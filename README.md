@@ -109,6 +109,15 @@ If the CD has **no Joliet tree**, the inspector clearly reports that it
 only has primary ISO 9660 names and that original long names may be
 unavailable. No invented name mapping is applied to necessary game files.
 
+On the same `RAYMAN2` CD, three additional root-level obsolete
+copy-protection helpers are **intentionally excluded**:
+`00000001.tmp`, `0000040c.016`, and `0000040c.256`.
+These match only exact root paths, never all `.tmp`, `.016` or `.256` files.
+When opening an installation created by an older Rayman2Fix build, the
+launcher automatically removes those three files and their SHA-256 receipt
+entries **after validating all remaining game files**; the CD does not need
+to be extracted again. Other assets and user settings are preserved.
+
 On a disc whose volume label is exactly `RAYMAN2`, we recognize **23 exact
 `Data/World/Levels/*.DAT` paths** discarded by the author's original
 [Lutris CD installation script](https://lutris.net/games/install/39141/view).
