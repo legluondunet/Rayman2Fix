@@ -10,6 +10,10 @@ target_include_directories(rayman2_disc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inclu
 
 add_library(rayman2_crypto STATIC src/security/sha256.cpp)
 target_include_directories(rayman2_crypto PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_library(rayman2_patch STATIC src/security/exe_patch.cpp)
+target_include_directories(rayman2_patch PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(rayman2_patch PUBLIC rayman2_crypto)
 if(MSVC)
   target_compile_options(rayman2_disc PRIVATE /W4)
 else()
@@ -21,7 +25,7 @@ add_executable(Rayman2Fix
   src/launcher/auto_flow.cpp
   src/launcher/startup.cpp
   src/launcher/system_inventory.cpp)
-target_link_libraries(Rayman2Fix PRIVATE rayman2_disc rayman2_crypto)
+target_link_libraries(Rayman2Fix PRIVATE rayman2_disc rayman2_patch)
 if(NOT WIN32)
   # Linux host-test binary must not collide with the Rayman2Fix/ install directory.
   set_target_properties(Rayman2Fix PROPERTIES OUTPUT_NAME rayman2fix_cli)
@@ -85,7 +89,7 @@ if(BUILD_TESTING)
     tests/auto_flow_tests.cpp
     src/launcher/auto_flow.cpp
     src/launcher/startup.cpp)
-  target_link_libraries(auto_flow_tests PRIVATE rayman2_disc rayman2_crypto)
+  target_link_libraries(auto_flow_tests PRIVATE rayman2_disc rayman2_patch)
   if(WIN32)
     # Startup tests need the same embedded DLL resource as the real launcher.
     target_sources(auto_flow_tests PRIVATE
@@ -97,4 +101,8 @@ if(BUILD_TESTING)
   add_executable(sha256_tests tests/sha256_tests.cpp)
   target_link_libraries(sha256_tests PRIVATE rayman2_crypto)
   add_test(NAME sha256-known-vectors COMMAND sha256_tests)
+
+  add_executable(exe_patch_tests tests/exe_patch_tests.cpp)
+  target_link_libraries(exe_patch_tests PRIVATE rayman2_patch)
+  add_test(NAME executable-delta-safety COMMAND exe_patch_tests)
 endif()
