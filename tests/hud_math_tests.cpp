@@ -6,7 +6,7 @@
 int main() {
     constexpr float source_width = 1024.0f;
     constexpr float epsilon = 0.0001f;
-    auto near = [](float a, float b) { return std::fabs(a - b) < epsilon; };
+    auto near = [epsilon](float a, float b) { return std::fabs(a - b) < epsilon; };
 
     const float wide = r2fix::hud_4_3_scale(1920, 1080);
     assert(near(wide, 0.75f));

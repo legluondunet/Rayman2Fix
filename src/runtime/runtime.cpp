@@ -186,7 +186,8 @@ bool executable_callback(const void* address) {
            protection == PAGE_EXECUTE_WRITECOPY;
 }
 
-bool writable_callback_slot(const void* slot) {
+bool writable_callback_slot(std::uintptr_t address) {
+    const void* slot = reinterpret_cast<const void*>(address);
     MEMORY_BASIC_INFORMATION info{};
     if (!slot || !VirtualQuery(slot, &info, sizeof(info)) ||
         info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD))
@@ -201,7 +202,7 @@ bool writable_callback_slot(const void* slot) {
 void install_callback(void* volatile* slot, void* replacement,
                       std::atomic<void*>& original, const char* message,
                       bool& logged) {
-    if (!writable_callback_slot(slot)) return;
+    if (!writable_callback_slot(reinterpret_cast<std::uintptr_t>(slot))) return;
     void* current = InterlockedCompareExchangePointer(slot, nullptr, nullptr);
     if (!current || current == replacement || !executable_callback(current))
         return;
