@@ -23,6 +23,32 @@ and SDL3 will provide modern gamepad input and hotplug support.
 These renderer, input, installer and in-game features are **planned, not yet
 implemented**.
 
+## Installed-file layout
+
+The launcher is kept **outside** the installed game directory and its single
+log is beside it. Windows packages now contain:
+
+```text
+Rayman2Fix.exe
+Rayman2Fix.log               (generated on first execution)
+Rayman2Fix/
+    Rayman2Fix.dll
+    Rayman2Fix.ini
+    glide2x.dll              (GameFrame: planned, not yet bundled)
+    SDL3.dll                 (SDL3: planned, not yet bundled)
+    Rayman2.exe              (installed from verified CD: planned)
+    ...                      (original game files: planned)
+```
+
+The correct Glide 2 filename is **`glide2x.dll`**. The eventual single-file
+launcher will extract its own runtime payload into `Rayman2Fix/`; the current
+bootstrap artifact provides the own DLL and INI already arranged in that folder.
+
+The launcher writes `Rayman2Fix.log` afresh at each run, collecting a
+privacy-conscious report with OS/Wine/Proton hints, CPU/cores, RAM, GPU,
+displays and controllers. It does not record usernames, full home paths,
+serials or network identifiers.
+
 ## Available now (PR #1)
 
 The initial Windows x86 executable can inspect and safely extract **ISO 9660**
@@ -30,14 +56,14 @@ images (2048-byte sectors) and **CUE/BIN with one MODE1/2352 or MODE1/2048 data
 track**. ISO 9660 boot descriptors are handled. Audio tracks are not extracted.
 
 ```text
-Rayman2Fix.exe --inspect "my-disc.iso"
+Rayman2Fix.exe --init\nRayman2Fix.exe --inspect "my-disc.iso"
 Rayman2Fix.exe --inspect "my-disc.cue"
 Rayman2Fix.exe --extract "my-disc.cue"
 Rayman2Fix.exe --extract "my-disc.iso" "custom-output-folder"
 Rayman2Fix.exe --help
 ```
 
-The default extraction output is `Rayman2Fix/DiscContent/`.
+The default extraction output is `Rayman2Fix/DiscContent/` beside the launcher.
 Extraction uses a staging directory and **refuses to overwrite** an existing
 destination. It does not run disc installers or modify game executables.
 
