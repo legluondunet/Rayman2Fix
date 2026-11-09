@@ -7,6 +7,8 @@
 #include <sstream>
 #include <ctime>
 #include <array>
+#include <vector>
+#include <utility>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -54,9 +56,46 @@ Startup::Startup(const fs::path& executable) {
 #ifdef _WIN32
 namespace {
 
-// The Windows launcher stores its own, currently inert x86 DLL as resource
-// 1101 (RCDATA). Generate it when absent, and preserve any pre-existing,
-// unrecognized runtime in a numbered backup when a later build changes it.
+// The Windows launcher stores its own x86 runtime DLL as RCDATA #1101.
+// Retain at most one backup: Rayman2Fix.dll.bak always contains the
+// immediately preceding DLL, replacing the previous backup after success.
+// Previous bootstrap versions generated Rayman2Fix.dll.backup.1, .2...
+// Keep only the newest legacy file as .bak if no backup exists yet; otherwise
+// delete only those precisely named obsolete launcher-generated backups.
+void prune_legacy_runtime_backups(const fs::path& directory) {
+    const std::string prefix = "Rayman2Fix.dll.backup.";
+    std::vector<std::pair<unsigned long, fs::path>> found;
+    for (const auto& entry : fs::directory_iterator(directory)) {
+        const auto filename = entry.path().filename().u8string();
+        if (filename.rfind(prefix, 0) != 0) continue;
+        const auto suffix = filename.substr(prefix.size());
+        if (suffix.empty() ||
+            !std::all_of(suffix.begin(), suffix.end(), [](unsigned char c) {
+                return c >= '0' && c <= '9';
+            })) continue;
+        if (entry.is_symlink() || !entry.is_regular_file())
+            throw std::runtime_error("unsafe old Rayman2Fix.dll backup path");
+        unsigned long id = 0;
+        try { id = std::stoul(suffix); }
+        catch (...) { throw std::runtime_error("malformed old runtime backup number"); }
+        found.emplace_back(id, entry.path());
+    }
+    if (found.empty()) return;
+    const fs::path backup = directory / "Rayman2Fix.dll.bak";
+    if (fs::is_symlink(backup) ||
+        (fs::exists(backup) && !fs::is_regular_file(backup)))
+        throw std::runtime_error("unsafe Rayman2Fix.dll.bak path");
+    if (!fs::exists(backup)) {
+        const auto latest = std::max_element(found.begin(), found.end(),
+            [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+        fs::rename(latest->second, backup);
+    }
+    for (const auto& entry : found) {
+        if (fs::exists(entry.second))
+            fs::remove(entry.second);
+    }
+}
+
 void ensure_embedded_runtime(const fs::path& directory) {
     const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1101),
                                         MAKEINTRESOURCEW(10)); // RT_RCDATA
@@ -86,7 +125,10 @@ void ensure_embedded_runtime(const fs::path& directory) {
             offset += n;
         }
     }
-    if (identical) return;
+    if (identical) {
+        prune_legacy_runtime_backups(directory);
+        return;
+    }
 
     const auto temporary = directory / "Rayman2Fix.dll.installing";
     if (fs::exists(temporary))
@@ -100,24 +142,58 @@ void ensure_embedded_runtime(const fs::path& directory) {
     }
     fs::permissions(temporary, fs::perms::owner_write, fs::perm_options::add);
 
-    fs::path backup;
-    if (fs::exists(dest)) {
-        for (unsigned i = 1; i <= 1000; ++i) {
-            auto candidate = directory / ("Rayman2Fix.dll.backup." + std::to_string(i));
-            if (!fs::exists(candidate)) { backup = std::move(candidate); break; }
-        }
-        if (backup.empty())
-            throw std::runtime_error("too many prior DLL backups; refusing overwrite");
-        fs::rename(dest, backup);
+    const fs::path backup = directory / "Rayman2Fix.dll.bak";
+    const fs::path prior = directory / "Rayman2Fix.dll.bak.previous";
+    if (fs::exists(prior) || fs::is_symlink(prior)) {
+        fs::remove(temporary);
+        throw std::runtime_error("unfinished Rayman2Fix.dll backup rotation; preserving files");
     }
+    if (fs::is_symlink(backup) ||
+        (fs::exists(backup) && !fs::is_regular_file(backup))) {
+        fs::remove(temporary);
+        throw std::runtime_error("Rayman2Fix.dll.bak is not a safe backup file");
+    }
+    if (fs::exists(dest) && !fs::is_regular_file(dest)) {
+        fs::remove(temporary);
+        throw std::runtime_error("Rayman2Fix.dll is not a regular file");
+    }
+
+    bool moved_prior = false;
+    bool backed_up_current = false;
+    bool published = false;
     try {
+        if (fs::exists(dest)) {
+            if (fs::exists(backup)) {
+                fs::rename(backup, prior);
+                moved_prior = true;
+            }
+            fs::rename(dest, backup);
+            backed_up_current = true;
+        }
         fs::rename(temporary, dest);
+        published = true;
     } catch (...) {
         std::error_code ignored;
-        if (!backup.empty()) fs::rename(backup, dest, ignored);
+        // Restore both the current runtime and the previous backup if the
+        // replacement could not be completed. Never overwrite user data.
+        if (backed_up_current) {
+            if (published) fs::remove(dest, ignored);
+            if (!fs::exists(dest))
+                fs::rename(backup, dest, ignored);
+        }
+        if (moved_prior && !fs::exists(backup))
+            fs::rename(prior, backup, ignored);
         fs::remove(temporary, ignored);
         throw;
     }
+
+    // Only after the new DLL is safely published do we remove the older .bak.
+    // On success there is exactly one backup of the immediately prior DLL.
+    if (moved_prior) {
+        fs::permissions(prior, fs::perms::owner_write, fs::perm_options::add);
+        fs::remove(prior);
+    }
+    prune_legacy_runtime_backups(directory);
 }
 } // namespace
 #endif
