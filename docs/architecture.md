@@ -14,7 +14,8 @@ Rayman2Fix/
     glide2x.dll                      pinned GameFrame x86 Glide 2 wrapper (deployed)
     GameFrame-LICENSE-APACHE.txt      license copied from embedded resource
     SDL3.dll                         future phase; not required at startup
-    Rayman2Fix.ini                   generated if missing, user-owned
+    Rayman2Fix.ini                   single user-maintained configuration
+    ubi.ini                          legacy game-facing file (auto-generated/synced)
     dll/snd_cpa.ini                  copied from CD's snd_cpa_mmx.ini
     data/...                         original CD content, lowercase and writable
     .rayman2fix-cd-files.tsv         local file-size and SHA-256 receipt
@@ -58,12 +59,15 @@ a cryptographic authentication of a specific trusted retail edition.
 5. Extract only the historically necessary CD files into a sibling staging
    directory, using Joliet long names, lowercase paths and writable output.
    Duplicate `dll/snd_cpa_mmx.ini` as `dll/snd_cpa.ini` and create a
-   SHA-256 receipt listing all extracted files.
+   SHA-256 receipt listing immutable extracted files (not mutable `ubi.ini`).
 6. Preserve launcher-generated INI/runtime and its single latest DLL backup from
    the bootstrap folder. Refuse unexpected existing files; promote the
    prepared installation to `Rayman2Fix/`, with rollback on failure.
    The original CD image and executable are never modified.
-7. Reverify the published files by size and SHA-256. **Do not start the game yet**: there is no
+7. Reverify the published files by size and SHA-256. Translate the user
+   `Rayman2Fix.ini` graphics resolution into game-facing `ubi.ini` on
+   installation and at each launcher run. Preserve other existing CD keys.
+   **Do not start the game yet**: there is no
    trusted retail executable/hash profile, working no-CD runtime or tested
    Rayman 2 graphics. The **GameFrame 32-bit Glide wrapper is now integrated**
    and SHA-256 verified, while SDL3 is deliberately deferred. Log the
@@ -151,8 +155,10 @@ Avoid game-specific resolution hacks.
 Native x86 SDL3 gamepad support (hotplug, consistent mappings, controller
 reconnection, keyboard fallback), initialized outside `DllMain`.
 Keep the configuration short: mandatory compatibility fixes are not toggles.
-The `Rayman2Fix.ini` defaults will become active when the corresponding
-features have been tested.
+`Rayman2Fix.ini` is the only user-editable settings file. The active
+`[Graphics] Resolution=Desktop` option controls the legacy `ubi.ini`
+`GLI_Mode`; mandatory `GLI_DllFile=GliVd1` and `GLI_Dll=Glide2` are
+written automatically. SDL3-related options remain deferred.
 
 ## Runtime protection contract
 
