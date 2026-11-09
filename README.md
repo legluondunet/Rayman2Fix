@@ -12,6 +12,17 @@ Ray2Fix and does not contain code copied from that project.
 > Windows/Wine/Proton is still being tested; no broad game compatibility
 > is claimed.
 
+## Second introduction skip (experimental)
+
+On the known, approved retail game executable, press **Space**, **Enter** or
+**Escape** during the **second** opening cinematic (`jail_20`) to request
+the native transition to `learn_10`. The first cinematic (`jail_10`),
+the menu and later cutscenes are not affected. Holding Enter while entering
+the cutscene will not trigger a skip until the key is released and pressed again.
+The game uses its own deferred level-change request, with no save operation;
+full in-game transition still needs validation under Windows and Wine.
+`RUNTIME-INTRO:` lines in the one-file log identify activation and requests.
+
 ## Automatic launcher workflow
 
 Run **`Rayman2Fix.exe` without arguments**. The obsolete `--init` command

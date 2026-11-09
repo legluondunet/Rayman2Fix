@@ -8,6 +8,7 @@
 #include <windows.h>
 #include "rayman2fix/fov_math.hpp"
 #include "rayman2fix/hud_math.hpp"
+#include "rayman2fix/intro_skip.hpp"
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -22,6 +23,11 @@ namespace {
 constexpr DWORD kConfigMagic = 0x32584652; // "RFX2" in little endian
 constexpr DWORD kOriginalTimestamp = 0x3807B68B;
 constexpr uintptr_t kCameraRva = 0x22AB0; // verified VA=0x422AB0 for image base 0x400000
+// Original game's native scene names and deferred level-change API.
+// These addresses apply ONLY to the single hash-verified retail executable.
+constexpr uintptr_t kLevelNameRva = 0x100381; // VA 0x500381, char[30]
+constexpr uintptr_t kRequestLevelRva = 0x54D0; // VA 0x4054D0
+constexpr char kAfterIntroLevel[] = "learn_10";
 constexpr std::size_t kHookLength = 7;
 constexpr BYTE kExpected[kHookLength] = {0x83, 0xEC, 0x0C, 0x8B, 0x4C, 0x24, 0x14};
 // Rayman 2's GLI_tdstCamera (owner's approved Win32 executable).
@@ -30,6 +36,11 @@ constexpr std::size_t kAlphaXOffset = 100;
 constexpr std::size_t kAlphaYOffset = 104;
 using CameraAdjust = void (__cdecl*)(void*, void*, void*);
 CameraAdjust g_original = nullptr;
+using RequestLevel = void (__cdecl*)(const char*, unsigned char);
+std::atomic<RequestLevel> g_request_intro_level{nullptr};
+const char* g_current_level = nullptr;
+r2fix::IntroSkipGuard g_intro_guard;
+bool g_intro_level_logged = false;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
 bool g_log = false;
@@ -79,6 +90,40 @@ void log_line(const char* message) {
     WriteFile(file, "\r\n", 2, &written, nullptr);
     CloseHandle(file);
 }
+bool game_window_is_foreground() {
+    HWND foreground = GetForegroundWindow();
+    DWORD pid = 0;
+    return foreground && GetWindowThreadProcessId(foreground, &pid) &&
+           pid == GetCurrentProcessId();
+}
+
+void poll_second_intro_skip() {
+    const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
+    if (!native_change || !g_current_level) return;
+    const bool in_intro = r2fix::is_second_intro(g_current_level);
+    if (in_intro && !g_intro_level_logged) {
+        log_line("RUNTIME-INTRO: jail_20 detected; Space/Enter/Esc can skip to learn_10");
+        g_intro_level_logged = true;
+    } else if (!in_intro && g_intro_level_logged) {
+        g_intro_level_logged = false;
+    }
+    // Never read keyboard state unless the game owns the foreground.
+    // Being unfocused or holding a key while entering the scene is not a
+    // skip request. A fresh press is required after one key-free frame.
+    const bool foreground = game_window_is_foreground();
+    const bool down = foreground &&
+        ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0 ||
+         (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0 ||
+         (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
+    if (!g_intro_guard.update(g_current_level, down) || !foreground) return;
+
+    // The game itself queues the level change for its next engine tick.
+    // Do not force a renderer switch, destroy a video window or write
+    // save data. This is the same native API used by script transitions.
+    log_line("RUNTIME-INTRO: skip requested for jail_20 -> learn_10 (native level change, no save)");
+    native_change(kAfterIntroLevel, 0);
+}
+
 void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // Preserve the vertical viewing angle and expand the horizontal angle
     // as 4:3 -> the actual monitor aspect. Never modify 4:3 camera state.
@@ -91,6 +136,9 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
             std::memcpy(bytes + kAlphaXOffset, &expanded, sizeof(expanded));
     }
     g_original(device, viewport, camera);
+    // Camera adjustment executes on the game's own render/main thread.
+    // Use it only as a safe tick to request a *deferred* native transition.
+    poll_second_intro_skip();
 }
 void write_jump(BYTE* at, const void* destination) {
     at[0] = 0xE9;  // JMP rel32
@@ -145,6 +193,44 @@ DWORD install_camera_hook() {
     g_installed = true;
     log_line("RUNTIME-FOV: Hor+ camera detour installed on approved Rayman 2 executable");
     return 1;
+}
+
+
+void initialize_native_intro_skip() {
+    const auto* module = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if (!module) return;
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 ||
+        dos->e_lfanew >= 0x1000) return;
+    const auto* pe = reinterpret_cast<const IMAGE_NT_HEADERS32*>(module + dos->e_lfanew);
+    if (pe->Signature != IMAGE_NT_SIGNATURE ||
+        pe->FileHeader.TimeDateStamp != kOriginalTimestamp ||
+        pe->FileHeader.Machine != IMAGE_FILE_MACHINE_I386 ||
+        pe->OptionalHeader.SizeOfImage < kLevelNameRva + 30) {
+        log_line("RUNTIME-INTRO: unknown executable layout, skip disabled");
+        return;
+    }
+    const auto* level = reinterpret_cast<const char*>(module + kLevelNameRva);
+    auto* request = reinterpret_cast<const void*>(module + kRequestLevelRva);
+    MEMORY_BASIC_INFORMATION level_memory{}, code_memory{};
+    if (!VirtualQuery(level, &level_memory, sizeof(level_memory)) ||
+        !VirtualQuery(request, &code_memory, sizeof(code_memory)) ||
+        level_memory.State != MEM_COMMIT ||
+        code_memory.State != MEM_COMMIT ||
+        (level_memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)) ||
+        (code_memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+        return;
+    const DWORD protection = code_memory.Protect & 0xffu;
+    if (protection != PAGE_EXECUTE &&
+        protection != PAGE_EXECUTE_READ &&
+        protection != PAGE_EXECUTE_READWRITE &&
+        protection != PAGE_EXECUTE_WRITECOPY)
+        return;
+    g_current_level = level;
+    g_request_intro_level.store(
+        reinterpret_cast<RequestLevel>(const_cast<void*>(request)),
+        std::memory_order_release);
+    log_line("RUNTIME-INTRO: native Jail_20 skip armed for Space/Enter/Esc");
 }
 
 // Three game-side GLI driver callback slots, verified only for the SHA256-locked
@@ -326,11 +412,11 @@ extern "C" __declspec(dllexport) unsigned int __cdecl Rayman2Fix_RuntimeApiVersi
     return 2;
 }
 extern "C" __declspec(dllexport) const char* __cdecl Rayman2Fix_RuntimeStatus() {
-    return "Rayman2Fix x86 Hor+ camera and centered 4:3 HUD runtime";
+    return "Rayman2Fix x86 Hor+ camera, 4:3 HUD and second-intro skip";
 }
 
 // Called on a separate thread after LoadLibrary, NEVER in DllMain.
-// Return 1 on installed hook, 2 for 4:3 (no hook), 3 for an unknown
+// Return 1 on installed hook, 3 for an unknown
 // executable/bytes, 4 for a memory-protection error and 5 for bad settings.
 extern "C" __declspec(dllexport)
 DWORD WINAPI Rayman2Fix_Initialize(void* input) {
@@ -348,10 +434,14 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
-    if (aspect <= 1.334f) return 2;
+    // This hook is also used for the targeted intro-skip poll on 4:3.
+    // For narrow monitors camera_hor_plus leaves the FOV unchanged.
     const DWORD camera_status = install_camera_hook();
-    // Unknown/unsupported game versions never receive either set of hooks.
-    if (camera_status == 1) start_hud_monitor();
+    // Unknown/unsupported game versions never receive additional hooks.
+    if (camera_status == 1) {
+        initialize_native_intro_skip();
+        start_hud_monitor();
+    }
     return camera_status;
 }
 

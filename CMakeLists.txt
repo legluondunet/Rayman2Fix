@@ -205,6 +205,10 @@ if(BUILD_TESTING)
   target_include_directories(hud_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME centered-hud-4-by-3-math COMMAND hud_math_tests)
 
+  add_executable(intro_skip_tests tests/intro_skip_tests.cpp)
+  target_include_directories(intro_skip_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME second-intro-skip-guard COMMAND intro_skip_tests)
+
   if(WIN32)
     # Harmless child executable for a Win32 CreateProcessW smoke test. This
     # checks spaces in paths and explicit game working directory, without
