@@ -88,8 +88,10 @@ jobs:
           }
           $ini = 'build/Release/Rayman2Fix/Rayman2Fix.ini'
           $initial = (Get-Content $ini | Where-Object { $_.Trim() })
-          if ($initial.Count -ne 2 -or $initial[0] -ne '[Debug]' -or $initial[1] -ne 'Log=1') {
-            throw "Bootstrap INI must contain only [Debug] Log=1"
+          if ($initial.Count -ne 4 -or $initial[0] -ne '[Debug]' -or
+              $initial[1] -ne 'Log=1' -or $initial[2] -ne '[Graphics]' -or
+              $initial[3] -ne 'Resolution=Desktop') {
+            throw "Bootstrap INI must contain only [Debug] Log and [Graphics] Resolution"
           }
           # Exercise Win32 CRLF and UTF-8 BOM parsing, plus log opt-out.
           [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=0`r`n", [Text.UTF8Encoding]::new($true))
@@ -229,7 +231,7 @@ jobs:
           test -f build/Rayman2Fix/Rayman2Fix.ini
           test -f build/Rayman2Fix.log
           grep -q 'SYS-INFO: END' build/Rayman2Fix.log
-          test "$(cat build/Rayman2Fix/Rayman2Fix.ini)" = "$(printf '[Debug]\nLog=1')" || exit 1
+          test "$(cat build/Rayman2Fix/Rayman2Fix.ini)" = "$(printf '[Debug]\nLog=1\n\n[Graphics]\nResolution=Desktop')" || exit 1
           printf '[Debug]\r\nLog=0\r\n' > build/Rayman2Fix/Rayman2Fix.ini
           result=0
           ./build/rayman2fix_cli || result=$?
