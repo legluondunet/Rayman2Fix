@@ -1,3 +1,4 @@
+#include "rayman2fix/auto_flow.hpp"
 #include "rayman2fix/disc.hpp"
 #include "rayman2fix/startup.hpp"
 
@@ -12,17 +13,20 @@ namespace fs = std::filesystem;
 static void usage() {
     std::cout
         << "Rayman2Fix 0.1.0 (bootstrap)\n"
-        << "Disc inspection/extraction only. No game release is supported yet.\n\n"
+        << "Automatically inspect, install, and verify CD assets; game runtime still incomplete.\n\n"
         << "Usage:\n"
+        << "  Rayman2Fix                          (automatic CD/installation workflow)\n"
         << "  Rayman2Fix --inspect <game.iso|game.cue>\n"
         << "  Rayman2Fix --extract <game.iso|game.cue> [destination]\n"
-        << "  Rayman2Fix --init\n"
+        << "  Rayman2Fix --verify                 (check installed CD assets)\n"
         << "  Rayman2Fix --version\n"
         << "  Rayman2Fix --help\n\n"
-        << "Default extraction destination: <launcher>/Rayman2Fix/DiscContent\n"
+        << "Diagnostic --extract output: <launcher>/Rayman2Fix/DiscContent\n"
+        << "Automatic installs: <launcher>/Rayman2Fix/ (staged, no silent overwrite)\n"
         << "Options/log: <launcher>/Rayman2Fix/Rayman2Fix.ini and <launcher>/Rayman2Fix.log\n"
-        << "Files are copied offline from a disc image you own. The game is NOT\n"
-        << "installed, patched, made DRM-free or launched by this bootstrap.\n";
+        << "CD game files may be automatically installed, but the game cannot\n"
+        << "launch until a trusted executable edition and functional no-CD,\n"
+        << "Glide (GameFrame) and SDL3 runtime are integrated.\n";
 }
 
 static int run(const std::string& command, const fs::path& disc,
@@ -98,33 +102,21 @@ static int cli(int argc, const fs::path* args) {
         startup.initialize();
         r2fix::log_system_inventory(startup);
         startup.log("COMMAND: argument_count=" + std::to_string(argc > 0 ? argc - 1 : 0));
-        if (argc == 1) {
-            usage();
-            return 0;
-        }
+        if (argc == 1)
+            return r2fix::run_automatic(startup);
         const std::string command = args[1].string();
         if (command == "--help" || command == "-h") {
             usage();
             return 0;
         }
-        if (command == "--init") {
-            if (argc != 2) { usage(); return 2; }
-            std::cout << "Workspace: " << startup.game_dir().string() << '\n'
-                      << "Configuration: " << startup.ini_path().string() << '\n'
-                      << "Log: " << startup.log_path().string() << '\n';
-            startup.log("INIT: workspace prepared, no playable game installed");
-            return 0;
-        }
+
         if (command == "--version") {
             std::cout << "Rayman2Fix 0.1.0-bootstrap\n";
             return 0;
         }
-        if (command == "--install" || command == "--launch" ||
-            command == "--verify") {
-            startup.log("GAME: request refused (no verified retail edition profile)");
-            std::cerr << "Not supported yet: first identify a real retail CD edition, "
-                         "its file layout and executable SHA-256.\n";
-            return 2;
+        if (command == "--verify") {
+            if (argc != 2) { usage(); return 2; }
+            return r2fix::verify_installation(startup);
         }
         if ((command != "--inspect" && command != "--extract") ||
             (argc < 3 || argc > (command == "--extract" ? 4 : 3))) {
