@@ -21,7 +21,6 @@ struct DiscInfo {
     std::string volume_id;
     std::string format;
     std::string filename_source; // Joliet UCS-2 long names, or ISO9660 primary fallback
-    std::size_t merged_directory_aliases = 0; // Same lowercase directory target, distinct source entries
     std::vector<DiscEntry> files;
     std::uint64_t total_bytes = 0; // All ISO directory declarations, including skipped entries
     std::uint64_t extract_bytes = 0; // Planned output size after exact legacy exclusions
