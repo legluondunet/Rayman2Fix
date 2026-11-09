@@ -145,6 +145,28 @@ jobs:
             throw 'Embedded Apache 2.0 license is not from pinned GameFrame source'
           }
           Write-Host "Standalone EXE deploys pinned x86 GameFrame: $glide"
+          # Existing, unknown Glide DLL must be backed up, not lost, while
+          # the pinned GameFrame DLL is reinstalled from the same EXE.
+          [IO.File]::WriteAllText(
+            (Resolve-Path 'package-smoke/Rayman2Fix/glide2x.dll'),
+            'unknown-legacy-glide', [Text.Encoding]::ASCII)
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2) { throw 'Existing Glide upgrade failed unexpectedly' }
+          $backup = 'package-smoke/Rayman2Fix/glide2x.dll.bak'
+          if (!(Test-Path $backup) -or
+              (Get-Content -Raw $backup) -ne 'unknown-legacy-glide') {
+            throw 'Unknown old Glide DLL must be preserved under .bak'
+          }
+          $replacement = (Get-FileHash package-smoke/Rayman2Fix/glide2x.dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($replacement -cne $glide) {
+            throw 'GameFrame Glide replacement did not match the bundled SHA256'
+          }
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2) { throw 'Idempotent GameFrame upgrade failed' }
+          if (Test-Path 'package-smoke/Rayman2Fix/glide2x.dll.bak.1') {
+            throw 'Already-correct GameFrame DLL must not generate another backup'
+          }
+          Write-Host 'GameFrame Glide restore/backup smoke test: PASS'
           Remove-Item package-smoke -Recurse -Force
           if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix.dll,glide2x.dll) {
             throw 'One-file build must never include generated INI, logs or DLL sidecars'
