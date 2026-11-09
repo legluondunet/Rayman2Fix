@@ -1,6 +1,8 @@
 #pragma once
 
 #include <filesystem>
+#include <cstdint>
+#include <utility>
 
 namespace r2fix {
 class Startup;
@@ -11,5 +13,11 @@ class Startup;
 // arbitrary unknown sections. Fail on unsupported user resolutions.
 void synchronize_rayman2_ubi_ini(const std::filesystem::path& game_dir,
                                 Startup& startup);
+
+// Only user-maintained setting: output display resolution. Glide2 always
+// runs a stable 4:3 internal rendering mode (1024x768); the wrapper is
+// responsible for native output pixels, independently of the game mode.
+std::pair<std::uint32_t, std::uint32_t> configured_output_resolution(
+    const std::filesystem::path& rayman2fix_ini);
 
 } // namespace r2fix
