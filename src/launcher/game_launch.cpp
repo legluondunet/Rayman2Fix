@@ -4,6 +4,7 @@
 #include "rayman2fix/game_config.hpp"
 #include "rayman2fix/display.hpp"
 #include "rayman2fix/presentation.hpp"
+#include "rayman2fix/runtime_inject.hpp"
 #include "rayman2fix/patch_install.hpp"
 #include "rayman2fix/sha256.hpp"
 #include "rayman2fix/startup.hpp"
@@ -189,6 +190,12 @@ ChildProcessResult run_child_process(
     Handle thread(raw.hThread);
     ChildProcessResult result{};
     result.started = true;
+    if (display.borderless && display.enable_fov) {
+        result.fov_hook = initialize_game_fov(
+            reinterpret_cast<std::uintptr_t>(process.handle),
+            raw.dwProcessId, working_directory / "Rayman2Fix.dll",
+            display.output_width, display.output_height, display.log_enabled);
+    }
 
     if (display.borderless) {
         WindowPresentation presentation(raw.dwProcessId, display.monitor);
@@ -241,6 +248,8 @@ int launch_verified_game(Startup& startup) {
     display.monitor = monitor;
     display.output_width = configured.first;
     display.output_height = configured.second;
+    display.enable_fov = true;
+    display.log_enabled = startup.logging_enabled();
     ensure_rayman2_dpi_manifest(root);
     const auto aspect = static_cast<double>(configured.first) /
                         static_cast<double>(configured.second);
@@ -293,6 +302,12 @@ int launch_verified_game(Startup& startup) {
     startup.log("LAUNCH-EXIT: child_exit_code=" + exit_hex(result.exit_code) +
                 " elapsed_ms=" + std::to_string(
                     static_cast<unsigned long long>(seconds * 1000.0)));
+    startup.log("RUNTIME-FOV: injection_attempted=" +
+                std::string(result.fov_hook.attempted ? "1" : "0") +
+                " dll_loaded=" + (result.fov_hook.dll_loaded ? "1" : "0") +
+                " active=" + (result.fov_hook.active ? "1" : "0") +
+                " status=" + std::to_string(result.fov_hook.init_status) +
+                " win32_error=" + std::to_string(result.fov_hook.win32_error));
     if (result.exit_code != 0) {
         std::cerr << "Rayman 2 exited with code " << exit_hex(result.exit_code)
                   << "; see Rayman2Fix.log.\n";
