@@ -60,6 +60,9 @@ jobs:
               !(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'CONFIG: Debug.Log=1')) {
             throw "Log=1 must generate correctly configured log"
           }
+          # PowerShell propagates the last nonzero native exit code even
+          # after all expected-error assertions have passed.
+          $global:LASTEXITCODE = 0
       - name: Stage launcher and private runtime directory
         shell: pwsh
         run: |
