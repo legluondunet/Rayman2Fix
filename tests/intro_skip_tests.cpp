@@ -27,5 +27,31 @@ int main() {
     assert(!guard.update("jail_20", false));
     assert(!guard.update("jail_20", false));
     assert(guard.update("jail_20", true));
+
+    // Learn_10 is a playable level; only a pending *intro* can be skipped.
+    assert(r2fix::is_first_playable_level("Learn_10"));
+    assert(r2fix::is_first_playable_level("learn_10"));
+    assert(!r2fix::is_first_playable_level("jail_20"));
+    assert(!r2fix::is_first_playable_level("learn_101"));
+    assert(!r2fix::is_first_playable_level(nullptr));
+    assert(r2fix::story_word_index(1091) == 34u);
+    assert(r2fix::story_word_mask(1091) == 4u);
+    assert(r2fix::story_word_index(1188) == 37u);
+    assert(r2fix::story_word_mask(1188) == 8u);
+
+    r2fix::LearnIntroGuard learn;
+    assert(!learn.update("jail_20", false, true));
+    assert(!learn.update("learn_10", true, true));
+    assert(!learn.update("learn_10", true, true));
+    assert(!learn.update("learn_10", true, false));
+    assert(learn.update("learn_10", true, true));
+    assert(!learn.update("learn_10", true, true));
+    assert(!learn.update("learn_10", true, false));
+    assert(!learn.update("learn_10", true, true));
+    assert(!learn.update("learn_10", false, false));
+    assert(!learn.update("learn_10", true, false));
+    assert(!learn.update("learn_10", true, false));
+    assert(learn.update("learn_10", true, true));
+    assert(!learn.update("menu", false, false));
     return 0;
 }

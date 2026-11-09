@@ -23,6 +23,21 @@ The game uses its own deferred level-change request, with no save operation;
 full in-game transition still needs validation under Windows and Wine.
 `RUNTIME-INTRO:` lines in the one-file log identify activation and requests.
 
+## Learn_10 opening cinematic (experimental native skip probe)
+
+The playable first level, \`learn_10\`, is **not** a video file or a level
+that should be skipped. Its scripted director hands control to Rayman and
+sets story bit 1091. A new experiment observes that handover and, on a
+**fresh Enter press during the opening scene**, temporarily enables the
+game's original \`NOMOVIES\` ability (story bit 1188). It restores that
+flag after the handover or within 2.5 seconds, preserving other story
+bits and never writing to save files, replacing actors or reloading the level.
+This is **not yet confirmed to work** in the actual game. If the expected
+engine data is missing, no modification is made. \`RUNTIME-INTRO:\` lines
+show the exact outcome. Space/Esc mapping for this particular scripted
+scene requires confirmation before enabling. The earlier jail_20 skip is
+unchanged.
+
 ## Automatic launcher workflow
 
 Run **`Rayman2Fix.exe` without arguments**. The obsolete `--init` command

@@ -51,4 +51,56 @@ struct IntroSkipGuard {
         return false;
     }
 };
+
+// The third *sequence* happens inside the first playable level, Learn_10.
+// Unlike jail_20, a level-change request here would restart the sequence or
+// skip gameplay. Only arm on a fresh press while the native intro is active;
+// one request per entrance, with the scene marked complete by the game itself.
+inline bool is_first_playable_level(const char* level) {
+    if (!level) return false;
+    constexpr char expected[] = "learn_10";
+    for (std::size_t i = 0; i < sizeof(expected); ++i) {
+        const unsigned char c = static_cast<unsigned char>(level[i]);
+        const unsigned char lower = c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c;
+        if (lower != static_cast<unsigned char>(expected[i])) return false;
+        if (expected[i] == '\0') break;
+    }
+    return true;
+}
+
+inline std::size_t story_word_index(unsigned bit_one_based) {
+    return bit_one_based ? (bit_one_based - 1u) / 32u : 0u;
+}
+
+inline unsigned story_word_mask(unsigned bit_one_based) {
+    return bit_one_based ? 1u << ((bit_one_based - 1u) % 32u) : 0u;
+}
+
+struct LearnIntroGuard {
+    bool inside = false;
+    bool released = false;
+    bool requested = false;
+
+    bool update(const char* level, bool scene_active, bool enter_down) {
+        if (!is_first_playable_level(level) || !scene_active) {
+            inside = released = requested = false;
+            return false;
+        }
+        if (!inside) {
+            inside = true;
+            released = false;
+            requested = false;
+            return false;
+        }
+        if (!enter_down) {
+            released = true;
+            return false;
+        }
+        if (released && !requested) {
+            requested = true;
+            return true;
+        }
+        return false;
+    }
+};
 } // namespace r2fix

@@ -28,6 +28,12 @@ constexpr uintptr_t kCameraRva = 0x22AB0; // verified VA=0x422AB0 for image base
 constexpr uintptr_t kLevelNameRva = 0x100381; // VA 0x500381, char[30]
 constexpr uintptr_t kRequestLevelRva = 0x54D0; // VA 0x4054D0
 constexpr char kAfterIntroLevel[] = "learn_10";
+// GOG/retail Rayman 2 engine: Fix actor 6 owns the progress-bit array
+// (designer variable 42). Read dynamically; do NOT assume heap pointers.
+constexpr uintptr_t kFixActor6Rva = 0x0B730C; // VA 0x4B730C
+constexpr unsigned kLearnHandoverBit = 1091;
+constexpr unsigned kNoMoviesBit = 1188;
+constexpr DWORD kTemporaryCheatMillis = 2500;
 constexpr std::size_t kHookLength = 7;
 constexpr BYTE kExpected[kHookLength] = {0x83, 0xEC, 0x0C, 0x8B, 0x4C, 0x24, 0x14};
 // Rayman 2's GLI_tdstCamera (owner's approved Win32 executable).
@@ -41,6 +47,13 @@ std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
 r2fix::IntroSkipGuard g_intro_guard;
 bool g_intro_level_logged = false;
+r2fix::LearnIntroGuard g_learn_guard;
+bool g_learn_logged = false;
+bool g_learn_requested = false;
+bool g_learn_handover = false;
+DWORD g_temporary_cheat_start = 0;
+std::uintptr_t g_temporary_cheat_word = 0;
+std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
 bool g_log = false;
@@ -97,6 +110,161 @@ bool game_window_is_foreground() {
            pid == GetCurrentProcessId();
 }
 
+
+// Read-only process-memory introspection avoids trusting unverified actor
+// pointers. The optional, very short cheat enablement uses one writable
+// game-owned progress word and restores its original bit afterwards. This
+// does not patch machine code or alter any save file on disk.
+bool read_u32(std::uintptr_t address, std::uint32_t& value) {
+    SIZE_T copied = 0;
+    return address >= 0x10000 &&
+           ReadProcessMemory(GetCurrentProcess(),
+                             reinterpret_cast<const void*>(address),
+                             &value, sizeof(value), &copied) &&
+           copied == sizeof(value);
+}
+bool read_u8(std::uintptr_t address, std::uint8_t& value) {
+    SIZE_T copied = 0;
+    return address >= 0x10000 &&
+           ReadProcessMemory(GetCurrentProcess(),
+                             reinterpret_cast<const void*>(address),
+                             &value, sizeof(value), &copied) &&
+           copied == sizeof(value);
+}
+bool write_story_word(std::uintptr_t address, std::uint32_t value) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(reinterpret_cast<const void*>(address), &mbi,
+                      sizeof(mbi)) ||
+        mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD) ||
+        (mbi.Protect & 0xff) != PAGE_READWRITE)
+        return false;
+    SIZE_T written = 0;
+    return WriteProcessMemory(GetCurrentProcess(),
+                              reinterpret_cast<void*>(address),
+                              &value, sizeof(value), &written) &&
+           written == sizeof(value);
+}
+// Rayman 2 Fix actor 6, variable 42: array of 45 32-bit story words. Every
+// dereference is checked, and none of the game-owned pointers are cached
+// across level loads.
+std::uintptr_t find_story_words() {
+    const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    if (!base) return 0;
+    std::uint32_t fix_so = 0, actor = 0, brain = 0, mind = 0, dsg = 0;
+    std::uint32_t decl = 0, infos = 0, buffer = 0, offset = 0, kind = 0;
+    std::uint8_t vars = 0, count = 0;
+    if (!read_u32(base + kFixActor6Rva, fix_so) ||
+        !read_u32(fix_so + 4, actor) ||
+        !read_u32(actor + 0xC, brain) ||
+        !read_u32(brain, mind) ||
+        !read_u32(mind + 0xC, dsg) ||
+        !read_u32(dsg, decl) ||
+        !read_u32(decl + 4, infos) ||
+        !read_u8(decl + 0xC, vars) || vars <= 42 ||
+        !read_u32(dsg + 8, buffer) ||
+        !read_u32(infos + 42 * 16, offset) ||
+        !read_u32(infos + 42 * 16 + 4, kind) ||
+        kind != 21 || offset > 65536)
+        return 0;
+    const std::uintptr_t array = std::uintptr_t(buffer) + offset;
+    if (!read_u8(array + 4, count) || count != 45) return 0;
+    std::uint32_t probe1 = 0, probe2 = 0;
+    const auto words = array + 8;
+    if (!read_u32(words + r2fix::story_word_index(kLearnHandoverBit) * 4, probe1) ||
+        !read_u32(words + r2fix::story_word_index(kNoMoviesBit) * 4, probe2))
+        return 0;
+    return words;
+}
+bool game_story_bit(std::uintptr_t words, unsigned bit, bool& value) {
+    std::uint32_t word = 0;
+    if (!words || !read_u32(words + r2fix::story_word_index(bit) * 4, word))
+        return false;
+    value = (word & r2fix::story_word_mask(bit)) != 0;
+    return true;
+}
+void restore_temporary_no_movies() {
+    if (!g_temporary_cheat_word) return;
+    const auto where = g_temporary_cheat_word;
+    g_temporary_cheat_word = 0;
+    std::uint32_t current = 0;
+    if (!read_u32(where, current) ||
+        !write_story_word(where, current & ~r2fix::story_word_mask(kNoMoviesBit))) {
+        log_line("RUNTIME-INTRO: cannot restore transient NoMovies flag");
+    } else {
+        log_line("RUNTIME-INTRO: transient NoMovies flag restored");
+    }
+}
+// In Learn_10, the 1091 story bit is written when the scripted director
+// naturally hands Rayman over. Try the built-in NOMOVIES enablement only
+// briefly while Enter is freshly pressed, then immediately restore it.
+// No direct actor deletion, teleport, level reload or saved-game edits.
+void poll_learn_intro_skip() {
+    if (!g_current_level) return;
+    if (!r2fix::is_first_playable_level(g_current_level)) {
+        restore_temporary_no_movies();
+        g_learn_guard.update(g_current_level, false, false);
+        g_progress_words = 0;
+        g_learn_logged = false;
+        g_learn_requested = false;
+        g_learn_handover = false;
+        return;
+    }
+    if (!g_progress_words) g_progress_words = find_story_words();
+    if (!g_progress_words) {
+        if (!g_learn_logged) {
+            g_learn_logged = true;
+            log_line("RUNTIME-INTRO: learn_10 progress array unavailable, skip safely disabled");
+        }
+        return;
+    }
+    bool handed_over = false, no_movies = false;
+    if (!game_story_bit(g_progress_words, kLearnHandoverBit, handed_over) ||
+        !game_story_bit(g_progress_words, kNoMoviesBit, no_movies))
+        return;
+    if (!g_learn_logged) {
+        g_learn_logged = true;
+        log_line(handed_over
+            ? "RUNTIME-INTRO: learn_10 already playable, skip disabled"
+            : "RUNTIME-INTRO: learn_10 intro active, Enter enables transient native skip");
+    }
+    if (g_temporary_cheat_word &&
+        (handed_over ||
+         DWORD(GetTickCount() - g_temporary_cheat_start) >= kTemporaryCheatMillis)) {
+        restore_temporary_no_movies();
+        if (handed_over) {
+            g_learn_handover = true;
+            log_line("RUNTIME-INTRO: learn_10 control handover confirmed (story bit 1091)");
+        } else
+            log_line("RUNTIME-INTRO: native skip attempt timed out; scene left unchanged");
+    }
+    if (!g_temporary_cheat_word && handed_over && g_learn_requested &&
+        !g_learn_handover) {
+        g_learn_handover = true;
+        log_line("RUNTIME-INTRO: learn_10 control handover confirmed (story bit 1091)");
+    }
+    const bool foreground = game_window_is_foreground();
+    const bool down = foreground && (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
+    if (!g_learn_guard.update(g_current_level, !handed_over, down) || !foreground)
+        return;
+    if (g_learn_requested) return;
+    g_learn_requested = true;
+    if (no_movies) {
+        log_line("RUNTIME-INTRO: native NOMOVIES already enabled; Enter forwarded to game");
+        return;
+    }
+    std::uint32_t word = 0;
+    const std::uintptr_t where =
+        g_progress_words + r2fix::story_word_index(kNoMoviesBit) * 4;
+    if (!read_u32(where, word) ||
+        !write_story_word(where, word | r2fix::story_word_mask(kNoMoviesBit))) {
+        log_line("RUNTIME-INTRO: native skip unavailable; no game state changed");
+        return;
+    }
+    g_temporary_cheat_word = where;
+    g_temporary_cheat_start = GetTickCount();
+    log_line("RUNTIME-INTRO: transient NOMOVIES enabled for learn_10 intro (Enter)");
+}
+
 void poll_second_intro_skip() {
     const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
     if (!native_change || !g_current_level) return;
@@ -139,6 +307,7 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // Camera adjustment executes on the game's own render/main thread.
     // Use it only as a safe tick to request a *deferred* native transition.
     poll_second_intro_skip();
+    poll_learn_intro_skip();
 }
 void write_jump(BYTE* at, const void* destination) {
     at[0] = 0xE9;  // JMP rel32
@@ -230,7 +399,7 @@ void initialize_native_intro_skip() {
     g_request_intro_level.store(
         reinterpret_cast<RequestLevel>(const_cast<void*>(request)),
         std::memory_order_release);
-    log_line("RUNTIME-INTRO: native Jail_20 skip armed for Space/Enter/Esc");
+    log_line("RUNTIME-INTRO: native Jail_20 skip armed; Learn_10 transient native skip probe enabled");
 }
 
 // Three game-side GLI driver callback slots, verified only for the SHA256-locked
@@ -412,7 +581,7 @@ extern "C" __declspec(dllexport) unsigned int __cdecl Rayman2Fix_RuntimeApiVersi
     return 2;
 }
 extern "C" __declspec(dllexport) const char* __cdecl Rayman2Fix_RuntimeStatus() {
-    return "Rayman2Fix x86 Hor+ camera, 4:3 HUD and second-intro skip";
+    return "Rayman2Fix x86 Hor+ camera, 4:3 HUD and scoped introduction skips";
 }
 
 // Called on a separate thread after LoadLibrary, NEVER in DllMain.
