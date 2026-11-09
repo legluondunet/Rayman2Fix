@@ -207,7 +207,7 @@ if(BUILD_TESTING)
     # launching any commercial executable.
     add_executable(test_child_process tests/test_child_process.cpp)
     target_link_libraries(test_child_process PRIVATE user32)
-    add_dependencies(game_launch_tests test_child_process)
+    add_dependencies(game_launch_tests test_child_process Rayman2FixRuntime)
   endif()
 
   add_executable(sha256_tests tests/sha256_tests.cpp)
