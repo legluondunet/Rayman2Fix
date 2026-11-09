@@ -7,20 +7,18 @@
 namespace r2fix {
 
 // Explicit root-only exclusions requested for the original RAYMAN2 CD.
-// Keep the existing owner-approved exclusions and the exact SafeDisc 1
-// auxiliaries. In particular dplayerx.dll and dxplayerx.dll are distinct
-// filenames. Do not filter nested namesakes or extensions: apply these
-// exclusions only to the root of a volume labelled exactly RAYMAN2.
-inline constexpr std::array<const char*, 10> kExcludedCdRootFiles = {{
+// Exact root-only protection-era auxiliaries. The original CD inspection
+// confirmed "directx/dplayx.dll" (DirectPlay), NOT the misspelled root-level
+// "dplayerx.dll" or "dxplayerx.dll". Those are not exclusion rules.
+// Do not filter nested namesakes or extensions. Applies only to RAYMAN2.
+inline constexpr std::array<const char*, 8> kExcludedCdRootFiles = {{
     "00000001.tmp",
     "0000040c.016",
     "0000040c.256",
     "secdrv.sys",
     "rayman2.icd",
-    "dxplayerx.dll",
     "clcd32.dll",
     "clokspl.exe",
-    "dplayerx.dll",
     "drvmgt.dll",
 }};
 

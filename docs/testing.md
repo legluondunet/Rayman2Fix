@@ -31,14 +31,17 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - Modify/remove one installed game file (including a same-size modification):
   SHA-256 verification and default launch must report the mismatch and
   leave the user's files untouched.
-- Fresh RAYMAN2 installs must omit exactly ten root-only entries:
+- Fresh RAYMAN2 installs must omit exactly eight root-only entries:
   `00000001.tmp`, `0000040c.016`, `0000040c.256`, `secdrv.sys`,
-  `rayman2.icd`, `dxplayerx.dll`, `clcd32.dll`, `clokspl.exe`,
-  `dplayerx.dll`, `drvmgt.dll`, including their SHA-256 receipt
-  entries. `dplayerx.dll` and `dxplayerx.dll` are distinct names;
-  same-named files under `data/` are preserved.
+  `rayman2.icd`, `clcd32.dll`, `clokspl.exe`, `drvmgt.dll`,
+  including their SHA-256 receipt entries. Same-named files under `data/`
+  are preserved.
+- The misspelled root-level names `dxplayerx.dll` and `dplayerx.dll`
+  must NOT be excluded if encountered in synthetic test media.
+  The real `directx/dplayx.dll` belongs to the already excluded `directx/`
+  installer tree, not to the root-only protection auxiliary list.
 - Existing installs recorded by older builds must migrate without the
-  original CD: remove those ten files and receipt entries, tolerate an
+  original CD: remove those eight files and receipt entries, tolerate an
   already-deleted obsolete file, preserve remaining SHA-256 hashes and
   the user INI, then verify normally.
 

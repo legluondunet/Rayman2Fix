@@ -294,8 +294,9 @@ int main() {
         check(real_text == "HELLO\n", "real nested file contents preserved");
         real.close();
 
-        // The ten owner-selected CD root files are excluded exactly.
-        // Same-name nested game assets must still be extracted: no globs.
+        // Eight exact root exclusions, with two similarly named but NOT
+        // excluded roots: only directx/dplayx.dll exists in the inspected
+        // retail image. Preserve unrelated names and nested game assets.
         auto obsolete_cd = make_rayman2_with_dummy();
         obsolete_cd.resize(40 * 2048);
         put32(obsolete_cd.data() + 16 * 2048 + 80, 40);
@@ -325,18 +326,20 @@ int main() {
             std::copy_n("TEST", 4, obsolete_cd.data() + sector * 2048);
         write_file(root / "obsolete_cd.iso", obsolete_cd);
         const auto obsolete_image = r2fix::DiscImage::open(root / "obsolete_cd.iso");
-        check(obsolete_image.info().skipped_files == 11,
-              "ten exact root exclusions and known large dummy are omitted");
-        check(obsolete_image.info().extract_bytes == 22,
-              "nested similarly named files remain selected");
+        check(obsolete_image.info().skipped_files == 9,
+              "eight exact root exclusions and known large dummy are omitted");
+        check(obsolete_image.info().extract_bytes == 30,
+              "unexcluded lookalikes and nested names remain selected");
         obsolete_image.extract(root / "obsolete-cd-extracted");
         for (const auto* file : {"00000001.tmp", "0000040c.016",
                                  "0000040c.256", "secdrv.sys",
-                                 "rayman2.icd", "dxplayerx.dll",
-                                 "clcd32.dll", "clokspl.exe",
-                                 "dplayerx.dll", "drvmgt.dll"})
+                                 "rayman2.icd", "clcd32.dll",
+                                 "clokspl.exe", "drvmgt.dll"})
             check(!fs::exists(root / "obsolete-cd-extracted" / file),
                   "exact root-only auxiliary must not be extracted");
+        check(fs::exists(root / "obsolete-cd-extracted" / "dxplayerx.dll") &&
+              fs::exists(root / "obsolete-cd-extracted" / "dplayerx.dll"),
+              "misspelled lookalike root names must not be excluded");
         check(fs::exists(root / "obsolete-cd-extracted" / "data" / "0000040c.016") &&
               fs::exists(root / "obsolete-cd-extracted" / "data" / "dxplayerx.dll") &&
               fs::exists(root / "obsolete-cd-extracted" / "data" / "dplayerx.dll") &&

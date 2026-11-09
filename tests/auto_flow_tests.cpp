@@ -207,17 +207,23 @@ int main() {
               "managed ubi.ini must not be recorded as an immutable CD asset");
         check(fs::exists(game / ".rayman2fix-cd-files.tsv"),
               "local installation receipt created");
-        // All ten exact root-only exclusions must be absent from fresh
-        // installation and from the local SHA256 receipt.
+        // All eight root-only exclusions are absent from a fresh installation
+        // and its SHA256 receipt. Similar but unrelated filenames survive.
         for (const auto* filename : {"00000001.tmp", "0000040c.016",
                                      "0000040c.256", "secdrv.sys",
-                                     "rayman2.icd", "dxplayerx.dll",
-                                     "clcd32.dll", "clokspl.exe",
-                                     "dplayerx.dll", "drvmgt.dll"}) {
+                                     "rayman2.icd", "clcd32.dll",
+                                     "clokspl.exe", "drvmgt.dll"}) {
             check(!fs::exists(game / filename), "obsolete protection file not extracted");
             check(contents(game / ".rayman2fix-cd-files.tsv").find(filename) ==
                       std::string::npos,
                   "obsolete protection file omitted from receipt");
+        }
+        for (const auto* name : {"dxplayerx.dll", "dplayerx.dll"}) {
+            check(fs::exists(game / name),
+                  "unrelated lookalike root names must survive installation");
+            check(contents(game / ".rayman2fix-cd-files.tsv").find(name) !=
+                      std::string::npos,
+                  "unrelated lookalike root names stay in SHA256 receipt");
         }
         check(!fs::exists(root / "Rayman2Fix.installing"),
               "staging directory removed after publishing");
@@ -226,16 +232,14 @@ int main() {
 
         // Simulate an already-installed copy made by an older Rayman2Fix
         // build: the receipt used to list now-excluded root files.
-        const std::array<std::pair<const char*, const char*>, 10> legacy = {{
+        const std::array<std::pair<const char*, const char*>, 8> legacy = {{
             {"00000001.tmp", "TEMP"},
             {"0000040c.016", "ICON"},
             {"0000040c.256", "LOGO"},
             {"secdrv.sys", "DRV!"},
             {"rayman2.icd", "ICD!"},
-            {"dxplayerx.dll", "DXP!"},
             {"clcd32.dll", "CL32"},
             {"clokspl.exe", "CLOK"},
-            {"dplayerx.dll", "DPLY"},
             {"drvmgt.dll", "DRVM"}
         }};
         {
@@ -262,6 +266,9 @@ int main() {
         }
         check(r2fix::verify_installation(app) == 0,
               "post-migration hash verification remains valid");
+        check(fs::exists(game / "dxplayerx.dll") &&
+              fs::exists(game / "dplayerx.dll"),
+              "lookalike root files remain untouched during migration");
         check(contents(game / "data" / "game.dat") == "DATA\n",
               "migration preserves unrelated game assets");
         check(contents(game / "Rayman2Fix.ini") ==
