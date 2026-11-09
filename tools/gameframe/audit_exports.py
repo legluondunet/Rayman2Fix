@@ -29,10 +29,15 @@ def main(path, definitions):
         for entry in pe.DIRECTORY_ENTRY_EXPORT.symbols if entry.name
     }
     missing = sorted(declared - actual)
-    extra = sorted(actual - declared)
-    print(f"GameFrame PE32 x86 Glide: expected 156 exports; actual {len(actual)}")
-    if missing or extra or ESSENTIAL - actual:
-        raise ValueError(f"Glide export mismatch: missing={missing}, extra={extra}, "
+    # Upstream intentionally exports the ordinary Rust DLL entry point
+    # and a Glide 2.11 splash compatibility alias in addition to its 156
+    # canonical Glide API calls; neither should be treated as an ABI error.
+    expected_extras = {"DllMain", "grSplash21"}
+    unknown_extra = sorted(actual - declared - expected_extras)
+    print(f"GameFrame PE32 x86 Glide: expected 156 canonical exports; actual {len(actual)}")
+    if missing or unknown_extra or ESSENTIAL - actual:
+        raise ValueError(f"Glide export mismatch: missing={missing}, "
+                         f"unexpected_extra={unknown_extra}, "
                          f"essentials_missing={ESSENTIAL - actual}")
     print("GameFrame 156 decorated Win32 Glide exports: PASS")
     print("Rayman 2 rendering compatibility: not yet validated on the game")
