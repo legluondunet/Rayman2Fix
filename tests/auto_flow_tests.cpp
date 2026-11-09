@@ -115,7 +115,7 @@ int main() {
               "bootstrap initialization must create INI when absent");
         write(root / "Rayman2Fix" / "Rayman2Fix.dll", "BOOTSTRAP");
         write(root / "Rayman2Fix" / "Rayman2Fix.ini",
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n");
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\n");
         const auto user_ini = root / "Rayman2Fix" / "Rayman2Fix.ini";
         check(r2fix::configured_fps_limit(user_ini) == 60,
               "older INI without FPSLimit uses default 60");
