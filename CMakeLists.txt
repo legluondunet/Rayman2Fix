@@ -23,6 +23,7 @@ endif()
 add_executable(Rayman2Fix
   src/launcher/main.cpp
   src/launcher/auto_flow.cpp
+  src/launcher/game_config.cpp
   src/launcher/gameframe.cpp
   src/launcher/patch_install.cpp
   src/launcher/startup.cpp
@@ -145,6 +146,7 @@ if(BUILD_TESTING)
   add_executable(auto_flow_tests
     tests/auto_flow_tests.cpp
     src/launcher/auto_flow.cpp
+    src/launcher/game_config.cpp
     src/launcher/gameframe.cpp
     src/launcher/patch_install.cpp
     src/launcher/startup.cpp)
