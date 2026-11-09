@@ -3,6 +3,8 @@
 Build the x86 Windows `Rayman2Fix.exe`, which **embeds** the project's
 inert `Rayman2Fix.dll`. The workflow archive must contain **only one EXE**;
 the INI, log and runtime directory must be created by that executable.
+The same EXE must now also embed and deploy the pinned GameFrame
+`glide2x.dll` and Apache 2.0 license with verified SHA-256.
 Run `ctest` on Windows and Linux for synthetic ISO/CUE and automatic CD
 installation, verification and refusal behavior.
 
@@ -40,8 +42,15 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - Validate `--verify` on installed CD files. It checks **size and SHA-256** against
   a locally generated receipt, but source-edition authentication and
   no-CD/Glide compatibility are not yet certified.
-- Test an exe-only copy of the workflow artifact: verify extracted DLL SHA-256
-  equals the build output and that no sidecar INI/log/DLL is shipped.
+- Test an exe-only copy of the workflow artifact: verify its own
+  `Rayman2Fix.dll` and pinned GameFrame `glide2x.dll` SHA-256 match the
+  original build outputs. Verify the extracted Apache license is identical
+  to the pinned GameFrame source and no DLL/INI/log sidecars are shipped.
+- Replace the installed `glide2x.dll` with an unknown file, rerun the
+  launcher, verify the old file is preserved as `glide2x.dll.bak` and
+  the pinned DLL is restored. A third launch must be idempotent.
+- Verify SDL3 is NOT a prerequisite and does not produce a missing-runtime
+  warning; gamepad input remains unimplemented until the next phase.
 - Check that `Log=0` suppresses and removes stale logs, while preserving
   existing user settings.
 
@@ -63,5 +72,6 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - Without Joliet, clearly label the ISO9660 primary-name fallback instead of
   inventing long file names.
 
-**No playable game support, GameFrame render integration, SDL3 initialization
-or runtime hooks are asserted by these bootstrap tests.**
+**GameFrame packaging and file integrity are tested, but no actual Rayman 2
+rendering, playable no-CD launch, SDL3 initialization or game hooks are
+asserted by these bootstrap tests.**
