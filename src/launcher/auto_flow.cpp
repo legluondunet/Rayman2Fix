@@ -382,6 +382,38 @@ void publish_installation(const fs::path& game_dir, const fs::path& staging) {
     }
 }
 
+// Patch bytes are intentionally not bundled until we obtain the ORIGINAL
+// retail executable and generate an edition-specific minimal delta.
+// On a supported build, commit the new EXE with its original preserved under
+// rayman2.exe.bak, never overwrite a previous backup.
+void patch_executable_if_supported(const fs::path& game_root, Startup& startup) {
+    if (is_exe_replaced(game_root)) {
+        startup.log("EXE-PATCH: installed patch marker present; original preserved as rayman2.exe.bak");
+        return;
+    }
+    const auto patch = bundled_exe_patch();
+    if (patch.empty()) {
+        startup.log("EXE-PATCH: not bundled; original CD executable unchanged (no .bak yet)");
+        return;
+    }
+    const auto header = inspect_exe_patch(patch);
+    if (header.patched_sha256 != kApprovedUnprotectedExeSha256) {
+        throw std::runtime_error("bundled executable patch target hash is not approved");
+    }
+    // If the CD image/edition is unrecognized, *do not* patch or rename the
+    // user's original executable; keep it intact for later investigation.
+    const auto exe = game_root / "rayman2.exe";
+    if (!exists_file(exe) || fs::file_size(exe) != header.original_size ||
+        sha256_file(exe) != header.original_sha256) {
+        startup.log("EXE-PATCH: source hash not supported by bundled patch; original kept");
+        return;
+    }
+    const auto applied = install_exe_replacement(game_root, patch);
+    startup.log("EXE-PATCH: applied source_sha256=" + applied.original_sha256 +
+                " target_sha256=" + applied.patched_sha256 +
+                " backup=rayman2.exe.bak");
+}
+
 int report_runtime_status(const fs::path& root, Startup& startup) {
     // This release has only an inert Rayman2Fix.dll; neither a pinned,
     // validated retail game executable nor GameFrame/SDL3 is integrated.
@@ -432,6 +464,8 @@ int run_automatic(Startup& startup) {
         if (has_game_executable(root)) {
             startup.log("AUTO: existing game found; verify before possible launch");
             if (verify_installation(startup) != 0) return 2;
+            patch_executable_if_supported(root, startup);
+            if (verify_installation(startup) != 0) return 2;
             return report_runtime_status(root, startup);
         }
 
@@ -480,6 +514,7 @@ int run_automatic(Startup& startup) {
             image.extract(staging);
             initialize_audio(staging);
             write_receipt(staging, info);
+            patch_executable_if_supported(staging, startup);
             copy_bootstrap_files(root, staging);
             if (!has_game_executable(staging))
                 throw std::runtime_error("extracted game executable is missing");
