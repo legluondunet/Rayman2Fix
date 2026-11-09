@@ -129,6 +129,23 @@ author's CD script, not a universal claim about every possible Rayman 2
 edition. Future editions require their own verified layouts. No game
 executables or DRM modules from the old Lutris patch are redistributed.
 
+## Additional Rayman2Fix exclusions: obsolete CD-protection auxiliaries
+
+Beyond the existing Lutris list, the user confirmed that Rayman2Fix must
+**not install** the three root-level files `00000001.tmp`,
+`0000040c.016` and `0000040c.256`. These ancillary files are
+associated with the old disc-protection startup; their necessity has not
+been tested against the still-unmodified retail executable. The project's
+future runtime targets independent no-CD compatibility rather than invoking
+the original protection software.
+
+The exclusion is **exact path and only for the `RAYMAN2` volume**. Other
+files matching the same extensions, names under `data/`, or other discs
+are not removed. Existing installs migrate automatically: verify all
+retained files by SHA-256, update the local receipt, then remove the three
+root files without re-extracting the disc. If any other installed game file
+fails verification, no cleanup is attempted.
+
 ## CD inspection evidence (2026-11-09)
 
 With the previous 23-long-name filter, the user's ISO was reported as
