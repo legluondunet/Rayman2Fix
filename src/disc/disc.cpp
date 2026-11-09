@@ -276,29 +276,44 @@ void DiscImage::scan_directory(std::uint32_t extent,
         if (!names.insert(upper(name)).second)
             fail("case-insensitive filename collision on disc");
         const fs::path relative = parent / name;
-        // Ignore deliberately irregular metadata only for exact, documented
-        // Rayman 2 CD filenames. All other entries require consistent endian
-        // copies and physical bounds. Never relax directory validation.
-        const bool skipped = !(flags & 0x02) &&
+        const bool directory = (flags & 0x02) != 0;
+        // An exact historical exclusion may be unreadable; do not generalize
+        // that rule to other files just because their declared sizes are huge.
+        const bool skipped = !directory &&
             ignored_by_lutris_rayman2_cd(info_.volume_id, relative);
-        const auto child_extent = skipped ? le32(rec + 2) : iso733(rec + 2);
-        const auto child_size = skipped ? le32(rec + 10) : iso733(rec + 10);
-        if (flags & 0x02) {
-            validate_extent(child_extent, child_size); // Never skip malformed directories.
+        const auto child_extent = le32(rec + 2);
+        const auto child_size = le32(rec + 10);
+        if (directory) {
+            // Broken directories cannot be catalogued safely, so remain fatal.
+            (void)iso733(rec + 2);
+            (void)iso733(rec + 10);
+            validate_extent(child_extent, child_size);
             scan_directory(child_extent, child_size, relative, depth + 1, ancestors);
         } else {
             if (info_.files.size() >= 50000)
                 fail("too many files on disc");
             if (info_.total_bytes > std::numeric_limits<std::uint64_t>::max() - child_size)
                 fail("file total overflow");
-            // Only exact paths from the documented CD install recipe may bypass
-            // the physical extent check. All other files must be readable.
-            if (!skipped) validate_extent(child_extent, child_size);
-            info_.files.push_back({relative, child_extent, child_size, skipped});
+            std::string issue;
+            if (!skipped) {
+                try {
+                    (void)iso733(rec + 2);
+                    (void)iso733(rec + 10);
+                    validate_extent(child_extent, child_size);
+                } catch (const std::runtime_error& error) {
+                    // --inspect must expose the path of the suspect file. The
+                    // unsafe extent MUST NOT be read or copied by --extract.
+                    issue = error.what();
+                }
+            }
+            info_.files.push_back({relative, child_extent, child_size,
+                                   skipped, !issue.empty(), issue});
             info_.total_bytes += child_size;
             if (skipped) {
                 info_.skipped_bytes += child_size;
                 ++info_.skipped_files;
+            } else if (!issue.empty()) {
+                ++info_.suspect_files;
             } else {
                 info_.extract_bytes += child_size;
             }
@@ -359,7 +374,7 @@ DiscImage DiscImage::open(const fs::path& source) {
 
     std::set<std::pair<std::uint32_t, std::uint32_t>> extents;
     for (const auto& file : image.info_.files) {
-        if (file.skipped_by_cd_recipe) continue;
+        if (file.skipped_by_cd_recipe || file.invalid_extent) continue;
         if (extents.insert({file.extent_lba, file.size_bytes}).second)
             image.info_.distinct_extent_bytes += file.size_bytes;
         else ++image.info_.shared_extent_references;
@@ -370,6 +385,12 @@ DiscImage DiscImage::open(const fs::path& source) {
 void DiscImage::extract(const fs::path& destination) const {
     if (destination.empty() || destination == "." || destination == "/")
         fail("unsafe extraction destination");
+    // Abort before touching disk: --inspect is tolerant but --extract is not.
+    for (const auto& file : info_.files) {
+        if (file.invalid_extent && !file.skipped_by_cd_recipe)
+            fail("extraction refused: unrecognized suspect file " +
+                 file.relative_path.generic_string() + ": " + file.invalid_reason);
+    }
     if (fs::exists(destination)) fail("destination already exists; no files overwritten");
     if (!destination.parent_path().empty())
         fs::create_directories(destination.parent_path());
