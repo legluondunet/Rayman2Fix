@@ -89,6 +89,7 @@ int main(int argc, char** argv) {
               width == static_cast<int>(options.monitor.width) &&
               height == static_cast<int>(options.monitor.height),
               "test child window covers physical primary monitor exactly");
+        window.close(); // Release Windows sharing lock before temp tree cleanup.
 
         const auto nonexistent = root / "does-not-exist.exe";
         const auto failure = r2fix::run_child_process(nonexistent, root);
