@@ -190,8 +190,12 @@ void log_gpu(Startup& s) {
                       snprintf(code, sizeof(code), "%04lX", static_cast<unsigned long>(id.VendorId));
                       return std::string(code);
                   }());
+            const auto driver_version = std::to_string(HIWORD(id.DriverVersion.HighPart)) + "." +
+                std::to_string(LOWORD(id.DriverVersion.HighPart)) + "." +
+                std::to_string(HIWORD(id.DriverVersion.LowPart)) + "." +
+                std::to_string(LOWORD(id.DriverVersion.LowPart));
             s.log("SYS-GRAPHICS-DRIVER: adapter=" + t(i) +
-                  " module=" + safe(id.Driver) +
+                  " module=" + safe(id.Driver) + " version=" + driver_version +
                   " (D3D9 reported; may be Wine/DXVK, not host Mesa)");
         }
         api->Release();
