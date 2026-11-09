@@ -23,13 +23,15 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - Remove or unmount the source ISO and run without arguments again. Existing
   game files must be **verified without reinstalling**. Since no functional
   runtime is integrated, the game must NOT be executed yet.
-- Modify/remove one installed game file: verification and default launch
-  must report the mismatch and leave the user's files untouched.
+- Modify/remove one installed game file (including a same-size modification):
+  SHA-256 verification and default launch must report the mismatch and
+  leave the user's files untouched.
 - With two images, no images, a malformed CD, or a foreign folder already
   occupying `Rayman2Fix/`, the launcher must fail without silently
   deleting any data.
-- Validate `--verify` on installed CD files. It is **size based only**:
-  source-edition hashes and no-CD/Glide compatibility are not certified.
+- Validate `--verify` on installed CD files. It checks **size and SHA-256** against
+  a locally generated receipt, but source-edition authentication and
+  no-CD/Glide compatibility are not yet certified.
 - Test an exe-only copy of the workflow artifact: verify extracted DLL SHA-256
   equals the build output and that no sidecar INI/log/DLL is shipped.
 - Check that `Log=0` suppresses and removes stale logs, while preserving
