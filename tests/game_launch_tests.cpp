@@ -69,8 +69,16 @@ int main(int argc, char** argv) {
         check(fs::exists(local_runtime), "native Hor+ runtime built beside tests");
         fs::copy_file(local_runtime, root / "Rayman2Fix.dll");
         options.enable_fov = true;
+        options.fps_limit = 75;
         options.log_enabled = false;
+        check(SetEnvironmentVariableW(L"RAYMAN2FIX_FPS_LIMIT", L"99") != 0,
+              "set existing parent FPS setting for restoration check");
         const auto fullscreen = r2fix::run_child_process(child, root, options);
+        wchar_t parent_fps[16]{};
+        GetEnvironmentVariableW(L"RAYMAN2FIX_FPS_LIMIT", parent_fps, 16);
+        check(std::wstring(parent_fps) == L"99",
+              "launcher restores parent FPS variable after game creation");
+        SetEnvironmentVariableW(L"RAYMAN2FIX_FPS_LIMIT", nullptr);
         check(fullscreen.started && fullscreen.error_code == 0 &&
               fullscreen.exit_code == 17,
               "borderless-window child launched and returned expected exit code");
@@ -96,8 +104,12 @@ int main(int argc, char** argv) {
         std::wstring inherited_size;
         unsigned long long style = 0;
         int left = 0, top = 0, width = 0, height = 0;
-        window >> inherited_size >> style >> left >> top >> width >> height;
+        std::wstring inherited_fps;
+        window >> inherited_size >> style >> left >> top >> width >> height
+               >> inherited_fps;
         check(static_cast<bool>(window), "child reported window and env values");
+        check(inherited_fps == L"75",
+              "child inherits configured FPSLimit, not parent's prior value");
         const auto requested_size =
             std::to_wstring(options.output_width) + L"x" +
             std::to_wstring(options.output_height);
