@@ -89,7 +89,9 @@ jobs:
             throw "Expected system inventory in the launcher log"
           }
           $ini = 'build/Release/Rayman2Fix/Rayman2Fix.ini'
-          $initial = (Get-Content $ini | Where-Object { $_.Trim() })
+          $initial = (Get-Content $ini | Where-Object {
+            $_.Trim() -and !$_.Trim().StartsWith(';')
+          })
           if ($initial.Count -ne 5 -or $initial[0] -ne '[Debug]' -or
               $initial[1] -ne 'Log=1' -or $initial[2] -ne '[Graphics]' -or
               $initial[3] -ne 'Resolution=Desktop' -or
