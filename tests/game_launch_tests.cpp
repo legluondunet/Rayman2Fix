@@ -62,6 +62,14 @@ int main(int argc, char** argv) {
         options.monitor = r2fix::primary_display_metrics();
         options.output_width = options.monitor.width;
         options.output_height = options.monitor.height;
+        // The fixture is deliberately not an approved Rayman 2 build.
+        // Injection must load the local DLL but safely refuse to hook it.
+        const auto local_runtime = fs::absolute(fs::path(argv[0])).parent_path() /
+                                   "Rayman2Fix.dll";
+        check(fs::exists(local_runtime), "native Hor+ runtime built beside tests");
+        fs::copy_file(local_runtime, root / "Rayman2Fix.dll");
+        options.enable_fov = true;
+        options.log_enabled = false;
         const auto fullscreen = r2fix::run_child_process(child, root, options);
         check(fullscreen.started && fullscreen.error_code == 0 &&
               fullscreen.exit_code == 17,
@@ -70,6 +78,11 @@ int main(int argc, char** argv) {
               fullscreen.presentation.borderless_applied &&
               fullscreen.presentation.changes > 0,
               "window supervisor found and applied borderless fullscreen");
+        check(fullscreen.fov_hook.attempted &&
+              fullscreen.fov_hook.dll_loaded &&
+              !fullscreen.fov_hook.active &&
+              fullscreen.fov_hook.init_status == 3,
+              "remote Hor+ runtime loads but refuses unknown executable signature");
 
         std::wifstream window(root / "child-window.txt");
         std::wstring inherited_size;
