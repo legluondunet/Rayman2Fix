@@ -1,6 +1,7 @@
 #include "rayman2fix/startup.hpp"
 
 #include <chrono>
+#include <cstdio>
 #include <string>
 #include <vector>
 
