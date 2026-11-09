@@ -115,6 +115,49 @@ bool ignored_by_lutris_rayman2_cd(const std::string& volume_id,
     };
     for (const char* item : ignored)
         if (path == item) return true;
+
+    // The retail ISO9660 primary directory can contain DOS 8.3 aliases
+    // instead of the long filenames used in Lutris' mounted-CD cleanup:
+    // GRAPHICS0/1/2.DAT -> GRAPHI~1/2/3.DAT
+    // TEXTURES0/1/2.DAT -> TEXTUR~1/2/3.DAT
+    // We cannot prove which suffix maps to which digit without Joliet data,
+    // but all six original names are explicit Lutris exclusions. Restrict
+    // aliases to precisely these two stems and three numeric suffixes.
+    constexpr const char* levels = "DATA/WORLD/LEVELS/";
+    if (path.rfind(levels, 0) == 0) {
+        const auto name = path.substr(std::char_traits<char>::length(levels));
+        if (name.size() == 12 && name[6] == '~' &&
+            name[7] >= '1' && name[7] <= '3' &&
+            name.substr(8) == ".DAT" &&
+            (name.substr(0, 6) == "GRAPHI" ||
+             name.substr(0, 6) == "TEXTUR"))
+            return true;
+    }
+
+    // The same Lutris installation recipe removes installer-only root
+    // files and folders after copying the CD. Do not remove either DLL or
+    // Dll here: the original recipe MERGES them first, before removing the
+    // duplicate. That separate, order-dependent step belongs to the final
+    // edition-verified installer, not this generic ISO extraction pass.
+    constexpr const char* excluded_dirs[] = {
+        "ACROBAT", "DIRECTX", "DRIVERS", "INSTDATA", "PADS",
+        "TONIC TROUBLE", "TONICT~1"
+    };
+    const auto slash = path.find('/');
+    const auto root_name = path.substr(0, slash);
+    for (const char* folder : excluded_dirs)
+        if (root_name == folder && slash != std::string::npos)
+            return true;
+
+    if (slash == std::string::npos) {
+        constexpr const char* excluded_root_files[] = {
+            "AUTORUN.INF", "D3DIMM.DLL", "DDRAW.DLL",
+            "GXSETUP.EXE", "SETUP.EXE", "SETUPUBI.EXE"
+        };
+        for (const char* item : excluded_root_files)
+            if (path == item) return true;
+        if (path.rfind("DSETUP", 0) == 0) return true; // Lutris DSETUP* glob
+    }
     return false;
 }
 
