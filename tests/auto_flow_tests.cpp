@@ -1,5 +1,6 @@
 #include "rayman2fix/auto_flow.hpp"
 #include "rayman2fix/game_config.hpp"
+#include "rayman2fix/game_config.hpp"
 #include "rayman2fix/sha256.hpp"
 #include "rayman2fix/startup.hpp"
 
@@ -114,7 +115,28 @@ int main() {
               "bootstrap initialization must create INI when absent");
         write(root / "Rayman2Fix" / "Rayman2Fix.dll", "BOOTSTRAP");
         write(root / "Rayman2Fix" / "Rayman2Fix.ini",
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\n");
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n");
+        const auto user_ini = root / "Rayman2Fix" / "Rayman2Fix.ini";
+        check(r2fix::configured_fps_limit(user_ini) == 60,
+              "older INI without FPSLimit uses default 60");
+        write(user_ini, "[Graphics]\nFPSLimit=120\n");
+        check(r2fix::configured_fps_limit(user_ini) == 120,
+              "custom FPSLimit=120 read from user INI");
+        write(user_ini, "[Graphics]\nFPSLimit=0\n");
+        check(r2fix::configured_fps_limit(user_ini) == 0,
+              "FPSLimit=0 disables frame pacing");
+        write(user_ini, "[Graphics]\nFPSLimit=240\n");
+        check(r2fix::configured_fps_limit(user_ini) == 240,
+              "maximum FPSLimit=240 accepted");
+        for (const auto* invalid : {"-1", "5", "241", "abc", "99999999999", ""}) {
+            write(user_ini, std::string("[Graphics]\nFPSLimit=") + invalid + "\n");
+            bool refused = false;
+            try { (void)r2fix::configured_fps_limit(user_ini); }
+            catch (const std::exception&) { refused = true; }
+            check(refused, "invalid or unsupported FPSLimit rejected");
+        }
+        write(user_ini,
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n");
         check(r2fix::run_automatic(app) == 2,
               "no game or image must report missing media, not success");
         check(!fs::exists(root / "Rayman2Fix" / "rayman2.exe"),
@@ -143,7 +165,7 @@ int main() {
         check(contents(game / "Rayman2Fix.dll") == "BOOTSTRAP",
               "launcher runtime payload remains available");
         check(contents(game / "Rayman2Fix.ini") ==
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\n",
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n",
               "user ini retained across staging commit");
         auto ubi = contents(game / "ubi.ini");
         check(ubi.find("Language=French") != std::string::npos &&
@@ -212,7 +234,7 @@ int main() {
         check(contents(game / "data" / "game.dat") == "DATA\n",
               "migration preserves unrelated game assets");
         check(contents(game / "Rayman2Fix.ini") ==
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\n",
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n",
               "migration preserves user options");
 
         // Treat the original CD-sourced ubi.ini as a mutable game config.
@@ -225,7 +247,7 @@ int main() {
             check(static_cast<bool>(receipt), "legacy ubi.ini receipt appended");
         }
         write(game / "Rayman2Fix.ini",
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1280x720\n");
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1280x720\nFPSLimit=60\n");
         check(r2fix::run_automatic(app) == 2,
               "reconfigure graphics from one INI with no CD present");
         ubi = contents(game / "ubi.ini");
@@ -257,7 +279,7 @@ int main() {
         // configuration, and a corrected user INI works on the next start.
         const auto good_ubi = contents(game / "ubi.ini");
         write(game / "Rayman2Fix.ini",
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=invalid\n");
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=invalid\nFPSLimit=60\n");
         bool rejected_resolution = false;
         try { r2fix::run_automatic(app); }
         catch (const std::exception&) { rejected_resolution = true; }
@@ -265,7 +287,7 @@ int main() {
               contents(game / "ubi.ini") == good_ubi,
               "invalid Rayman2Fix.ini resolution refused with legacy config unchanged");
         write(game / "Rayman2Fix.ini",
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1280x720\n");
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1280x720\nFPSLimit=60\n");
 
         // Same-size corruption: size-only verification would have missed it.
         write(game / "data" / "game.dat", "OTHER");
