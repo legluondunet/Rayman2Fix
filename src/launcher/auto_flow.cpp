@@ -198,11 +198,11 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
         if (!safe_relative(relative) || count >= 50000)
             return false;
         const fs::path file = root / relative;
-        // These three root-only auxiliary files were previously copied and
+        // Some exact root-only excluded files were previously copied and
         // recorded by older Rayman2Fix builds. They are now omitted. Permit
         // their absence (e.g. already removed manually), but never relax
         // validation of any other file in the receipt.
-        if (excluded_cd_protection_auxiliary(relative)) {
+        if (excluded_cd_root_auxiliary(relative)) {
             ++count;
             continue;
         }
@@ -251,7 +251,7 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
 }
 
 // Upgrade an already installed original CD without requiring a second
-// extraction. Old Rayman2Fix receipts list these three ancillary files.
+// extraction. Old Rayman2Fix receipts may list these six root-only files.
 // Only an otherwise verified RAYMAN2 installation is eligible; the receipt
 // is replaced with rollback before any original files are removed.
 void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {
@@ -274,7 +274,7 @@ void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {
         const auto path = fs::u8path(line.substr(last_tab + 1));
         if (!safe_relative(path))
             throw std::runtime_error("unsafe CD receipt path during cleanup");
-        if (excluded_cd_protection_auxiliary(path))
+        if (excluded_cd_root_auxiliary(path))
             ++removed_receipt_entries;
         else
             retained.push_back(line);
@@ -284,9 +284,7 @@ void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {
     // the transactional .previous/.new replacement below.
     input.close();
 
-    const std::array<const char*, 3> names = {
-        "00000001.tmp", "0000040c.016", "0000040c.256"
-    };
+    const auto& names = kExcludedCdRootFiles;
     std::size_t present = 0;
     for (const auto* name : names) {
         const fs::path file = root / name;
@@ -345,7 +343,7 @@ void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {
             throw std::runtime_error("cannot delete obsolete auxiliary file");
         startup.log(std::string("CLEANUP-OMIT: deleted obsolete CD auxiliary ") + name);
     }
-    startup.log("CLEANUP: original CD protections auxiliaries excluded; "
+    startup.log("CLEANUP: obsolete CD root files excluded; "
                 "game data and user settings retained");
 }
 
