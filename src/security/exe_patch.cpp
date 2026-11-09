@@ -234,4 +234,25 @@ std::vector<unsigned char> bundled_exe_patch() {
 #endif
 }
 
+std::vector<unsigned char> available_exe_patch(const fs::path& launcher_root) {
+    const auto embedded = bundled_exe_patch();
+    if (!embedded.empty()) return embedded;
+
+    // Development-only external delta. This lets the owner validate a
+    // byte-perfect patch against their own CD before bundling it in one EXE.
+    // Never load symlinks or arbitrarily large files, and never overwrite
+    // a game unless the embedded target SHA256 allowlist also matches.
+    const auto path = launcher_root / "Rayman2Fix-executable.r2patch";
+    if (!fs::exists(path)) return {};
+    if (!fs::is_regular_file(path) || fs::is_symlink(path) ||
+        fs::file_size(path) > kMaxPatch)
+        fail("unrecognized local executable patch sidecar");
+    std::ifstream in(path, std::ios::binary);
+    if (!in) fail("cannot read local executable delta");
+    std::vector<unsigned char> data((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+    inspect_exe_patch(data);
+    return data;
+}
+
 } // namespace r2fix
