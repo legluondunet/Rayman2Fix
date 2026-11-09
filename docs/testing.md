@@ -1,9 +1,39 @@
 # Bootstrap validation
 
-Build `Rayman2Fix.exe` and the inert `Rayman2Fix.dll` on Windows x86.
-Run `ctest` on Windows and Linux to exercise synthetic ISO and CUE/BIN data.
+Build the x86 Windows `Rayman2Fix.exe`, which **embeds** the project's
+inert `Rayman2Fix.dll`. The workflow archive must contain **only one EXE**;
+the INI, log and runtime directory must be created by that executable.
+Run `ctest` on Windows and Linux for synthetic ISO/CUE and automatic CD
+installation, verification and refusal behavior.
 
 Synthetic tests MUST never depend on distribution of Rayman 2 assets.
+
+## Automatic startup checks
+
+- Launch **`Rayman2Fix.exe` without arguments** and without any CD or
+  `Rayman2Fix/` folder: it creates the folder, its own embedded runtime DLL,
+  the minimal `[Debug] Log=1` INI and the single launcher-side log, then
+  reports the missing CD cleanly. The former `--init` is unsupported.
+- Place exactly one original `.iso` or `.cue` beside the launcher. The
+  default command inspects it, verifies required file paths, extracts into
+  a sibling `Rayman2Fix.installing/` staging folder, initializes
+  `dll/snd_cpa.ini` from `snd_cpa_mmx.ini`, writes a size receipt and
+  promotes the assets to `Rayman2Fix/`. The installed layout must not use
+  `DiscContent/`.
+- Remove or unmount the source ISO and run without arguments again. Existing
+  game files must be **verified without reinstalling**. Since no functional
+  runtime is integrated, the game must NOT be executed yet.
+- Modify/remove one installed game file: verification and default launch
+  must report the mismatch and leave the user's files untouched.
+- With two images, no images, a malformed CD, or a foreign folder already
+  occupying `Rayman2Fix/`, the launcher must fail without silently
+  deleting any data.
+- Validate `--verify` on installed CD files. It is **size based only**:
+  source-edition hashes and no-CD/Glide compatibility are not certified.
+- Test an exe-only copy of the workflow artifact: verify extracted DLL SHA-256
+  equals the build output and that no sidecar INI/log/DLL is shipped.
+- Check that `Log=0` suppresses and removes stale logs, while preserving
+  existing user settings.
 
 ## Manual checks
 
