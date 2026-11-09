@@ -39,6 +39,23 @@ jobs:
           if (!(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'SYS-OS:')) {
             throw "Expected system inventory in the launcher log"
           }
+          $ini = 'build/Release/Rayman2Fix/Rayman2Fix.ini'
+          $initial = (Get-Content $ini | Where-Object { $_.Trim() })
+          if ($initial.Count -ne 2 -or $initial[0] -ne '[Debug]' -or $initial[1] -ne 'Log=1') {
+            throw "Bootstrap INI must contain only [Debug] Log=1"
+          }
+          # Exercise Win32 CRLF and UTF-8 BOM parsing, plus log opt-out.
+          [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=0`r`n", [Text.UTF8Encoding]::new($true))
+          & ./build/Release/Rayman2Fix.exe --init
+          if ($LASTEXITCODE -ne 0 -or (Test-Path build/Release/Rayman2Fix.log)) {
+            throw "Log=0 must prevent log creation (and remove stale log)"
+          }
+          [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=1`r`n", [Text.UTF8Encoding]::new($true))
+          & ./build/Release/Rayman2Fix.exe --init
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path build/Release/Rayman2Fix.log) -or
+              !(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'CONFIG: Debug.Log=1')) {
+            throw "Log=1 must generate correctly configured log"
+          }
       - name: Stage launcher and private runtime directory
         shell: pwsh
         run: |
@@ -75,3 +92,10 @@ jobs:
           test -f build/Rayman2Fix/Rayman2Fix.ini
           test -f build/Rayman2Fix.log
           grep -q 'SYS-INFO: END' build/Rayman2Fix.log
+          test "$(cat build/Rayman2Fix/Rayman2Fix.ini)" = "$(printf '[Debug]\\nLog=1')" || exit 1
+          printf '[Debug]\\r\\nLog=0\\r\\n' > build/Rayman2Fix/Rayman2Fix.ini
+          ./build/rayman2fix_cli --init
+          test ! -e build/Rayman2Fix.log
+          printf '[Debug]\\r\\nLog=1\\r\\n' > build/Rayman2Fix/Rayman2Fix.ini
+          ./build/rayman2fix_cli --init
+          grep -q 'CONFIG: Debug.Log=1' build/Rayman2Fix.log
