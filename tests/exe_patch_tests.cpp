@@ -88,6 +88,20 @@ int main() {
         const std::string target = "ABCDEFGHnewENDINGS";
         const auto patch = fixture(source, target);
         const auto header = r2fix::inspect_exe_patch(patch);
+        // Developer-only sidecar file is discoverable without embedding
+        // copyrighted patch bytes in a GitHub Actions executable.
+        const fs::path sidecar = root / "Rayman2Fix-executable.r2patch";
+        {
+            std::ofstream file(sidecar, std::ios::binary | std::ios::trunc);
+            file.write(reinterpret_cast<const char*>(patch.data()),
+                       static_cast<std::streamsize>(patch.size()));
+            check(static_cast<bool>(file), "write local delta sidecar");
+        }
+        check(r2fix::available_exe_patch(root) == patch,
+              "owner-supplied exact delta is discovered beside launcher");
+        fs::remove(sidecar);
+        check(r2fix::available_exe_patch(root).empty(),
+              "without sidecar and no embedded resource, no patch is available");
         check(header.original_size == source.size() &&
               header.patched_size == target.size(), "header sizes");
         check(header.original_sha256 == r2fix::sha256_text(source), "original hash");
