@@ -197,6 +197,10 @@ if(BUILD_TESTING)
   target_link_libraries(game_launch_tests PRIVATE rayman2_patch)
   add_test(NAME game-launch-preflight COMMAND game_launch_tests)
 
+  add_executable(fov_math_tests tests/fov_math_tests.cpp)
+  target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME widescreen-hor-plus-math COMMAND fov_math_tests)
+
   if(WIN32)
     # Harmless child executable for a Win32 CreateProcessW smoke test. This
     # checks spaces in paths and explicit game working directory, without
