@@ -1,6 +1,9 @@
 #include "rayman2fix/game_launch.hpp"
 
 #include "rayman2fix/gameframe.hpp"
+#include "rayman2fix/game_config.hpp"
+#include "rayman2fix/display.hpp"
+#include "rayman2fix/presentation.hpp"
 #include "rayman2fix/patch_install.hpp"
 #include "rayman2fix/sha256.hpp"
 #include "rayman2fix/startup.hpp"
@@ -9,6 +12,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
+#include <fstream>
+#include <iterator>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -85,8 +90,53 @@ GameLaunchPreflight check_game_launch(const fs::path& root) {
     }
 }
 
-ChildProcessResult run_child_process(const fs::path& executable,
-                                    const fs::path& working_directory) {
+void ensure_rayman2_dpi_manifest(const fs::path& game_dir) {
+    // Separate declarative, game-facing compatibility file. This does not
+    // touch the authenticated rayman2.exe bytes or the single user INI.
+    constexpr const char* xml =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n"
+        "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\r\n"
+        "  <assemblyIdentity type=\"win32\" name=\"Rayman2Fix.Rayman2\" version=\"1.0.0.0\" processorArchitecture=\"x86\"/>\r\n"
+        "  <application xmlns=\"urn:schemas-microsoft-com:asm.v3\">\r\n"
+        "    <windowsSettings>\r\n"
+        "      <dpiAware xmlns=\"http://schemas.microsoft.com/SMI/2005/WindowsSettings\">true/pm</dpiAware>\r\n"
+        "      <dpiAwareness xmlns=\"http://schemas.microsoft.com/SMI/2016/WindowsSettings\">PerMonitorV2,PerMonitor</dpiAwareness>\r\n"
+        "    </windowsSettings>\r\n"
+        "  </application>\r\n"
+        "</assembly>\r\n";
+    const fs::path dest = game_dir / "rayman2.exe.manifest";
+    if (fs::exists(dest)) {
+        if (!fs::is_regular_file(dest) || fs::is_symlink(dest) ||
+            fs::file_size(dest) > 16u*1024u)
+            throw std::runtime_error("unsafe existing Rayman2 DPI manifest");
+        std::ifstream in(dest, std::ios::binary);
+        const std::string existing((std::istreambuf_iterator<char>(in)), {});
+        if (!in.bad() && existing == xml) return;
+        // Preserve user files; fail rather than overwrite an unrelated or
+        // tampered native manifest with a new SxS configuration.
+        throw std::runtime_error("unknown existing rayman2.exe.manifest; refusing overwrite");
+    }
+    fs::path pending = dest;
+    pending += ".installing";
+    if (fs::exists(pending) || fs::is_symlink(pending))
+        throw std::runtime_error("stale Rayman2 DPI manifest staging file");
+    try {
+        std::ofstream out(pending, std::ios::binary | std::ios::trunc);
+        if (!out) throw std::runtime_error("cannot stage Rayman2 DPI manifest");
+        out << xml;
+        out.close();
+        if (!out) throw std::runtime_error("cannot write Rayman2 DPI manifest");
+        fs::rename(pending, dest);
+    } catch (...) {
+        std::error_code ignored;
+        fs::remove(pending, ignored);
+        throw;
+    }
+}
+
+ChildProcessResult run_child_process(
+    const fs::path& executable, const fs::path& working_directory,
+    const ChildDisplayOptions& display) {
 #ifdef _WIN32
     if (!fs::is_regular_file(executable) || fs::is_symlink(executable) ||
         !fs::is_directory(working_directory) || fs::is_symlink(working_directory))
@@ -98,24 +148,76 @@ ChildProcessResult run_child_process(const fs::path& executable,
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION raw{};
-    // Win32 CreateProcessW may modify the command line buffer, so pass
-    // a non-const std::wstring. The absolute lpApplicationName rules out
-    // shell interpretation and executable path hijacking.
-    if (!CreateProcessW(application.c_str(), &commandline[0],
-                        nullptr, nullptr, FALSE, 0, nullptr,
-                        cwd.c_str(), &startup, &raw))
-        return {false, 0, GetLastError()};
+
+    // GameFrame reads GLIDE_SIZE in the child process. Override its default
+    // scale=2 with the actual desktop output pixels; do not change desktop
+    // resolution and do not affect subsequent child processes.
+    std::wstring previous;
+    DWORD existing_length = 0;
+    bool had_previous = false;
+    if (display.borderless) {
+        if (!display.output_width || !display.output_height ||
+            display.output_width > 16384 || display.output_height > 8640)
+            return {false, 0, ERROR_INVALID_PARAMETER};
+        existing_length = GetEnvironmentVariableW(L"GLIDE_SIZE", nullptr, 0);
+        had_previous = existing_length != 0;
+        if (had_previous) {
+            previous.resize(existing_length, L'\0');
+            const DWORD written = GetEnvironmentVariableW(
+                L"GLIDE_SIZE", &previous[0], existing_length);
+            if (!written || written >= existing_length)
+                return {false, 0, GetLastError()};
+            previous.resize(written);
+        }
+        const std::wstring value = std::to_wstring(display.output_width) +
+                                   L"x" + std::to_wstring(display.output_height);
+        if (!SetEnvironmentVariableW(L"GLIDE_SIZE", value.c_str()))
+            return {false, 0, GetLastError()};
+    }
+    // Win32 CreateProcessW may modify the command-line buffer. A trusted
+    // absolute application path is used; there is no shell involved.
+    const BOOL created = CreateProcessW(application.c_str(), &commandline[0],
+                                        nullptr, nullptr, FALSE, 0, nullptr,
+                                        cwd.c_str(), &startup, &raw);
+    const DWORD spawn_error = created ? 0 : GetLastError();
+    if (display.borderless) {
+        if (had_previous) SetEnvironmentVariableW(L"GLIDE_SIZE", previous.c_str());
+        else SetEnvironmentVariableW(L"GLIDE_SIZE", nullptr);
+    }
+    if (!created) return {false, 0, spawn_error};
     Handle process(raw.hProcess);
     Handle thread(raw.hThread);
-    if (WaitForSingleObject(process.handle, INFINITE) != WAIT_OBJECT_0)
-        return {true, 0, GetLastError() ? GetLastError() : ERROR_GEN_FAILURE};
+    ChildProcessResult result{};
+    result.started = true;
+
+    if (display.borderless) {
+        WindowPresentation presentation(raw.dwProcessId, display.monitor);
+        DWORD wait = WAIT_TIMEOUT;
+        while ((wait = WaitForSingleObject(process.handle, 120)) == WAIT_TIMEOUT) {
+            presentation.update();
+        }
+        result.presentation = presentation.result();
+        if (wait != WAIT_OBJECT_0) {
+            result.error_code = GetLastError();
+            if (!result.error_code) result.error_code = ERROR_GEN_FAILURE;
+            return result;
+        }
+    } else if (WaitForSingleObject(process.handle, INFINITE) != WAIT_OBJECT_0) {
+        result.error_code = GetLastError();
+        if (!result.error_code) result.error_code = ERROR_GEN_FAILURE;
+        return result;
+    }
     DWORD code = 0;
-    if (!GetExitCodeProcess(process.handle, &code))
-        return {true, 0, GetLastError()};
-    return {true, code, 0};
+    if (!GetExitCodeProcess(process.handle, &code)) {
+        result.error_code = GetLastError();
+        return result;
+    }
+    result.exit_code = code;
+    return result;
 #else
     (void)executable;
     (void)working_directory;
+    (void)display;
     return {false, 0, 1};
 #endif
 }
@@ -129,13 +231,40 @@ int launch_verified_game(Startup& startup) {
         return 2;
     }
 
+    configure_launcher_dpi_awareness();
+    const auto monitor = primary_display_metrics();
+    const auto configured = configured_output_resolution(startup.ini_path());
+    if (configured.first < 640 || configured.second < 480)
+        throw std::runtime_error("invalid native output size");
+    ChildDisplayOptions display{};
+    display.borderless = true;
+    display.monitor = monitor;
+    display.output_width = configured.first;
+    display.output_height = configured.second;
+    ensure_rayman2_dpi_manifest(root);
+    const auto aspect = static_cast<double>(configured.first) /
+                        static_cast<double>(configured.second);
+    std::ostringstream ratio;
+    ratio << std::fixed << std::setprecision(4) << aspect;
     startup.log(std::string("LAUNCH-READY: original_sha256=") + kOriginalHash +
                 " patched_sha256=" + kUnprotectedHash +
                 " gameframe=verified input=keyboard SDL3=deferred");
+    startup.log("DISPLAY: primary_physical=" +
+                std::to_string(monitor.width) + "x" +
+                std::to_string(monitor.height) + " dpi=" +
+                std::to_string(monitor.dpi) + " origin=" +
+                std::to_string(monitor.left) + "," +
+                std::to_string(monitor.top) + " output=" +
+                std::to_string(display.output_width) + "x" +
+                std::to_string(display.output_height) +
+                " output_aspect=" + ratio.str() +
+                " GameFrame.GLIDE_SIZE=explicit window=borderless-not-topmost");
+    startup.log("WIDESCREEN: native output configured; game camera/Hor+ "
+                "FOV patch not yet validated (do not confuse output scaling with Hor+)");
     std::cout << "Launching Rayman 2 (Glide2)...\n" << std::flush;
     startup.log("LAUNCH-START: child=rayman2.exe working_directory=Rayman2Fix");
     const auto started = std::chrono::steady_clock::now();
-    const auto result = run_child_process(root / "rayman2.exe", root);
+    const auto result = run_child_process(root / "rayman2.exe", root, display);
     const auto seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - started).count();
     if (!result.started) {
@@ -152,6 +281,15 @@ int launch_verified_game(Startup& startup) {
                   << result.error_code << '\n';
         return 1;
     }
+    startup.log("PRESENTATION: window_found=" +
+                std::string(result.presentation.window_found ? "1" : "0") +
+                " borderless_applied=" +
+                (result.presentation.borderless_applied ? "1" : "0") +
+                " changes=" + std::to_string(result.presentation.changes) +
+                " child_window_dpi=" +
+                std::to_string(result.presentation.observed_dpi) +
+                (result.presentation.last_error.empty() ? "" :
+                  " last_error=" + result.presentation.last_error));
     startup.log("LAUNCH-EXIT: child_exit_code=" + exit_hex(result.exit_code) +
                 " elapsed_ms=" + std::to_string(
                     static_cast<unsigned long long>(seconds * 1000.0)));
