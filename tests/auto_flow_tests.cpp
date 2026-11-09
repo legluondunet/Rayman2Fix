@@ -61,6 +61,11 @@ static std::vector<std::uint8_t> test_disc() {
     p += record(root + p, 29, 4, false, "SECDRV.SYS;1");
     p += record(root + p, 30, 4, false, "RAYMAN2.ICD;1");
     p += record(root + p, 31, 4, false, "DXPLAYERX.DLL;1");
+    const std::string original_ubi =
+        "[Rayman2]\r\nLanguage=French\r\nGLI_Dll=DirectX6\r\n"
+        "GLI_Mode=1 - 640 x 480 x 16\r\n[Other]\r\nKeep=present\r\n";
+    p += record(root + p, 32, static_cast<std::uint32_t>(original_ubi.size()),
+                false, "UBI.INI;1");
 
     auto* dll = iso.data() + 21 * 2048;
     p = record(dll, 21, 2048, true, std::string(1, '\0'));
@@ -81,6 +86,7 @@ static std::vector<std::uint8_t> test_disc() {
     std::copy_n("DRV!", 4, iso.data() + 29 * 2048);
     std::copy_n("ICD!", 4, iso.data() + 30 * 2048);
     std::copy_n("DXP!", 4, iso.data() + 31 * 2048);
+    std::copy(original_ubi.begin(), original_ubi.end(), iso.begin() + 32 * 2048);
     return iso;
 }
 static void write(const fs::path& p, const std::string& data) {
@@ -106,6 +112,8 @@ int main() {
         check(fs::exists(root / "Rayman2Fix" / "Rayman2Fix.ini"),
               "bootstrap initialization must create INI when absent");
         write(root / "Rayman2Fix" / "Rayman2Fix.dll", "BOOTSTRAP");
+        write(root / "Rayman2Fix" / "Rayman2Fix.ini",
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\n");
         check(r2fix::run_automatic(app) == 2,
               "no game or image must report missing media, not success");
         check(!fs::exists(root / "Rayman2Fix" / "rayman2.exe"),
@@ -133,8 +141,22 @@ int main() {
               "original game data copied in lowercase");
         check(contents(game / "Rayman2Fix.dll") == "BOOTSTRAP",
               "launcher runtime payload remains available");
-        check(contents(game / "Rayman2Fix.ini") == "[Debug]\nLog=1\n",
+        check(contents(game / "Rayman2Fix.ini") ==
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\n",
               "user ini retained across staging commit");
+        auto ubi = contents(game / "ubi.ini");
+        check(ubi.find("Language=French") != std::string::npos &&
+              ubi.find("[Other]") != std::string::npos &&
+              ubi.find("Keep=present") != std::string::npos,
+              "CD ubi.ini custom/unknown values preserved");
+        check(ubi.find("GLI_DllFile=GliVd1") != std::string::npos &&
+              ubi.find("GLI_Dll=Glide2") != std::string::npos &&
+              ubi.find("GLI_Mode=1 - 1024 x 768 x 16") != std::string::npos &&
+              ubi.find("GLI_Dll=DirectX6") == std::string::npos,
+              "Glide 2 selected by single Rayman2Fix.ini at 1024x768");
+        check(contents(game / ".rayman2fix-cd-files.tsv").find("\tubi.ini") ==
+                  std::string::npos,
+              "managed ubi.ini must not be recorded as an immutable CD asset");
         check(fs::exists(game / ".rayman2fix-cd-files.tsv"),
               "local installation receipt created");
         // All six exact root-only exclusions must be absent from fresh
@@ -188,11 +210,43 @@ int main() {
               "post-migration hash verification remains valid");
         check(contents(game / "data" / "game.dat") == "DATA\n",
               "migration preserves unrelated game assets");
-        check(contents(game / "Rayman2Fix.ini") == "[Debug]\nLog=1\n",
+        check(contents(game / "Rayman2Fix.ini") ==
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\n",
               "migration preserves user options");
 
+        // Treat the original CD-sourced ubi.ini as a mutable game config.
+        // A legacy manifest entry must be removed without deleting ubi.ini.
+        {
+            std::ofstream receipt(game / ".rayman2fix-cd-files.tsv",
+                                  std::ios::binary | std::ios::app);
+            receipt << "FILE\t" << fs::file_size(game / "ubi.ini") << "\t"
+                    << r2fix::sha256_file(game / "ubi.ini") << "\tubi.ini\n";
+            check(static_cast<bool>(receipt), "legacy ubi.ini receipt appended");
+        }
+        write(game / "Rayman2Fix.ini",
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1280x720\n");
         check(r2fix::run_automatic(app) == 2,
-              "existing verified assets need no original CD, but launch stays blocked");
+              "reconfigure graphics from one INI with no CD present");
+        ubi = contents(game / "ubi.ini");
+        check(ubi.find("GLI_Mode=1 - 1280 x 720 x 16") != std::string::npos,
+              "game-facing configuration updates after user resolution change");
+        check(ubi.find("Language=French") != std::string::npos &&
+              ubi.find("Keep=present") != std::string::npos,
+              "regenerated config retains other original CD options");
+        check(contents(game / ".rayman2fix-cd-files.tsv").find("\tubi.ini") ==
+                  std::string::npos,
+              "legacy receipt no longer tracks the mutable ubi.ini");
+        check(r2fix::verify_installation(app) == 0,
+              "modified generated ubi.ini must not break immutable asset verification");
+
+        fs::remove(game / "ubi.ini");
+        check(r2fix::run_automatic(app) == 2,
+              "missing managed ubi.ini is automatically recreated");
+        check(contents(game / "ubi.ini").find("GLI_Mode=1 - 1280 x 720 x 16") !=
+                  std::string::npos,
+              "ubi.ini is generated when missing");
+        check(r2fix::verify_installation(app) == 0,
+              "recreated game config passes CD asset verification");
 
         // Same-size corruption: size-only verification would have missed it.
         write(game / "data" / "game.dat", "OTHER");
