@@ -1,0 +1,47 @@
+name: Build Rayman2Fix bootstrap
+
+on:
+  push:
+    branches: [ main, feat/bootstrap-cd-images ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure 32-bit Windows
+        run: cmake -S . -B build -A Win32 -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Upload bootstrap executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rayman2Fix-Windows-x86-bootstrap
+          path: |
+            build/Release/Rayman2Fix.exe
+            build/Release/Rayman2Fix.dll
+          if-no-files-found: error
+          retention-days: 30
+
+  linux-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
