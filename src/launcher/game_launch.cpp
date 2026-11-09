@@ -49,6 +49,47 @@ std::string exit_hex(unsigned long exit_code) {
     return stream.str();
 }
 #ifdef _WIN32
+// Temporarily override the selected wrapper variables only while creating
+// the child. Restore the parent's original environment even on failures.
+class ScopedChildEnvironment {
+public:
+    explicit ScopedChildEnvironment(const wchar_t* name) : name_(name) {}
+    ScopedChildEnvironment(const ScopedChildEnvironment&) = delete;
+    ScopedChildEnvironment& operator=(const ScopedChildEnvironment&) = delete;
+    ~ScopedChildEnvironment() { restore(); }
+
+    bool set(const std::wstring& desired) {
+        const DWORD n = GetEnvironmentVariableW(name_, nullptr, 0);
+        if (n > 32768) { error_ = ERROR_INVALID_PARAMETER; return false; }
+        if (n) {
+            original_.resize(n, L'\0');
+            const DWORD actual = GetEnvironmentVariableW(name_, &original_[0], n);
+            if (!actual || actual >= n) { error_ = GetLastError(); return false; }
+            original_.resize(actual);
+            existed_ = true;
+        }
+        if (!SetEnvironmentVariableW(name_, desired.c_str())) {
+            error_ = GetLastError();
+            return false;
+        }
+        active_ = true;
+        return true;
+    }
+    DWORD error() const { return error_; }
+    void restore() {
+        if (!active_) return;
+        if (existed_) SetEnvironmentVariableW(name_, original_.c_str());
+        else SetEnvironmentVariableW(name_, nullptr);
+        active_ = false;
+    }
+private:
+    const wchar_t* name_;
+    std::wstring original_;
+    bool existed_ = false;
+    bool active_ = false;
+    DWORD error_ = 0;
+};
+
 struct Handle {
     HANDLE handle = nullptr;
     ~Handle() {
@@ -150,30 +191,22 @@ ChildProcessResult run_child_process(
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION raw{};
 
-    // GameFrame reads GLIDE_SIZE in the child process. Override its default
-    // scale=2 with the actual desktop output pixels; do not change desktop
-    // resolution and do not affect subsequent child processes.
-    std::wstring previous;
-    DWORD existing_length = 0;
-    bool had_previous = false;
+    // GameFrame uses GLIDE_SIZE for physical output and our pinned-source
+    // extension RAYMAN2FIX_FPS_LIMIT for producer-side grBufferSwap pacing.
+    ScopedChildEnvironment glide_size(L"GLIDE_SIZE");
+    ScopedChildEnvironment fps_limit(L"RAYMAN2FIX_FPS_LIMIT");
     if (display.borderless) {
         if (!display.output_width || !display.output_height ||
-            display.output_width > 16384 || display.output_height > 8640)
+            display.output_width > 16384 || display.output_height > 8640 ||
+            (display.fps_limit != 0 &&
+             (display.fps_limit < 15 || display.fps_limit > 240)))
             return {false, 0, ERROR_INVALID_PARAMETER};
-        existing_length = GetEnvironmentVariableW(L"GLIDE_SIZE", nullptr, 0);
-        had_previous = existing_length != 0;
-        if (had_previous) {
-            previous.resize(existing_length, L'\0');
-            const DWORD written = GetEnvironmentVariableW(
-                L"GLIDE_SIZE", &previous[0], existing_length);
-            if (!written || written >= existing_length)
-                return {false, 0, GetLastError()};
-            previous.resize(written);
-        }
-        const std::wstring value = std::to_wstring(display.output_width) +
-                                   L"x" + std::to_wstring(display.output_height);
-        if (!SetEnvironmentVariableW(L"GLIDE_SIZE", value.c_str()))
-            return {false, 0, GetLastError()};
+        const std::wstring size = std::to_wstring(display.output_width) +
+                                  L"x" + std::to_wstring(display.output_height);
+        if (!glide_size.set(size))
+            return {false, 0, glide_size.error()};
+        if (!fps_limit.set(std::to_wstring(display.fps_limit)))
+            return {false, 0, fps_limit.error()};
     }
     // Win32 CreateProcessW may modify the command-line buffer. A trusted
     // absolute application path is used; there is no shell involved.
@@ -181,10 +214,8 @@ ChildProcessResult run_child_process(
                                         nullptr, nullptr, FALSE, 0, nullptr,
                                         cwd.c_str(), &startup, &raw);
     const DWORD spawn_error = created ? 0 : GetLastError();
-    if (display.borderless) {
-        if (had_previous) SetEnvironmentVariableW(L"GLIDE_SIZE", previous.c_str());
-        else SetEnvironmentVariableW(L"GLIDE_SIZE", nullptr);
-    }
+    fps_limit.restore();
+    glide_size.restore();
     if (!created) return {false, 0, spawn_error};
     Handle process(raw.hProcess);
     Handle thread(raw.hThread);
@@ -249,6 +280,7 @@ int launch_verified_game(Startup& startup) {
     display.output_width = configured.first;
     display.output_height = configured.second;
     display.enable_fov = true;
+    display.fps_limit = configured_fps_limit(startup.ini_path());
     display.log_enabled = startup.logging_enabled();
     ensure_rayman2_dpi_manifest(root);
     const auto aspect = static_cast<double>(configured.first) /
@@ -270,6 +302,9 @@ int launch_verified_game(Startup& startup) {
                 " GameFrame.GLIDE_SIZE=explicit window=borderless-not-topmost");
     startup.log("WIDESCREEN: native output configured; game camera/Hor+ "
                 "FOV patch not yet validated (do not confuse output scaling with Hor+)");
+    startup.log("FPS: limiter=" + std::to_string(display.fps_limit) +
+                (display.fps_limit ? " cap at GameFrame.grBufferSwap"
+                                   : " unlimited (GameFrame pacing disabled)"));
     std::cout << "Launching Rayman 2 (Glide2)...\n" << std::flush;
     startup.log("LAUNCH-START: child=rayman2.exe working_directory=Rayman2Fix");
     const auto started = std::chrono::steady_clock::now();
