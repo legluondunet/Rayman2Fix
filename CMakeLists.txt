@@ -23,10 +23,12 @@ endif()
 add_executable(Rayman2Fix
   src/launcher/main.cpp
   src/launcher/auto_flow.cpp
+  src/launcher/display.cpp
   src/launcher/extraction_console.cpp
   src/launcher/game_config.cpp
   src/launcher/gameframe.cpp
   src/launcher/game_launch.cpp
+  src/launcher/presentation.cpp
   src/launcher/patch_install.cpp
   src/launcher/startup.cpp
   src/launcher/system_inventory.cpp)
@@ -154,10 +156,12 @@ if(BUILD_TESTING)
   add_executable(auto_flow_tests
     tests/auto_flow_tests.cpp
     src/launcher/auto_flow.cpp
+    src/launcher/display.cpp
     src/launcher/extraction_console.cpp
     src/launcher/game_config.cpp
     src/launcher/gameframe.cpp
     src/launcher/game_launch.cpp
+    src/launcher/presentation.cpp
     src/launcher/patch_install.cpp
     src/launcher/startup.cpp)
   target_link_libraries(auto_flow_tests PRIVATE rayman2_disc rayman2_patch)
@@ -180,6 +184,9 @@ if(BUILD_TESTING)
   add_executable(game_launch_tests
     tests/game_launch_tests.cpp
     src/launcher/game_launch.cpp
+    src/launcher/display.cpp
+    src/launcher/presentation.cpp
+    src/launcher/game_config.cpp
     src/launcher/gameframe.cpp
     src/launcher/patch_install.cpp
     src/launcher/startup.cpp)
@@ -191,6 +198,7 @@ if(BUILD_TESTING)
     # checks spaces in paths and explicit game working directory, without
     # launching any commercial executable.
     add_executable(test_child_process tests/test_child_process.cpp)
+    target_link_libraries(test_child_process PRIVATE user32)
     add_dependencies(game_launch_tests test_child_process)
   endif()
 
