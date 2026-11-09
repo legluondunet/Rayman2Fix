@@ -31,6 +31,8 @@ int main() {
     }
     wchar_t buffer[128]{};
     GetEnvironmentVariableW(L"GLIDE_SIZE", buffer, 128);
+    wchar_t frame_limit[64]{};
+    GetEnvironmentVariableW(L"RAYMAN2FIX_FPS_LIMIT", frame_limit, 64);
     RECT rect{};
     GetWindowRect(hwnd, &rect);
     std::wofstream info(root / "child-window.txt");
@@ -38,7 +40,8 @@ int main() {
          << static_cast<unsigned long long>(GetWindowLongPtrW(hwnd, GWL_STYLE)) << L'\n'
          << rect.left << L' ' << rect.top << L' '
          << (rect.right - rect.left) << L' '
-         << (rect.bottom - rect.top) << L'\n';
+         << (rect.bottom - rect.top) << L'\n'
+         << frame_limit << L'\n';
     info.close();
     DestroyWindow(hwnd);
 #endif
