@@ -1,70 +1,148 @@
-# Rayman2Fix — clean-room architecture (v0)
+# Rayman2Fix — architecture and staged implementation
 
-## Public contract
+Rayman2Fix is a **new, clean-room** project for the original PC CD-ROM editions
+of **Rayman 2: The Great Escape**. It has no source-code dependency on Ray2Fix.
 
-The end-user entry point is a single `Rayman2Fix.exe`, eventually containing
-the installation payload and DLL dependencies. An installed game resides in
-`Rayman2Fix/` relative to the launcher.
+## Permanent layout
 
-The game itself is **not** redistributed. End users provide their own original
-CD images. A runtime must not alter original game media in place.
+```text
+Rayman2Fix.exe                       launcher / installer / verifier
+Rayman2Fix.log                       one log, reset at each launcher start
+Rayman2Fix/
+    Rayman2.exe                      installed, edition-verified game executable (future)
+    Rayman2Fix.dll                   our x86 in-memory patch/input/window runtime
+    glide2x.dll                      GameFrame's x86 Glide 2 compatibility DLL
+    SDL3.dll                         SDL3 x86 controller runtime
+    Rayman2Fix.ini                   persistent user options
+    ...                              original game data and resource layout
+```
 
-## Components
+**Important:** the Glide 2 API DLL is **`glide2x.dll`**, not `glid2.dll`.
+The final game will use **only the 3dfx Glide path**, never a separate
+DirectX game renderer. GameFrame implements Glide using OpenGL.
 
-1. **Launcher / installer**: native Windows application, with offline CD source
-   detection, installation staging, SHA-256 manifest verification, safe backups,
-   predictable launch, a single log next to the executable and repair/verify.
-2. **Disc layer**: ISO9660 and CUE/BIN readers; explicit MODE1 support; separate
-   future handling for ISO9660 Joliet, multi-session and multiple data tracks.
-   Unknown layouts and unverified editions fail closed.
-3. **Edition profiles**: immutable ID, language, disc fingerprints, required
-   source paths, expected SHA-256 for extracted files, executable hashes and
-   machine-specific patch map. Do not infer executable identity from filename.
-4. **Rayman2Fix.dll**: native x86 runtime, loaded only through a verified
-   entrypoint. Graphics fixes, FOV/aspect ratio, background window behavior,
-   bug-fix hooks and controller bridge are independent, testable modules.
-5. **Rendering**: the open-source GameFrame Glide implementation is the planned
-   3Dfx API backend, and should use a desktop-sized borderless window; no
-   exclusive resolution changes. The original game may require a Glide DLL
-   export name (`glide2x.dll`) or a legacy GLI entrypoint: these are separate
-   loading boundaries, not a reason to borrow Ray2Fix code.
-6. **Input**: SDL3 gamepad layer, with stable mappings, hotplug and keyboard
-   fallback. SDL must initialize outside `DllMain`.
-7. **Packaging**: sources and third-party licenses disclosed; no game assets,
-   SafeDisc payloads or vendor executables in git or CI archives.
+The installer may use a *temporary* sibling staging folder while extracting,
+but must publish only verified files into `Rayman2Fix/`. The current bootstrap's
+`Rayman2Fix/DiscContent` is an interim extraction test, **not** the final
+installed-game directory layout.
 
-## Non-negotiable safety and correctness
+The long-term release goal is **one launcher executable** embedding its
+own runtime payload. At present the Actions build bundles a prearranged
+launcher plus `Rayman2Fix/` runtime folder; it does not yet embed those DLLs.
 
-- No memory offsets, opcodes, FOV parameters or patches until the **exact
-  executable SHA-256** and original bytes have been validated.
-- Each installation is transactional: stage, verify, then rename. Existing
-  installed directories are not silently overwritten.
-- Distinguish **disc extracted** from **playable installed game**.
-- Proprietary disc protection is distinct from file extraction. Some retail
-  builds may require an official compatible executable or other lawful path;
-  support must not be claimed before verified on Windows and Wine.
-- Preserve original frame timing where possible; never advertise speedrun
-  equivalence without tests.
-- No code copied from Ray2Fix. Implement from independently documented
-  behavior and permitted interface analysis.
+## Launcher workflow
 
-## PR milestones
+1. On start, determine the directory containing **Rayman2Fix.exe**, regardless
+   of shell working directory. Create `Rayman2Fix/` and only generate
+   `Rayman2Fix.ini` if absent. Do not delete user settings.
+2. Write exactly one `Rayman2Fix.log` *beside the launcher*, beginning with
+   build/commit ID and passive machine inventory. Avoid personal identifiers,
+   usernames, home paths, serials, IP and private environment values.
+3. If an installed game is present, **verify** assets, executable hash, edition
+   manifest and our runtime DLL versions; only then launch.
+4. Otherwise discover exactly one supported CD image (or request an explicit
+   source); fail on ambiguous choices. Inspect ISO/CUE layouts and verify a
+   strict edition manifest, not merely a disc volume name.
+5. Extract into a temporary staging directory. Reconstruct the game files
+   and language resources using edition-specific extraction/copy rules.
+6. Validate hashes, and only then promote staging to `Rayman2Fix/` (with
+   backups and safe recovery). Never silently overwrite modified user assets.
+7. Launch the verified 3dfx game with the exact expected Glide DLL, our
+   runtime DLL and SDL3 in the same installation directory. Diagnose runtime
+   errors in the single launcher log.
 
-1. **Bootstrap (this PR)**: read-only ISO/CUE identification, safe extraction,
-   empty Windows DLL ABI skeleton, automated builds/tests.
-2. **Evidence**: inventory real retail disc samples, compile fingerprints,
-   extract ISO path/locale table, establish a supported-edition manifest.
-3. **Installer**: verified installation layout, unique log, CLI --verify,
-   executable selection, backup/repair, packaging of own assets.
-4. **Renderer**: open-source Glide and borderless 4:3/widescreen, correct FOV,
-   HUD and cutscenes, focus/Alt+Tab.
-5. **SDL3**: gamepad mapping, startup recognition and reconnection, input tests.
-6. **Versioned hooks**: safe per-build bug fixes and diagnostics.
-7. **Release**: Windows and Wine/Proton validation of each advertised edition.
+## Diagnostic inventory (independently implemented, same categories as SpiderMan2k1Fix)
 
-## Bootstrap limitations
+- Rayman2Fix version + commit, build platform, selected game edition and
+  executable hash, source format and verification status.
+- Windows runtime version; whether Wine or Proton is detected; Wine version,
+  Linux host OS/kernel as reported by Wine, Proton **hint** when exposed,
+  Linux desktop/session **hint** when exposed. Never mistake Wine's emulated
+  Windows version for the host OS.
+- CPU model, logical processor count and physical cores when available.
+- RAM total and available.
+- GPUs and adapter driver description/version as reported by Win32/D3D9
+  (not an unverified Linux kernel/Mesa/NVIDIA driver version).
+- Monitor count, primary/virtual desktop sizes, resolution and refresh rate.
+- XInput and DirectInput controller presence at launcher startup (passive
+  enumeration, without acquiring input); SDL3 device names/mappings after
+  input integration, without exposing private identifiers.
+- Active settings, GameFrame/SDL3 versions, DX/Glide export checks,
+  lifecycle, focus/Alt+Tab, failure codes and integrity checks.
 
-The first build only supports `--inspect`, `--extract`, `--version` and
-`--help`. The DLL exports an informational API but applies no hooks, does
-not load SDL3 and does not initialize a Glide renderer. No CD release is
-currently identified or playable through this bootstrap.
+The log is **not** the persistent configuration; `Rayman2Fix.ini` is.
+The logging policy must remain privacy-conscious, with unknown information
+marked unavailable rather than guessed.
+
+## Implementation stages (in strict order)
+
+### 1. Reconstruct a healthy installation from real PC CDs
+
+Collect known-good image formats and build **per-edition profiles**:
+language, region, disc layout, source file SHA-256, executable SHA-256,
+install layout, resource decoding and expected output. Retail CD installers
+may compress or transform assets: ISO extraction alone is not enough.
+
+### 2. Make a correctly installed edition runnable without the CD
+
+Find how each supported game checks disc presence and what legitimate
+compatibility mechanisms are available. Preserve and validate original
+media assets; verify behavior on Windows 11 and Wine without a CD mount.
+Do **not** assume SafeDisc-wrapped executables run after extraction.
+
+### 3. Investigate and eliminate unintended anticopy side effects
+
+Catalog the reported in-game *pirate-head* and other anticopy symptoms
+against **exact executable versions**. An independently acquired GOG
+executable may be compared (hash, PE structure, code/data patterns) as a
+research reference, without redistributing it or importing another project's
+code. Any binary or memory correction requires exact-version gating,
+original-byte validation, backups and reproducible before/after tests.
+
+### 4. Add GameFrame, and support only the 3dfx renderer
+
+Build or bundle a pinned, attributed open-source GameFrame Glide2x x86
+library with the expected `glide2x.dll` exports. Verify textures,
+lighting, videos, HUD, aspect correction, horizontal FOV and proper
+4:3 positioning of overlays. The DirectX *game renderer* is unsupported.
+Avoid treating a Win32 diagnostic API (D3D9 GPU enumeration) as a game renderer.
+
+### 5. Replace exclusive fullscreen with stable borderless fullscreen
+
+Use a window occupying the selected monitor's desktop bounds, **without
+changing desktop display modes**. Preserve focus ownership, Alt+Tab,
+cursor behavior and pause/resume across Windows/Wine/Proton; never force
+topmost over another application. Handle 4:3, 16:9, high DPI and multimonitor.
+Avoid game-specific resolution hacks.
+
+### 6. Integrate SDL3 and options
+
+Native x86 SDL3 gamepad support (hotplug, consistent mappings, controller
+reconnection, keyboard fallback), initialized outside `DllMain`.
+Keep the configuration short: mandatory compatibility fixes are not toggles.
+The `Rayman2Fix.ini` defaults will become active when the corresponding
+features have been tested.
+
+## Runtime protection contract
+
+- `Rayman2Fix.dll` is loaded through a version-checked entrypoint, **never**
+  unconditionally by executing `DllMain` patching code.
+- No offsets or hooks before matching SHA-256 and verifying expected original
+  bytes and per-build ABI.
+- The launcher must refuse unrecognized executable builds with a helpful log.
+- Never ship Rayman game assets, proprietary executables, CD images, activation
+  keys or vendor DRM code in the repository or CI artifacts.
+
+## Current PR #1 bootstrap status
+
+- `--init` prepares the launcher-relative workspace and log.
+- `--inspect` and `--extract` implement cautious MODE1 ISO/CUE handling.
+- The Windows x86 runtime DLL is **inert**.
+- Installer, no-CD play, pirate-head fixes, GameFrame and SDL3 are **planned**.
+- Synthetic Windows x86 and Linux tests establish the build baseline, not real
+  retail CD compatibility.
+
+## Licensing
+
+Select the main project license before release. Keep distinct attributions
+for GameFrame, SDL3 and all other third-party dependencies.
