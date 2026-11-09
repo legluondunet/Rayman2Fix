@@ -132,12 +132,13 @@ int main() {
         check(r2fix::run_automatic(app) == 2,
               "existing verified assets need no original CD, but launch stays blocked");
 
-        write(game / "data" / "game.dat", "CHANGED");
+        // Same-size corruption: size-only verification would have missed it.
+        write(game / "data" / "game.dat", "OTHER");
         check(r2fix::verify_installation(app) == 2,
-              "tampered game file must be detected");
+              "same-size changed game file must fail SHA256 verification");
         check(r2fix::run_automatic(app) == 2,
               "tampered installation is not repaired or launched silently");
-        check(contents(game / "data" / "game.dat") == "CHANGED",
+        check(contents(game / "data" / "game.dat") == "OTHER",
               "existing modified file preserved");
 
         std::error_code ignored;
