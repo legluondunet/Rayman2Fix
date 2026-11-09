@@ -25,6 +25,20 @@ jobs:
         run: cmake --build build --config Release --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Verify launcher workspace and diagnostics
+        shell: pwsh
+        run: |
+          & ./build/Release/Rayman2Fix.exe --init
+          if ($LASTEXITCODE -ne 0) { throw "Rayman2Fix --init failed" }
+          if (!(Test-Path build/Release/Rayman2Fix/Rayman2Fix.ini)) {
+            throw "Expected persistent Rayman2Fix.ini alongside launcher"
+          }
+          if (!(Test-Path build/Release/Rayman2Fix.log)) {
+            throw "Expected single launcher-side log"
+          }
+          if (!(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'SYS-OS:')) {
+            throw "Expected system inventory in the launcher log"
+          }
       - name: Stage launcher and private runtime directory
         shell: pwsh
         run: |
@@ -55,3 +69,9 @@ jobs:
         run: cmake --build build --parallel
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Verify Linux bootstrap workspace
+        run: |
+          ./build/Rayman2Fix --init
+          test -f build/Rayman2Fix/Rayman2Fix.ini
+          test -f build/Rayman2Fix.log
+          grep -q 'SYS-INFO: END' build/Rayman2Fix.log
