@@ -14,7 +14,7 @@ namespace fs = std::filesystem;
 static void usage() {
     std::cout
         << "Rayman2Fix 0.1.0 (bootstrap)\n"
-        << "Automatically inspect, install, and verify CD assets; game runtime still incomplete.\n\n"
+        << "Install and verify CD assets, then test-launch the exact approved unprotected Rayman 2 EXE.\n\n"
         << "Usage:\n"
         << "  Rayman2Fix                          (automatic CD/installation workflow)\n"
         << "  Rayman2Fix --inspect <game.iso|game.cue>\n"
@@ -25,9 +25,10 @@ static void usage() {
         << "Diagnostic --extract output: <launcher>/Rayman2Fix/DiscContent\n"
         << "Automatic installs: <launcher>/Rayman2Fix/ (staged, no silent overwrite)\n"
         << "Options/log: <launcher>/Rayman2Fix/Rayman2Fix.ini and <launcher>/Rayman2Fix.log\n"
-        << "CD game files may be automatically installed, but the game cannot\n"
-        << "launch until a trusted executable edition and functional no-CD,\n"
-        << "Glide (GameFrame) and SDL3 runtime are integrated.\n";
+        << "Game launch is enabled only for the exact SHA256-approved unprotected\n"
+        << "Rayman 2 executable, with the original .bak and verified GameFrame.\n"
+        << "Real Windows/Wine gameplay compatibility is still being tested.\n"
+        << "SDL3 gamepad support is postponed and not required for launch.\n";
 }
 
 static int run(const std::string& command, const fs::path& disc,
