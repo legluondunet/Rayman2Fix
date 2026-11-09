@@ -64,7 +64,8 @@ Rayman2Fix.log                  (generated beside EXE when Log=1)
 Rayman2Fix/
     Rayman2Fix.dll             (unpacked from the EXE; inert placeholder)
     Rayman2Fix.dll.bak         (only if updated; one latest backup)
-    Rayman2Fix.ini             (generated once if missing)
+    Rayman2Fix.ini             (only user-editable configuration)
+    ubi.ini                     (generated/synchronized for Rayman 2)
     rayman2.exe                (from original CD)
     dll/
         snd_cpa_mmx.ini         (from original CD)
@@ -83,17 +84,35 @@ license, and the project's own inert runtime DLL. It generates the INI and
 log itself. There is still **only one file** in the Windows workflow artifact:
 `Rayman2Fix.exe`. SDL3 and copyrighted game files are never bundled.
 
-The only currently supported option in `Rayman2Fix.ini` is:
+**`Rayman2Fix.ini` is the only user-editable configuration file.** Newly
+generated installations contain:
 
 ```ini
 [Debug]
 Log=1
+
+[Graphics]
+Resolution=Desktop
 ```
 
-Do not generate inactive graphics or controller settings. With `Log=1`, the
-launcher resets `Rayman2Fix.log` each run and records a privacy-conscious
-report (OS/Wine/Proton hints, CPU/cores, RAM, GPU, displays and controllers).
-With `Log=0` it suppresses diagnostics and deletes any stale launcher log.
+`Resolution=Desktop` automatically uses the primary desktop resolution on
+Windows/Wine. You can alternatively select an explicit resolution such as
+`Resolution=1280x720` or `Resolution=1920x1080`.
+The format is validated and invalid values are refused, not silently ignored.
+`Log=0` suppresses diagnostics and removes stale launcher logs.
+
+Rayman 2 still needs its legacy `ubi.ini` in the game directory, but **the
+user must not maintain it**. The launcher preserves its unrelated CD settings
+(e.g. `Language`) or creates it when absent, and automatically synchronizes
+the required Glide settings, `GLI_DllFile=GliVd1`,
+`GLI_Dll=Glide2` and `GLI_Mode=1 - WIDTH x HEIGHT x 16` from
+`Rayman2Fix.ini` before each future game launch. Glide and 16-bit mode
+are mandatory compatibility details, not redundant user options.
+`ubi.ini` is mutable, so it is deliberately excluded from the immutable
+CD SHA-256 receipt. Old receipts with this entry are migrated without the CD.
+
+The game-facing configuration has been implemented and unit-tested, but
+actual Rayman 2 rendering at widescreen resolutions still needs validation.
 No usernames, private home paths, serials or network identifiers are logged.
 
 ## Available now (PR #1)
