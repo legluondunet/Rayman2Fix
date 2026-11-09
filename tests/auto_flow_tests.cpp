@@ -1,7 +1,9 @@
 #include "rayman2fix/auto_flow.hpp"
+#include "rayman2fix/sha256.hpp"
 #include "rayman2fix/startup.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -53,6 +55,9 @@ static std::vector<std::uint8_t> test_disc() {
     p += record(root + p, 23, 4, false, "RAYMAN2.EXE;1");
     p += record(root + p, 21, 2048, true, "DLL");
     p += record(root + p, 22, 2048, true, "DATA");
+    p += record(root + p, 26, 4, false, "00000001.TMP;1");
+    p += record(root + p, 27, 4, false, "0000040C.016;1");
+    p += record(root + p, 28, 4, false, "0000040C.256;1");
 
     auto* dll = iso.data() + 21 * 2048;
     p = record(dll, 21, 2048, true, std::string(1, '\0'));
@@ -67,6 +72,9 @@ static std::vector<std::uint8_t> test_disc() {
     std::copy_n("GAME", 4, iso.data() + 23 * 2048);
     std::copy_n("AUDIO\n", 6, iso.data() + 24 * 2048);
     std::copy_n("DATA\n", 5, iso.data() + 25 * 2048);
+    std::copy_n("TEMP", 4, iso.data() + 26 * 2048);
+    std::copy_n("ICON", 4, iso.data() + 27 * 2048);
+    std::copy_n("LOGO", 4, iso.data() + 28 * 2048);
     return iso;
 }
 static void write(const fs::path& p, const std::string& data) {
@@ -123,12 +131,55 @@ int main() {
               "user ini retained across staging commit");
         check(fs::exists(game / ".rayman2fix-cd-files.tsv"),
               "local installation receipt created");
+        // The three root SafeDisc auxiliaries are excluded from both a new
+        // installation and its local SHA256 receipt.
+        for (const auto* filename : {"00000001.tmp", "0000040c.016", "0000040c.256"}) {
+            check(!fs::exists(game / filename), "obsolete protection file not extracted");
+            check(contents(game / ".rayman2fix-cd-files.tsv").find(filename) ==
+                      std::string::npos,
+                  "obsolete protection file omitted from receipt");
+        }
         check(!fs::exists(root / "Rayman2Fix.installing"),
               "staging directory removed after publishing");
         check(r2fix::verify_installation(app) == 0,
               "installed game resources verify from local receipt");
 
+        // Simulate an already-installed copy made by an older Rayman2Fix
+        // build: the receipt used to list these three auxiliaries.
+        const std::array<std::pair<const char*, const char*>, 3> legacy = {{
+            {"00000001.tmp", "TEMP"},
+            {"0000040c.016", "ICON"},
+            {"0000040c.256", "LOGO"}
+        }};
+        {
+            std::ofstream receipt(game / ".rayman2fix-cd-files.tsv",
+                                  std::ios::binary | std::ios::app);
+            for (const auto& file : legacy) {
+                receipt << "FILE\t4\t" << r2fix::sha256_text(file.second)
+                        << '\t' << file.first << '\n';
+                write(game / file.first, file.second);
+            }
+            check(static_cast<bool>(receipt), "extend old receipt for migration test");
+        }
+        // Also accept an obsolete file which the user had removed manually.
+        fs::remove(game / "00000001.tmp");
         fs::remove(root / "Rayman2.iso");
+        check(r2fix::run_automatic(app) == 2,
+              "old install is migrated without disc and runtime stays gated");
+        for (const auto& file : legacy) {
+            check(!fs::exists(game / file.first),
+                  "existing obsolete protection file removed by migration");
+            check(contents(game / ".rayman2fix-cd-files.tsv").find(file.first) ==
+                      std::string::npos,
+                  "obsolete entry removed from old SHA256 receipt");
+        }
+        check(r2fix::verify_installation(app) == 0,
+              "post-migration hash verification remains valid");
+        check(contents(game / "data" / "game.dat") == "DATA\n",
+              "migration preserves unrelated game assets");
+        check(contents(game / "Rayman2Fix.ini") == "[Debug]\nLog=1\n",
+              "migration preserves user options");
+
         check(r2fix::run_automatic(app) == 2,
               "existing verified assets need no original CD, but launch stays blocked");
 
