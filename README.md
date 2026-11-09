@@ -63,6 +63,15 @@ The initial Windows x86 executable can inspect and safely extract **ISO 9660**
 images (2048-byte sectors) and **CUE/BIN with one MODE1/2352 or MODE1/2048 data
 track**. ISO 9660 boot descriptors are handled. Audio tracks are not extracted.
 
+On a disc whose volume label is exactly `RAYMAN2`, we recognize **23 exact
+`Data/World/Levels/*.DAT` paths** discarded by the author's original
+[Lutris CD installation script](https://lutris.net/games/install/39141/view).
+Those entries stay visible in `--inspect`, but are skipped during
+`--extract` (including any unreadable/fictitiously large extents). The log
+distinguishes **declared total bytes**, **source image size**, **selected
+extraction bytes** and each known exclusion. Unknown/unlisted oversized files
+still cause a safe error; no blanket skip-by-size is performed.
+
 ```text
 Rayman2Fix.exe --init
 Rayman2Fix.exe --inspect "my-disc.iso"
@@ -101,6 +110,7 @@ artifact retention.
 
 - [Design and roadmap](docs/architecture.md)
 - [How to document retail disc editions](docs/disc-evidence.md)
+- [CD installation steps from the author's Lutris installer](docs/lutris-cd-install.md)
 - [Bootstrap test protocol](docs/testing.md)
 
 No copyrighted Rayman 2 content, proprietary executables, disc images,
