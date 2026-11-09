@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <cwchar>
 #include <string>
 
 #ifdef _WIN32
@@ -122,8 +123,11 @@ FovHookResult initialize_game_fov(
     }
     // LoadLibraryW is hosted by kernel32 or forwarded to kernelbase depending
     // on OS. Find the actual function owner in the target, then add its RVA.
-    auto loader = remote_system_entry(
-        static_cast<DWORD>(pid), reinterpret_cast<FARPROC>(&LoadLibraryW));
+    const HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+    const FARPROC local_loader = kernel32 ?
+        GetProcAddress(kernel32, "LoadLibraryW") : nullptr;
+    auto loader = local_loader ?
+        remote_system_entry(static_cast<DWORD>(pid), local_loader) : nullptr;
     DWORD base = 0;
     bool timeout = false;
     if (!remote_call(process, loader, path.memory, base, result.win32_error, timeout)) {
