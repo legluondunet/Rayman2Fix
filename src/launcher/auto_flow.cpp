@@ -26,8 +26,12 @@ constexpr const char* kReceipt = ".rayman2fix-cd-files.tsv";
 constexpr const char* kReceiptHeader = "RAYMAN2FIX-CD-FILES\t2";
 // The unprotected executable supplied by the project owner. No commercial
 // EXE is bundled; only a verified byte-delta may eventually be added.
+constexpr const char* kApprovedProtectedExeSha256 =
+    "7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3";
+constexpr std::uint64_t kApprovedProtectedExeSize = 676352;
 constexpr const char* kApprovedUnprotectedExeSha256 =
     "9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713";
+constexpr std::uint64_t kApprovedUnprotectedExeSize = 1468928;
 
 std::string upper(std::string s) {
     for (auto& c : s)
@@ -417,8 +421,11 @@ void patch_executable_if_supported(const fs::path& game_root, Startup& startup) 
         return;
     }
     const auto header = inspect_exe_patch(patch);
-    if (header.patched_sha256 != kApprovedUnprotectedExeSha256) {
-        throw std::runtime_error("executable patch target SHA256 is not approved");
+    if (header.original_sha256 != kApprovedProtectedExeSha256 ||
+        header.original_size != kApprovedProtectedExeSize ||
+        header.patched_sha256 != kApprovedUnprotectedExeSha256 ||
+        header.patched_size != kApprovedUnprotectedExeSize) {
+        throw std::runtime_error("executable patch does not match approved original-to-unprotected SHA256 pair");
     }
     // If the CD image/edition is unrecognized, *do not* patch or rename the
     // user's original executable; keep it intact for later investigation.
@@ -435,6 +442,10 @@ void patch_executable_if_supported(const fs::path& game_root, Startup& startup) 
 }
 
 int report_runtime_status(const fs::path& root, Startup& startup) {
+    if (is_exe_replaced(root)) {
+        startup.log("EXE-PATCH: verified approved unprotected executable and original .bak");
+        std::cout << "Verified unprotected rayman2.exe; original retained in rayman2.exe.bak.\n";
+    }
     // GameFrame Glide2x is integrated and verified, but the retail game EXE
     // and its no-CD compatibility still require owner testing. SDL3 is
     // postponed and is intentionally NOT a prerequisite for game launch.
