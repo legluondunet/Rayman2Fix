@@ -1,6 +1,9 @@
 #include "rayman2fix/startup.hpp"
 
 #include <chrono>
+#include <algorithm>
+#include <cctype>
+#include <sstream>
 #include <ctime>
 #include <stdexcept>
 #include <string>
@@ -82,9 +85,53 @@ void Startup::initialize() {
 #endif
     char when[32]{};
     std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &local);
-    log("Rayman2Fix 0.1.0-bootstrap");
+#ifndef RAYMAN2FIX_VERSION
+#define RAYMAN2FIX_VERSION "0.1.0"
+#endif
+#ifndef RAYMAN2FIX_BUILD_COMMIT
+#define RAYMAN2FIX_BUILD_COMMIT "unknown"
+#endif
+    log(std::string("Rayman2Fix ") + RAYMAN2FIX_VERSION + "-bootstrap commit=" + RAYMAN2FIX_BUILD_COMMIT);
     log(std::string("START: local_time=") + when);
     log("LAYOUT: launcher=Rayman2Fix.exe install=Rayman2Fix/ config=Rayman2Fix/Rayman2Fix.ini log=Rayman2Fix.log");
+    // Log only specific, public configuration enums. Do not expose arbitrary
+    // INI strings (which may contain private filesystem paths or tokens).
+    auto option = [&](const std::string& section, const std::string& key) {
+        std::ifstream in(ini_path_, std::ios::binary);
+        std::string current, line;
+        while (std::getline(in, line)) {
+            const auto trim = [](std::string v) {
+                const auto first = v.find_first_not_of(" \\t\\r\\n");
+                if (first == std::string::npos) return std::string();
+                return v.substr(first, v.find_last_not_of(" \\t\\r\\n") - first + 1);
+            };
+            line = trim(line);
+            if (line.empty() || line[0] == ';' || line[0] == '#') continue;
+            if (line.front() == '[' && line.back() == ']') {
+                current = line.substr(1, line.size() - 2);
+                continue;
+            }
+            const auto equals = line.find('=');
+            if (current == section && equals != std::string::npos &&
+                trim(line.substr(0, equals)) == key)
+                return trim(line.substr(equals + 1));
+        }
+        return std::string();
+    };
+    const auto display = option("Graphics", "DisplayMode");
+    const auto pad = option("Input", "GamepadBackend");
+    const auto debug = option("Debug", "Log");
+    log("CONFIG: Graphics.DisplayMode=" +
+        std::string(display == "BorderlessFullscreen" ? "BorderlessFullscreen" :
+                    display == "Windowed" ? "Windowed" : "Unrecognized or unset") +
+        " (bootstrap option, inactive)");
+    log("CONFIG: Input.GamepadBackend=" +
+        std::string(pad == "SDL3" ? "SDL3" : "Unrecognized or unset") +
+        " (bootstrap option, inactive)");
+    log("CONFIG: Debug.Log=" +
+        std::string(debug == "1" ? "1" : debug == "0" ? "0" : "Unrecognized or unset") +
+        " (bootstrap always writes startup log)");
+
     log("RUNTIME: Rayman2Fix.dll=" +
         std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));
     log("RENDERER: GameFrame (glide2x.dll)=not integrated");
