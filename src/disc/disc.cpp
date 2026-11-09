@@ -190,7 +190,7 @@ std::string decode_name(const unsigned char* p, std::size_t size, bool joliet) {
 // https://lutris.net/games/install/39141/view
 // Their presence in that recipe is evidence that installation did not require
 // copying them, NOT proof that each is a dummy or physically invalid file.
-bool ignored_by_lutris_rayman2_cd(const std::string& volume_id,
+bool ignored_by_rayman2_cd_recipe(const std::string& volume_id,
                                   const fs::path& relative) {
     if (upper(volume_id) != "RAYMAN2") return false;
     const std::string path = upper(relative.generic_u8string());
@@ -433,7 +433,7 @@ void DiscImage::scan_directory(std::uint32_t extent,
         // An exact historical exclusion may be unreadable; do not generalize
         // that rule to other files just because their declared sizes are huge.
         const bool skipped = !directory &&
-            ignored_by_lutris_rayman2_cd(info_.volume_id, relative);
+            ignored_by_rayman2_cd_recipe(info_.volume_id, relative);
         const auto child_extent = le32(rec + 2);
         const auto child_size = le32(rec + 10);
         if (directory) {
