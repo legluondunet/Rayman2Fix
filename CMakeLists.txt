@@ -29,6 +29,7 @@ add_executable(Rayman2Fix
   src/launcher/gameframe.cpp
   src/launcher/game_launch.cpp
   src/launcher/presentation.cpp
+  src/launcher/runtime_inject.cpp
   src/launcher/patch_install.cpp
   src/launcher/startup.cpp
   src/launcher/system_inventory.cpp)
@@ -69,6 +70,7 @@ if(WIN32)
   add_library(Rayman2FixRuntime SHARED src/runtime/runtime.cpp)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME Rayman2Fix)
   target_compile_definitions(Rayman2FixRuntime PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_include_directories(Rayman2FixRuntime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
   # Package the project's own x86 DLL inside Rayman2Fix.exe as RCDATA.
   # Windows artifact: one EXE. GameFrame is compiled separately by CI and
@@ -162,6 +164,7 @@ if(BUILD_TESTING)
     src/launcher/gameframe.cpp
     src/launcher/game_launch.cpp
     src/launcher/presentation.cpp
+    src/launcher/runtime_inject.cpp
     src/launcher/patch_install.cpp
     src/launcher/startup.cpp)
   target_link_libraries(auto_flow_tests PRIVATE rayman2_disc rayman2_patch)
@@ -186,6 +189,7 @@ if(BUILD_TESTING)
     src/launcher/game_launch.cpp
     src/launcher/display.cpp
     src/launcher/presentation.cpp
+    src/launcher/runtime_inject.cpp
     src/launcher/game_config.cpp
     src/launcher/gameframe.cpp
     src/launcher/patch_install.cpp
