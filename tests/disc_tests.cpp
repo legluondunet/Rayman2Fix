@@ -83,6 +83,7 @@ int main() {
         std::ifstream content(target / "DATA.TXT", std::ios::binary);
         std::string text((std::istreambuf_iterator<char>(content)), {});
         check(text == "HELLO\n", "extraction data");
+        content.close();  // Windows cannot delete an open output file.
         bool refused = false;
         try { parsed.extract(target); }
         catch (const std::exception&) { refused = true; }
