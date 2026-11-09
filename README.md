@@ -172,7 +172,14 @@ Rayman2Fix.exe --help
 ```
 
 The explicit diagnostic `--extract` command still targets
-`Rayman2Fix/DiscContent/` by default. **The no-argument installer does
+`Rayman2Fix/DiscContent/` by default. Both it and the automatic installer
+display a readable command-line progress report: current operation, copied
+bytes and files at 5% increments, then a success summary including the
+actual files/bytes written, excluded files/bytes, destination, and duration.
+The automatic installer also reports the audio, graphics configuration,
+executable patch and final SHA-256 verification status. Progress uses
+ordinary flushed lines (no ANSI or terminal-only carriage returns), so it
+remains readable in Windows cmd/PowerShell, Wine and redirected output. **The no-argument installer does
 not use DiscContent**: it publishes the staged assets directly under
 `Rayman2Fix/`. Extraction never runs the CD's own installers or modifies
 the retail executable. `--verify` checks installed file presence, sizes and SHA-256,
