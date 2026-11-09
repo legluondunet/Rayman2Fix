@@ -43,7 +43,9 @@ SDL3 and controller support are deferred to a subsequent phase.
    remain diagnostic commands.
 2. Use the executable's own directory as the root, create `Rayman2Fix/`
    and a minimal `Rayman2Fix.ini` only when missing. Deploy the bundled
-   `Rayman2Fix.dll`, backing up mismatched versions without deleting them.
+   `Rayman2Fix.dll`, retaining exactly one rolling backup:
+   `Rayman2Fix.dll.bak` (the immediately previous DLL). An older `.bak` is
+   discarded after successful replacement; legacy numbered backups migrate.
    Write a single optional log beside the launcher with passive system info.
 3. If `Rayman2Fix/rayman2.exe` exists, check its **local CD receipt**:
    expected file names, sizes and SHA-256 hashes, sound initialization and game executable.
@@ -57,7 +59,7 @@ a cryptographic authentication of a specific trusted retail edition.
    directory, using Joliet long names, lowercase paths and writable output.
    Duplicate `dll/snd_cpa_mmx.ini` as `dll/snd_cpa.ini` and create a
    SHA-256 receipt listing all extracted files.
-6. Preserve launcher-generated INI/runtime and earlier DLL backups from
+6. Preserve launcher-generated INI/runtime and its single latest DLL backup from
    the bootstrap folder. Refuse unexpected existing files; promote the
    prepared installation to `Rayman2Fix/`, with rollback on failure.
    The original CD image and executable are never modified.
