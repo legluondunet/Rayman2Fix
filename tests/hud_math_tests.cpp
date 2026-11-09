@@ -14,7 +14,8 @@ int main() {
     assert(near(r2fix::centered_hud_x(512, source_width, wide), 512.0f));
     assert(near(r2fix::centered_hud_x(1024, source_width, wide), 896.0f));
     // Both axes grow by the same number of physical pixels after correction.
-    assert(near((896.0f - 128.0f) * 1920.0f / 1024.0f, 1080.0f));
+    assert(near((896.0f - 128.0f) * 1920.0f / 1024.0f, 1440.0f));
+    assert(near(1440.0f, 1080.0f * 4.0f / 3.0f));
 
     assert(near(r2fix::hud_4_3_scale(1280, 1024), 1.0f));
     assert(near(r2fix::hud_4_3_scale(1024, 768), 1.0f));
