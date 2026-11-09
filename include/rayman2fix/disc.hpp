@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <set>
 #include <string>
 #include <vector>
@@ -33,13 +34,35 @@ struct DiscInfo {
     std::size_t shared_extent_references = 0;
 };
 
+// Actual completed extraction statistics. Calculated from successfully
+// written files; never report planned bytes as completed work.
+struct ExtractionResult {
+    std::size_t copied_files = 0;
+    std::uint64_t copied_bytes = 0;
+    std::size_t skipped_files = 0;
+    std::uint64_t skipped_bytes = 0;
+};
+
+struct ExtractionProgress {
+    std::size_t copied_files = 0;
+    std::size_t total_files = 0;
+    std::uint64_t copied_bytes = 0;
+    std::uint64_t total_bytes = 0;
+    std::filesystem::path current_file;
+};
+using ExtractionCallback = std::function<void(const ExtractionProgress&)>;
+
 // Read-only parser for single-data-track ISO 9660 and MODE1 CUE/BIN images.
 // Never execute any disc-provided installer or game binary.
 class DiscImage {
 public:
     static DiscImage open(const std::filesystem::path& source);
     const DiscInfo& info() const noexcept { return info_; }
-    void extract(const std::filesystem::path& destination) const;
+    // Optional streaming progress callback (file completion and every 1 MiB
+    // within larger files). Existing silent callers can omit the callback.
+    ExtractionResult extract(
+        const std::filesystem::path& destination,
+        const ExtractionCallback& progress = {}) const;
 
 private:
     std::filesystem::path data_file_;
