@@ -14,7 +14,8 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 
 - Launch **`Rayman2Fix.exe` without arguments** and without any CD or
   `Rayman2Fix/` folder: it creates the folder, its own embedded runtime DLL,
-  the minimal `[Debug] Log=1` INI and the single launcher-side log, then
+  the minimal `[Debug] Log=1` and `[Graphics] Resolution=Desktop` INI
+  and the single launcher-side log, then
   reports the missing CD cleanly. The former `--init` is unsupported.
 - Place exactly one original `.iso` or `.cue` beside the launcher. The
   default command inspects it, verifies required file paths, extracts into
@@ -40,6 +41,16 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - With two images, no images, a malformed CD, or a foreign folder already
   occupying `Rayman2Fix/`, the launcher must fail without silently
   deleting any data.
+- Generate `ubi.ini` on the first install from the CD's settings, preserving
+  unrelated keys and sections, but force Glide 2 and user-selected
+  `[Graphics] Resolution` (e.g. `1024x768`) as
+  `GLI_Mode=1 - 1024 x 768 x 16`.
+- Change `Resolution` to `1280x720` with the original CD removed.
+  On the next launcher run, check that only the managed graphics values
+  change, and the game-facing `ubi.ini` is updated. Removing `ubi.ini`
+  should cause it to be regenerated. Invalid resolution must fail safely.
+- Older manifests that recorded `ubi.ini` must migrate its entry out of
+  the immutable SHA-256 receipt without deleting the game-facing file.
 - Validate `--verify` on installed CD files. It checks **size and SHA-256** against
   a locally generated receipt, but source-edition authentication and
   no-CD/Glide compatibility are not yet certified.
