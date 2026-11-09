@@ -20,6 +20,7 @@ public:
     void initialize();
     void log(const std::string& line);
     bool has_runtime_dll() const;
+    bool logging_enabled() const noexcept { return logging_enabled_; }
 private:
     std::filesystem::path root_, game_dir_, ini_path_, log_path_;
     std::ofstream log_stream_;
