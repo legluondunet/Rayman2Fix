@@ -294,12 +294,11 @@ int main() {
         check(real_text == "HELLO\n", "real nested file contents preserved");
         real.close();
 
-        // The owner's three root-only SafeDisc auxiliary files are not
-        // installed. Other files with the same extension in game directories
-        // must still be retained; exclusions are exact paths, not globs.
+        // The six owner-selected CD root files are excluded exactly.
+        // Same-name nested game assets must still be extracted: no globs.
         auto obsolete_cd = make_rayman2_with_dummy();
-        obsolete_cd.resize(31 * 2048);
-        put32(obsolete_cd.data() + 16 * 2048 + 80, 31);
+        obsolete_cd.resize(35 * 2048);
+        put32(obsolete_cd.data() + 16 * 2048 + 80, 35);
         auto* obsolete_root = obsolete_cd.data() + 20 * 2048;
         std::size_t root_pos = record(obsolete_root, 20, 2048, 2, std::string(1, '\0'));
         root_pos += record(obsolete_root + root_pos, 20, 2048, 2, std::string(1, '\1'));
@@ -307,25 +306,32 @@ int main() {
         root_pos += record(obsolete_root + root_pos, 26, 4, 0, "00000001.TMP;1");
         root_pos += record(obsolete_root + root_pos, 27, 4, 0, "0000040C.016;1");
         root_pos += record(obsolete_root + root_pos, 28, 4, 0, "0000040C.256;1");
+        root_pos += record(obsolete_root + root_pos, 30, 4, 0, "SECDRV.SYS;1");
+        root_pos += record(obsolete_root + root_pos, 31, 4, 0, "RAYMAN2.ICD;1");
+        root_pos += record(obsolete_root + root_pos, 32, 4, 0, "DXPLAYERX.DLL;1");
         auto* data_dir = obsolete_cd.data() + 21 * 2048;
         std::size_t data_pos = record(data_dir, 21, 2048, 2, std::string(1, '\0'));
         data_pos += record(data_dir + data_pos, 20, 2048, 2, std::string(1, '\1'));
         data_pos += record(data_dir + data_pos, 22, 2048, 2, "WORLD");
-        record(data_dir + data_pos, 29, 4, 0, "0000040C.016;1");
-        std::copy_n("TEST", 4, obsolete_cd.data() + 29 * 2048);
+        data_pos += record(data_dir + data_pos, 29, 4, 0, "0000040C.016;1");
+        record(data_dir + data_pos, 33, 4, 0, "DXPLAYERX.DLL;1");
+        for (int sector : {29, 30, 31, 32, 33})
+            std::copy_n("TEST", 4, obsolete_cd.data() + sector * 2048);
         write_file(root / "obsolete_cd.iso", obsolete_cd);
         const auto obsolete_image = r2fix::DiscImage::open(root / "obsolete_cd.iso");
-        check(obsolete_image.info().skipped_files == 4,
-              "three obsolete root files plus the known dummy are omitted");
-        check(obsolete_image.info().extract_bytes == 10,
-              "nested similarly named file remains selected");
+        check(obsolete_image.info().skipped_files == 7,
+              "six exact root exclusions and known large dummy are omitted");
+        check(obsolete_image.info().extract_bytes == 14,
+              "nested similarly named files remain selected");
         obsolete_image.extract(root / "obsolete-cd-extracted");
-        check(!fs::exists(root / "obsolete-cd-extracted" / "00000001.tmp") &&
-              !fs::exists(root / "obsolete-cd-extracted" / "0000040c.016") &&
-              !fs::exists(root / "obsolete-cd-extracted" / "0000040c.256"),
-              "none of the three protection auxiliaries is extracted");
-        check(fs::exists(root / "obsolete-cd-extracted" / "data" / "0000040c.016"),
-              "same extension and name under data directory are preserved");
+        for (const auto* file : {"00000001.tmp", "0000040c.016",
+                                 "0000040c.256", "secdrv.sys",
+                                 "rayman2.icd", "dxplayerx.dll"})
+            check(!fs::exists(root / "obsolete-cd-extracted" / file),
+                  "exact root-only auxiliary must not be extracted");
+        check(fs::exists(root / "obsolete-cd-extracted" / "data" / "0000040c.016") &&
+              fs::exists(root / "obsolete-cd-extracted" / "data" / "dxplayerx.dll"),
+              "nested same-name game files must be preserved");
 
         // A foreign disc must not silently inherit RAYMAN2-specific rules.
         auto foreign_aux = obsolete_cd;
