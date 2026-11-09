@@ -220,8 +220,14 @@ int main() {
               "original disc DLL directory extracted in lowercase");
         check(fs::exists(root / "joliet-single-dll-extracted" / "assets" / "second.dll"),
               "unrelated source tree retained");
-        check(!fs::exists(root / "joliet-single-dll-extracted" / "DLL"),
-              "no uppercase duplicate or special DLL folder merge");
+        unsigned dll_folder_count = 0;
+        for (const auto& entry : fs::directory_iterator(root / "joliet-single-dll-extracted")) {
+            if (entry.is_directory() && entry.path().filename().u8string() == "dll")
+                ++dll_folder_count;
+            check(entry.path().filename().u8string() != "DLL",
+                  "no actual uppercase DLL directory is created");
+        }
+        check(dll_folder_count == 1, "one lowercase dll directory in output");
 
         write_file(root / "unexpected-case-folders.iso",
                    make_joliet_cd_dirs_iso(true));
