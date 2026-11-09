@@ -54,6 +54,38 @@ static std::vector<std::uint8_t> make_iso(const std::string& name = "DATA.TXT;1"
     for (unsigned i = 0; i < 6; ++i) file[i] = "HELLO\n"[i];
     return iso;
 }
+// Small synthetic RAYMAN2 image with a deliberately impossible "dummy"
+/// under the exact path ignored by the user's historical Lutris CD recipe.
+static std::vector<std::uint8_t> make_rayman2_with_dummy(bool recognized_volume = true,
+                                                          bool recognized_path = true) {
+    auto base = make_iso();
+    base.resize(26 * 2048);
+    auto* pvd = base.data() + 16 * 2048;
+    put32(pvd + 80, 26);
+    std::fill(pvd + 40, pvd + 72, ' ');
+    const std::string volume = recognized_volume ? "RAYMAN2" : "OTHER_CD";
+    std::copy(volume.begin(), volume.end(), pvd + 40);
+    auto dir = [&](int sector, int child_sector, const char* child_name) {
+        auto* data = base.data() + sector * 2048;
+        std::fill(data, data + 2048, 0);
+        std::size_t pos = record(data, sector, 2048, 2, std::string(1, '\0'));
+        pos += record(data + pos, sector == 20 ? sector : sector - 1,
+                      2048, 2, std::string(1, '\1'));
+        record(data + pos, child_sector, 2048, 2, child_name);
+    };
+    dir(20, 21, "DATA");
+    dir(21, 22, "WORLD");
+    dir(22, 23, "LEVELS");
+    auto* levels = base.data() + 23 * 2048;
+    std::size_t pos = record(levels, 23, 2048, 2, std::string(1, '\0'));
+    pos += record(levels + pos, 22, 2048, 2, std::string(1, '\1'));
+    pos += record(levels + pos, 24, 900000000, 0,
+                  recognized_path ? "MAP0.DAT;1" : "IMPORTANT.DAT;1");
+    record(levels + pos, 25, 6, 0, "REAL.DAT;1");
+    std::copy_n("HELLO\n", 6, base.data() + 25 * 2048);
+    return base;
+}
+
 static void write_file(const fs::path& path, const std::vector<std::uint8_t>& data) {
     std::ofstream out(path, std::ios::binary);
     check(static_cast<bool>(out), "create test file");
@@ -108,6 +140,34 @@ int main() {
         record(outside_dir + offset, 25, 6, 0, "DATA.TXT;1");
         write_file(root / "outside.iso", outside);
         check(fails(root / "outside.iso"), "file extent outside ISO must fail");
+
+        // Real historical CD copies can list impossible huge dummy entries.
+        // Ignore ONLY the exact paths from the original Rayman 2 Lutris recipe.
+        const auto r2iso = make_rayman2_with_dummy();
+        write_file(root / "rayman2_dummy.iso", r2iso);
+        const auto r2 = r2fix::DiscImage::open(root / "rayman2_dummy.iso");
+        check(r2.info().skipped_files == 1, "one exact historical CD exclusion");
+        check(r2.info().skipped_bytes == 900000000, "huge declared ignored size");
+        check(r2.info().total_bytes == 900000006, "full declared bytes");
+        check(r2.info().extract_bytes == 6, "actual selected extract size");
+        check(r2.info().files.size() == 2, "full directory inventory retained");
+        check(r2.info().files[0].skipped_by_cd_recipe, "explicitly marked ignored file");
+        r2.extract(root / "filtered");
+        check(!fs::exists(root / "filtered" / "DATA" / "WORLD" / "LEVELS" / "MAP0.DAT"),
+              "historical excluded file not extracted");
+        std::ifstream real(root / "filtered" / "DATA" / "WORLD" / "LEVELS" / "REAL.DAT",
+                           std::ios::binary);
+        check(static_cast<bool>(real), "real nested file exists");
+        std::string real_text((std::istreambuf_iterator<char>(real)), {});
+        check(real_text == "HELLO\n", "real nested file contents preserved");
+        real.close();
+
+        write_file(root / "not_rayman2.iso", make_rayman2_with_dummy(false, true));
+        check(fails(root / "not_rayman2.iso"),
+              "never ignore an impossible file on an unknown CD");
+        write_file(root / "not_allowlisted.iso", make_rayman2_with_dummy(true, false));
+        check(fails(root / "not_allowlisted.iso"),
+              "never ignore an impossible file by size alone");
 
         // A valid ISO 9660 disc may contain a boot record before its PVD.
         auto boot_iso = make_iso();
