@@ -100,6 +100,58 @@ output and `Rayman2Fix.log` (look for `LAUNCH-READY`,
 A nonzero exit code may indicate a game crash or a missing runtime component.
 Do not claim playability from the launch event alone.
 
+## Native borderless, DPI and first Hor+ in-game validation
+
+With the owner's approved unprotected Rayman 2 EXE plus its original
+\`rayman2.exe.bak\`, run the current Windows-x86 launcher under Wine:
+
+\`\`\`bash
+WINEDEBUG=-all wine Rayman2Fix.exe
+\`\`\`
+
+The **single** user-facing setting \`Rayman2Fix/Rayman2Fix.ini\` should remain
+\`[Graphics] Resolution=Desktop\`. On the user's 1920×1080 monitor the
+launcher must log:
+
+- \`CONFIG-UBI: ... internal=1024x768x16 output=1920x1080\`; the internal
+  Glide compatibility mode must **not** be forced to an unsupported 16:9
+  value.
+- \`DISPLAY: primary_physical=1920x1080 dpi=... output=1920x1080
+  GameFrame.GLIDE_SIZE=explicit window=borderless-not-topmost\`.
+- \`RUNTIME-FOV: injection_attempted=1 dll_loaded=1 active=1 status=1\`
+  (or \`status=2\` for an actual 4:3 display). A failed load, missing export,
+  unrecognized code signature or patch failure must be logged explicitly
+  and requires investigation before claiming Hor+.
+- \`PRESENTATION: window_found=1 borderless_applied=1 changes=...\`
+  with \`child_window_dpi\` logged; \`LAUNCH-EXIT\` must report the real
+  game exit code.
+
+Inspect **actual gameplay**, not just a launch success message:
+
+1. Window client rectangle exactly covers the physical primary monitor:
+   no border/title bar/taskbar, no exclusive display mode switch. Alt+Tab
+   and switching to another window must work and the game must not be topmost.
+2. Horizontal FOV should show more landscape at 16:9 than 4:3, *not* zoom,
+   vertical crop or a stretched 4:3 picture. Compare matching scene screenshots.
+   Check that Rayman is not distorted; inspect HUD and all menu overlays.
+3. Check native resolution and physical DPI at 100%, 125%, 150% Windows
+   scaling and under Wine where possible. The launcher must not confuse
+   1920 physical pixels with DPI-virtualized logical pixels. Check a second
+   monitor or a nonzero virtual-desktop origin if available.
+4. Verify cutscenes, menus, gameplay and the first post-video transition,
+   plus quitting and a second launch. The external DPI manifest must not
+   trigger an SxS failure or an exception.
+5. Verify a 4:3 display leaves the original FOV untouched and unknown EXEs
+   never receive executable hooks. Share a screenshot and the single
+   \`Rayman2Fix.log\` for any discrepancy.
+
+The initial Hor+ runtime uses an exact seven-byte checked detour in the
+owner-approved Win32 EXE at image RVA \`0x22AB0\`, with alphaX/alphaY
+camera fields at offsets \`0x64\`/\`0x68\`. No game exe bytes are modified
+on disk. Unlike the main launcher, this game runtime has not yet been
+validated by real visual screenshots; in particular **HUD overlays may
+still require their own aspect correction**.
+
 ## Manual checks
 
 - `Rayman2Fix.exe --help` and `--version`.
