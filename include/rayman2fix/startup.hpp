@@ -23,6 +23,7 @@ public:
 private:
     std::filesystem::path root_, game_dir_, ini_path_, log_path_;
     std::ofstream log_stream_;
+    bool logging_enabled_ = true;
 };
 
 void log_system_inventory(Startup& startup);
