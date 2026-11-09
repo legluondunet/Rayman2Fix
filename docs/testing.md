@@ -23,9 +23,11 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
   `dll/snd_cpa.ini` from `snd_cpa_mmx.ini`, writes a size receipt and
   promotes the assets to `Rayman2Fix/`. The installed layout must not use
   `DiscContent/`.
-- Remove or unmount the source ISO and run without arguments again. Existing
-  game files must be **verified without reinstalling**. Since no functional
-  runtime is integrated, the game must NOT be executed yet.
+- Remove or unmount the source ISO and run without arguments again.
+  Existing game files must be **verified without reinstalling**. An
+  unpatched, unsupported or modified game executable must **never** run.
+  Only the exact approved unprotected executable with original `.bak`,
+  patch marker, GameFrame and sound/ubi.ini assets can be launched.
 - Modify/remove one installed game file (including a same-size modification):
   SHA-256 verification and default launch must report the mismatch and
   leave the user's files untouched.
@@ -71,6 +73,32 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
   warning; gamepad input remains unimplemented until the next phase.
 - Check that `Log=0` suppresses and removes stale logs, while preserving
   existing user settings.
+- With untrusted/incorrect `rayman2.exe` and an invalid patch marker, the
+  Win32 preflight **must refuse** to spawn any process. CI tests this
+  refusal on both Windows and Linux.
+- The Windows-specific CreateProcessW smoke test launches a harmless
+  fixture with spaces in its path and an explicit working directory,
+  waits for it to finish, verifies the working directory marker and
+  records the exact nonzero exit code. No commercial executable is
+  distributed or executed by CI.
+
+## First approved-game Wine/Windows launch test
+
+After installing the supported retail CD and applying the owner's
+`Rayman2Fix-executable.r2patch` (sidecar next to the launcher), check that
+`Rayman2Fix/rayman2.exe.bak` still hashes to
+`7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`
+and `rayman2.exe` hashes to
+`9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`.
+
+Run `WINEDEBUG=-all wine Rayman2Fix.exe` (or `Rayman2Fix.exe` on Windows).
+This build should now attempt to spawn `rayman2.exe` in its own directory
+and **wait until the game process exits**. Observe any window/dialog, intro,
+menu, graphics (Glide), sound and keyboard navigation. Record the console
+output and `Rayman2Fix.log` (look for `LAUNCH-READY`,
+`LAUNCH-START`, `LAUNCH-EXIT`, or `LAUNCH-ERROR`).
+A nonzero exit code may indicate a game crash or a missing runtime component.
+Do not claim playability from the launch event alone.
 
 ## Manual checks
 
@@ -99,6 +127,6 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - Without Joliet, clearly label the ISO9660 primary-name fallback instead of
   inventing long file names.
 
-**GameFrame packaging and file integrity are tested, but no actual Rayman 2
-rendering, playable no-CD launch, SDL3 initialization or game hooks are
-asserted by these bootstrap tests.**
+**The ability to spawn a separate Windows process is unit-tested; actual
+Rayman 2 rendering, playable no-CD launch, SDL3 initialization or game
+hooks are not established by CI.**
