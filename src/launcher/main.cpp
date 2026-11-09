@@ -1,5 +1,6 @@
 #include "rayman2fix/auto_flow.hpp"
 #include "rayman2fix/disc.hpp"
+#include "rayman2fix/extraction_console.hpp"
 #include "rayman2fix/startup.hpp"
 
 #include <filesystem>
@@ -31,6 +32,9 @@ static void usage() {
 
 static int run(const std::string& command, const fs::path& disc,
                const fs::path& destination, r2fix::Startup& startup) {
+    r2fix::ExtractionConsole console(std::cout);
+    if (command == "--extract")
+        console.step(1, 3, "Inspecting CD image...");
     const auto image = r2fix::DiscImage::open(disc);
     const auto& info = image.info();
     startup.log("DISC: filename_source=" + info.filename_source +
@@ -77,14 +81,21 @@ static int run(const std::string& command, const fs::path& disc,
               << " (extraction blocked if nonzero)\n"
               << "Edition: UNKNOWN (no trusted executable/hash profile yet)\n";
     if (command == "--extract") {
-        image.extract(destination);
+        console.plan(info);
+        console.step(2, 3, "Extracting selected CD files...");
+        const auto result = image.extract(destination,
+            [&](const r2fix::ExtractionProgress& progress) {
+                console.progress(progress);
+            });
+        console.step(3, 3, "Finalizing extraction...");
+        console.summary(info, result, destination);
         startup.log("EXTRACT: completed, files_copied=" +
-                    std::to_string(info.files.size() - info.skipped_files) +
-                    " files_omitted=" + std::to_string(info.skipped_files) +
-                    " expected_output_bytes=" + std::to_string(info.extract_bytes) +
+                    std::to_string(result.copied_files) +
+                    " files_omitted=" + std::to_string(result.skipped_files) +
+                    " copied_bytes=" + std::to_string(result.copied_bytes) +
                     " verified_edition=none (not a playable install)");
-        std::cout << "Extracted to: " << destination.string() << '\n'
-                  << "Not a playable game installation: no edition validated.\n";
+        std::cout << "  Note: diagnostic CD extraction only; "
+                     "game launch remains unvalidated.\n";
     } else {
         for (const auto& file : info.files)
             std::cout << file.relative_path.u8string() << " (" << file.size_bytes
