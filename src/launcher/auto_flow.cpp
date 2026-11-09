@@ -6,6 +6,7 @@
 #include "rayman2fix/patch_install.hpp"
 #include "rayman2fix/exe_patch.hpp"
 #include "rayman2fix/gameframe.hpp"
+#include "rayman2fix/game_launch.hpp"
 #include "rayman2fix/game_config.hpp"
 #include "rayman2fix/startup.hpp"
 
@@ -449,31 +450,16 @@ void patch_executable_if_supported(const fs::path& game_root, Startup& startup) 
                 " backup=rayman2.exe.bak");
 }
 
+// Launch the one verified retail edition after the complete CD verification
+// succeeded and the generated game configuration has been synchronized.
 int report_runtime_status(const fs::path& root, Startup& startup) {
     if (is_exe_replaced(root)) {
-        startup.log("EXE-PATCH: verified approved unprotected executable and original .bak");
+        startup.log("EXE-PATCH: approved unprotected rayman2.exe and original .bak verified");
         std::cout << "Verified unprotected rayman2.exe; original retained in rayman2.exe.bak.\n";
     }
-    // GameFrame Glide2x is integrated and verified, but the retail game EXE
-    // and its no-CD compatibility still require owner testing. SDL3 is
-    // postponed and is intentionally NOT a prerequisite for game launch.
-    std::vector<std::string> missing;
-    if (!exists_file(root / "Rayman2Fix.dll")) missing.emplace_back("Rayman2Fix.dll");
-    if (!gameframe_glide_ready(root))
-        missing.emplace_back("glide2x.dll (GameFrame missing/unverified)");
-    for (const auto& name : missing)
-        startup.log("RUNTIME-MISSING: " + name);
-    startup.log("LAUNCH-BLOCKED: no trusted retail executable hash profile or "
-                "tested no-CD/game hooks; GameFrame integrated, SDL3 deferred");
-    std::cerr << "CD files prepared/checked; GameFrame Glide2x "
-                 "installed if verified. Game launch is still blocked: "
-                 "retail EXE/no-CD compatibility not validated.\n";
-    if (!missing.empty()) {
-        std::cerr << "Missing runtime components:";
-        for (const auto& name : missing) std::cerr << " " << name << ";";
-        std::cerr << '\n';
-    }
-    return 2;
+    // No SDL3 dependency is required for this first game launch; the game's
+    // original keyboard input remains available for rendering tests.
+    return launch_verified_game(startup);
 }
 } // namespace
 
@@ -580,7 +566,7 @@ int run_automatic(Startup& startup) {
             throw;
         }
         startup.log("AUTO-INSTALL: CD files staged and committed to Rayman2Fix/ "
-                    "with snd_cpa.ini and local SHA256 receipt; game not certified playable");
+                    "with snd_cpa.ini and local SHA256 receipt; game startup test follows");
         console.step(8, 8, "Verifying installed files and executable hashes...");
         if (verify_installation(startup) != 0) return 2;
         console.summary(info, extraction, root);
@@ -593,7 +579,7 @@ int run_automatic(Startup& startup) {
                       "not applied (no supported embedded/local delta)") << '\n'
                   << "  GameFrame: "
                   << (gameframe_glide_ready(root) ? "verified" : "not verified")
-                  << "\n  Game startup: not yet validated\n";
+                  << "\n  Game startup: attempting supported EXE (first real-world test)\n";
         return report_runtime_status(root, startup);
     } catch (const std::exception& error) {
         startup.log(std::string("AUTO-ERROR: ") + error.what());
