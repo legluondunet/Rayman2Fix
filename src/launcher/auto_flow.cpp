@@ -64,6 +64,10 @@ bool gameframe_bundle_file(const std::string& filename) {
     return false;
 }
 bool runtime_backup_name(const std::string& filename) {
+    if (filename == "RAYMAN2FIX.DLL.BAK") return true;
+    // Accept legacy launcher-generated numbered backups only so startup can
+    // migrate them to one .bak before a CD install. The .bak.previous
+    // transactional file is deliberately not accepted as a normal state.
     const std::string prefix = "RAYMAN2FIX.DLL.BACKUP.";
     if (filename.rfind(prefix, 0) != 0 || filename.size() == prefix.size())
         return false;
