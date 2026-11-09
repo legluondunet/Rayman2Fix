@@ -29,6 +29,9 @@ static int run(const std::string& command, const fs::path& disc,
                const fs::path& destination, r2fix::Startup& startup) {
     const auto image = r2fix::DiscImage::open(disc);
     const auto& info = image.info();
+    startup.log("DISC: filename_source=" + info.filename_source +
+                " output_case=lowercase merged_directory_aliases=" +
+                std::to_string(info.merged_directory_aliases));
     startup.log("DISC: format=" + info.format + " volume=" + info.volume_id +
                 " files=" + std::to_string(info.files.size()) +
                 " declared_bytes=" + std::to_string(info.total_bytes) +
@@ -43,7 +46,7 @@ static int run(const std::string& command, const fs::path& disc,
     for (const auto& file : info.files) {
         if (file.skipped_by_cd_recipe)
             startup.log("DISC-OMIT: legacy Rayman 2 CD installer path=" +
-                        file.relative_path.generic_string() +
+                        file.relative_path.generic_u8string() +
                         " declared_bytes=" + std::to_string(file.size_bytes) +
                         " (not copied; protection status unverified)");
         else if (file.invalid_extent)
@@ -55,6 +58,9 @@ static int run(const std::string& command, const fs::path& disc,
     }
     std::cout << "Disc image: " << disc.string() << '\n'
               << "Format: " << info.format << '\n'
+              << "Filename source: " << info.filename_source << '\n'
+              << "Extraction filename case: lowercase\n"
+              << "Merged case-variant directories: " << info.merged_directory_aliases << '\n'
               << "ISO volume: " << info.volume_id << '\n'
               << "Files: " << info.files.size() << '\n'
               << "Declared file bytes: " << info.total_bytes << '\n'
@@ -79,7 +85,7 @@ static int run(const std::string& command, const fs::path& disc,
                   << "Not a playable game installation: no edition validated.\n";
     } else {
         for (const auto& file : info.files)
-            std::cout << file.relative_path.string() << " (" << file.size_bytes
+            std::cout << file.relative_path.u8string() << " (" << file.size_bytes
                       << " bytes)"
                       << (file.skipped_by_cd_recipe ? " [SKIP: historical CD recipe]" :
                           file.invalid_extent ? " [SUSPECT: invalid extent, extraction blocked]" : "")
