@@ -78,6 +78,16 @@ int main() {
         check(parsed.info().files.size() == 1, "ISO file count");
         check(parsed.info().volume_id == "RAYMAN2_TEST", "ISO volume");
         check(parsed.info().total_bytes == 6, "file size");
+
+        // A valid ISO 9660 disc may contain a boot record before its PVD.
+        auto boot_iso = make_iso();
+        std::copy(boot_iso.begin() + 16 * 2048, boot_iso.begin() + 17 * 2048,
+                  boot_iso.begin() + 17 * 2048);
+        boot_iso[16 * 2048] = 0;  // ISO boot record descriptor
+        write_file(root / "boot.iso", boot_iso);
+        check(r2fix::DiscImage::open(root / "boot.iso").info().files.size() == 1,
+              "PVD after boot descriptor");
+
         const auto target = root / "Rayman2Fix" / "DiscContent";
         parsed.extract(target);
         std::ifstream content(target / "DATA.TXT", std::ios::binary);
