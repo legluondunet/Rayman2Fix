@@ -8,6 +8,12 @@
 #include <stdexcept>
 #include <string>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 namespace fs = std::filesystem;
 static void check(bool value, const char* message) {
     if (!value) throw std::runtime_error(message);
