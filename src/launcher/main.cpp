@@ -35,7 +35,16 @@ static int run(const std::string& command, const fs::path& disc,
                 " distinct_extent_bytes=" + std::to_string(info.distinct_extent_bytes) +
                 " shared_extent_references=" + std::to_string(info.shared_extent_references) +
                 " image_bytes=" + std::to_string(info.image_bytes) +
-                " volume_bytes=" + std::to_string(info.volume_bytes));
+                " volume_bytes=" + std::to_string(info.volume_bytes) +
+                " planned_extract_bytes=" + std::to_string(info.extract_bytes) +
+                " lutris_cd_ignored_files=" + std::to_string(info.skipped_files) +
+                " lutris_cd_ignored_bytes=" + std::to_string(info.skipped_bytes));
+    for (const auto& file : info.files)
+        if (file.skipped_by_cd_recipe)
+            startup.log("DISC-OMIT: legacy Rayman 2 CD installer path=" +
+                        file.relative_path.generic_string() +
+                        " declared_bytes=" + std::to_string(file.size_bytes) +
+                        " (not copied; protection status unverified)");
     std::cout << "Disc image: " << disc.string() << '\n'
               << "Format: " << info.format << '\n'
               << "ISO volume: " << info.volume_id << '\n'
@@ -45,15 +54,24 @@ static int run(const std::string& command, const fs::path& disc,
               << "Shared extent references: " << info.shared_extent_references << '\n'
               << "ISO volume bytes: " << info.volume_bytes << '\n'
               << "Physical image bytes: " << info.image_bytes << '\n'
+              << "Selected extract bytes: " << info.extract_bytes << '\n'
+              << "Known CD recipe exclusions: " << info.skipped_files << " files ("
+              << info.skipped_bytes << " declared bytes)\n"
               << "Edition: UNKNOWN (no trusted executable/hash profile yet)\n";
     if (command == "--extract") {
         image.extract(destination);
-        startup.log("EXTRACT: completed, verified edition=none (not a playable install)");
+        startup.log("EXTRACT: completed, files_copied=" +
+                    std::to_string(info.files.size() - info.skipped_files) +
+                    " files_omitted=" + std::to_string(info.skipped_files) +
+                    " expected_output_bytes=" + std::to_string(info.extract_bytes) +
+                    " verified_edition=none (not a playable install)");
         std::cout << "Extracted to: " << destination.string() << '\n'
                   << "Not a playable game installation: no edition validated.\n";
     } else {
         for (const auto& file : info.files)
-            std::cout << file.relative_path.string() << " (" << file.size_bytes << " bytes)\n";
+            std::cout << file.relative_path.string() << " (" << file.size_bytes
+                      << " bytes)" << (file.skipped_by_cd_recipe ? " [SKIP: historical CD recipe]" : "")
+                      << '\n';
     }
     return 0;
 }
