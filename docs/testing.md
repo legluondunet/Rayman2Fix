@@ -26,6 +26,14 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - Modify/remove one installed game file (including a same-size modification):
   SHA-256 verification and default launch must report the mismatch and
   leave the user's files untouched.
+- Fresh RAYMAN2 installs must omit exactly the three root-level files
+  `00000001.tmp`, `0000040c.016`, `0000040c.256` and omit their
+  SHA-256 receipt entries. Same-named files under `data/` are preserved.
+- Existing installs recorded by older builds must migrate on no-argument
+  launch without needing the original CD: remove the three obsolete files
+  and receipt entries, tolerate an already-deleted obsolete file, preserve
+  the game's other SHA-256 hashes and user INI, then verify cleanly.
+
 - With two images, no images, a malformed CD, or a foreign folder already
   occupying `Rayman2Fix/`, the launcher must fail without silently
   deleting any data.
