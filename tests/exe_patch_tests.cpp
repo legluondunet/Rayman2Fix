@@ -1,6 +1,7 @@
 #include "rayman2fix/exe_patch.hpp"
 #include "rayman2fix/sha256.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -59,6 +60,24 @@ static std::vector<unsigned char> fixture(const std::string& source,
     return data;
 }
 
+static std::vector<unsigned char> compressed_fixture(const std::string& source,
+                                                      const std::string& target) {
+    // LZ4 token 0x4f encodes 4 literal bytes "ABCD" followed by a
+    // back-reference to repeat them 15 more times (64 bytes total).
+    // Trailing token 0x00 marks the final zero-literal sequence.
+    std::vector<unsigned char> data{'R','2','F','X','P','0','1',0};
+    append64(data, source.size());
+    append64(data, target.size());
+    digest(data, r2fix::sha256_text(source));
+    digest(data, r2fix::sha256_text(target));
+    data.push_back('C'); append64(data, 0); append32(data, 8);
+    data.push_back('Z'); append32(data, 64); append32(data, 9);
+    data.insert(data.end(), {0x4f, 'A','B','C','D', 4, 0, 45, 0});
+    data.push_back('C'); append64(data, 8); append32(data, 7);
+    data.push_back('E');
+    return data;
+}
+
 int main() {
     const fs::path root = fs::temp_directory_path() /
         ("r2fix-exe-patch-tests-" +
@@ -103,6 +122,34 @@ int main() {
         } catch (const std::exception&) { refused = true; }
         check(refused && !fs::exists(root / "bad.exe"),
               "corrupt patch removes the partial output");
+
+        // LZ4 payloads can compress repeated unmatched bytes without
+        // importing proprietary large literal data into the launcher.
+        const std::string compressed_target =
+            "ABCDEFGH" + std::string("ABCDABCDABCDABCD") +
+            "ABCDABCDABCDABCD" + "ABCDABCDABCDABCD" +
+            "ABCDABCDABCDABCD" + "ENDINGS";
+        check(compressed_target.size() == 79, "LZ4 test fixture length");
+        auto zipped = compressed_fixture(source, compressed_target);
+        const fs::path zipped_output = root / "lz4-patched.exe";
+        r2fix::apply_exe_patch(original, zipped_output, zipped);
+        check(read(zipped_output) == compressed_target,
+              "LZ4 patch reconstructs byte-identical game target");
+
+        // A corrupt offset in the LZ4 block is not accepted.
+        auto corrupt_lz4 = zipped;
+        // Search instead of hardcoding the encoded patch's header offset.
+        const std::string signature("\x4f" "ABCD" "\x04\x00\x2d\x00", 9);
+        auto it = std::search(corrupt_lz4.begin(), corrupt_lz4.end(),
+                              signature.begin(), signature.end());
+        check(it != corrupt_lz4.end(), "LZ4 sequence in patch found");
+        *(it + 5) = 0x00;
+        refused = false;
+        try {
+            r2fix::apply_exe_patch(original, root / "lz4-bad.exe", corrupt_lz4);
+        } catch (const std::exception&) { refused = true; }
+        check(refused && !fs::exists(root / "lz4-bad.exe"),
+              "bad LZ4 reference is refused without leaving patched data");
 
         std::error_code ignored;
         fs::remove_all(root, ignored);
