@@ -1,4 +1,5 @@
 #include "rayman2fix/disc.hpp"
+#include "rayman2fix/cd_exclusions.hpp"
 
 #include <algorithm>
 #include <array>
@@ -193,6 +194,10 @@ bool ignored_by_lutris_rayman2_cd(const std::string& volume_id,
                                   const fs::path& relative) {
     if (upper(volume_id) != "RAYMAN2") return false;
     const std::string path = upper(relative.generic_u8string());
+    // Explicitly exclude the three root-level legacy CD protection helpers.
+    // Do not broaden the rule to other numeric files or extensions.
+    if (excluded_cd_protection_auxiliary(relative))
+        return true;
     constexpr const char* ignored[] = {
         "DATA/WORLD/LEVELS/GRAPHICS2.DAT",
         "DATA/WORLD/LEVELS/MAP1.DAT",
