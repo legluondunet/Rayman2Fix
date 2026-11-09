@@ -37,6 +37,15 @@ bool safe_relative(const fs::path& relative) {
 bool exists_file(const fs::path& file) {
     return fs::is_regular_file(file) && !fs::is_symlink(file);
 }
+bool runtime_backup_name(const std::string& filename) {
+    const std::string prefix = "RAYMAN2FIX.DLL.BACKUP.";
+    if (filename.rfind(prefix, 0) != 0 || filename.size() == prefix.size())
+        return false;
+    return std::all_of(filename.begin() + static_cast<std::ptrdiff_t>(prefix.size()),
+                       filename.end(), [](unsigned char c) {
+                           return c >= '0' && c <= '9';
+                       });
+}
 bool has_game_executable(const fs::path& root) {
     return exists_file(root / "rayman2.exe");
 }
@@ -101,7 +110,8 @@ void check_bootstrap_workspace(const fs::path& game_dir) {
             throw std::runtime_error("unrecognized content in existing Rayman2Fix directory; "
                                      "preserving user data (no overwrite)");
         const auto name = upper(item.path().filename().u8string());
-        if (name != "RAYMAN2FIX.INI" && name != "RAYMAN2FIX.DLL")
+        if (name != "RAYMAN2FIX.INI" && name != "RAYMAN2FIX.DLL" &&
+            !runtime_backup_name(name))
             throw std::runtime_error("existing Rayman2Fix directory contains user files; "
                                      "automatic install refused to avoid overwriting them");
     }
@@ -169,14 +179,16 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
 }
 
 void copy_bootstrap_files(const fs::path& original, const fs::path& staged) {
-    for (const char* name : {"Rayman2Fix.ini", "Rayman2Fix.dll"}) {
-        const auto src = original / name;
-        if (!exists_file(src)) continue;
-        const auto dest = staged / name;
+    for (const auto& entry : fs::directory_iterator(original)) {
+        const auto name = upper(entry.path().filename().u8string());
+        if (name != "RAYMAN2FIX.INI" && name != "RAYMAN2FIX.DLL" &&
+            !runtime_backup_name(name))
+            continue;
+        const auto dest = staged / entry.path().filename();
         if (fs::exists(dest))
-            throw std::runtime_error(std::string("CD content collides with runtime file: ") +
-                                     name);
-        fs::copy_file(src, dest);
+            throw std::runtime_error("CD content collides with runtime file: " +
+                                     dest.filename().u8string());
+        fs::copy_file(entry.path(), dest);
     }
 }
 
@@ -195,7 +207,8 @@ void initialize_audio(const fs::path& staged) {
 // Staged installation is copied and checked before the existing bootstrap
 // workspace is moved aside. If commit fails, restore the original directory.
 void publish_installation(const fs::path& game_dir, const fs::path& staging) {
-    const fs::path backup(game_dir.u8string() + ".bootstrap-backup");
+    fs::path backup = game_dir;
+    backup += ".bootstrap-backup";
     if (fs::exists(backup))
         throw std::runtime_error("previous bootstrap backup exists; refusing overwrite");
     const bool had_workspace = fs::exists(game_dir);
@@ -299,7 +312,9 @@ int run_automatic(Startup& startup) {
         // gameplay assets in DiscContent/. We stage as a sibling and then
         // atomically publish without overwriting arbitrary user data.
         const fs::path staging = startup.root() / "Rayman2Fix.installing";
-        if (fs::exists(staging) || fs::exists(fs::path(staging.u8string() + ".staging")))
+        fs::path nested_staging = staging;
+        nested_staging += ".staging";
+        if (fs::exists(staging) || fs::exists(nested_staging))
             throw std::runtime_error("previous installation staging exists; no overwrite");
         try {
             image.extract(staging);
