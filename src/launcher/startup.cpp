@@ -213,7 +213,10 @@ void Startup::initialize() {
         std::ofstream ini(ini_path_, std::ios::binary | std::ios::out);
         if (!ini) throw std::runtime_error("cannot create Rayman2Fix.ini");
         ini << "[Debug]\n"
-               "Log=1\n";
+               "Log=1\n"
+               "\n"
+               "[Graphics]\n"
+               "Resolution=Desktop\n";
         if (!ini) throw std::runtime_error("failed writing Rayman2Fix.ini");
     }
 
@@ -282,6 +285,9 @@ void Startup::initialize() {
     log("LAYOUT: launcher=Rayman2Fix.exe install=Rayman2Fix/ config=Rayman2Fix/Rayman2Fix.ini log=Rayman2Fix.log");
     log("CONFIG: Debug.Log=" +
         std::string(debug == "1" ? "1" : "invalid or missing (default 1)"));
+    const auto display = option("Graphics", "Resolution");
+    log("CONFIG: Graphics.Resolution=" +
+        (display.empty() ? "Desktop (default)" : display));
 
     log("RUNTIME: Rayman2Fix.dll=" +
         std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));
