@@ -5,10 +5,12 @@
 Rayman2Fix is being developed **from scratch**. It is **not a fork** of
 Ray2Fix and does not contain code copied from that project.
 
-> **Development status: CD installation bootstrap.** The launcher can
-> automatically prepare the CD's game files, but no retail executable is
-> authenticated as playable and the game **cannot yet be launched** through
-> Rayman2Fix. This is not a no-CD patch or complete runtime.
+> **Development status: first real game-launch experiment.** The installer
+> validates original CD assets and can launch the single known unprotected
+> Rayman 2 x86 executable, **only after** validating the original backup,
+> the patch receipt, and GameFrame's Glide DLL. Actual playability on
+> Windows/Wine/Proton is still being tested; no broad game compatibility
+> is claimed.
 
 ## Automatic launcher workflow
 
@@ -36,10 +38,13 @@ has been removed.
   `Rayman2Fix.dll.bak`; the older backup is replaced, never accumulated
   as numbered history.
 
-**Important:** a SHA-256 receipt generated from the same CD verifies subsequent
-file integrity, but does not authenticate the original retail edition. Starting the game is still **blocked** until the original retail EXE and
-no-CD compatibility are validated. **GameFrame Glide2x is now bundled**;
-SDL3/gamepad integration is deliberately deferred to a later phase.
+**Important:** a SHA-256 receipt generated from the same CD verifies
+subsequent file integrity, but does not authenticate the retail edition.
+**Game launch is now attempted only** for the approved protected/unprotected
+executable SHA-256 pair, with `rayman2.exe.bak` and patch receipt verified.
+An unsupported EXE or unverified GameFrame library still blocks launch.
+No-CD/gameplay compatibility is not yet established by tests.
+SDL3/gamepad integration is deferred to a later phase.
 
 The planned native `Rayman2Fix.dll` will handle validated per-executable
 memory fixes, display and FOV/HUD behavior, window focus and graphics settings.
@@ -187,7 +192,12 @@ but is not a trusted retail-edition allowlist/profile check.
 
 GameFrame integration means the correct open-source graphics DLL is installed
 and SHA-256-verified; it does **not** prove that Rayman 2 can render with it.
-The retail executable/no-CD launch gate remains deliberately active.
+The launcher now performs an initial game-startup experiment with strict
+original/unprotected EXE SHA-256 and size checks. It starts `rayman2.exe`
+through Win32 `CreateProcessW` with `Rayman2Fix/` as the working directory,
+waits for the process to exit, and logs the full exit code and duration in
+the existing single `Rayman2Fix.log`. Invalid editions are never executed.
+Testing is required on both Windows 11 and Wine/Proton before claiming support.
 
 ## Original executable and patch backup
 
@@ -233,9 +243,10 @@ The underlying game executables are **never distributed or committed**.
 present in the public CI build. When the owner adds the matching local
 delta (or builds with it embedded), Rayman2Fix creates
 `rayman2.exe.bak` only after reconstructing and SHA-256-checking
-the unprotected executable. The game launcher still remains blocked
-pending actual compatibility and Glide rendering tests; SDL3 is
-out of scope for this stage.
+the unprotected executable. Once the approved EXE and pinned GameFrame
+are verified, the launcher **now attempts to start Rayman 2**. Actual
+gameplay, CD-independent runtime behavior and Glide rendering remain to
+be validated; SDL3 is out of scope for this stage.
 
 ## Build
 
