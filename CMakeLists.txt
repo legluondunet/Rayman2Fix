@@ -13,8 +13,14 @@ else()
   target_compile_options(rayman2_disc PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_executable(Rayman2Fix src/launcher/main.cpp)
+add_executable(Rayman2Fix
+  src/launcher/main.cpp
+  src/launcher/startup.cpp
+  src/launcher/system_inventory.cpp)
 target_link_libraries(Rayman2Fix PRIVATE rayman2_disc)
+if(WIN32)
+  target_link_libraries(Rayman2Fix PRIVATE dxguid)
+endif()
 target_compile_definitions(Rayman2Fix PRIVATE RAYMAN2FIX_VERSION="${PROJECT_VERSION}")
 
 # Rayman 2 itself is 32-bit. This DLL is intentionally only a benign,
