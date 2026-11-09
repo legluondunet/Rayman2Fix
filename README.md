@@ -69,10 +69,10 @@ track**. ISO 9660 boot descriptors are handled. Audio tracks are not extracted.
 volume descriptor** and uses its real UCS-2 long filenames instead of the
 8.3 names in the ISO 9660 primary tree. All extracted files **and directory
 components are lowercased**, including accented Unicode letters, and are
-marked writable (no Windows read-only attribute). Case-variant directories,
-such as `DLL` and `Dll`, share a single lowercase `dll/` output directory.
-Conflicting duplicate files at the same lowercase destination are refused
-rather than silently overwritten.
+marked writable (no Windows read-only attribute). The original CD has a single DLL directory, extracted as `dll/`.
+The historical Lutris `DLL`/`Dll` merge belonged to the Ray2Fix/dgVoodoo2
+installation and is **not required** here. Unexpected collisions after
+lowercasing (files or directories) are refused rather than silently merged.
 
 If the CD has **no Joliet tree**, the inspector clearly reports that it
 only has primary ISO 9660 names and that original long names may be
