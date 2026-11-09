@@ -22,7 +22,7 @@ int main() {
     if (!hwnd) return 23;
     DWORD ticks = GetTickCount();
     MSG msg{};
-    while (GetTickCount() - ticks < 800) {
+    while (GetTickCount() - ticks < 3000) {
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
