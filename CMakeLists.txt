@@ -18,6 +18,10 @@ add_executable(Rayman2Fix
   src/launcher/startup.cpp
   src/launcher/system_inventory.cpp)
 target_link_libraries(Rayman2Fix PRIVATE rayman2_disc)
+if(NOT WIN32)
+  # Linux host-test binary must not collide with the Rayman2Fix/ install directory.
+  set_target_properties(Rayman2Fix PROPERTIES OUTPUT_NAME rayman2fix_cli)
+endif()
 if(WIN32)
   target_link_libraries(Rayman2Fix PRIVATE dxguid)
 endif()
