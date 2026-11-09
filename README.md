@@ -101,12 +101,20 @@ Log=1
 
 [Graphics]
 Resolution=Desktop
+; FPSLimit=0 disables the cap; accepted range: 15..240
+FPSLimit=60
 ```
 
 `Resolution=Desktop` automatically uses the primary desktop resolution on
 Windows/Wine. You can alternatively select an explicit resolution such as
 `Resolution=1280x720` or `Resolution=1920x1080`.
 The format is validated and invalid values are refused, not silently ignored.
+`FPSLimit=60` caps the **game's rendered frame rate** by pacing its
+`grBufferSwap` calls; set `FPSLimit=30`, `120`, or another rate
+between 15 and 240 if required. `FPSLimit=0` disables the cap.
+These are maximum frame rates, not guaranteed measured FPS: actual performance
+may be lower. Very high limits may affect classic-game timing and require
+in-game testing; 60 is the default setting to validate on real hardware.
 `Log=0` suppresses diagnostics and removes stale launcher logs.
 
 Rayman 2 still needs its legacy `ubi.ini` in the game directory, but **the
@@ -277,8 +285,13 @@ ctest --test-dir build -C Release --output-on-failure
 ```
 
 CI checks out a fixed GameFrame upstream revision
-(`f195a074a63cc150673c38becdec696163b0b3d1`), compiles the 32-bit
-`glide2x.dll` in Rust/MSVC and checks its 156 canonical Glide exports.
+(`f195a074a63cc150673c38becdec696163b0b3d1`). Before compiling the
+32-bit Rust/MSVC `glide2x.dll`, Rayman2Fix applies a small, reproducible
+`tools/gameframe/apply_fps_limit.py` adaptation **only in the temporary CI
+checkout**. It adds a 15..240 FPS cap (or 0 for unlimited) to
+`grBufferSwap` on the game's calling thread using a monotonic clock and
+`sleep`, without adding a second DLL or modifying upstream. The patch fails
+closed if upstream changes. The build audits all 156 canonical Glide exports.
 CMake embeds it in `Rayman2Fix.exe` together with its Apache license,
 and the executable verifies the SHA-256 of the installed DLL on every start.
 If a different `glide2x.dll` exists, the launcher saves it as
