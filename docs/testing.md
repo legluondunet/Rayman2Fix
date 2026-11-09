@@ -28,13 +28,14 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - Modify/remove one installed game file (including a same-size modification):
   SHA-256 verification and default launch must report the mismatch and
   leave the user's files untouched.
-- Fresh RAYMAN2 installs must omit exactly the three root-level files
-  `00000001.tmp`, `0000040c.016`, `0000040c.256` and omit their
-  SHA-256 receipt entries. Same-named files under `data/` are preserved.
-- Existing installs recorded by older builds must migrate on no-argument
-  launch without needing the original CD: remove the three obsolete files
-  and receipt entries, tolerate an already-deleted obsolete file, preserve
-  the game's other SHA-256 hashes and user INI, then verify cleanly.
+- Fresh RAYMAN2 installs must omit exactly six root-only entries:
+  `00000001.tmp`, `0000040c.016`, `0000040c.256`, `secdrv.sys`,
+  `rayman2.icd`, `dxplayerx.dll`, including their SHA-256 receipt
+  entries. Same-named files under `data/` are preserved.
+- Existing installs recorded by older builds must migrate without the
+  original CD: remove those six files and receipt entries, tolerate an
+  already-deleted obsolete file, preserve remaining SHA-256 hashes and
+  the user INI, then verify normally.
 
 - With two images, no images, a malformed CD, or a foreign folder already
   occupying `Rayman2Fix/`, the launcher must fail without silently
@@ -46,6 +47,12 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
   `Rayman2Fix.dll` and pinned GameFrame `glide2x.dll` SHA-256 match the
   original build outputs. Verify the extracted Apache license is identical
   to the pinned GameFrame source and no DLL/INI/log sidecars are shipped.
+- Replace the installed `Rayman2Fix.dll` twice in succession, with
+  a preexisting `Rayman2Fix.dll.bak` and old
+  `Rayman2Fix.dll.backup.N` files: after each replacement, retain
+  **one** `Rayman2Fix.dll.bak` with the immediately previous runtime.
+  Delete earlier backup generations; a subsequent unchanged launch
+  must not change the backup.
 - Replace the installed `glide2x.dll` with an unknown file, rerun the
   launcher, verify the old file is preserved as `glide2x.dll.bak` and
   the pinned DLL is restored. A third launch must be idempotent.
