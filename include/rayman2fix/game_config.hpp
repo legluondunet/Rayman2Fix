@@ -20,4 +20,8 @@ void synchronize_rayman2_ubi_ini(const std::filesystem::path& game_dir,
 std::pair<std::uint32_t, std::uint32_t> configured_output_resolution(
     const std::filesystem::path& rayman2fix_ini);
 
+// 60 FPS by default; 0 means unlimited, otherwise accept 15..240 FPS.
+std::uint32_t configured_fps_limit(
+    const std::filesystem::path& rayman2fix_ini);
+
 } // namespace r2fix
