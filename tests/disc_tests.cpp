@@ -86,6 +86,69 @@ static std::vector<std::uint8_t> make_rayman2_with_dummy(bool recognized_volume 
     return base;
 }
 
+// Joliet supplementary volume descriptors store UCS-2 big-endian paths.
+// The primary tree deliberately has only an unrelated 8.3 name.
+static std::string joliet_ucs2(const std::u16string& name) {
+    std::string result;
+    for (char16_t cp : name) {
+        result.push_back(static_cast<char>(cp >> 8));
+        result.push_back(static_cast<char>(cp & 255));
+    }
+    return result;
+}
+static std::vector<std::uint8_t> make_joliet_iso() {
+    auto iso = make_iso("OLDNAME.TXT;1");
+    iso.resize(32 * 2048);
+    put32(iso.data() + 16 * 2048 + 80, 32);
+    auto* svd = iso.data() + 17 * 2048;
+    svd[0] = 2;
+    svd[1] = 'C'; svd[2] = 'D'; svd[3] = '0'; svd[4] = '0';
+    svd[5] = '1'; svd[6] = 1;
+    svd[88] = '%'; svd[89] = '/'; svd[90] = 'E';
+    put32(svd + 80, 32);
+    record(svd + 156, 24, 2048, 2, std::string(1, '\0'));
+    auto* terminator = iso.data() + 18 * 2048;
+    terminator[0] = 255; terminator[1] = 'C'; terminator[2] = 'D';
+    terminator[3] = '0'; terminator[4] = '0'; terminator[5] = '1';
+    terminator[6] = 1;
+
+    auto* dir = iso.data() + 24 * 2048;
+    std::size_t pos = record(dir, 24, 2048, 2, std::string(1, '\0'));
+    pos += record(dir + pos, 24, 2048, 2, std::string(1, '\1'));
+    record(dir + pos, 26, 2048, 2,
+           joliet_ucs2(u"R\u00C9PERTOIRE LONG"));
+    auto* sub = iso.data() + 26 * 2048;
+    pos = record(sub, 26, 2048, 2, std::string(1, '\0'));
+    pos += record(sub + pos, 24, 2048, 2, std::string(1, '\1'));
+    record(sub + pos, 27, 6, 0,
+           joliet_ucs2(u"TR\u00C8S-LONG-NOM.DAT;1"));
+    std::copy_n("HELLO\n", 6, iso.data() + 27 * 2048);
+    return iso;
+}
+static std::vector<std::uint8_t> make_joliet_merged_dll_iso(bool collision = false) {
+    auto iso = make_joliet_iso();
+    iso.resize(34 * 2048);
+    put32(iso.data() + 16 * 2048 + 80, 34);
+    put32(iso.data() + 17 * 2048 + 80, 34);
+    auto* root = iso.data() + 24 * 2048;
+    std::fill(root, root + 2048, 0);
+    std::size_t pos = record(root, 24, 2048, 2, std::string(1, '\0'));
+    pos += record(root + pos, 24, 2048, 2, std::string(1, '\1'));
+    pos += record(root + pos, 28, 2048, 2, joliet_ucs2(u"DLL"));
+    record(root + pos, 29, 2048, 2, joliet_ucs2(u"Dll"));
+    for (int i = 0; i < 2; ++i) {
+        const int sector = 28 + i;
+        auto* dir = iso.data() + sector * 2048;
+        std::size_t p = record(dir, sector, 2048, 2, std::string(1, '\0'));
+        p += record(dir + p, 24, 2048, 2, std::string(1, '\1'));
+        record(dir + p, 30 + i, 6, 0,
+               joliet_ucs2(collision ? (i == 0 ? u"Same.DLL;1" : u"SAME.dll;1")
+                                    : (i == 0 ? u"First.DLL;1" : u"SECOND.dll;1")));
+        std::copy_n("HELLO\n", 6, iso.data() + (30 + i) * 2048);
+    }
+    return iso;
+}
+
 static void write_file(const fs::path& path, const std::vector<std::uint8_t>& data) {
     std::ofstream out(path, std::ios::binary);
     check(static_cast<bool>(out), "create test file");
@@ -117,6 +180,45 @@ int main() {
         check(parsed.info().distinct_extent_bytes == 6, "unique file extents");
         check(parsed.info().filename_source.find("primary") != std::string::npos,
               "short-name fallback is explicitly identified");
+
+        // A Joliet tree must supersede the DOS 8.3 tree. Names are written
+        // in lowercase, including Unicode accents and nested directory names.
+        const auto unicode_iso = make_joliet_iso();
+        write_file(root / "joliet.iso", unicode_iso);
+        const auto joliet = r2fix::DiscImage::open(root / "joliet.iso");
+        check(joliet.info().filename_source.find("Joliet") != std::string::npos,
+              "Joliet long names selected over primary ISO 8.3");
+        check(joliet.info().files.size() == 1, "one Joliet long-name file");
+        const auto unicode_relative = fs::u8path(u8"r\u00E9pertoire long") /
+                                      fs::u8path(u8"tr\u00E8s-long-nom.dat");
+        check(joliet.info().files[0].relative_path == unicode_relative,
+              "accented directory and long file are lowercase");
+        joliet.extract(root / "joliet-extracted");
+        const auto actual_file = root / "joliet-extracted" / unicode_relative;
+        check(fs::exists(actual_file), "Joliet long file extracted");
+        check(!fs::exists(root / "joliet-extracted" / "oldname.txt"),
+              "short primary ISO 8.3 name is never extracted when Joliet exists");
+        check((fs::status(actual_file).permissions() & fs::perms::owner_write)
+                != fs::perms::none,
+              "extracted file is writable");
+        check((fs::status(actual_file.parent_path()).permissions() & fs::perms::owner_write)
+                != fs::perms::none,
+              "extracted directory is writable");
+
+        const auto merged_iso = make_joliet_merged_dll_iso();
+        write_file(root / "joliet-merge.iso", merged_iso);
+        const auto merged = r2fix::DiscImage::open(root / "joliet-merge.iso");
+        check(merged.info().merged_directory_aliases == 1,
+              "DLL and Dll directories are merged into lowercase dll");
+        check(merged.info().files.size() == 2, "both case-variant folder contents retained");
+        merged.extract(root / "joliet-merge-extracted");
+        check(fs::exists(root / "joliet-merge-extracted" / "dll" / "first.dll"),
+              "first library retained in common dll directory");
+        check(fs::exists(root / "joliet-merge-extracted" / "dll" / "second.dll"),
+              "second library retained in common dll directory");
+        write_file(root / "joliet-conflict.iso", make_joliet_merged_dll_iso(true));
+        check(fails(root / "joliet-conflict.iso"),
+              "two different file extents must not overwrite one lowercase output path");
 
         // A valid ISO may reuse the same physical extent for different filenames.
         // In that case sum of declared file lengths can exceed the image size.
