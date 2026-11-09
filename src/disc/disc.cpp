@@ -248,7 +248,9 @@ DiscImage DiscImage::open(const fs::path& source) {
     const auto pvd = image.read_user(16, 0, 2048);
     if (pvd[0] != 1 || std::string(reinterpret_cast<const char*>(pvd.data() + 1), 5) != "CD001" || pvd[6] != 1)
         fail("ISO 9660 primary volume descriptor not found at sector 16");
-    image.info_.volume_id = trim(std::string(reinterpret_cast<const char*>(pvd.data() + 40), 32));
+    std::string volume(reinterpret_cast<const char*>(pvd.data() + 40), 32);
+    volume.erase(std::find(volume.begin(), volume.end(), '\0'), volume.end());
+    image.info_.volume_id = trim(volume);
     const auto* root = pvd.data() + 156;
     if (root[0] < 34 || !(root[25] & 0x02))
         fail("invalid ISO 9660 root directory");
