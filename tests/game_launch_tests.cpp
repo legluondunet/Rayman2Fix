@@ -78,11 +78,19 @@ int main(int argc, char** argv) {
               fullscreen.presentation.borderless_applied &&
               fullscreen.presentation.changes > 0,
               "window supervisor found and applied borderless fullscreen");
-        check(fullscreen.fov_hook.attempted &&
+        if (!(fullscreen.fov_hook.attempted &&
               fullscreen.fov_hook.dll_loaded &&
               !fullscreen.fov_hook.active &&
-              fullscreen.fov_hook.init_status == 3,
-              "remote Hor+ runtime loads but refuses unknown executable signature");
+              fullscreen.fov_hook.init_status == 3)) {
+            std::cerr << "FOV test diagnostics: attempted=" << fullscreen.fov_hook.attempted
+                      << " loaded=" << fullscreen.fov_hook.dll_loaded
+                      << " active=" << fullscreen.fov_hook.active
+                      << " init_status=" << fullscreen.fov_hook.init_status
+                      << " win32_error=" << fullscreen.fov_hook.win32_error
+                      << "\\n";
+            throw std::runtime_error(
+                "remote Hor+ runtime loads but refuses unknown executable signature");
+        }
 
         std::wifstream window(root / "child-window.txt");
         std::wstring inherited_size;
