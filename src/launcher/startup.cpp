@@ -1,4 +1,5 @@
 #include "rayman2fix/startup.hpp"
+#include "rayman2fix/gameframe.hpp"
 
 #include <chrono>
 #include <algorithm>
@@ -127,6 +128,7 @@ void Startup::initialize() {
     fs::create_directories(game_dir_);
 #ifdef _WIN32
     ensure_embedded_runtime(game_dir_);
+    ensure_gameframe_glide(game_dir_);
 #endif
 
     // Existing settings belong to the user. No silent regeneration, and no
@@ -207,8 +209,13 @@ void Startup::initialize() {
 
     log("RUNTIME: Rayman2Fix.dll=" +
         std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));
-    log("RENDERER: GameFrame (glide2x.dll)=not integrated");
-    log("INPUT: SDL3.dll=not integrated; controller input is not active");
+    if (gameframe_glide_ready(game_dir_))
+        log("RENDERER: GameFrame glide2x.dll=verified sha256=" +
+            gameframe_glide_expected_sha256() +
+            " upstream=f195a074a63cc150673c38becdec696163b0b3d1");
+    else
+        log("RENDERER: GameFrame glide2x.dll=not bundled in this developer build");
+    log("INPUT: SDL3 deferred to second phase; controller support not yet active");
     log("INSTALL: no verified CD edition profile, no playable installation");
 }
 
