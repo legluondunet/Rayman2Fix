@@ -6,6 +6,7 @@
 #include <fstream>
 #include <limits>
 #include <set>
+#include <utility>
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
@@ -24,6 +25,18 @@ std::uint32_t le32(const unsigned char* p) {
            (static_cast<std::uint32_t>(p[1]) << 8) |
            (static_cast<std::uint32_t>(p[2]) << 16) |
            (static_cast<std::uint32_t>(p[3]) << 24);
+}
+
+// The ISO 9660 on-disc 733 number stores both little- and big-endian copies.
+// Comparing them detects malformed records before trusting their extents.
+std::uint32_t iso733(const unsigned char* p) {
+    const auto little = le32(p);
+    const auto big = (static_cast<std::uint32_t>(p[4]) << 24) |
+                     (static_cast<std::uint32_t>(p[5]) << 16) |
+                     (static_cast<std::uint32_t>(p[6]) << 8) |
+                      static_cast<std::uint32_t>(p[7]);
+    if (little != big) fail("ISO 9660 extent/size endian copies disagree");
+    return little;
 }
 
 std::string upper(std::string s) {
@@ -151,6 +164,19 @@ TrackSpec parse_cue(const fs::path& cue) {
 
 }  // namespace
 
+void DiscImage::validate_extent(std::uint32_t extent, std::uint32_t size) const {
+    const auto end = static_cast<std::uint64_t>(extent) +
+                     (static_cast<std::uint64_t>(size) + 2047) / 2048;
+    const auto volume_sectors = info_.volume_bytes / 2048;
+    const auto physical_sectors = image_bytes_ >= track_start_
+        ? (image_bytes_ - track_start_) / sector_bytes_ : 0;
+    if (end > volume_sectors || end > physical_sectors)
+        fail("file/directory extent outside ISO volume or physical image: LBA=" +
+             std::to_string(extent) + " bytes=" + std::to_string(size) +
+             " volume_sectors=" + std::to_string(volume_sectors) +
+             " image_sectors=" + std::to_string(physical_sectors));
+}
+
 std::vector<unsigned char> DiscImage::read_user(
     std::uint64_t lba, std::uint64_t offset, std::size_t length) const {
     std::vector<unsigned char> out(length);
@@ -186,6 +212,7 @@ void DiscImage::scan_directory(std::uint32_t extent,
         fail("excessive directory depth or directory length");
     if (std::find(ancestors.begin(), ancestors.end(), extent) != ancestors.end())
         fail("recursive ISO directory extent");
+    validate_extent(extent, size);
     ancestors.push_back(extent);
     const auto bytes = read_user(extent, 0, size);
     std::set<std::string> names;
@@ -196,20 +223,23 @@ void DiscImage::scan_directory(std::uint32_t extent,
             pos = ((pos / 2048) + 1) * 2048;
             continue;
         }
-        if (len < 34 || len > bytes.size() - pos)
+        if (len < 34 || len > bytes.size() - pos ||
+            (pos % 2048) + len > 2048)
             fail("invalid ISO directory record length");
         const unsigned char* rec = bytes.data() + pos;
         const auto name_length = static_cast<std::size_t>(rec[32]);
         if (33 + name_length > len) fail("invalid ISO name length");
         const auto flags = rec[25];
         if (flags & 0x80) fail("multi-extent ISO files are not implemented");
+        if (rec[26] || rec[27]) fail("interleaved ISO file extents are unsupported");
         const std::string name = decode_name(rec + 33, name_length);
         pos += len;
         if (name.empty()) continue;  // dot/dot-dot
         if (!names.insert(upper(name)).second)
             fail("case-insensitive filename collision on disc");
-        const auto child_extent = le32(rec + 2);
-        const auto child_size = le32(rec + 10);
+        const auto child_extent = iso733(rec + 2);
+        const auto child_size = iso733(rec + 10);
+        validate_extent(child_extent, child_size);
         const fs::path relative = parent / name;
         if (flags & 0x02) {
             scan_directory(child_extent, child_size, relative, depth + 1, ancestors);
@@ -241,7 +271,10 @@ DiscImage DiscImage::open(const fs::path& source) {
 
     image.data_file_ = track.file;
     image.image_bytes_ = fs::file_size(track.file);
+    image.info_.image_bytes = image.image_bytes_;
     image.track_start_ = track.first_sector * track.sector_bytes;
+    if (image.track_start_ >= image.image_bytes_)
+        fail("data track starts outside the image");
     image.sector_bytes_ = track.sector_bytes;
     image.user_data_offset_ = track.payload_offset;
 
@@ -262,11 +295,22 @@ DiscImage DiscImage::open(const fs::path& source) {
     std::string volume(reinterpret_cast<const char*>(pvd.data() + 40), 32);
     volume.erase(std::find(volume.begin(), volume.end(), '\0'), volume.end());
     image.info_.volume_id = trim(volume);
+    const auto volume_sectors = iso733(pvd.data() + 80);
+    if (volume_sectors < 17)
+        fail("invalid ISO 9660 volume space size");
+    image.info_.volume_bytes = static_cast<std::uint64_t>(volume_sectors) * 2048;
     const auto* root = pvd.data() + 156;
     if (root[0] < 34 || !(root[25] & 0x02))
         fail("invalid ISO 9660 root directory");
     std::vector<std::uint32_t> ancestors;
-    image.scan_directory(le32(root + 2), le32(root + 10), fs::path(), 0, ancestors);
+    image.scan_directory(iso733(root + 2), iso733(root + 10), fs::path(), 0, ancestors);
+
+    std::set<std::pair<std::uint32_t, std::uint32_t>> extents;
+    for (const auto& file : image.info_.files) {
+        if (extents.insert({file.extent_lba, file.size_bytes}).second)
+            image.info_.distinct_extent_bytes += file.size_bytes;
+        else ++image.info_.shared_extent_references;
+    }
     return image;
 }
 
