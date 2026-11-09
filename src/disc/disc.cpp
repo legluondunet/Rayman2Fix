@@ -556,6 +556,26 @@ DiscImage DiscImage::open(const fs::path& source) {
     return image;
 }
 
+namespace {
+
+// CD files can be flagged read-only. We do not carry those attributes into
+// an installation: all output files and directories must be user-writable.
+void make_writable(const fs::path& p) {
+#ifdef _WIN32
+    const DWORD attrs = GetFileAttributesW(p.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES)
+        fail("cannot query extracted file attributes");
+    if ((attrs & FILE_ATTRIBUTE_READONLY) &&
+        !SetFileAttributesW(p.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY))
+        fail("cannot remove Windows read-only attribute");
+#endif
+    std::error_code error;
+    fs::permissions(p, fs::perms::owner_write, fs::perm_options::add, error);
+    if (error) fail("cannot mark extracted file/directory writable: " + error.message());
+}
+
+} // namespace
+
 void DiscImage::extract(const fs::path& destination) const {
     if (destination.empty() || destination == "." || destination == "/")
         fail("unsafe extraction destination");
@@ -573,10 +593,12 @@ void DiscImage::extract(const fs::path& destination) const {
 
     fs::create_directory(staging);
     try {
+        make_writable(staging);
         for (const auto& file : info_.files) {
             if (file.skipped_by_cd_recipe) continue;
             const fs::path out = staging / file.relative_path;
             fs::create_directories(out.parent_path());
+            make_writable(out.parent_path());
             std::ofstream dest(out, std::ios::binary | std::ios::trunc);
             if (!dest) fail("cannot create output: " + out.string());
             std::uint64_t pos = 0;
@@ -591,6 +613,7 @@ void DiscImage::extract(const fs::path& destination) const {
             }
             dest.close();
             if (!dest) fail("error closing extracted file: " + out.string());
+            make_writable(out);
         }
         fs::rename(staging, destination);
     } catch (...) {
