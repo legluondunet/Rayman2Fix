@@ -111,6 +111,29 @@ if(WIN32)
     target_sources(Rayman2Fix PRIVATE
       "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_gameframe.rc")
   endif()
+
+  # An owner-verified delta is optional and must never be checked into the
+  # public repository or bundled in bootstrap CI artifacts. When explicitly
+  # supplied for a local Windows build, it becomes RCDATA #1102 in the
+  # existing *single* Rayman2Fix.exe distribution.
+  set(RAYMAN2FIX_EXE_PATCH "" CACHE FILEPATH "Private SHA256-locked Rayman2 executable .r2patch")
+  if(RAYMAN2FIX_EXE_PATCH)
+    if(NOT EXISTS "${RAYMAN2FIX_EXE_PATCH}")
+      message(FATAL_ERROR "Owner-supplied Rayman2 executable delta not found")
+    endif()
+    file(SIZE "${RAYMAN2FIX_EXE_PATCH}" RAYMAN2FIX_PATCH_SIZE)
+    if(RAYMAN2FIX_PATCH_SIZE GREATER 524288)
+      message(FATAL_ERROR "Owner-supplied executable delta exceeds 512 KiB")
+    endif()
+    file(GENERATE
+      OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_exe_delta.rc"
+      CONTENT "1102 RCDATA \"${RAYMAN2FIX_EXE_PATCH}\"\n")
+    set_source_files_properties(
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_exe_delta.rc"
+      PROPERTIES GENERATED TRUE)
+    target_sources(Rayman2Fix PRIVATE
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_exe_delta.rc")
+  endif()
 endif()
 
 include(CTest)
