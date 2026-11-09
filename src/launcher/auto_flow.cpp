@@ -411,14 +411,14 @@ void patch_executable_if_supported(const fs::path& game_root, Startup& startup) 
         startup.log("EXE-PATCH: installed patch marker present; original preserved as rayman2.exe.bak");
         return;
     }
-    const auto patch = bundled_exe_patch();
+    const auto patch = available_exe_patch(startup.root());
     if (patch.empty()) {
-        startup.log("EXE-PATCH: not bundled; original CD executable unchanged (no .bak yet)");
+        startup.log("EXE-PATCH: no embedded or local delta; original CD executable unchanged (no .bak yet)");
         return;
     }
     const auto header = inspect_exe_patch(patch);
     if (header.patched_sha256 != kApprovedUnprotectedExeSha256) {
-        throw std::runtime_error("bundled executable patch target hash is not approved");
+        throw std::runtime_error("executable patch target SHA256 is not approved");
     }
     // If the CD image/edition is unrecognized, *do not* patch or rename the
     // user's original executable; keep it intact for later investigation.
