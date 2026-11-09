@@ -14,6 +14,14 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - Repeat the extraction: it must refuse to overwrite the prior directory.
 - Truncated / malicious image paths fail without writing outside the staging dir.
 - Check UTF-16 Windows path support on filenames with French accents.
+- When a Joliet supplementary descriptor is present, use its actual long names
+  instead of the ISO9660 primary 8.3 aliases; show the source in `--inspect`.
+- Export every directory and file component in lowercase, including accented
+  characters. Confirm the output is writable and has no Windows read-only bit.
+- Merge case-variant source directories (`DLL/` and `Dll/`) into the single
+  `dll/` target; reject duplicate non-identical files at the same target path.
+- Without Joliet, clearly label the ISO9660 primary-name fallback instead of
+  inventing long file names.
 
 **No playable game support, GameFrame render integration, SDL3 initialization
 or runtime hooks are asserted by these bootstrap tests.**
