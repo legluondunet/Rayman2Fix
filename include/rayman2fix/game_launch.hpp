@@ -2,6 +2,7 @@
 
 #include "rayman2fix/display.hpp"
 #include "rayman2fix/presentation.hpp"
+#include "rayman2fix/runtime_inject.hpp"
 
 #include <filesystem>
 #include <string>
@@ -25,6 +26,7 @@ struct ChildProcessResult {
     unsigned long exit_code = 0;
     unsigned long error_code = 0;
     PresentationResult presentation;
+    FovHookResult fov_hook;
 };
 
 struct ChildDisplayOptions {
@@ -32,6 +34,8 @@ struct ChildDisplayOptions {
     DisplayMetrics monitor;
     std::uint32_t output_width = 0;
     std::uint32_t output_height = 0;
+    bool enable_fov = false;
+    bool log_enabled = true;
 };
 
 // An external PMv2 activation manifest does not change the user's
