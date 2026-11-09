@@ -40,11 +40,11 @@ static std::size_t record(std::uint8_t* p, std::uint32_t extent,
     return length;
 }
 static std::vector<std::uint8_t> test_disc() {
-    std::vector<std::uint8_t> iso(30 * 2048, 0);
+    std::vector<std::uint8_t> iso(33 * 2048, 0);
     auto* pvd = iso.data() + 16 * 2048;
     pvd[0] = 1; pvd[1] = 'C'; pvd[2] = 'D'; pvd[3] = '0';
     pvd[4] = '0'; pvd[5] = '1'; pvd[6] = 1;
-    put32(pvd + 80, 30);
+    put32(pvd + 80, 33);
     const char* name = "RAYMAN2";
     std::copy(name, name + 7, pvd + 40);
     record(pvd + 156, 20, 2048, true, std::string(1, '\0'));
@@ -58,6 +58,9 @@ static std::vector<std::uint8_t> test_disc() {
     p += record(root + p, 26, 4, false, "00000001.TMP;1");
     p += record(root + p, 27, 4, false, "0000040C.016;1");
     p += record(root + p, 28, 4, false, "0000040C.256;1");
+    p += record(root + p, 29, 4, false, "SECDRV.SYS;1");
+    p += record(root + p, 30, 4, false, "RAYMAN2.ICD;1");
+    p += record(root + p, 31, 4, false, "DXPLAYERX.DLL;1");
 
     auto* dll = iso.data() + 21 * 2048;
     p = record(dll, 21, 2048, true, std::string(1, '\0'));
@@ -75,6 +78,9 @@ static std::vector<std::uint8_t> test_disc() {
     std::copy_n("TEMP", 4, iso.data() + 26 * 2048);
     std::copy_n("ICON", 4, iso.data() + 27 * 2048);
     std::copy_n("LOGO", 4, iso.data() + 28 * 2048);
+    std::copy_n("DRV!", 4, iso.data() + 29 * 2048);
+    std::copy_n("ICD!", 4, iso.data() + 30 * 2048);
+    std::copy_n("DXP!", 4, iso.data() + 31 * 2048);
     return iso;
 }
 static void write(const fs::path& p, const std::string& data) {
@@ -131,9 +137,11 @@ int main() {
               "user ini retained across staging commit");
         check(fs::exists(game / ".rayman2fix-cd-files.tsv"),
               "local installation receipt created");
-        // The three root SafeDisc auxiliaries are excluded from both a new
-        // installation and its local SHA256 receipt.
-        for (const auto* filename : {"00000001.tmp", "0000040c.016", "0000040c.256"}) {
+        // All six exact root-only exclusions must be absent from fresh
+        // installation and from the local SHA256 receipt.
+        for (const auto* filename : {"00000001.tmp", "0000040c.016",
+                                     "0000040c.256", "secdrv.sys",
+                                     "rayman2.icd", "dxplayerx.dll"}) {
             check(!fs::exists(game / filename), "obsolete protection file not extracted");
             check(contents(game / ".rayman2fix-cd-files.tsv").find(filename) ==
                       std::string::npos,
@@ -145,11 +153,14 @@ int main() {
               "installed game resources verify from local receipt");
 
         // Simulate an already-installed copy made by an older Rayman2Fix
-        // build: the receipt used to list these three auxiliaries.
-        const std::array<std::pair<const char*, const char*>, 3> legacy = {{
+        // build: the receipt used to list six now-excluded root files.
+        const std::array<std::pair<const char*, const char*>, 6> legacy = {{
             {"00000001.tmp", "TEMP"},
             {"0000040c.016", "ICON"},
-            {"0000040c.256", "LOGO"}
+            {"0000040c.256", "LOGO"},
+            {"secdrv.sys", "DRV!"},
+            {"rayman2.icd", "ICD!"},
+            {"dxplayerx.dll", "DXP!"}
         }};
         {
             std::ofstream receipt(game / ".rayman2fix-cd-files.tsv",
