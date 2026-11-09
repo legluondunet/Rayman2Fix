@@ -16,7 +16,7 @@ Rayman2Fix/
     Rayman2Fix.ini                   generated if missing, user-owned
     dll/snd_cpa.ini                  copied from CD's snd_cpa_mmx.ini
     data/...                         original CD content, lowercase and writable
-    .rayman2fix-cd-files.tsv         locally generated file-size receipt
+    .rayman2fix-cd-files.tsv         local file-size and SHA-256 receipt
 ```
 
 **Important:** the Glide 2 API DLL is **`glide2x.dll`**, not `glid2.dll`.
@@ -44,21 +44,22 @@ once integrated and attributable.
    `Rayman2Fix.dll`, backing up mismatched versions without deleting them.
    Write a single optional log beside the launcher with passive system info.
 3. If `Rayman2Fix/rayman2.exe` exists, check its **local CD receipt**:
-   expected file names and sizes, sound initialization and game executable.
+   expected file names, sizes and SHA-256 hashes, sound initialization and game executable.
    If any file is missing or changed, refuse startup, **never auto-repair or
-   overwrite**. This is not yet a cryptographic retail-edition verification.
+   overwrite**. The SHA-256 baseline comes from the unverified user CD and is not yet
+a cryptographic authentication of a specific trusted retail edition.
 4. If there is no installed game, discover exactly one adjacent `.iso` or
    `.cue` and examine it. Require volume `RAYMAN2`, essential game files
    and no unrecognized suspect entries. Refuse missing or ambiguous images.
 5. Extract only the historically necessary CD files into a sibling staging
    directory, using Joliet long names, lowercase paths and writable output.
    Duplicate `dll/snd_cpa_mmx.ini` as `dll/snd_cpa.ini` and create a
-   size receipt listing all extracted files.
+   SHA-256 receipt listing all extracted files.
 6. Preserve launcher-generated INI/runtime and earlier DLL backups from
    the bootstrap folder. Refuse unexpected existing files; promote the
    prepared installation to `Rayman2Fix/`, with rollback on failure.
    The original CD image and executable are never modified.
-7. Reverify the published files. **Do not start the game yet**: there is no
+7. Reverify the published files by size and SHA-256. **Do not start the game yet**: there is no
    trusted retail executable/hash profile, working no-CD runtime, GameFrame
    Glide 2 or SDL3 integration. Log the exact blocker rather than claiming
    a successful launch. This stage is a safe *installation foundation*.
