@@ -83,5 +83,11 @@ if(BUILD_TESTING)
     src/launcher/auto_flow.cpp
     src/launcher/startup.cpp)
   target_link_libraries(auto_flow_tests PRIVATE rayman2_disc)
+  if(WIN32)
+    # Startup tests need the same embedded DLL resource as the real launcher.
+    target_sources(auto_flow_tests PRIVATE
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc")
+    add_dependencies(auto_flow_tests Rayman2FixRuntime)
+  endif()
   add_test(NAME automatic-cd-install COMMAND auto_flow_tests)
 endif()
