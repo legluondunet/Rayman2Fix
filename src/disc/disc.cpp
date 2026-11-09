@@ -80,6 +80,44 @@ std::string decode_name(const unsigned char* p, std::size_t size) {
     return name;
 }
 
+// Exact removals performed by the user's existing CD Lutris installer:
+// https://lutris.net/games/install/39141/view
+// Their presence in that recipe is evidence that installation did not require
+// copying them, NOT proof that each is a dummy or physically invalid file.
+bool ignored_by_lutris_rayman2_cd(const std::string& volume_id,
+                                  const fs::path& relative) {
+    if (upper(volume_id) != "RAYMAN2") return false;
+    const std::string path = upper(relative.generic_string());
+    constexpr const char* ignored[] = {
+        "DATA/WORLD/LEVELS/GRAPHICS2.DAT",
+        "DATA/WORLD/LEVELS/MAP1.DAT",
+        "DATA/WORLD/LEVELS/ANIMS1.DAT",
+        "DATA/WORLD/LEVELS/MUSIC2.DAT",
+        "DATA/WORLD/LEVELS/MUSIC1.DAT",
+        "DATA/WORLD/LEVELS/SOUNDS0.DAT",
+        "DATA/WORLD/LEVELS/GRAPHICS0.DAT",
+        "DATA/WORLD/LEVELS/SOUNDS1.DAT",
+        "DATA/WORLD/LEVELS/LEVELS1.DAT",
+        "DATA/WORLD/LEVELS/ANIMS0.DAT",
+        "DATA/WORLD/LEVELS/MAP2.DAT",
+        "DATA/WORLD/LEVELS/SOUNDS2.DAT",
+        "DATA/WORLD/LEVELS/TEXTURES2.DAT",
+        "DATA/WORLD/LEVELS/ANIMS2.DAT",
+        "DATA/WORLD/LEVELS/MENU2.DAT",
+        "DATA/WORLD/LEVELS/MENU0.DAT",
+        "DATA/WORLD/LEVELS/MUSIC0.DAT",
+        "DATA/WORLD/LEVELS/TEXTURES0.DAT",
+        "DATA/WORLD/LEVELS/TEXTURES1.DAT",
+        "DATA/WORLD/LEVELS/LEVELS2.DAT",
+        "DATA/WORLD/LEVELS/MAP0.DAT",
+        "DATA/WORLD/LEVELS/MENU1.DAT",
+        "DATA/WORLD/LEVELS/GRAPHICS1.DAT"
+    };
+    for (const char* item : ignored)
+        if (path == item) return true;
+    return false;
+}
+
 struct TrackSpec {
     fs::path file;
     std::uint64_t first_sector = 0;
@@ -239,17 +277,27 @@ void DiscImage::scan_directory(std::uint32_t extent,
             fail("case-insensitive filename collision on disc");
         const auto child_extent = iso733(rec + 2);
         const auto child_size = iso733(rec + 10);
-        validate_extent(child_extent, child_size);
         const fs::path relative = parent / name;
         if (flags & 0x02) {
+            validate_extent(child_extent, child_size); // Never skip malformed directories.
             scan_directory(child_extent, child_size, relative, depth + 1, ancestors);
         } else {
             if (info_.files.size() >= 50000)
                 fail("too many files on disc");
             if (info_.total_bytes > std::numeric_limits<std::uint64_t>::max() - child_size)
                 fail("file total overflow");
-            info_.files.push_back({relative, child_extent, child_size});
+            const bool skipped = ignored_by_lutris_rayman2_cd(info_.volume_id, relative);
+            // Only exact paths from the documented CD install recipe may bypass
+            // the physical extent check. All other files must be readable.
+            if (!skipped) validate_extent(child_extent, child_size);
+            info_.files.push_back({relative, child_extent, child_size, skipped});
             info_.total_bytes += child_size;
+            if (skipped) {
+                info_.skipped_bytes += child_size;
+                ++info_.skipped_files;
+            } else {
+                info_.extract_bytes += child_size;
+            }
         }
     }
     ancestors.pop_back();
@@ -307,6 +355,7 @@ DiscImage DiscImage::open(const fs::path& source) {
 
     std::set<std::pair<std::uint32_t, std::uint32_t>> extents;
     for (const auto& file : image.info_.files) {
+        if (file.skipped_by_cd_recipe) continue;
         if (extents.insert({file.extent_lba, file.size_bytes}).second)
             image.info_.distinct_extent_bytes += file.size_bytes;
         else ++image.info_.shared_extent_references;
@@ -326,6 +375,7 @@ void DiscImage::extract(const fs::path& destination) const {
     fs::create_directory(staging);
     try {
         for (const auto& file : info_.files) {
+            if (file.skipped_by_cd_recipe) continue;
             const fs::path out = staging / file.relative_path;
             fs::create_directories(out.parent_path());
             std::ofstream dest(out, std::ios::binary | std::ios::trunc);
