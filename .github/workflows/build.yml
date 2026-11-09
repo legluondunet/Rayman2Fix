@@ -62,11 +62,17 @@ jobs:
           New-Item -Path package/Rayman2Fix -ItemType Directory -Force | Out-Null
           Copy-Item build/Release/Rayman2Fix.exe package/Rayman2Fix.exe
           Copy-Item build/Release/Rayman2Fix.dll package/Rayman2Fix/Rayman2Fix.dll
-          Copy-Item assets/Rayman2Fix.ini package/Rayman2Fix/Rayman2Fix.ini
           if (!(Test-Path package/Rayman2Fix.exe) -or
-              !(Test-Path package/Rayman2Fix/Rayman2Fix.dll) -or
-              !(Test-Path package/Rayman2Fix/Rayman2Fix.ini)) {
+              !(Test-Path package/Rayman2Fix/Rayman2Fix.dll)) {
             throw 'Incomplete Rayman2Fix bootstrap package'
+          }
+          # User options are created only by Rayman2Fix.exe on first run.
+          # Enforce this for all CI artifacts and future releases.
+          if (Get-ChildItem -Path package -Recurse -File -Filter Rayman2Fix.ini) {
+            throw 'Never ship generated Rayman2Fix.ini in CI or release packages'
+          }
+          if (Get-ChildItem -Path package -Recurse -File -Filter Rayman2Fix.log) {
+            throw 'Never ship diagnostic logs in CI or release packages'
           }
       - name: Upload bootstrap package
         uses: actions/upload-artifact@v4
