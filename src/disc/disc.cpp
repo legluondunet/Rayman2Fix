@@ -194,9 +194,9 @@ bool ignored_by_rayman2_cd_recipe(const std::string& volume_id,
                                   const fs::path& relative) {
     if (upper(volume_id) != "RAYMAN2") return false;
     const std::string path = upper(relative.generic_u8string());
-    // Explicitly exclude the three root-level legacy CD protection helpers.
-    // Do not broaden the rule to other numeric files or extensions.
-    if (excluded_cd_protection_auxiliary(relative))
+    // Explicit root-only CD exclusions requested by the user. Do not
+    // broaden these paths to nested files or other extension matches.
+    if (excluded_cd_root_auxiliary(relative))
         return true;
     constexpr const char* ignored[] = {
         "DATA/WORLD/LEVELS/GRAPHICS2.DAT",
