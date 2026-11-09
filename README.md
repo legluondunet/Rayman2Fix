@@ -46,12 +46,14 @@ An unsupported EXE or unverified GameFrame library still blocks launch.
 No-CD/gameplay compatibility is not yet established by tests.
 SDL3/gamepad integration is deferred to a later phase.
 
-The planned native `Rayman2Fix.dll` will handle validated per-executable
-memory fixes, display and FOV/HUD behavior, window focus and graphics settings.
-GameFrame's Apache-2.0 Glide 2.x OpenGL wrapper is now embedded and
-automatically installed as `glide2x.dll`. Actual Rayman 2 renderer behavior,
-borderless fullscreen, input and in-game fixes are **not yet validated**.
-SDL3 will be considered in a separate phase and is not required at startup.
+The single EXE now deploys an exact-edition-gated x86 `Rayman2Fix.dll`:
+it can adjust the game's camera horizontal field of view (Hor+) **in
+memory** for widescreen output, after checking the exact 32-bit executable
+signature. It refuses all other game versions. GameFrame's Apache-2.0
+OpenGL Glide 2 wrapper is embedded as `glide2x.dll`.
+Window styling and FOV are implemented for the owner's first Wine/Windows
+test; gameplay appearance, HUD alignment, video behavior and Alt+Tab are
+**not yet validated**. SDL3/gamepad integration remains deferred.
 
 ## Installed-file layout
 
@@ -70,7 +72,8 @@ Rayman2Fix/
     Rayman2Fix.dll             (unpacked from the EXE; inert placeholder)
     Rayman2Fix.dll.bak         (only if updated; one latest backup)
     Rayman2Fix.ini             (only user-editable configuration)
-    ubi.ini                     (generated/synchronized for Rayman 2)
+    ubi.ini                     (generated game-facing Glide config)
+    rayman2.exe.manifest         (generated DPI compatibility manifest)
     rayman2.exe                (from original CD)
     dll/
         snd_cpa_mmx.ini         (from original CD)
@@ -109,15 +112,30 @@ The format is validated and invalid values are refused, not silently ignored.
 Rayman 2 still needs its legacy `ubi.ini` in the game directory, but **the
 user must not maintain it**. The launcher preserves its unrelated CD settings
 (e.g. `Language`) or creates it when absent, and automatically synchronizes
-the required Glide settings, `GLI_DllFile=GliVd1`,
-`GLI_Dll=Glide2` and `GLI_Mode=1 - WIDTH x HEIGHT x 16` from
-`Rayman2Fix.ini` before each future game launch. Glide and 16-bit mode
-are mandatory compatibility details, not redundant user options.
+the required Glide settings (`GLI_DllFile=GliVd1`,
+`GLI_Dll=Glide2` and the supported internal
+`GLI_Mode=1 - 1024 x 768 x 16`) before each launch.
+**This internal 4:3 mode is not the desktop/output resolution.**
+The launcher derives native physical pixels from Windows/Wine's
+primary monitor and DPI APIs, and supplies GameFrame's `GLIDE_SIZE`
+environment variable (e.g. `1920x1080`) to the child game process.
+It also generates the `rayman2.exe.manifest` PMv2 DPI compatibility
+file without changing the SHA-256-approved game EXE.
+
+During gameplay Rayman2Fix supervises the actual game window, requests
+borderless fullscreen at the monitor's physical coordinates, and never
+enables exclusive fullscreen, topmost or changes the desktop resolution.
+Only the approved game executable may load the in-memory Hor+ camera
+correction. The projection angle is calculated for the output aspect,
+while the FOV reference stays 4:3. Glide, 16-bit internal mode,
+borderless window and Hor+ are mandatory fixes, not redundant user options.
 `ubi.ini` is mutable, so it is deliberately excluded from the immutable
 CD SHA-256 receipt. Old receipts with this entry are migrated without the CD.
 
-The game-facing configuration has been implemented and unit-tested, but
-actual Rayman 2 rendering at widescreen resolutions still needs validation.
+The game-facing configuration and Hor+ projection calculation are
+unit-tested, but **actual Rayman 2 widescreen visuals and HUD still require
+Wine/Windows testing**. Unknown or modified camera function bytes are
+refused instead of patched.
 No usernames, private home paths, serials or network identifiers are logged.
 
 ## Available now (PR #1)
