@@ -1,5 +1,6 @@
 #include "rayman2fix/disc.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
