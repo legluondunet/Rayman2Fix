@@ -216,7 +216,9 @@ void Startup::initialize() {
                "Log=1\n"
                "\n"
                "[Graphics]\n"
-               "Resolution=Desktop\n";
+               "Resolution=Desktop\n"
+               "; FPSLimit=0 disables the cap; accepted range: 15..240\n"
+               "FPSLimit=60\n";
         if (!ini) throw std::runtime_error("failed writing Rayman2Fix.ini");
     }
 
@@ -288,6 +290,9 @@ void Startup::initialize() {
     const auto display = option("Graphics", "Resolution");
     log("CONFIG: Graphics.Resolution=" +
         (display.empty() ? "Desktop (default)" : display));
+    const auto fps = option("Graphics", "FPSLimit");
+    log("CONFIG: Graphics.FPSLimit=" +
+        (fps.empty() ? "60 (default)" : fps));
 
     log("RUNTIME: Rayman2Fix.dll=" +
         std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));
