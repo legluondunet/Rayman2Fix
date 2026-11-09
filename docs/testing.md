@@ -78,7 +78,16 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - `--inspect disc.iso` and `--inspect disc.cue`, each containing one ISO9660
   MODE1 data track. Unsupported formats fail without side effects.
 - `--extract disc.cue` writes to `Rayman2Fix/DiscContent`.
-- Repeat the extraction: it must refuse to overwrite the prior directory.
+  Check the console shows image inspection, extraction progress in approximately
+  5% steps, finalization, and a factual summary (files/bytes copied,
+  exact skipped entries, destination, elapsed time). Ensure even one
+  large file emits progress during its transfer rather than only at the end.
+  The automatic no-argument installer should show its eight active stages,
+  including SHA-256 receipt generation and verification, then a final summary.
+  Both modes must flush line-oriented progress for Wine/PowerShell.
+- Repeat the extraction: it must refuse to overwrite the prior directory
+  without incorrectly reporting success. An interrupted/failed extraction
+  must not leave a promoted output or a false success summary.
 - Truncated / malicious image paths fail without writing outside the staging dir.
 - Check UTF-16 Windows path support on filenames with French accents.
 - When a Joliet supplementary descriptor is present, use its actual long names
