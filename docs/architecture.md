@@ -12,6 +12,7 @@ Rayman2Fix/
     rayman2.exe                      copied from original CD (not yet playable)
     Rayman2Fix.dll                   unpacked from launcher (currently inert)
     glide2x.dll                      pinned GameFrame x86 Glide 2 wrapper (deployed)
+    rayman2.exe.manifest             automatically generated PMv2 DPI compatibility
     GameFrame-LICENSE-APACHE.txt      license copied from embedded resource
     SDL3.dll                         future phase; not required at startup
     Rayman2Fix.ini                   single user-maintained configuration
@@ -168,6 +169,48 @@ Keep the configuration short: mandatory compatibility fixes are not toggles.
 `[Graphics] Resolution=Desktop` option controls the legacy `ubi.ini`
 `GLI_Mode`; mandatory `GLI_DllFile=GliVd1` and `GLI_Dll=Glide2` are
 written automatically. SDL3-related options remain deferred.
+
+## Borderless native output and Hor+ camera integration (first real build)
+
+**Exact physical monitor dimensions and DPI:** The launcher is DPI-aware
+(per-monitor-v2 where Windows/Wine supports it), obtains the primary monitor's
+Win32 `MONITORINFO.rcMonitor` bounds and DPI, and uses that same coordinate
+system to supervise the child game's window. No exclusive screen mode switch
+or `HWND_TOPMOST` is permitted.
+
+**Two resolutions, not two user settings:** `Rayman2Fix.ini` remains the
+only user-maintained configuration, with `[Graphics] Resolution=Desktop` by
+default. The game-facing `ubi.ini` keeps a supported internal Glide mode
+`1 - 1024 x 768 x 16`. GameFrame is independently instructed to render
+at the **native output** via `GLIDE_SIZE=WxH` in the spawned game process.
+Native-resolution windowing is mandatory; user-selected resolutions can
+override Desktop, but are never mistaken for the internal 3dfx mode.
+
+**Borderless:** The launcher watches the actual game window and uses
+`WS_POPUP | WS_VISIBLE`, removing caption/frame, and positions it exactly
+over the physical primary monitor. It neither creates a separate fake
+fullscreen overlay nor changes desktop resolution. It is not topmost;
+Alt+Tab must be tested.
+
+**True horizontal FOV:** Only the original-to-unprotected EXE pair
+validated by SHA-256 is eligible. `Rayman2Fix.dll` is injected into that
+running Win32 process by a separately initialized remote LoadLibrary call.
+The runtime independently matches the exact Win32 PE timestamp and the
+original seven code bytes at image RVA `0x22AB0` before hooking
+`GLI_xAdjustCameraToViewport2`. Camera xAlphaY at offset `0x68`
+is the reference angle and horizontal FOV expands with native aspect;
+xAlphaX at offset `0x64` is modified before the original camera
+projection function is called. The game EXE stays unchanged on disk.
+The initialization happens outside DllMain, with no game callbacks under
+the loader lock. On a hash/signature mismatch, it refuses the hook.
+The first Wine/Windows gameplay tests will confirm injection and scene
+geometry; **this is not yet a validated HUD/menus/aspect correction**.
+Synthetic tests cover FOV math, Win32 non-game rejection, creation of a
+borderless child at physical monitor bounds and inherited GLIDE_SIZE.
+
+**DPI manifest:** `rayman2.exe.manifest` is a generated technical file
+with PMv2/PM settings; it is not user-editable and must not mutate the
+approved EXE. An existing unknown manifest is never overwritten.
 
 ## Runtime protection contract
 
