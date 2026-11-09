@@ -139,7 +139,17 @@ int main() {
         offset += record(outside_dir + offset, 20, 2048, 2, std::string(1, '\1'));
         record(outside_dir + offset, 25, 6, 0, "DATA.TXT;1");
         write_file(root / "outside.iso", outside);
-        check(fails(root / "outside.iso"), "file extent outside ISO must fail");
+        const auto outside_scan = r2fix::DiscImage::open(root / "outside.iso");
+        check(outside_scan.info().suspect_files == 1,
+              "inspect reports unknown out-of-range file without aborting");
+        check(outside_scan.info().files[0].invalid_extent,
+              "invalid extent marked and retained in inventory");
+        bool blocked_outside = false;
+        try { outside_scan.extract(root / "blocked-outside"); }
+        catch (const std::exception&) { blocked_outside = true; }
+        check(blocked_outside, "unknown extent blocks extraction");
+        check(!fs::exists(root / "blocked-outside"),
+              "unknown extent fails before creating a destination");
 
         // Real historical CD copies can list impossible huge dummy entries.
         // Ignore ONLY the exact paths from the original Rayman 2 Lutris recipe.
@@ -163,11 +173,42 @@ int main() {
         real.close();
 
         write_file(root / "not_rayman2.iso", make_rayman2_with_dummy(false, true));
-        check(fails(root / "not_rayman2.iso"),
-              "never ignore an impossible file on an unknown CD");
+        const auto unrelated = r2fix::DiscImage::open(root / "not_rayman2.iso");
+        check(unrelated.info().suspect_files == 1 && unrelated.info().skipped_files == 0,
+              "unknown disc is inspected but never allowlisted");
+        bool blocked_unrelated = false;
+        try { unrelated.extract(root / "blocked-unrelated"); }
+        catch (const std::exception&) { blocked_unrelated = true; }
+        check(blocked_unrelated && !fs::exists(root / "blocked-unrelated"),
+              "unknown disc cannot extract invalid files");
         write_file(root / "not_allowlisted.iso", make_rayman2_with_dummy(true, false));
-        check(fails(root / "not_allowlisted.iso"),
-              "never ignore an impossible file by size alone");
+        const auto unlisted = r2fix::DiscImage::open(root / "not_allowlisted.iso");
+        check(unlisted.info().suspect_files == 1 && unlisted.info().skipped_files == 0,
+              "unlisted bogus file flagged without automatic omission");
+        bool blocked_unlisted = false;
+        try { unlisted.extract(root / "blocked-unlisted"); }
+        catch (const std::exception&) { blocked_unlisted = true; }
+        check(blocked_unlisted && !fs::exists(root / "blocked-unlisted"),
+              "unlisted bogus files cannot be silently extracted");
+
+        // Regression: user's CD reported LBA=200578 size=437458886.
+        auto real_case = make_iso("UNKNOWN.DAT;1");
+        auto* real_dir = real_case.data() + 20 * 2048;
+        const auto first = record(real_dir, 20, 2048, 2, std::string(1, '\0'));
+        const auto second = record(real_dir + first, 20, 2048, 2, std::string(1, '\1'));
+        record(real_dir + first + second, 200578, 437458886, 0, "UNKNOWN.DAT;1");
+        write_file(root / "retail_anomaly.iso", real_case);
+        const auto problem = r2fix::DiscImage::open(root / "retail_anomaly.iso");
+        check(problem.info().suspect_files == 1,
+              "retail-size anomaly must not stop --inspect");
+        check(problem.info().files[0].extent_lba == 200578 &&
+              problem.info().files[0].size_bytes == 437458886,
+              "retain offending LBA and file size for logging");
+        bool blocked_problem = false;
+        try { problem.extract(root / "blocked-retail"); }
+        catch (const std::exception&) { blocked_problem = true; }
+        check(blocked_problem && !fs::exists(root / "blocked-retail"),
+              "retail-size anomaly cannot be extracted without an explicit exception");
 
         // A valid ISO 9660 disc may contain a boot record before its PVD.
         auto boot_iso = make_iso();
