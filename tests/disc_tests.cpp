@@ -200,6 +200,7 @@ int main() {
 
         auto unrecognized_alias = make_rayman2_with_dummy();
         auto* other_levels = unrecognized_alias.data() + 23 * 2048;
+        std::fill(other_levels, other_levels + 2048, 0);
         std::size_t other_pos = record(other_levels, 23, 2048, 2, std::string(1, '\0'));
         other_pos += record(other_levels + other_pos, 22, 2048, 2, std::string(1, '\1'));
         other_pos += record(other_levels + other_pos, 200578, 437458886, 0,
