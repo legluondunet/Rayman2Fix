@@ -41,6 +41,7 @@ static std::vector<std::uint8_t> make_iso(const std::string& name = "DATA.TXT;1"
     auto* pvd = iso.data() + 16 * 2048;
     pvd[0] = 1; pvd[1] = 'C'; pvd[2] = 'D'; pvd[3] = '0';
     pvd[4] = '0'; pvd[5] = '1'; pvd[6] = 1;
+    put32(pvd + 80, 22); // ISO volume logical sector count (both byte orders)
     const char* volume = "RAYMAN2_TEST";
     for (unsigned i = 0; volume[i] != 0; ++i) pvd[40 + i] = volume[i];
     record(pvd + 156, 20, 2048, 2, std::string(1, '\0'));
@@ -79,6 +80,34 @@ int main() {
         check(parsed.info().files.size() == 1, "ISO file count");
         check(parsed.info().volume_id == "RAYMAN2_TEST", "ISO volume");
         check(parsed.info().total_bytes == 6, "file size");
+        check(parsed.info().image_bytes == iso.size(), "physical image size");
+        check(parsed.info().volume_bytes == iso.size(), "ISO logical volume size");
+        check(parsed.info().distinct_extent_bytes == 6, "unique file extents");
+
+        // A valid ISO may reuse the same physical extent for different filenames.
+        // In that case sum of declared file lengths can exceed the image size.
+        auto shared = make_iso();
+        auto* shared_dir = shared.data() + 20 * 2048;
+        std::size_t extra = record(shared_dir, 20, 2048, 2, std::string(1, '\0'));
+        extra += record(shared_dir + extra, 20, 2048, 2, std::string(1, '\1'));
+        extra += record(shared_dir + extra, 21, 6, 0, "DATA.TXT;1");
+        extra += record(shared_dir + extra, 21, 6, 0, "ALIAS.TXT;1");
+        (void)extra;
+        write_file(root / "shared.iso", shared);
+        const auto aliases = r2fix::DiscImage::open(root / "shared.iso");
+        check(aliases.info().files.size() == 2, "shared extent file count");
+        check(aliases.info().total_bytes == 12, "logical size counts both names");
+        check(aliases.info().distinct_extent_bytes == 6, "physical extent counted once");
+        check(aliases.info().shared_extent_references == 1, "shared extent reported");
+
+        // Valid ISO records can also be malformed or lie outside the image.
+        auto outside = make_iso();
+        auto* outside_dir = outside.data() + 20 * 2048;
+        std::size_t offset = record(outside_dir, 20, 2048, 2, std::string(1, '\0'));
+        offset += record(outside_dir + offset, 20, 2048, 2, std::string(1, '\1'));
+        record(outside_dir + offset, 25, 6, 0, "DATA.TXT;1");
+        write_file(root / "outside.iso", outside);
+        check(fails(root / "outside.iso"), "file extent outside ISO must fail");
 
         // A valid ISO 9660 disc may contain a boot record before its PVD.
         auto boot_iso = make_iso();
