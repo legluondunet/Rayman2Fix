@@ -18,8 +18,8 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
   instead of the ISO9660 primary 8.3 aliases; show the source in `--inspect`.
 - Export every directory and file component in lowercase, including accented
   characters. Confirm the output is writable and has no Windows read-only bit.
-- Merge case-variant source directories (`DLL/` and `Dll/`) into the single
-  `dll/` target; reject duplicate non-identical files at the same target path.
+- Extract the CD's single original DLL directory to `dll/`, with no extra
+  `DLL`/`Dll` merge. Reject unexpected case-colliding source entries.
 - Without Joliet, clearly label the ISO9660 primary-name fallback instead of
   inventing long file names.
 
