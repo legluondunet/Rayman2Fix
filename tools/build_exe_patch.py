@@ -22,6 +22,99 @@ STEP = 8
 MIN_MATCH = 32
 MAX_CANDIDATES = 6
 MAX_INPUT = 64 * 1024 * 1024
+MAX_LITERAL_PAYLOAD = 64 * 1024
+ZBLOCK = struct.Struct("<cII")
+
+def encode_lz4_length(out: bytearray, value: int) -> None:
+    while value >= 255:
+        out.append(255)
+        value -= 255
+    out.append(value)
+
+def lz4_compress(value: bytes) -> bytes:
+    """Small, pure-Python LZ4-block encoder; no third-party dependencies."""
+    out = bytearray()
+    seen: dict[bytes, int] = {}
+    anchor = 0
+    pos = 0
+    end = len(value)
+    while pos + 4 <= end:
+        key = value[pos:pos + 4]
+        previous = seen.get(key)
+        seen[key] = pos
+        if previous is None or pos - previous > 65535:
+            pos += 1
+            continue
+        length = 4
+        while pos + length < end and value[previous + length] == value[pos + length]:
+            length += 1
+        literals = pos - anchor
+        match = length - 4
+        out.append((min(15, literals) << 4) | min(15, match))
+        if literals >= 15:
+            encode_lz4_length(out, literals - 15)
+        out.extend(value[anchor:pos])
+        out.extend(struct.pack("<H", pos - previous))
+        if match >= 15:
+            encode_lz4_length(out, match - 15)
+        for offset in range(pos + 1, min(end - 3, pos + length)):
+            seen[value[offset:offset + 4]] = offset
+        pos += length
+        anchor = pos
+    literals = end - anchor
+    out.append(min(15, literals) << 4)
+    if literals >= 15:
+        encode_lz4_length(out, literals - 15)
+    out.extend(value[anchor:])
+    return bytes(out)
+
+def lz4_decompress(value: bytes, expected: int) -> bytes:
+    """Test decoder for the C++ executable's Z command."""
+    result = bytearray()
+    pos = 0
+    while pos < len(value):
+        token = value[pos]
+        pos += 1
+        length = token >> 4
+        if length == 15:
+            while True:
+                if pos >= len(value):
+                    raise ValueError("truncated LZ4 literal extension")
+                n = value[pos]
+                pos += 1
+                length += n
+                if n != 255:
+                    break
+        if length > len(value) - pos or length > expected - len(result):
+            raise ValueError("invalid LZ4 literal length")
+        result.extend(value[pos:pos + length])
+        pos += length
+        if pos == len(value):
+            break
+        if len(value) - pos < 2:
+            raise ValueError("truncated LZ4 match offset")
+        offset = struct.unpack_from("<H", value, pos)[0]
+        pos += 2
+        if not offset or offset > len(result):
+            raise ValueError("invalid LZ4 offset")
+        length = 4 + (token & 15)
+        if token & 15 == 15:
+            while True:
+                if pos >= len(value):
+                    raise ValueError("truncated LZ4 match extension")
+                n = value[pos]
+                pos += 1
+                length += n
+                if n != 255:
+                    break
+        if length > expected - len(result):
+            raise ValueError("invalid LZ4 decoded size")
+        for _ in range(length):
+            result.append(result[-offset])
+    if len(result) != expected:
+        raise ValueError("incorrect LZ4 output size")
+    return bytes(result)
+
 
 
 def sha(value: bytes) -> bytes:
@@ -65,9 +158,18 @@ def generate_patch(source: bytes, target: bytes) -> tuple[bytes, int, int]:
         nonlocal literal_bytes
         if not literals:
             return
-        commands.extend(DATA.pack(b"L", len(literals)))
-        commands.extend(literals)
-        literal_bytes += len(literals)
+        payload = bytes(literals)
+        encoded = lz4_compress(payload)
+        if lz4_decompress(encoded, len(payload)) != payload:
+            raise ValueError("internal LZ4 mismatch")
+        if len(encoded) + 4 < len(payload):
+            commands.extend(ZBLOCK.pack(b"Z", len(payload), len(encoded)))
+            commands.extend(encoded)
+            literal_bytes += len(encoded)
+        else:
+            commands.extend(DATA.pack(b"L", len(payload)))
+            commands.extend(payload)
+            literal_bytes += len(payload)
         literals.clear()
 
     pos = 0
@@ -124,15 +226,22 @@ def apply_patch(source: bytes, patch: bytes) -> bytes:
             if length == 0 or offset + length > len(source):
                 raise ValueError("unsafe copy operation")
             result.extend(source[offset:offset + length])
-        elif tag == b"L":
+        elif tag in (b"L", b"Z"):
             if pos + 4 > len(patch):
                 raise ValueError("truncated literal length")
             (length,) = struct.unpack_from("<I", patch, pos)
             pos += 4
-            if length == 0 or pos + length > len(patch):
+            encoded_length = length
+            if tag == b"Z":
+                if pos + 4 > len(patch):
+                    raise ValueError("truncated compressed length")
+                (encoded_length,) = struct.unpack_from("<I", patch, pos)
+                pos += 4
+            if not length or not encoded_length or pos + encoded_length > len(patch):
                 raise ValueError("truncated literal operation")
-            result.extend(patch[pos:pos + length])
-            pos += length
+            payload = patch[pos:pos + encoded_length]
+            result.extend(lz4_decompress(payload, length) if tag == b"Z" else payload)
+            pos += encoded_length
         else:
             raise ValueError("unknown patch command")
         if len(result) > dst_len:
@@ -163,11 +272,11 @@ def main() -> int:
         print(f"Source size: {len(original)}; SHA256: {sha(original).hex()}")
         print(f"Target size: {len(target)}; SHA256: {sha(target).hex()}")
         print(f"Copied from original: {copied} bytes")
-        print(f"Patch literal payload: {literals} bytes ({literals * 100 / len(target):.1f}% of target)")
+        print(f"Patch encoded unmatched payload: {literals} bytes ({literals * 100 / len(target):.1f}% of target)")
         print(f"Patch file size: {len(patch)} bytes")
-        if literals > 65536:
-            print("REFUSED: patch contains >64 KiB of literal target code; "
-                  "do not distribute commercial executable material in Rayman2Fix.",
+        if literals > MAX_LITERAL_PAYLOAD:
+            print("REFUSED: patch contains >64 KiB of encoded unmatched content; "
+                  "review copyright constraints before distributing any delta.",
                   file=sys.stderr)
             return 2
         args.output.write_bytes(patch)
