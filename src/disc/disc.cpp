@@ -192,7 +192,7 @@ std::string decode_name(const unsigned char* p, std::size_t size, bool joliet) {
 bool ignored_by_lutris_rayman2_cd(const std::string& volume_id,
                                   const fs::path& relative) {
     if (upper(volume_id) != "RAYMAN2") return false;
-    const std::string path = upper(relative.generic_string());
+    const std::string path = upper(relative.generic_u8string());
     constexpr const char* ignored[] = {
         "DATA/WORLD/LEVELS/GRAPHICS2.DAT",
         "DATA/WORLD/LEVELS/MAP1.DAT",
@@ -601,7 +601,7 @@ void DiscImage::extract(const fs::path& destination) const {
             fs::create_directories(out.parent_path());
             make_writable(out.parent_path());
             std::ofstream dest(out, std::ios::binary | std::ios::trunc);
-            if (!dest) fail("cannot create output: " + out.string());
+            if (!dest) fail("cannot create output: " + out.u8string());
             std::uint64_t pos = 0;
             while (pos < file.size_bytes) {
                 const auto n = static_cast<std::size_t>(
@@ -609,11 +609,11 @@ void DiscImage::extract(const fs::path& destination) const {
                 const auto chunk = read_user(file.extent_lba, pos, n);
                 dest.write(reinterpret_cast<const char*>(chunk.data()),
                            static_cast<std::streamsize>(chunk.size()));
-                if (!dest) fail("cannot write output: " + out.string());
+                if (!dest) fail("cannot write output: " + out.u8string());
                 pos += n;
             }
             dest.close();
-            if (!dest) fail("error closing extracted file: " + out.string());
+            if (!dest) fail("error closing extracted file: " + out.u8string());
             make_writable(out);
         }
         fs::rename(staging, destination);
