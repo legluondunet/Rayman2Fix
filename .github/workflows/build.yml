@@ -38,7 +38,7 @@ jobs:
           $upstreamDef = (Resolve-Path 'third_party/game-frame/wrappers/glide/glide2x.def').Path
           # Adapt GNU internal symbols to 32-bit MSVC, keep 156 public exports.
           $def = Join-Path $env:RUNNER_TEMP 'rayman2fix-glide-msvc.def'
-          $original = (Get-Content -Raw $upstreamDef).Replace([char]13, '')
+          $original = (Get-Content -Raw $upstreamDef).Replace([string][char]13, '')
           $converted = [regex]::Replace($original, '(?m)^(_[A-Za-z0-9_]+@[0-9]+)=([A-Za-z0-9_]+@[0-9]+)$', '$1=_$2')
           $count = ([regex]::Matches($converted, '(?m)^_[A-Za-z0-9_]+@[0-9]+=_[A-Za-z0-9_]+@[0-9]+$')).Count
           if ($count -ne 156) { throw "Expected 156 Glide exports, got $count" }
