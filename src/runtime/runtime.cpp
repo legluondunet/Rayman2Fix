@@ -186,6 +186,12 @@ void restore_temporary_no_movies() {
     if (!g_temporary_cheat_word) return;
     const auto where = g_temporary_cheat_word;
     g_temporary_cheat_word = 0;
+    // Level changes can free/reuse this memory. Only touch the same
+    // validated Fix progress-array object we temporarily modified.
+    if (!g_progress_words || find_story_words() != g_progress_words) {
+        log_line("RUNTIME-INTRO: progress array changed; stale memory left untouched");
+        return;
+    }
     std::uint32_t current = 0;
     if (!read_u32(where, current) ||
         !write_story_word(where, current & ~r2fix::story_word_mask(kNoMoviesBit))) {
