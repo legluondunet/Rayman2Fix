@@ -23,6 +23,7 @@ endif()
 add_executable(Rayman2Fix
   src/launcher/main.cpp
   src/launcher/auto_flow.cpp
+  src/launcher/gameframe.cpp
   src/launcher/patch_install.cpp
   src/launcher/startup.cpp
   src/launcher/system_inventory.cpp)
@@ -65,8 +66,9 @@ if(WIN32)
   target_compile_definitions(Rayman2FixRuntime PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 
   # Package the project's own x86 DLL inside Rayman2Fix.exe as RCDATA.
-  # The Windows artifact is now a single EXE. No INI, log, runtime folder,
-  # game assets, GameFrame or SDL3 are added to the archive.
+  # Windows artifact: one EXE. GameFrame is compiled separately by CI and
+  # embedded as a second RCDATA resource with its Apache license.
+  # No INI, log, runtime directory, SDL3 or commercial game assets are shipped.
   # The resource file is config-specific so both Debug and Release resolve
   # their matching DLL. This DLL remains an inert bootstrap placeholder.
   file(GENERATE
@@ -78,6 +80,31 @@ if(WIN32)
   target_sources(Rayman2Fix PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc")
   add_dependencies(Rayman2Fix Rayman2FixRuntime)
+
+  set(RAYMAN2FIX_GLIDE_DLL "" CACHE FILEPATH "Pinned Windows x86 GameFrame glide2x.dll")
+  set(RAYMAN2FIX_GLIDE_LICENSE "" CACHE FILEPATH "Pinned Apache 2.0 license from GameFrame")
+  set(RAYMAN2FIX_GLIDE_SHA256 "" CACHE STRING "Exact SHA256 of bundled GameFrame x86 DLL")
+  if(RAYMAN2FIX_GLIDE_DLL OR RAYMAN2FIX_GLIDE_LICENSE OR RAYMAN2FIX_GLIDE_SHA256)
+    if(NOT EXISTS "${RAYMAN2FIX_GLIDE_DLL}" OR
+       NOT EXISTS "${RAYMAN2FIX_GLIDE_LICENSE}" OR
+       NOT RAYMAN2FIX_GLIDE_SHA256 MATCHES "^[0-9a-f]{64}$")
+      message(FATAL_ERROR "GameFrame requires existing x86 DLL, Apache license and its exact lowercase SHA256")
+    endif()
+    file(SHA256 "${RAYMAN2FIX_GLIDE_DLL}" RAYMAN2FIX_GLIDE_ACTUAL_SHA)
+    if(NOT RAYMAN2FIX_GLIDE_ACTUAL_SHA STREQUAL RAYMAN2FIX_GLIDE_SHA256)
+      message(FATAL_ERROR "GameFrame glide2x.dll SHA256 does not match the supplied checksum")
+    endif()
+    target_compile_definitions(Rayman2Fix PRIVATE
+      RAYMAN2FIX_GLIDE_SHA256="${RAYMAN2FIX_GLIDE_SHA256}")
+    file(GENERATE
+      OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_gameframe.rc"
+      CONTENT "1103 RCDATA \"${RAYMAN2FIX_GLIDE_DLL}\"\n1104 RCDATA \"${RAYMAN2FIX_GLIDE_LICENSE}\"\n")
+    set_source_files_properties(
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_gameframe.rc"
+      PROPERTIES GENERATED TRUE)
+    target_sources(Rayman2Fix PRIVATE
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_gameframe.rc")
+  endif()
 endif()
 
 include(CTest)
@@ -89,6 +116,7 @@ if(BUILD_TESTING)
   add_executable(auto_flow_tests
     tests/auto_flow_tests.cpp
     src/launcher/auto_flow.cpp
+    src/launcher/gameframe.cpp
     src/launcher/patch_install.cpp
     src/launcher/startup.cpp)
   target_link_libraries(auto_flow_tests PRIVATE rayman2_disc rayman2_patch)
@@ -97,6 +125,12 @@ if(BUILD_TESTING)
     target_sources(auto_flow_tests PRIVATE
       "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc")
     add_dependencies(auto_flow_tests Rayman2FixRuntime)
+    if(RAYMAN2FIX_GLIDE_DLL)
+      target_compile_definitions(auto_flow_tests PRIVATE
+        RAYMAN2FIX_GLIDE_SHA256="${RAYMAN2FIX_GLIDE_SHA256}")
+      target_sources(auto_flow_tests PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_gameframe.rc")
+    endif()
   endif()
   add_test(NAME automatic-cd-install COMMAND auto_flow_tests)
 
