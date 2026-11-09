@@ -1,6 +1,7 @@
 #include "rayman2fix/auto_flow.hpp"
 #include "rayman2fix/cd_exclusions.hpp"
 #include "rayman2fix/disc.hpp"
+#include "rayman2fix/extraction_console.hpp"
 #include "rayman2fix/sha256.hpp"
 #include "rayman2fix/patch_install.hpp"
 #include "rayman2fix/exe_patch.hpp"
@@ -525,6 +526,8 @@ int run_automatic(Startup& startup) {
 
         startup.log("AUTO: found single adjacent disc image=" +
                     candidates.front().filename().u8string());
+        ExtractionConsole console(std::cout);
+        console.step(1, 8, "Inspecting original CD image...");
         const auto image = DiscImage::open(candidates.front());
         const auto& info = image.info();
         startup.log("AUTO-DISC: volume=" + info.volume_id +
@@ -533,6 +536,7 @@ int run_automatic(Startup& startup) {
                     " omitted=" + std::to_string(info.skipped_files) +
                     " suspect=" + std::to_string(info.suspect_files) +
                     " extract_bytes=" + std::to_string(info.extract_bytes));
+        console.plan(info);
         if (info.volume_id != "RAYMAN2" || info.suspect_files ||
             !contains_required_cd_files(info)) {
             startup.log("AUTO: media unsupported or required CD files unavailable");
@@ -550,12 +554,22 @@ int run_automatic(Startup& startup) {
         nested_staging += ".staging";
         if (fs::exists(staging) || fs::exists(nested_staging))
             throw std::runtime_error("previous installation staging exists; no overwrite");
+        ExtractionResult extraction{};
         try {
-            image.extract(staging);
+            console.step(2, 8, "Extracting selected CD files...");
+            extraction = image.extract(staging,
+                [&](const ExtractionProgress& progress) {
+                    console.progress(progress);
+                });
+            console.step(3, 8, "Initializing audio settings...");
             initialize_audio(staging);
+            console.step(4, 8, "Generating SHA-256 file receipt...");
             write_receipt(staging, info);
+            console.step(5, 8, "Synchronizing Glide configuration from Rayman2Fix.ini...");
             synchronize_rayman2_ubi_ini(staging, startup);
+            console.step(6, 8, "Checking executable patch compatibility...");
             patch_executable_if_supported(staging, startup);
+            console.step(7, 8, "Publishing installed files...");
             copy_bootstrap_files(root, staging);
             if (!has_game_executable(staging))
                 throw std::runtime_error("extracted game executable is missing");
@@ -567,8 +581,19 @@ int run_automatic(Startup& startup) {
         }
         startup.log("AUTO-INSTALL: CD files staged and committed to Rayman2Fix/ "
                     "with snd_cpa.ini and local SHA256 receipt; game not certified playable");
-        std::cout << "Original CD files installed into Rayman2Fix/.\n";
+        console.step(8, 8, "Verifying installed files and executable hashes...");
         if (verify_installation(startup) != 0) return 2;
+        console.summary(info, extraction, root);
+        std::cout << "  SHA-256 receipt: verified\n"
+                     "  Audio: snd_cpa.ini initialized\n"
+                     "  Graphics: ubi.ini synchronized from Rayman2Fix.ini\n"
+                  << "  Executable patch: "
+                  << (is_exe_replaced(root) ?
+                      "applied (original kept as rayman2.exe.bak)" :
+                      "not applied (no supported embedded/local delta)") << '\n'
+                  << "  GameFrame: "
+                  << (gameframe_glide_ready(root) ? "verified" : "not verified")
+                  << "\n  Game startup: not yet validated\n";
         return report_runtime_status(root, startup);
     } catch (const std::exception& error) {
         startup.log(std::string("AUTO-ERROR: ") + error.what());
