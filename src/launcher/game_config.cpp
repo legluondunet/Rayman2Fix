@@ -59,9 +59,10 @@ std::vector<std::string> lines_of(const fs::path& file) {
     if (in.bad()) throw std::runtime_error("failed reading INI");
     return lines;
 }
-std::string read_resolution_setting(const fs::path& ini) {
+std::string read_graphics_setting(const fs::path& ini,
+                                  const char* key, const char* fallback) {
     const auto lines = lines_of(ini);
-    std::string current, choice = "Desktop";
+    std::string current, choice = fallback;
     for (const auto& raw : lines) {
         std::string next;
         if (section(raw, next)) { current = next; continue; }
@@ -69,12 +70,17 @@ std::string read_resolution_setting(const fs::path& ini) {
         if (line.empty() || line.front() == ';' || line.front() == '#') continue;
         const auto equal = line.find('=');
         if (equal == std::string::npos || current != "GRAPHICS" ||
-            upper(trim(line.substr(0, equal))) != "RESOLUTION")
+            upper(trim(line.substr(0, equal))) != upper(key))
             continue;
         choice = trim(line.substr(equal + 1));
     }
-    if (choice.empty()) throw std::runtime_error("empty [Graphics] Resolution in Rayman2Fix.ini");
+    if (choice.empty())
+        throw std::runtime_error(std::string("empty [Graphics] ") + key +
+                                 " in Rayman2Fix.ini");
     return choice;
+}
+std::string read_resolution_setting(const fs::path& ini) {
+    return read_graphics_setting(ini, "Resolution", "Desktop");
 }
 std::pair<std::uint32_t,std::uint32_t> resolution(const std::string& setting) {
     const auto value = upper(trim(setting));
@@ -211,6 +217,21 @@ void atomically_install(const fs::path& output, const std::string& bytes) {
 std::pair<std::uint32_t, std::uint32_t> configured_output_resolution(
     const fs::path& ini) {
     return resolution(read_resolution_setting(ini));
+}
+
+// FPSLimit=60 by default; 0 = unlimited for troubleshooting, 15-240 =
+// supported limits. Keep this in the single Rayman2Fix.ini user config.
+std::uint32_t configured_fps_limit(const fs::path& ini) {
+    const auto value = read_graphics_setting(ini, "FPSLimit", "60");
+    if (value.size() > 3 ||
+        !std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+            return ch >= '0' && ch <= '9';
+        }))
+        throw std::runtime_error("invalid [Graphics] FPSLimit; use 0 or 15..240");
+    const auto fps = static_cast<std::uint32_t>(std::stoul(value));
+    if (fps != 0 && (fps < 15 || fps > 240))
+        throw std::runtime_error("unsupported [Graphics] FPSLimit; use 0 or 15..240");
+    return fps;
 }
 
 void synchronize_rayman2_ubi_ini(const fs::path& game_dir, Startup& startup) {
