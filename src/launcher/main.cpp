@@ -43,12 +43,12 @@ static int run(const std::string& command, const fs::path& disc,
                 " image_bytes=" + std::to_string(info.image_bytes) +
                 " volume_bytes=" + std::to_string(info.volume_bytes) +
                 " planned_extract_bytes=" + std::to_string(info.extract_bytes) +
-                " lutris_cd_ignored_files=" + std::to_string(info.skipped_files) +
-                " lutris_cd_ignored_bytes=" + std::to_string(info.skipped_bytes) +
+                " cd_excluded_files=" + std::to_string(info.skipped_files) +
+                " cd_excluded_bytes=" + std::to_string(info.skipped_bytes) +
                 " suspect_files=" + std::to_string(info.suspect_files));
     for (const auto& file : info.files) {
         if (file.skipped_by_cd_recipe)
-            startup.log("DISC-OMIT: legacy Rayman 2 CD installer path=" +
+            startup.log("DISC-OMIT: Rayman 2 installation exclusion path=" +
                         file.relative_path.generic_u8string() +
                         " declared_bytes=" + std::to_string(file.size_bytes) +
                         " (not copied; protection status unverified)");
