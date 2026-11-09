@@ -16,7 +16,7 @@ Run **`Rayman2Fix.exe` without arguments**. The obsolete `--init` command
 has been removed.
 
 - When `Rayman2Fix/rayman2.exe` already exists, the launcher checks the
-  CD installation receipt (original filenames and sizes) and audio assets
+  local CD installation receipt (original filenames, sizes and SHA-256) and audio assets
   without needing the source CD again. Missing or changed files are reported,
   not silently overwritten.
 - Otherwise, it searches for **exactly one** adjacent `.iso` or `.cue` file.
@@ -26,15 +26,15 @@ has been removed.
 - It extracts the supported CD files to a sibling staging directory, omitting
   the known installer-only material and dummy entries, preserving long Joliet
   names in lowercase and writable. It creates `dll/snd_cpa.ini` from
-  `dll/snd_cpa_mmx.ini`, writes a local **size-based** CD file receipt,
+  `dll/snd_cpa_mmx.ini`, writes a local **SHA-256** CD file receipt,
   then publishes directly into `Rayman2Fix/` transactionally. Existing
   unrelated files are preserved; an incomplete/unrecognized installation is
   never silently overwritten.
 - The launcher embeds and deploys its own x86 `Rayman2Fix.dll`, creating
   the `Rayman2Fix/` directory and minimal INI automatically.
 
-**Important:** file-size verification of a copied CD is not cryptographic
-edition authentication. Starting the game after successful installation
+**Important:** a SHA-256 receipt generated from the same CD verifies subsequent
+file integrity, but does not authenticate the original retail edition. Starting the game after successful installation
 is still **blocked** until the actual no-CD, GameFrame, SDL3 and exact
 retail executable compatibility work is finished.
 
@@ -68,7 +68,7 @@ Rayman2Fix/
         snd_cpa.ini             (initialized from MMX ini)
         ...
     data/ ...                  (original CD assets)
-    .rayman2fix-cd-files.tsv   (local size-based receipt)
+    .rayman2fix-cd-files.tsv   (local size + SHA-256 receipt)
     glide2x.dll                (GameFrame: planned, not yet integrated)
     SDL3.dll                   (SDL3: planned, not yet integrated)
 ```
@@ -136,8 +136,8 @@ The explicit diagnostic `--extract` command still targets
 `Rayman2Fix/DiscContent/` by default. **The no-argument installer does
 not use DiscContent**: it publishes the staged assets directly under
 `Rayman2Fix/`. Extraction never runs the CD's own installers or modifies
-the retail executable. `--verify` checks installed file presence and
-sizes, but is not a trusted retail-edition hash check.
+the retail executable. `--verify` checks installed file presence, sizes and SHA-256,
+but is not a trusted retail-edition allowlist/profile check.
 
 The runtime remains deliberately gated: a successful CD extraction is
 **not** a playable Windows/Wine game installation.
