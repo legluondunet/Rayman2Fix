@@ -55,6 +55,21 @@ if(WIN32)
   add_library(Rayman2FixRuntime SHARED src/runtime/runtime.cpp)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME Rayman2Fix)
   target_compile_definitions(Rayman2FixRuntime PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+
+  # Package the project's own x86 DLL inside Rayman2Fix.exe as RCDATA.
+  # The Windows artifact is now a single EXE. No INI, log, runtime folder,
+  # game assets, GameFrame or SDL3 are added to the archive.
+  # The resource file is config-specific so both Debug and Release resolve
+  # their matching DLL. This DLL remains an inert bootstrap placeholder.
+  file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc"
+    CONTENT "1101 RCDATA \"$<TARGET_FILE:Rayman2FixRuntime>\"\n")
+  set_source_files_properties(
+    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc"
+    PROPERTIES GENERATED TRUE)
+  target_sources(Rayman2Fix PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc")
+  add_dependencies(Rayman2Fix Rayman2FixRuntime)
 endif()
 
 include(CTest)
