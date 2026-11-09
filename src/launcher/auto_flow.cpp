@@ -5,6 +5,7 @@
 #include "rayman2fix/patch_install.hpp"
 #include "rayman2fix/exe_patch.hpp"
 #include "rayman2fix/gameframe.hpp"
+#include "rayman2fix/game_config.hpp"
 #include "rayman2fix/startup.hpp"
 
 #include <algorithm>
@@ -86,7 +87,8 @@ bool has_game_executable(const fs::path& root) {
 bool contains_required_cd_files(const DiscInfo& info) {
     bool exe = false, audio = false, data = false;
     for (const auto& file : info.files) {
-        if (file.skipped_by_cd_recipe || file.invalid_extent) continue;
+        if (file.skipped_by_cd_recipe || file.invalid_extent ||
+            file.relative_path.generic_u8string() == "ubi.ini") continue;
         const auto name = file.relative_path.generic_u8string();
         if (name == "rayman2.exe") exe = true;
         if (name == "dll/snd_cpa_mmx.ini") audio = true;
@@ -210,9 +212,10 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
         // recorded by older Rayman2Fix builds. They are now omitted. Permit
         // their absence (e.g. already removed manually), but never relax
         // validation of any other file in the receipt.
-        if (excluded_cd_root_auxiliary(relative)) {
+        if (excluded_cd_root_auxiliary(relative) ||
+            relative.generic_u8string() == "ubi.ini") {
             ++count;
-            continue;
+            continue; // Game-facing ubi.ini is rebuilt from Rayman2Fix.ini.
         }
         if (relative.generic_u8string() == "rayman2.exe") {
             if (exe_listed) return false;
@@ -282,8 +285,9 @@ void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {
         const auto path = fs::u8path(line.substr(last_tab + 1));
         if (!safe_relative(path))
             throw std::runtime_error("unsafe CD receipt path during cleanup");
-        if (excluded_cd_root_auxiliary(path))
-            ++removed_receipt_entries;
+        if (excluded_cd_root_auxiliary(path) ||
+            path.generic_u8string() == "ubi.ini")
+            ++removed_receipt_entries; // ubi.ini remains; only its hash is removed.
         else
             retained.push_back(line);
     }
@@ -496,6 +500,7 @@ int run_automatic(Startup& startup) {
         if (has_game_executable(root)) {
             startup.log("AUTO: existing game found; verify before possible launch");
             if (verify_installation(startup) != 0) return 2;
+            synchronize_rayman2_ubi_ini(root, startup);
             patch_executable_if_supported(root, startup);
             if (verify_installation(startup) != 0) return 2;
             return report_runtime_status(root, startup);
@@ -546,6 +551,7 @@ int run_automatic(Startup& startup) {
             image.extract(staging);
             initialize_audio(staging);
             write_receipt(staging, info);
+            synchronize_rayman2_ubi_ini(staging, startup);
             patch_executable_if_supported(staging, startup);
             copy_bootstrap_files(root, staging);
             if (!has_game_executable(staging))
