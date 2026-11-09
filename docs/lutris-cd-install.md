@@ -36,7 +36,17 @@ patches. Copying the CD on its own **does not demonstrate** no-CD gameplay.
 ## Current exact file exclusion rule
 
 For volume identifier **`RAYMAN2`** only, the ISO 9660 scanner may
-recognize these **exact paths** from the author's Lutris recipe:
+recognize these **exact paths** from the author's Lutris recipe.
+
+**Retail ISO 9660 short-name aliases:** an actual RAYMAN2 CD inspection
+reported `DATA/WORLD/LEVELS/GRAPHI~3.DAT`, while the existing script
+removes `GRAPHICS0.DAT`, `GRAPHICS1.DAT`, and `GRAPHICS2.DAT`.
+The primary-volume directory exposes short 8.3 names rather than the
+long names used by Lutris after mounting. To account for all six missing
+entries in the first log, only under `DATA/WORLD/LEVELS/`, the scanner
+also accepts **`GRAPHI~1.DAT` through `GRAPHI~3.DAT`** and
+**`TEXTUR~1.DAT` through `TEXTUR~3.DAT`** as installation exclusions.
+The exact mapping from alias number to long-name suffix is not assumed.
 
 ```text
 Data/World/Levels/GRAPHICS2.DAT
@@ -84,6 +94,46 @@ or malformed files outside this narrow list still fail closed.
 The installation remains a **bootstrap-only CD content extraction** until
 we identify real executable SHA-256 values, verify the reconstructed game,
 and independently implement the game renderer and fixes.
+
+## Other installer-only files and directories
+
+The same Lutris script removes these **root directories** after copying
+and setting up the old runtime: `Acrobat/`, `DIRECTX/`, `Drivers/`,
+`InstData/`, `Pads/`, `Tonic Trouble/`. The bootstrap excludes the files
+inside these roots when its disc volume is `RAYMAN2`, along with the
+8.3 folder alias `TONICT~1/` for `Tonic Trouble/`.
+
+The script also removes these **root files**: `Autorun.inf`,
+`D3DImm.dll`, `DDraw.dll`, `DSETUP*`, `GXSetup.exe`,
+`setup.exe` and `SetupUbi.exe`. These are excluded by exact root paths
+(or the original `DSETUP*` pattern), not by arbitrary filename matches
+elsewhere in game directories.
+
+**Special case: `DLL/` and `Dll/`.** The Lutris script first merges
+`DLL/` into `Dll/`, *then* removes the redundant `DLL/`. Our bootstrap
+does **not** omit either directory: the proper merge and conflict handling
+must be performed by the later edition-verified installer, otherwise we
+could discard required game DLLs.
+
+The exclusions are an **installation recipe** based on a version of the
+author's CD script, not a universal claim about every possible Rayman 2
+edition. Future editions require their own verified layouts. No game
+executables or DRM modules from the old Lutris patch are redistributed.
+
+## CD inspection evidence (2026-11-09)
+
+With the previous 23-long-name filter, the user's ISO was reported as
+`RAYMAN2`, **3,718 file records**, **7,450,158,839 declared bytes**,
+**678,168,576 physical image bytes**, **17 known deletions**
+(`5,150,888,419` declared bytes), and **1 unknown suspect** named
+`DATA/WORLD/LEVELS/GRAPHI~3.DAT` (`LBA=200578`,
+`437,458,886` declared bytes). The remaining five short-name aliases
+likely account for much of the original excess nominal size. Their
+exact presence and sizes **must be confirmed by another inspection**;
+the ISO itself has not been uploaded.
+
+The parser now logs all ignored paths and leaves any unrecognized suspect
+files visible for inspection but blocks extraction if they remain.
 
 ## Adaptation roadmap for the new Rayman2Fix
 
