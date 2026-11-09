@@ -6,6 +6,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include "rayman2fix/fov_math.hpp"
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -65,23 +66,11 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // as 4:3 -> the actual monitor aspect. Never modify 4:3 camera state.
     if (camera && g_aspect > 1.334f) {
         auto* bytes = static_cast<unsigned char*>(camera);
-        float horizontal = 0.0f;
         float vertical = 0.0f;
-        std::memcpy(&horizontal, bytes + kAlphaXOffset, sizeof(horizontal));
         std::memcpy(&vertical, bytes + kAlphaYOffset, sizeof(vertical));
-        // The game's original xAlphaY is scaled by the reference ratio
-        // of 0.75 (height/width). Reconstruct the 4:3 horizontal FOV
-        // before transforming to the current output aspect.
-        constexpr float reference_aspect = 4.0f / 3.0f;
-        const float baseline = vertical / 0.75f;
-        if (valid_angle(vertical) && valid_angle(baseline) &&
-            valid_angle(horizontal)) {
-            const float expanded = 2.0f * std::atan(
-                std::tan(baseline * 0.5f) * (g_aspect / reference_aspect));
-            if (valid_angle(expanded)) {
-                std::memcpy(bytes + kAlphaXOffset, &expanded, sizeof(expanded));
-            }
-        }
+        const float expanded = r2fix::hor_plus_fov(vertical, g_aspect);
+        if (valid_angle(expanded))
+            std::memcpy(bytes + kAlphaXOffset, &expanded, sizeof(expanded));
     }
     g_original(device, viewport, camera);
 }
