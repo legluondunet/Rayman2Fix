@@ -5,6 +5,8 @@
 #include <cctype>
 #include <sstream>
 #include <ctime>
+#include <array>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 
@@ -48,10 +50,84 @@ Startup::Startup(const fs::path& executable) {
     log_path_ = root_ / "Rayman2Fix.log";
 }
 
+#ifdef _WIN32
+namespace {
+
+// The Windows launcher stores its own, currently inert x86 DLL as resource
+// 1101 (RCDATA). Generate it when absent, and preserve any pre-existing,
+// unrecognized runtime in a numbered backup when a later build changes it.
+void ensure_embedded_runtime(const fs::path& directory) {
+    const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1101),
+                                        MAKEINTRESOURCEW(10)); // RT_RCDATA
+    if (!resource) throw std::runtime_error("Rayman2Fix.exe is missing bundled runtime DLL");
+    const DWORD length = SizeofResource(nullptr, resource);
+    const HGLOBAL loaded = LoadResource(nullptr, resource);
+    const auto* bytes = loaded ?
+        static_cast<const unsigned char*>(LockResource(loaded)) : nullptr;
+    if (!bytes || !length)
+        throw std::runtime_error("bundled Rayman2Fix.dll is empty or unreadable");
+
+    const auto dest = directory / "Rayman2Fix.dll";
+    if (fs::is_symlink(dest))
+        throw std::runtime_error("refusing a symlink at runtime DLL destination");
+    bool identical = fs::is_regular_file(dest) && fs::file_size(dest) == length;
+    if (identical) {
+        std::ifstream old(dest, std::ios::binary);
+        std::array<char, 4096> block{};
+        std::size_t offset = 0;
+        while (offset < length && old) {
+            const std::size_t n = std::min<std::size_t>(block.size(), length - offset);
+            old.read(block.data(), static_cast<std::streamsize>(n));
+            if (!old || std::memcmp(block.data(), bytes + offset, n) != 0) {
+                identical = false;
+                break;
+            }
+            offset += n;
+        }
+    }
+    if (identical) return;
+
+    const auto temporary = directory / "Rayman2Fix.dll.installing";
+    if (fs::exists(temporary))
+        throw std::runtime_error("old runtime staging file exists; refusing overwrite");
+    {
+        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+        if (!out) throw std::runtime_error("cannot create bundled runtime DLL");
+        out.write(reinterpret_cast<const char*>(bytes),
+                  static_cast<std::streamsize>(length));
+        if (!out) throw std::runtime_error("error writing bundled runtime DLL");
+    }
+    fs::permissions(temporary, fs::perms::owner_write, fs::perm_options::add);
+
+    fs::path backup;
+    if (fs::exists(dest)) {
+        for (unsigned i = 1; i <= 1000; ++i) {
+            auto candidate = directory / ("Rayman2Fix.dll.backup." + std::to_string(i));
+            if (!fs::exists(candidate)) { backup = std::move(candidate); break; }
+        }
+        if (backup.empty())
+            throw std::runtime_error("too many prior DLL backups; refusing overwrite");
+        fs::rename(dest, backup);
+    }
+    try {
+        fs::rename(temporary, dest);
+    } catch (...) {
+        std::error_code ignored;
+        if (!backup.empty()) fs::rename(backup, dest, ignored);
+        fs::remove(temporary, ignored);
+        throw;
+    }
+}
+} // namespace
+#endif
+
 void Startup::initialize() {
     if (fs::exists(game_dir_) && !fs::is_directory(game_dir_))
         throw std::runtime_error("Rayman2Fix installation path is not a directory");
     fs::create_directories(game_dir_);
+#ifdef _WIN32
+    ensure_embedded_runtime(game_dir_);
+#endif
 
     // Existing settings belong to the user. No silent regeneration, and no
     // claim that currently unimplemented options actually change the game.
