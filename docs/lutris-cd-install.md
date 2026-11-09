@@ -129,22 +129,23 @@ author's CD script, not a universal claim about every possible Rayman 2
 edition. Future editions require their own verified layouts. No game
 executables or DRM modules from the old Lutris patch are redistributed.
 
-## Additional Rayman2Fix exclusions: obsolete CD-protection auxiliaries
+## Additional Rayman2Fix exclusions: six exact CD root files
 
-Beyond the existing Lutris list, the user confirmed that Rayman2Fix must
-**not install** the three root-level files `00000001.tmp`,
-`0000040c.016` and `0000040c.256`. These ancillary files are
-associated with the old disc-protection startup; their necessity has not
-been tested against the still-unmodified retail executable. The project's
-future runtime targets independent no-CD compatibility rather than invoking
-the original protection software.
+Beyond the historical Lutris list, the project owner explicitly excludes
+these files from the `RAYMAN2` installation:
 
-The exclusion is **exact path and only for the `RAYMAN2` volume**. Other
-files matching the same extensions, names under `data/`, or other discs
-are not removed. Existing installs migrate automatically: verify all
-retained files by SHA-256, update the local receipt, then remove the three
-root files without re-extracting the disc. If any other installed game file
-fails verification, no cleanup is attempted.
+- `00000001.tmp`, `0000040c.016`, `0000040c.256`, identified as
+  old SafeDisc-era auxiliary data.
+- `secdrv.sys`, `rayman2.icd`, `dxplayerx.dll`, newly requested as
+  installation exclusions. Their precise roles are not inferred.
+
+The exclusion is **exact root path, only for the `RAYMAN2` volume**.
+It never removes unrelated extensions, files with the same name in
+`data/`, or content on other volumes. Existing installations migrate
+automatically: validate all retained files against the saved SHA-256
+receipt, remove the six root-only entries from the receipt, and delete
+those precise files without re-extracting the CD. If unrelated files
+fail verification, no cleanup is attempted.
 
 ## CD inspection evidence (2026-11-09)
 
