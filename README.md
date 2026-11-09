@@ -34,17 +34,16 @@ has been removed.
   the `Rayman2Fix/` directory and minimal INI automatically.
 
 **Important:** a SHA-256 receipt generated from the same CD verifies subsequent
-file integrity, but does not authenticate the original retail edition. Starting the game after successful installation
-is still **blocked** until the actual no-CD, GameFrame, SDL3 and exact
-retail executable compatibility work is finished.
+file integrity, but does not authenticate the original retail edition. Starting the game is still **blocked** until the original retail EXE and
+no-CD compatibility are validated. **GameFrame Glide2x is now bundled**;
+SDL3/gamepad integration is deliberately deferred to a later phase.
 
 The planned native `Rayman2Fix.dll` will handle validated per-executable
 memory fixes, display and FOV/HUD behavior, window focus and graphics settings.
-GameFrame's open-source Glide backend will provide borderless fullscreen,
-and SDL3 will provide modern gamepad input and hotplug support.
-
-The automatic CD-file installer is now implemented. The actual renderer,
-input integration, no-CD behavior and in-game fixes remain **planned**.
+GameFrame's Apache-2.0 Glide 2.x OpenGL wrapper is now embedded and
+automatically installed as `glide2x.dll`. Actual Rayman 2 renderer behavior,
+borderless fullscreen, input and in-game fixes are **not yet validated**.
+SDL3 will be considered in a separate phase and is not required at startup.
 
 ## Installed-file layout
 
@@ -69,13 +68,16 @@ Rayman2Fix/
         ...
     data/ ...                  (original CD assets)
     .rayman2fix-cd-files.tsv   (local size + SHA-256 receipt)
-    glide2x.dll                (GameFrame: planned, not yet integrated)
-    SDL3.dll                   (SDL3: planned, not yet integrated)
+    glide2x.dll                (GameFrame x86: deployed from launcher)
+    GameFrame-LICENSE-APACHE.txt (Apache 2.0 license: deployed from launcher)
+    SDL3.dll                   (future phase: not bundled or required)
 ```
 
-The correct Glide 2 filename is **`glide2x.dll`**. The **INI, log,
-CD game files, GameFrame and SDL3 are never shipped** in bootstrap artifacts.
-Only the project's own inert runtime DLL is embedded and unpacked automatically.
+The correct Glide 2 filename is **`glide2x.dll`**, not `glide2.dll`.
+The launcher embeds the **pinned GameFrame x86 Glide DLL**, its Apache 2.0
+license, and the project's own inert runtime DLL. It generates the INI and
+log itself. There is still **only one file** in the Windows workflow artifact:
+`Rayman2Fix.exe`. SDL3 and copyrighted game files are never bundled.
 
 The only currently supported option in `Rayman2Fix.ini` is:
 
@@ -148,8 +150,9 @@ not use DiscContent**: it publishes the staged assets directly under
 the retail executable. `--verify` checks installed file presence, sizes and SHA-256,
 but is not a trusted retail-edition allowlist/profile check.
 
-The runtime remains deliberately gated: a successful CD extraction is
-**not** a playable Windows/Wine game installation.
+GameFrame integration means the correct open-source graphics DLL is installed
+and SHA-256-verified; it does **not** prove that Rayman 2 can render with it.
+The retail executable/no-CD launch gate remains deliberately active.
 
 ## Original executable and patch backup
 
@@ -175,10 +178,11 @@ A patch generator and strict R2FXP01 binary-delta interpreter are included:
   **backup**, and the patch target hash against the installed EXE. An existing
   backup is *never* silently overwritten; a failed replacement rolls back.
 
-**No patch is applied and no `.bak` is created until the source CD version
-has been matched and a verified delta is bundled.** A file-size receipt or a
-volume label alone cannot establish that an EXE is safe to patch. Game
-launch remains disabled until further no-CD, GameFrame and SDL3 testing.
+**No EXE patch is applied and no `rayman2.exe.bak` is created until the
+source CD version has been matched and a verified delta is bundled.** A
+file-size receipt or volume label cannot establish a safe patch target.
+Game launch still requires no-CD and actual Glide renderer validation;
+SDL3 is explicitly out of scope for this stage.
 
 ## Build
 
@@ -190,11 +194,19 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The Windows build produces `Rayman2Fix.exe` containing its own **inert**
-`Rayman2Fix.dll` skeleton as an embedded resource; no game hooks or
-SDL3/GameFrame integration yet. Linux and Windows CI run synthetic CD
-installation/verification tests. GitHub Actions packages only the Windows
-x86 EXE with **30-day** artifact retention.
+CI checks out a fixed GameFrame upstream revision
+(`f195a074a63cc150673c38becdec696163b0b3d1`), compiles the 32-bit
+`glide2x.dll` in Rust/MSVC and checks its 156 canonical Glide exports.
+CMake embeds it in `Rayman2Fix.exe` together with its Apache license,
+and the executable verifies the SHA-256 of the installed DLL on every start.
+If a different `glide2x.dll` exists, the launcher saves it as
+`glide2x.dll.bak` (or the next unused numbered backup) before installing
+the pinned DLL. No pre-existing backup is overwritten.
+
+Linux and Windows CI run synthetic CD installation/verification tests.
+GitHub Actions ships **only the Windows x86 EXE**, with **30-day** artifact
+retention. Windows tests additionally compare the compiled DLL to the
+unpacked copy byte-for-byte, and exercise the upgrade/backup path.
 
 ## Architecture and evidence
 
