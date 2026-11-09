@@ -1,5 +1,6 @@
 #include "rayman2fix/auto_flow.hpp"
 #include "rayman2fix/disc.hpp"
+#include "rayman2fix/display.hpp"
 #include "rayman2fix/extraction_console.hpp"
 #include "rayman2fix/startup.hpp"
 
@@ -110,6 +111,7 @@ static int run(const std::string& command, const fs::path& disc,
 
 static int cli(int argc, const fs::path* args) {
     try {
+        r2fix::configure_launcher_dpi_awareness();
         r2fix::Startup startup(r2fix::Startup::executable_path(args[0]));
         startup.initialize();
         r2fix::log_system_inventory(startup);
