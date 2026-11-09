@@ -1,5 +1,6 @@
 #include "rayman2fix/auto_flow.hpp"
 #include "rayman2fix/disc.hpp"
+#include "rayman2fix/sha256.hpp"
 #include "rayman2fix/startup.hpp"
 
 #include <algorithm>
@@ -18,7 +19,7 @@ namespace fs = std::filesystem;
 namespace r2fix {
 namespace {
 constexpr const char* kReceipt = ".rayman2fix-cd-files.tsv";
-constexpr const char* kReceiptHeader = "RAYMAN2FIX-CD-FILES\t1";
+constexpr const char* kReceiptHeader = "RAYMAN2FIX-CD-FILES\t2";
 
 std::string upper(std::string s) {
     for (auto& c : s)
@@ -73,8 +74,9 @@ std::vector<fs::path> find_disc_candidates(const fs::path& root) {
     return candidates;
 }
 
-// Manifest generated from an observed CD image. It is a local file-size
-// verification receipt, NOT an authenticated edition/hash profile.
+// Manifest generated from the user's CD. Each installed file is SHA-256
+// hashed for later integrity checks; this is NOT a trusted retail-edition
+// manifest because the hash baseline is generated from the same unverified CD.
 void write_receipt(const fs::path& staged, const DiscInfo& info) {
     const auto receipt = staged / kReceipt;
     if (fs::exists(receipt))
@@ -91,7 +93,11 @@ void write_receipt(const fs::path& staged, const DiscInfo& info) {
             name.find('\n') != std::string::npos ||
             !safe_relative(file.relative_path))
             throw std::runtime_error("unsafe file name in CD receipt");
-        out << "FILE\t" << file.size_bytes << '\t' << name << '\n';
+        const fs::path installed = staged / file.relative_path;
+        if (!exists_file(installed) || fs::file_size(installed) != file.size_bytes)
+            throw std::runtime_error("CD file size mismatch while writing receipt");
+        const auto digest = sha256_file(installed);
+        out << "FILE\t" << file.size_bytes << '\t' << digest << '\t' << name << '\n';
         ++count;
     }
     if (!count || !out)
@@ -143,6 +149,16 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
         }
         const auto split = line.find('\t', 5);
         if (split == std::string::npos) return false;
+        const auto hash_end = line.find('\t', split + 1);
+        if (hash_end == std::string::npos) return false;
+        const auto expected_hash = line.substr(split + 1, hash_end - split - 1);
+        if (expected_hash.size() != 64 ||
+            !std::all_of(expected_hash.begin(), expected_hash.end(),
+                [](unsigned char c) {
+                    return (c >= '0' && c <= '9') ||
+                           (c >= 'a' && c <= 'f');
+                }))
+            return false;
         std::uint64_t expected = 0;
         try {
             const auto size_text = line.substr(5, split - 5);
@@ -151,7 +167,7 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
                 return false;
             expected = std::stoull(size_text);
         } catch (...) { return false; }
-        const fs::path relative = fs::u8path(line.substr(split + 1));
+        const fs::path relative = fs::u8path(line.substr(hash_end + 1));
         if (!safe_relative(relative) || count >= 50000)
             return false;
         const fs::path file = root / relative;
@@ -159,6 +175,11 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
             startup.log("VERIFY: missing or size-mismatched game file=" +
                         relative.generic_u8string());
             std::cerr << "Game file missing or modified: " << relative.u8string() << '\n';
+            return false;
+        }
+        if (sha256_file(file) != expected_hash) {
+            startup.log("VERIFY: SHA256 mismatch file=" + relative.generic_u8string());
+            std::cerr << "Game file SHA256 mismatch: " << relative.u8string() << '\n';
             return false;
         }
         exe_listed |= relative.generic_u8string() == "rayman2.exe";
@@ -173,8 +194,9 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
         startup.log("VERIFY: missing core executable/audio assets");
         return false;
     }
-    startup.log("VERIFY: local CD receipt sizes OK files=" + std::to_string(count) +
-                " (NOT cryptographic authentication of game edition)");
+    startup.log("VERIFY: local CD receipt size+SHA256 OK files=" +
+                std::to_string(count) +
+                " (local integrity only; NOT authenticated edition hashes)");
     return true;
 }
 
@@ -330,7 +352,7 @@ int run_automatic(Startup& startup) {
             throw;
         }
         startup.log("AUTO-INSTALL: CD files staged and committed to Rayman2Fix/ "
-                    "with snd_cpa.ini and local size receipt; game not certified playable");
+                    "with snd_cpa.ini and local SHA256 receipt; game not certified playable");
         std::cout << "Original CD files installed into Rayman2Fix/.\n";
         if (verify_installation(startup) != 0) return 2;
         return report_runtime_status(root, startup);
