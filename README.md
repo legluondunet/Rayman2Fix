@@ -65,6 +65,19 @@ The initial Windows x86 executable can inspect and safely extract **ISO 9660**
 images (2048-byte sectors) and **CUE/BIN with one MODE1/2352 or MODE1/2048 data
 track**. ISO 9660 boot descriptors are handled. Audio tracks are not extracted.
 
+**Filename handling:** the inspector searches for a **Joliet supplementary
+volume descriptor** and uses its real UCS-2 long filenames instead of the
+8.3 names in the ISO 9660 primary tree. All extracted files **and directory
+components are lowercased**, including accented Unicode letters, and are
+marked writable (no Windows read-only attribute). Case-variant directories,
+such as `DLL` and `Dll`, share a single lowercase `dll/` output directory.
+Conflicting duplicate files at the same lowercase destination are refused
+rather than silently overwritten.
+
+If the CD has **no Joliet tree**, the inspector clearly reports that it
+only has primary ISO 9660 names and that original long names may be
+unavailable. No invented name mapping is applied to necessary game files.
+
 On a disc whose volume label is exactly `RAYMAN2`, we recognize **23 exact
 `Data/World/Levels/*.DAT` paths** discarded by the author's original
 [Lutris CD installation script](https://lutris.net/games/install/39141/view).
