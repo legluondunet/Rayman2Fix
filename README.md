@@ -1,20 +1,80 @@
 # Rayman2Fix
 
-A clean-room compatibility project for **Rayman 2: The Great Escape (PC CD editions)**.
+**A new, independent compatibility project for Rayman 2: The Great Escape (PC CD editions).**
 
-> Early development. No retail disc edition is claimed compatible yet.
+Rayman2Fix is being developed **from scratch**. It is **not a fork** of
+Ray2Fix and does not contain code copied from that project.
 
-## Direction
+> **Development status: bootstrap only.** No retail edition is recognized as
+> playable and the game cannot yet be launched through Rayman2Fix.
 
-- One `Rayman2Fix.exe` for offline CD-image inspection, safe extraction, installation verification and launch.
-- A separate native 32-bit `Rayman2Fix.dll` for version-specific in-memory fixes, display and input integration.
-- Open-source GameFrame Glide as the planned 3D renderer (borderless fullscreen, no exclusive mode switches).
-- SDL3 as the planned universal controller layer, with keyboard fallback.
-- Only patch **known executable builds**; never apply unverified offsets.
-- No game data, copyrighted binaries, disc images, keys or DRM replacements are distributed.
+## Planned experience
 
-This repository deliberately starts **from scratch**: it does **not** incorporate source from Ray2Fix. Its name and architecture are independent.
+Place a supported original CD image beside `Rayman2Fix.exe`.
+The final single-file launcher will detect the image, extract and verify
+its contents, install the game into `Rayman2Fix/`, install the fix components,
+and run the game. On later runs it will verify the existing installation.
 
-Development proceeds through reviewable pull requests. See the first architecture PR for initial code, tests, and the release acceptance criteria.
+The planned native `Rayman2Fix.dll` will handle validated per-executable
+memory fixes, display and FOV/HUD behavior, window focus and graphics settings.
+GameFrame's open-source Glide backend will provide borderless fullscreen,
+and SDL3 will provide modern gamepad input and hotplug support.
+
+These renderer, input, installer and in-game features are **planned, not yet
+implemented**.
+
+## Available now (PR #1)
+
+The initial Windows x86 executable can inspect and safely extract **ISO 9660**
+images (2048-byte sectors) and **CUE/BIN with one MODE1/2352 or MODE1/2048 data
+track**. ISO 9660 boot descriptors are handled. Audio tracks are not extracted.
+
+```text
+Rayman2Fix.exe --inspect "my-disc.iso"
+Rayman2Fix.exe --inspect "my-disc.cue"
+Rayman2Fix.exe --extract "my-disc.cue"
+Rayman2Fix.exe --extract "my-disc.iso" "custom-output-folder"
+Rayman2Fix.exe --help
+```
+
+The default extraction output is `Rayman2Fix/DiscContent/`.
+Extraction uses a staging directory and **refuses to overwrite** an existing
+destination. It does not run disc installers or modify game executables.
+
+Commands `--install`, `--launch` and `--verify` refuse for now:
+we first need known-good real CD edition profiles and executable SHA-256 values.
+Do not confuse successful data extraction with a playable installation.
+
+## Build
+
+The source uses C++17 and CMake. On Windows, build in 32-bit mode:
+
+```powershell
+cmake -S . -B build -A Win32 -DBUILD_TESTING=ON
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+The Windows build produces `Rayman2Fix.exe` and an **inert**
+`Rayman2Fix.dll` skeleton (no game hooks or SDL3/GameFrame integration yet).
+
+Linux CI builds the disc tool and runs the same synthetic-data tests.
+GitHub Actions packages the Windows x86 bootstrap binaries with **30-day**
+artifact retention.
+
+## Architecture and evidence
+
+- [Design and roadmap](docs/architecture.md)
+- [How to document retail disc editions](docs/disc-evidence.md)
+- [Bootstrap test protocol](docs/testing.md)
+
+No copyrighted Rayman 2 content, proprietary executables, disc images,
+activation keys or protection-removal payloads are stored or distributed here.
+Some CD executables use obsolete SafeDisc protection; compatibility must be
+verified separately from ISO extraction. Support will be claimed only after
+testing the corresponding edition on Windows and Wine/Proton.
+
+Rayman2Fix's own project license is **to be selected before release**.
+Third-party components will retain their respective notices and licenses.
 
 Prepared by legluondunet, assisted by ChatGPT (OpenAI).
