@@ -201,6 +201,10 @@ if(BUILD_TESTING)
   target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME widescreen-hor-plus-math COMMAND fov_math_tests)
 
+  add_executable(hud_math_tests tests/hud_math_tests.cpp)
+  target_include_directories(hud_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME centered-hud-4-by-3-math COMMAND hud_math_tests)
+
   if(WIN32)
     # Harmless child executable for a Win32 CreateProcessW smoke test. This
     # checks spaces in paths and explicit game working directory, without

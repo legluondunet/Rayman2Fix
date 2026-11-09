@@ -7,6 +7,8 @@
 #define NOMINMAX
 #include <windows.h>
 #include "rayman2fix/fov_math.hpp"
+#include "rayman2fix/hud_math.hpp"
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -30,6 +32,10 @@ CameraAdjust g_original = nullptr;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
 bool g_log = false;
+float g_hud_scale = 1.0f;
+std::atomic<void*> g_plain_sprite_original{nullptr};
+std::atomic<void*> g_uv_sprite_original{nullptr};
+volatile LONG g_hud_worker_started = 0;
 
 struct RuntimeOptions {
     DWORD size;
@@ -128,13 +134,137 @@ DWORD install_camera_hook() {
     log_line("RUNTIME-FOV: Hor+ camera detour installed on approved Rayman 2 executable");
     return 1;
 }
+
+// Two game-side GLI driver callback slots, verified only for the SHA256-locked
+// retail executable supported by this project. Unlike a Glide-wide heuristic,
+// these callbacks are used for sprites, not every 3D triangle. The additional
+// xOoZ=1 check preserves perspective-projected world sprites.
+constexpr uintptr_t kPlainSpriteSlotRva = 0x104530; // VA 0x504530
+constexpr uintptr_t kUvSpriteSlotRva = 0x104524;    // VA 0x504524
+constexpr float kInternalGlideWidth = 1024.0f;
+using PlainSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float, void*);
+using UvSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float*, float, void*);
+
+void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
+    const auto original = reinterpret_cast<PlainSpriteFn>(
+        g_plain_sprite_original.load(std::memory_order_acquire));
+    if (!original) return;
+    if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
+        original(quad, z, globals);
+        return;
+    }
+    r2fix::HudVertex centered[4];
+    std::memcpy(centered, quad, sizeof(centered));
+    r2fix::center_screen_sprite_quad(centered, kInternalGlideWidth, g_hud_scale);
+    original(centered, z, globals);
+}
+
+void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
+                           float z, void* globals) {
+    const auto original = reinterpret_cast<UvSpriteFn>(
+        g_uv_sprite_original.load(std::memory_order_acquire));
+    if (!original) return;
+    if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
+        original(quad, uv, z, globals);
+        return;
+    }
+    r2fix::HudVertex centered[4];
+    std::memcpy(centered, quad, sizeof(centered));
+    r2fix::center_screen_sprite_quad(centered, kInternalGlideWidth, g_hud_scale);
+    original(centered, uv, z, globals);
+}
+
+bool executable_callback(const void* address) {
+    MEMORY_BASIC_INFORMATION info{};
+    if (!address || !VirtualQuery(address, &info, sizeof(info)) ||
+        info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD))
+        return false;
+    const DWORD protection = info.Protect & 0xff;
+    return protection == PAGE_EXECUTE ||
+           protection == PAGE_EXECUTE_READ ||
+           protection == PAGE_EXECUTE_READWRITE ||
+           protection == PAGE_EXECUTE_WRITECOPY;
+}
+
+bool writable_callback_slot(const void* slot) {
+    MEMORY_BASIC_INFORMATION info{};
+    if (!slot || !VirtualQuery(slot, &info, sizeof(info)) ||
+        info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD))
+        return false;
+    const DWORD protection = info.Protect & 0xff;
+    return protection == PAGE_READWRITE ||
+           protection == PAGE_WRITECOPY ||
+           protection == PAGE_EXECUTE_READWRITE ||
+           protection == PAGE_EXECUTE_WRITECOPY;
+}
+
+void install_callback(void* volatile* slot, void* replacement,
+                      std::atomic<void*>& original, const char* message,
+                      bool& logged) {
+    if (!writable_callback_slot(slot)) return;
+    void* current = InterlockedCompareExchangePointer(slot, nullptr, nullptr);
+    if (!current || current == replacement || !executable_callback(current))
+        return;
+    original.store(current, std::memory_order_release);
+    if (InterlockedCompareExchangePointer(slot, replacement, current) == current &&
+        !logged) {
+        logged = true;
+        log_line(message);
+    }
+}
+
+DWORD WINAPI monitor_hud_callbacks(void*) {
+    auto* module = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if (!module) return 0;
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+    const auto* pe = reinterpret_cast<const IMAGE_NT_HEADERS32*>(module + dos->e_lfanew);
+    if (pe->Signature != IMAGE_NT_SIGNATURE ||
+        pe->OptionalHeader.SizeOfImage < kPlainSpriteSlotRva + sizeof(void*)) {
+        log_line("RUNTIME-HUD: callback slots outside approved executable image");
+        return 0;
+    }
+    // The renderer initializes these callbacks after the early DLL injection.
+    // Keep them patched if the game later recreates its Glide driver.
+    auto* plain = reinterpret_cast<void* volatile*>(
+        const_cast<BYTE*>(module + kPlainSpriteSlotRva));
+    auto* uv = reinterpret_cast<void* volatile*>(
+        const_cast<BYTE*>(module + kUvSpriteSlotRva));
+    bool plain_logged = false;
+    bool uv_logged = false;
+    for (;;) {
+        install_callback(plain, reinterpret_cast<void*>(&hud_plain_sprite),
+                         g_plain_sprite_original,
+                         "RUNTIME-HUD: centered 4:3 screen-space sprites enabled",
+                         plain_logged);
+        install_callback(uv, reinterpret_cast<void*>(&hud_uv_sprite),
+                         g_uv_sprite_original,
+                         "RUNTIME-HUD: centered 4:3 UV sprites enabled",
+                         uv_logged);
+        Sleep(500);
+    }
+}
+
+void start_hud_monitor() {
+    if (g_hud_scale >= 1.0f ||
+        InterlockedCompareExchange(&g_hud_worker_started, 1, 0) != 0)
+        return;
+    HANDLE thread = CreateThread(nullptr, 0, monitor_hud_callbacks,
+                                 nullptr, 0, nullptr);
+    if (!thread) {
+        InterlockedExchange(&g_hud_worker_started, 0);
+        log_line("RUNTIME-HUD: could not create callback monitor thread");
+        return;
+    }
+    CloseHandle(thread);
+}
 } // namespace
 
 extern "C" __declspec(dllexport) unsigned int __cdecl Rayman2Fix_RuntimeApiVersion() {
     return 2;
 }
 extern "C" __declspec(dllexport) const char* __cdecl Rayman2Fix_RuntimeStatus() {
-    return "Rayman2Fix x86 experimental Hor+ camera runtime";
+    return "Rayman2Fix x86 Hor+ camera and centered 4:3 HUD runtime";
 }
 
 // Called on a separate thread after LoadLibrary, NEVER in DllMain.
@@ -153,9 +283,14 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
                          static_cast<float>(settings->output_height);
     if (!std::isfinite(aspect) || aspect <= 0.1f || aspect > 10.0f) return 5;
     g_aspect = aspect;
+    g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
+                                      settings->output_height);
     g_log = settings->logging != 0;
     if (aspect <= 1.334f) return 2;
-    return install_camera_hook();
+    const DWORD camera_status = install_camera_hook();
+    // Unknown/unsupported game versions never receive either set of hooks.
+    if (camera_status == 1) start_hud_monitor();
+    return camera_status;
 }
 
 BOOL APIENTRY DllMain(HMODULE, DWORD, LPVOID) {
