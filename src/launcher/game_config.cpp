@@ -1,5 +1,6 @@
 #include "rayman2fix/game_config.hpp"
 #include "rayman2fix/startup.hpp"
+#include "rayman2fix/display.hpp"
 
 #include <algorithm>
 #include <array>
@@ -79,8 +80,9 @@ std::pair<std::uint32_t,std::uint32_t> resolution(const std::string& setting) {
     const auto value = upper(trim(setting));
     if (value == "DESKTOP" || value == "AUTO") {
 #ifdef _WIN32
-        const int w = GetSystemMetrics(SM_CXSCREEN);
-        const int h = GetSystemMetrics(SM_CYSCREEN);
+        const auto display = primary_display_metrics();
+        const int w = static_cast<int>(display.width);
+        const int h = static_cast<int>(display.height);
         if (w <= 0 || h <= 0)
             throw std::runtime_error("cannot detect primary desktop resolution");
         return {static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h)};
@@ -123,7 +125,9 @@ std::string generated_ubi(const std::vector<std::string>& original,
         "GLI_Dll=Glide2",
         "GLI_Driver=",
         "GLI_Device=",
-        "GLI_Mode=1 - " + std::to_string(w) + " x " + std::to_string(h) + " x 16"
+        // Rayman 2/Glide only supports the original 4:3 internal modes;
+        // desktop dimensions are applied by GameFrame via GLIDE_SIZE.
+        "GLI_Mode=1 - 1024 x 768 x 16"
     }};
     std::vector<std::string> out;
     std::string current;
@@ -204,16 +208,21 @@ void atomically_install(const fs::path& output, const std::string& bytes) {
 }
 } // namespace
 
+std::pair<std::uint32_t, std::uint32_t> configured_output_resolution(
+    const fs::path& ini) {
+    return resolution(read_resolution_setting(ini));
+}
+
 void synchronize_rayman2_ubi_ini(const fs::path& game_dir, Startup& startup) {
-    const auto setting = read_resolution_setting(startup.ini_path());
-    const auto [w,h] = resolution(setting);
+    const auto [w,h] = configured_output_resolution(startup.ini_path());
     const fs::path target = game_dir / "ubi.ini";
     const auto original = fs::exists(target) ? lines_of(target) :
                                                std::vector<std::string>{};
     const auto updated = generated_ubi(original, w, h);
     atomically_install(target, updated);
     startup.log("CONFIG-UBI: managed from Rayman2Fix.ini, renderer=Glide2"
-                " adapter=GliVd1 mode=" + std::to_string(w) + "x" +
-                std::to_string(h) + "x16 (game-facing ubi.ini)");
+                " adapter=GliVd1 internal=1024x768x16 output=" +
+                std::to_string(w) + "x" + std::to_string(h) +
+                " (GameFrame GLIDE_SIZE, game-facing ubi.ini)");
 }
 } // namespace r2fix
