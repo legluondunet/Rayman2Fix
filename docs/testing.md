@@ -56,6 +56,17 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - Validate `--verify` on installed CD files. It checks **size and SHA-256** against
   a locally generated receipt, but source-edition authentication and
   no-CD/Glide compatibility are not yet certified.
+- Check that the generated `Rayman2Fix.ini` contains
+  `[Graphics] FPSLimit=60`. Older user INIs without this entry must still
+  default to 60. Changing to `FPSLimit=75` must pass that value to
+  GameFrame's child-only `RAYMAN2FIX_FPS_LIMIT` environment variable; the
+  launcher environment must be restored immediately after process creation.
+  `FPSLimit=0` disables pacing. Valid values are 0 or 15..240;
+  invalid strings and out-of-range values must fail safely.
+- Verify the temporary pinned GameFrame checkout applies
+  `tools/gameframe/apply_fps_limit.py` before the Rust build and that the
+  limiter is attached to `grBufferSwap` **on the producer/game thread**,
+  not only the asynchronous GL swap thread.
 - Test an exe-only copy of the workflow artifact: verify its own
   `Rayman2Fix.dll` and pinned GameFrame `glide2x.dll` SHA-256 match the
   original build outputs. Verify the extracted Apache license is identical
@@ -94,7 +105,10 @@ and `rayman2.exe` hashes to
 Run `WINEDEBUG=-all wine Rayman2Fix.exe` (or `Rayman2Fix.exe` on Windows).
 This build should now attempt to spawn `rayman2.exe` in its own directory
 and **wait until the game process exits**. Observe any window/dialog, intro,
-menu, graphics (Glide), sound and keyboard navigation. Record the console
+menu, graphics (Glide), sound and keyboard navigation. To check the FPS
+cap, run the game at `FPSLimit=60`, then `FPSLimit=30` and `FPSLimit=0`
+for a brief comparison using an external FPS overlay. Confirm that the
+gameplay speed does not change and that Wine Alt+Tab is still responsive. Record the console
 output and `Rayman2Fix.log` (look for `LAUNCH-READY`,
 `LAUNCH-START`, `LAUNCH-EXIT`, or `LAUNCH-ERROR`).
 A nonzero exit code may indicate a game crash or a missing runtime component.
