@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,8 @@ struct DiscEntry {
 struct DiscInfo {
     std::string volume_id;
     std::string format;
+    std::string filename_source; // Joliet UCS-2 long names, or ISO9660 primary fallback
+    std::size_t merged_directory_aliases = 0; // Same lowercase directory target, distinct source entries
     std::vector<DiscEntry> files;
     std::uint64_t total_bytes = 0; // All ISO directory declarations, including skipped entries
     std::uint64_t extract_bytes = 0; // Planned output size after exact legacy exclusions
@@ -45,6 +48,8 @@ private:
     std::uint64_t track_start_ = 0;
     std::uint32_t sector_bytes_ = 2048;
     std::uint32_t user_data_offset_ = 0;
+    bool joliet_ = false;
+    std::set<std::filesystem::path> output_file_paths_;
     DiscInfo info_;
 
     void validate_extent(std::uint32_t lba, std::uint32_t bytes) const;
