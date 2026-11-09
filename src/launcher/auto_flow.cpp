@@ -4,6 +4,7 @@
 #include "rayman2fix/sha256.hpp"
 #include "rayman2fix/patch_install.hpp"
 #include "rayman2fix/exe_patch.hpp"
+#include "rayman2fix/gameframe.hpp"
 #include "rayman2fix/startup.hpp"
 
 #include <algorithm>
@@ -44,6 +45,23 @@ bool safe_relative(const fs::path& relative) {
 }
 bool exists_file(const fs::path& file) {
     return fs::is_regular_file(file) && !fs::is_symlink(file);
+}
+bool gameframe_bundle_file(const std::string& filename) {
+    if (filename == "GLIDE2X.DLL" ||
+        filename == "GAMEFRAME-LICENSE-APACHE.TXT" ||
+        filename == "GLIDE2X.DLL.BAK" ||
+        filename == "GAMEFRAME-LICENSE-APACHE.TXT.BAK") return true;
+    for (const char* prefix : {"GLIDE2X.DLL.BAK.",
+                                "GAMEFRAME-LICENSE-APACHE.TXT.BAK."}) {
+        const std::string head(prefix);
+        if (filename.rfind(head, 0) == 0 &&
+            filename.size() > head.size() &&
+            std::all_of(filename.begin() + static_cast<std::ptrdiff_t>(head.size()),
+                        filename.end(), [](unsigned char c) {
+                            return c >= '0' && c <= '9';
+                        })) return true;
+    }
+    return false;
 }
 bool runtime_backup_name(const std::string& filename) {
     const std::string prefix = "RAYMAN2FIX.DLL.BACKUP.";
@@ -124,7 +142,7 @@ void check_bootstrap_workspace(const fs::path& game_dir) {
                                      "preserving user data (no overwrite)");
         const auto name = upper(item.path().filename().u8string());
         if (name != "RAYMAN2FIX.INI" && name != "RAYMAN2FIX.DLL" &&
-            !runtime_backup_name(name))
+            !runtime_backup_name(name) && !gameframe_bundle_file(name))
             throw std::runtime_error("existing Rayman2Fix directory contains user files; "
                                      "automatic install refused to avoid overwriting them");
     }
@@ -335,7 +353,7 @@ void copy_bootstrap_files(const fs::path& original, const fs::path& staged) {
     for (const auto& entry : fs::directory_iterator(original)) {
         const auto name = upper(entry.path().filename().u8string());
         if (name != "RAYMAN2FIX.INI" && name != "RAYMAN2FIX.DLL" &&
-            !runtime_backup_name(name))
+            !runtime_backup_name(name) && !gameframe_bundle_file(name))
             continue;
         const auto dest = staged / entry.path().filename();
         if (fs::exists(dest))
@@ -415,19 +433,20 @@ void patch_executable_if_supported(const fs::path& game_root, Startup& startup) 
 }
 
 int report_runtime_status(const fs::path& root, Startup& startup) {
-    // This release has only an inert Rayman2Fix.dll; neither a pinned,
-    // validated retail game executable nor GameFrame/SDL3 is integrated.
-    // Never launch an unpatched SafeDisc executable or claim it is playable.
+    // GameFrame Glide2x is integrated and verified, but the retail game EXE
+    // and its no-CD compatibility still require owner testing. SDL3 is
+    // postponed and is intentionally NOT a prerequisite for game launch.
     std::vector<std::string> missing;
     if (!exists_file(root / "Rayman2Fix.dll")) missing.emplace_back("Rayman2Fix.dll");
-    if (!exists_file(root / "glide2x.dll")) missing.emplace_back("glide2x.dll (GameFrame)");
-    if (!exists_file(root / "SDL3.dll")) missing.emplace_back("SDL3.dll");
+    if (!gameframe_glide_ready(root))
+        missing.emplace_back("glide2x.dll (GameFrame missing/unverified)");
     for (const auto& name : missing)
         startup.log("RUNTIME-MISSING: " + name);
-    startup.log("LAUNCH-BLOCKED: no trusted retail executable hash profile; "
-                "no game hooks/no-CD runtime, GameFrame or SDL3 integration yet");
-    std::cerr << "CD files prepared/checked, but Rayman2Fix cannot launch the game yet: "
-                 "no verified retail executable profile or functional no-CD/Glide runtime.\n";
+    startup.log("LAUNCH-BLOCKED: no trusted retail executable hash profile or "
+                "tested no-CD/game hooks; GameFrame integrated, SDL3 deferred");
+    std::cerr << "CD files prepared/checked; GameFrame Glide2x "
+                 "installed if verified. Game launch is still blocked: "
+                 "retail EXE/no-CD compatibility not validated.\n";
     if (!missing.empty()) {
         std::cerr << "Missing runtime components:";
         for (const auto& name : missing) std::cerr << " " << name << ";";
