@@ -44,10 +44,18 @@ The correct Glide 2 filename is **`glide2x.dll`**. The eventual single-file
 launcher will extract its own runtime payload into `Rayman2Fix/`; the current
 bootstrap artifact provides the own DLL and INI already arranged in that folder.
 
-The launcher writes `Rayman2Fix.log` afresh at each run, collecting a
-privacy-conscious report with OS/Wine/Proton hints, CPU/cores, RAM, GPU,
-displays and controllers. It does not record usernames, full home paths,
-serials or network identifiers.
+The only currently supported option in `Rayman2Fix.ini` is:
+
+```ini
+[Debug]
+Log=1
+```
+
+Do not generate inactive graphics or controller settings. With `Log=1`, the
+launcher resets `Rayman2Fix.log` each run and records a privacy-conscious
+report (OS/Wine/Proton hints, CPU/cores, RAM, GPU, displays and controllers).
+With `Log=0` it suppresses diagnostics and deletes any stale launcher log.
+No usernames, private home paths, serials or network identifiers are logged.
 
 ## Available now (PR #1)
 
@@ -56,7 +64,8 @@ images (2048-byte sectors) and **CUE/BIN with one MODE1/2352 or MODE1/2048 data
 track**. ISO 9660 boot descriptors are handled. Audio tracks are not extracted.
 
 ```text
-Rayman2Fix.exe --init\nRayman2Fix.exe --inspect "my-disc.iso"
+Rayman2Fix.exe --init
+Rayman2Fix.exe --inspect "my-disc.iso"
 Rayman2Fix.exe --inspect "my-disc.cue"
 Rayman2Fix.exe --extract "my-disc.cue"
 Rayman2Fix.exe --extract "my-disc.iso" "custom-output-folder"
