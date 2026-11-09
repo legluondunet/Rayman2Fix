@@ -38,13 +38,21 @@ static int run(const std::string& command, const fs::path& disc,
                 " volume_bytes=" + std::to_string(info.volume_bytes) +
                 " planned_extract_bytes=" + std::to_string(info.extract_bytes) +
                 " lutris_cd_ignored_files=" + std::to_string(info.skipped_files) +
-                " lutris_cd_ignored_bytes=" + std::to_string(info.skipped_bytes));
-    for (const auto& file : info.files)
+                " lutris_cd_ignored_bytes=" + std::to_string(info.skipped_bytes) +
+                " suspect_files=" + std::to_string(info.suspect_files));
+    for (const auto& file : info.files) {
         if (file.skipped_by_cd_recipe)
             startup.log("DISC-OMIT: legacy Rayman 2 CD installer path=" +
                         file.relative_path.generic_string() +
                         " declared_bytes=" + std::to_string(file.size_bytes) +
                         " (not copied; protection status unverified)");
+        else if (file.invalid_extent)
+            startup.log("DISC-SUSPECT: path=" + file.relative_path.generic_string() +
+                        " lba=" + std::to_string(file.extent_lba) +
+                        " declared_bytes=" + std::to_string(file.size_bytes) +
+                        " reason=" + file.invalid_reason +
+                        " (inspect only; extraction refused)");
+    }
     std::cout << "Disc image: " << disc.string() << '\n'
               << "Format: " << info.format << '\n'
               << "ISO volume: " << info.volume_id << '\n'
@@ -57,6 +65,8 @@ static int run(const std::string& command, const fs::path& disc,
               << "Selected extract bytes: " << info.extract_bytes << '\n'
               << "Known CD recipe exclusions: " << info.skipped_files << " files ("
               << info.skipped_bytes << " declared bytes)\n"
+              << "Unknown suspect files: " << info.suspect_files
+              << " (extraction blocked if nonzero)\n"
               << "Edition: UNKNOWN (no trusted executable/hash profile yet)\n";
     if (command == "--extract") {
         image.extract(destination);
@@ -70,7 +80,9 @@ static int run(const std::string& command, const fs::path& disc,
     } else {
         for (const auto& file : info.files)
             std::cout << file.relative_path.string() << " (" << file.size_bytes
-                      << " bytes)" << (file.skipped_by_cd_recipe ? " [SKIP: historical CD recipe]" : "")
+                      << " bytes)"
+                      << (file.skipped_by_cd_recipe ? " [SKIP: historical CD recipe]" :
+                          file.invalid_extent ? " [SUSPECT: invalid extent, extraction blocked]" : "")
                       << '\n';
     }
     return 0;
