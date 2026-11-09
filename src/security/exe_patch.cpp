@@ -85,7 +85,8 @@ std::vector<char> decompress_lz4(const unsigned char* block, std::size_t length,
         p += 2;
         if (!offset || offset > decoded.size()) fail("invalid LZ4 back-reference");
         auto count = add_length(token & 15);
-        if (count > expected - decoded.size() - 4)
+        if (expected - decoded.size() < 4 ||
+            count > expected - decoded.size() - 4)
             fail("LZ4 match overflows expected result");
         count += 4;
         for (std::size_t n = 0; n < count; ++n)
