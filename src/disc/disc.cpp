@@ -400,7 +400,7 @@ void DiscImage::scan_directory(std::uint32_t extent,
     validate_extent(extent, size);
     ancestors.push_back(extent);
     const auto bytes = read_user(extent, 0, size);
-    std::set<std::string> names;
+    std::map<std::string, bool> names; // Lowercase target name -> is directory
     std::size_t pos = 0;
     while (pos < bytes.size()) {
         const auto len = bytes[pos];
@@ -417,13 +417,20 @@ void DiscImage::scan_directory(std::uint32_t extent,
         const auto flags = rec[25];
         if (flags & 0x80) fail("multi-extent ISO files are not implemented");
         if (rec[26] || rec[27]) fail("interleaved ISO file extents are unsupported");
-        const std::string name = decode_name(rec + 33, name_length);
+        const std::string name = decode_name(rec + 33, name_length, joliet_);
         pos += len;
         if (name.empty()) continue;  // dot/dot-dot
-        if (!names.insert(upper(name)).second)
-            fail("case-insensitive filename collision on disc");
-        const fs::path relative = parent / name;
         const bool directory = (flags & 0x02) != 0;
+        const auto result = names.emplace(name, directory);
+        if (!result.second) {
+            if (!directory || !result.first->second)
+                fail("filename collision after lowercase conversion: " +
+                     (parent / fs::u8path(name)).generic_u8string());
+            // Legacy CD installations may contain both DLL/ and Dll/. They
+            // must become one lowercase dll/ directory, not two overwrites.
+            ++info_.merged_directory_aliases;
+        }
+        const fs::path relative = parent / fs::u8path(name);
         // An exact historical exclusion may be unreadable; do not generalize
         // that rule to other files just because their declared sizes are huge.
         const bool skipped = !directory &&
@@ -453,6 +460,9 @@ void DiscImage::scan_directory(std::uint32_t extent,
                     issue = error.what();
                 }
             }
+            if (!skipped && !output_file_paths_.insert(relative).second)
+                fail("duplicate lowercase output file (merge conflict): " +
+                     relative.generic_u8string());
             info_.files.push_back({relative, child_extent, child_size,
                                    skipped, !issue.empty(), issue});
             info_.total_bytes += child_size;
