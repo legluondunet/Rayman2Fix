@@ -71,7 +71,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
       - name: Verify Linux bootstrap workspace
         run: |
-          ./build/Rayman2Fix --init
+          ./build/rayman2fix_cli --init
           test -f build/Rayman2Fix/Rayman2Fix.ini
           test -f build/Rayman2Fix.log
           grep -q 'SYS-INFO: END' build/Rayman2Fix.log
