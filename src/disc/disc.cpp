@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <codecvt>
+#include <locale>
+#include <map>
+#include <cwctype>
 #include <fstream>
 #include <limits>
 #include <set>
@@ -10,6 +14,10 @@
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -56,20 +64,116 @@ bool ends_with_case_insensitive(const fs::path& path, const char* extension) {
     return upper(path.extension().string()) == extension;
 }
 
-std::string decode_name(const unsigned char* p, std::size_t size) {
-    if (size == 1 && (p[0] == 0 || p[0] == 1)) return "";
-    std::string name(reinterpret_cast<const char*>(p), size);
-    const auto semi = name.find(';');
-    if (semi != std::string::npos) name.resize(semi);
-    while (!name.empty() && name.back() == '.') name.pop_back();
-    if (name.empty() || name == "." || name == "..") fail("invalid directory entry name");
-    if (name.size() > 120) fail("unreasonably long ISO 9660 filename");
-    for (const unsigned char c : name) {
-        if (c < 32 || c >= 127 || c == '/' || c == '\\' || c == ':' ||
-            c == '<' || c == '>' || c == '"' || c == '|' || c == '?' || c == '*')
-            fail("unsafe or unsupported ISO 9660 filename");
+// Joliet stores file identifiers as UCS-2 big-endian; the primary
+// ISO 9660 tree often exposes only 8.3 DOS aliases. Prefer the Joliet
+// supplementary tree when available and never fabricate missing long names.
+void append_utf8(std::string& output, std::uint32_t cp) {
+    if (cp <= 0x7f) {
+        output.push_back(static_cast<char>(cp));
+    } else if (cp <= 0x7ff) {
+        output.push_back(static_cast<char>(0xc0 | (cp >> 6)));
+        output.push_back(static_cast<char>(0x80 | (cp & 63)));
+    } else if (cp <= 0xffff) {
+        output.push_back(static_cast<char>(0xe0 | (cp >> 12)));
+        output.push_back(static_cast<char>(0x80 | ((cp >> 6) & 63)));
+        output.push_back(static_cast<char>(0x80 | (cp & 63)));
+    } else {
+        output.push_back(static_cast<char>(0xf0 | (cp >> 18)));
+        output.push_back(static_cast<char>(0x80 | ((cp >> 12) & 63)));
+        output.push_back(static_cast<char>(0x80 | ((cp >> 6) & 63)));
+        output.push_back(static_cast<char>(0x80 | (cp & 63)));
     }
-    if (name.back() == ' ') fail("trailing space in disc filename");
+}
+
+std::string lowercase_utf8(const std::string& value) {
+#ifdef _WIN32
+    const int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                     value.data(), static_cast<int>(value.size()),
+                                     nullptr, 0);
+    if (!n) fail("invalid UTF-8 ISO filename");
+    std::wstring wide(static_cast<std::size_t>(n), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                            value.data(), static_cast<int>(value.size()),
+                            wide.data(), n) != n)
+        fail("cannot convert Joliet filename to Unicode");
+    const int needed = LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE,
+                                    wide.data(), n, nullptr, 0, nullptr, nullptr, 0);
+    if (!needed) fail("Windows Unicode lowercase conversion unavailable");
+    std::wstring lowered(static_cast<std::size_t>(needed), L'\0');
+    if (LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE,
+                      wide.data(), n, lowered.data(), needed,
+                      nullptr, nullptr, 0) != needed)
+        fail("Windows Unicode lowercase conversion failed");
+    const int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+                                         lowered.data(), needed,
+                                         nullptr, 0, nullptr, nullptr);
+    if (!bytes) fail("cannot encode lowercase Unicode filename");
+    std::string out(static_cast<std::size_t>(bytes), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+                            lowered.data(), needed, out.data(), bytes,
+                            nullptr, nullptr) != bytes)
+        fail("cannot encode lowercase Unicode filename");
+    return out;
+#else
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> utf8;
+    std::wstring w;
+    try {
+        w = utf8.from_bytes(value);
+    } catch (const std::range_error&) {
+        fail("invalid UTF-8 ISO filename");
+    }
+    static const std::locale unicode_locale = [] {
+        try { return std::locale("C.UTF-8"); }
+        catch (const std::runtime_error&) { return std::locale::classic(); }
+    }();
+    for (auto& cp : w) {
+        cp = std::tolower(cp, unicode_locale);
+        // Consistent basic Latin and accented Latin-1 fallback if a host lacks
+        // a UTF-8 locale; on Windows the native Unicode mapping is used.
+        if (cp >= L'A' && cp <= L'Z') cp += L'a' - L'A';
+        else if (cp >= 0x00c0 && cp <= 0x00d6) cp += 0x20;
+        else if (cp >= 0x00d8 && cp <= 0x00de) cp += 0x20;
+    }
+    return utf8.to_bytes(w);
+#endif
+}
+
+std::string decode_name(const unsigned char* p, std::size_t size, bool joliet) {
+    if (size == 1 && (p[0] == 0 || p[0] == 1)) return "";
+    std::string name;
+    if (joliet) {
+        if (size % 2 != 0) fail("odd-length Joliet UCS-2 filename");
+        for (std::size_t i = 0; i < size; i += 2) {
+            const auto cp = (static_cast<std::uint32_t>(p[i]) << 8) | p[i + 1];
+            if (cp >= 0xd800 && cp <= 0xdfff)
+                fail("unsupported surrogate in Joliet UCS-2 filename");
+            append_utf8(name, cp);
+        }
+    } else {
+        name.assign(reinterpret_cast<const char*>(p), size);
+        for (const unsigned char c : name)
+            if (c >= 127) fail("non-ASCII filename in ISO 9660 primary directory");
+    }
+    // Strip the ISO 9660 version suffix (usually ;1), but not an ordinary
+    // embedded semicolon in an actual long filename.
+    const auto semi = name.rfind(';');
+    if (semi != std::string::npos && semi + 1 < name.size() &&
+        std::all_of(name.begin() + static_cast<std::ptrdiff_t>(semi + 1),
+                    name.end(), [](unsigned char c) { return c >= '0' && c <= '9'; }))
+        name.resize(semi);
+    while (!name.empty() && name.back() == '.') name.pop_back();
+    if (name.empty() || name == "." || name == "..")
+        fail("invalid directory entry name");
+    if (name.size() > 240) fail("unreasonably long ISO filename");
+    for (const unsigned char c : name)
+        if (c < 32 || c == 127 || c == '/' || c == '\\' || c == ':' ||
+            c == '<' || c == '>' || c == '"' || c == '|' || c == '?' ||
+            c == '*' || c == '\0')
+            fail("unsafe ISO filename");
+    if (name.back() == ' ') fail("trailing space in ISO filename");
+
+    name = lowercase_utf8(name);
+    // Windows device names remain reserved even with extensions.
     const std::string stem = upper(name.substr(0, name.find('.')));
     const std::set<std::string> reserved = {
         "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4",
