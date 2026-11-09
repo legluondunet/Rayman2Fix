@@ -28,8 +28,12 @@ jobs:
       - name: Verify launcher workspace and diagnostics
         shell: pwsh
         run: |
+          # Bare execution is the default workflow. With no CD or installed
+          # game the launcher must fail safely while still generating config/log.
+          & ./build/Release/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2) { throw "Bare launcher must report missing CD" }
           & ./build/Release/Rayman2Fix.exe --init
-          if ($LASTEXITCODE -ne 0) { throw "Rayman2Fix --init failed" }
+          if ($LASTEXITCODE -ne 2) { throw "--init must no longer be supported" }
           if (!(Test-Path build/Release/Rayman2Fix/Rayman2Fix.ini)) {
             throw "Expected persistent Rayman2Fix.ini alongside launcher"
           }
@@ -46,13 +50,13 @@ jobs:
           }
           # Exercise Win32 CRLF and UTF-8 BOM parsing, plus log opt-out.
           [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=0`r`n", [Text.UTF8Encoding]::new($true))
-          & ./build/Release/Rayman2Fix.exe --init
-          if ($LASTEXITCODE -ne 0 -or (Test-Path build/Release/Rayman2Fix.log)) {
+          & ./build/Release/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or (Test-Path build/Release/Rayman2Fix.log)) {
             throw "Log=0 must prevent log creation (and remove stale log)"
           }
           [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=1`r`n", [Text.UTF8Encoding]::new($true))
-          & ./build/Release/Rayman2Fix.exe --init
-          if ($LASTEXITCODE -ne 0 -or !(Test-Path build/Release/Rayman2Fix.log) -or
+          & ./build/Release/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or !(Test-Path build/Release/Rayman2Fix.log) -or
               !(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'CONFIG: Debug.Log=1')) {
             throw "Log=1 must generate correctly configured log"
           }
@@ -94,14 +98,20 @@ jobs:
         run: ctest --test-dir build --output-on-failure
       - name: Verify Linux bootstrap workspace
         run: |
-          ./build/rayman2fix_cli --init
+          result=0
+          ./build/rayman2fix_cli || result=$?
+          test "$result" -eq 2
           test -f build/Rayman2Fix/Rayman2Fix.ini
           test -f build/Rayman2Fix.log
           grep -q 'SYS-INFO: END' build/Rayman2Fix.log
           test "$(cat build/Rayman2Fix/Rayman2Fix.ini)" = "$(printf '[Debug]\nLog=1')" || exit 1
           printf '[Debug]\r\nLog=0\r\n' > build/Rayman2Fix/Rayman2Fix.ini
-          ./build/rayman2fix_cli --init
+          result=0
+          ./build/rayman2fix_cli || result=$?
+          test "$result" -eq 2
           test ! -e build/Rayman2Fix.log
           printf '[Debug]\r\nLog=1\r\n' > build/Rayman2Fix/Rayman2Fix.ini
-          ./build/rayman2fix_cli --init
+          result=0
+          ./build/rayman2fix_cli || result=$?
+          test "$result" -eq 2
           grep -q 'CONFIG: Debug.Log=1' build/Rayman2Fix.log
