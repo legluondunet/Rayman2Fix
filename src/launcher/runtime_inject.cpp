@@ -126,8 +126,19 @@ FovHookResult initialize_game_fov(
     const HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
     const FARPROC local_loader = kernel32 ?
         GetProcAddress(kernel32, "LoadLibraryW") : nullptr;
-    auto loader = local_loader ?
-        remote_system_entry(static_cast<DWORD>(pid), local_loader) : nullptr;
+    void* loader = nullptr;
+    if (local_loader) {
+        // A child may not have finished loading kernelbase/kernel32 when
+        // CreateProcessW returns. Retry remote module discovery for a
+        // bounded period instead of treating this startup race as a missing
+        // API (Windows ERROR_PROC_NOT_FOUND=127).
+        for (unsigned attempt = 0; attempt < 50; ++attempt) {
+            loader = remote_system_entry(static_cast<DWORD>(pid), local_loader);
+            if (loader) break;
+            if (WaitForSingleObject(process, 0) == WAIT_OBJECT_0) break;
+            Sleep(40);
+        }
+    }
     DWORD base = 0;
     bool timeout = false;
     if (!remote_call(process, loader, path.memory, base, result.win32_error, timeout)) {
