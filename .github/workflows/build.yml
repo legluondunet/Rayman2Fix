@@ -25,13 +25,23 @@ jobs:
         run: cmake --build build --config Release --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
-      - name: Upload bootstrap executables
+      - name: Stage launcher and private runtime directory
+        shell: pwsh
+        run: |
+          New-Item -Path package/Rayman2Fix -ItemType Directory -Force | Out-Null
+          Copy-Item build/Release/Rayman2Fix.exe package/Rayman2Fix.exe
+          Copy-Item build/Release/Rayman2Fix.dll package/Rayman2Fix/Rayman2Fix.dll
+          Copy-Item assets/Rayman2Fix.ini package/Rayman2Fix/Rayman2Fix.ini
+          if (!(Test-Path package/Rayman2Fix.exe) -or
+              !(Test-Path package/Rayman2Fix/Rayman2Fix.dll) -or
+              !(Test-Path package/Rayman2Fix/Rayman2Fix.ini)) {
+            throw 'Incomplete Rayman2Fix bootstrap package'
+          }
+      - name: Upload bootstrap package
         uses: actions/upload-artifact@v4
         with:
           name: Rayman2Fix-Windows-x86-bootstrap
-          path: |
-            build/Release/Rayman2Fix.exe
-            build/Release/Rayman2Fix.dll
+          path: package/
           if-no-files-found: error
           retention-days: 30
 
