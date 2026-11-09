@@ -122,7 +122,10 @@ void write_receipt(const fs::path& staged, const DiscInfo& info) {
     out << "VOLUME\t" << info.volume_id << '\n';
     std::size_t count = 0;
     for (const auto& file : info.files) {
-        if (file.skipped_by_cd_recipe || file.invalid_extent) continue;
+        // ubi.ini is a mutable game-facing config generated from
+        // Rayman2Fix.ini; it is never part of the immutable CD receipt.
+        if (file.skipped_by_cd_recipe || file.invalid_extent ||
+            file.relative_path.generic_u8string() == "ubi.ini") continue;
         const auto name = file.relative_path.generic_u8string();
         if (name.find('\t') != std::string::npos ||
             name.find('\n') != std::string::npos ||
