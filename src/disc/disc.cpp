@@ -275,9 +275,14 @@ void DiscImage::scan_directory(std::uint32_t extent,
         if (name.empty()) continue;  // dot/dot-dot
         if (!names.insert(upper(name)).second)
             fail("case-insensitive filename collision on disc");
-        const auto child_extent = iso733(rec + 2);
-        const auto child_size = iso733(rec + 10);
         const fs::path relative = parent / name;
+        // Ignore deliberately irregular metadata only for exact, documented
+        // Rayman 2 CD filenames. All other entries require consistent endian
+        // copies and physical bounds. Never relax directory validation.
+        const bool skipped = !(flags & 0x02) &&
+            ignored_by_lutris_rayman2_cd(info_.volume_id, relative);
+        const auto child_extent = skipped ? le32(rec + 2) : iso733(rec + 2);
+        const auto child_size = skipped ? le32(rec + 10) : iso733(rec + 10);
         if (flags & 0x02) {
             validate_extent(child_extent, child_size); // Never skip malformed directories.
             scan_directory(child_extent, child_size, relative, depth + 1, ancestors);
@@ -286,7 +291,6 @@ void DiscImage::scan_directory(std::uint32_t extent,
                 fail("too many files on disc");
             if (info_.total_bytes > std::numeric_limits<std::uint64_t>::max() - child_size)
                 fail("file total overflow");
-            const bool skipped = ignored_by_lutris_rayman2_cd(info_.volume_id, relative);
             // Only exact paths from the documented CD install recipe may bypass
             // the physical extent check. All other files must be readable.
             if (!skipped) validate_extent(child_extent, child_size);
