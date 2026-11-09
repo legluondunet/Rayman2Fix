@@ -9,47 +9,64 @@ of **Rayman 2: The Great Escape**. It has no source-code dependency on Ray2Fix.
 Rayman2Fix.exe                       launcher / installer / verifier
 Rayman2Fix.log                       one log, reset at each launcher start
 Rayman2Fix/
-    Rayman2.exe                      installed, edition-verified game executable (future)
-    Rayman2Fix.dll                   our x86 in-memory patch/input/window runtime
-    glide2x.dll                      GameFrame's x86 Glide 2 compatibility DLL
-    SDL3.dll                         SDL3 x86 controller runtime
-    Rayman2Fix.ini                   persistent user options
-    ...                              original game data and resource layout
+    rayman2.exe                      copied from original CD (not yet playable)
+    Rayman2Fix.dll                   unpacked from launcher (currently inert)
+    glide2x.dll                      GameFrame x86 Glide 2 DLL (future)
+    SDL3.dll                         SDL3 x86 controller DLL (future)
+    Rayman2Fix.ini                   generated if missing, user-owned
+    dll/snd_cpa.ini                  copied from CD's snd_cpa_mmx.ini
+    data/...                         original CD content, lowercase and writable
+    .rayman2fix-cd-files.tsv         locally generated file-size receipt
 ```
 
 **Important:** the Glide 2 API DLL is **`glide2x.dll`**, not `glid2.dll`.
 The final game will use **only the 3dfx Glide path**, never a separate
 DirectX game renderer. GameFrame implements Glide using OpenGL.
 
-The installer may use a *temporary* sibling staging folder while extracting,
-but must publish only verified files into `Rayman2Fix/`. The current bootstrap's
-`Rayman2Fix/DiscContent` is an interim extraction test, **not** the final
-installed-game directory layout.
+The bare launcher uses `Rayman2Fix.installing/` next to itself while
+extracting, then verifies sizes and publishes to `Rayman2Fix/` without
+overwriting unknown existing user files. `Rayman2Fix/DiscContent` is used
+**only** by the explicit diagnostic `--extract` command.
 
-The long-term release goal is **one launcher executable** embedding its
-own runtime payload. At present the Actions build bundles a prearranged
-launcher plus `Rayman2Fix/` runtime folder; it does not yet embed those DLLs.
+The Windows CI archive now contains **only `Rayman2Fix.exe`**, with the
+project's own inert x86 DLL embedded as an RCDATA resource; it is unpacked
+automatically. **GameFrame, SDL3, CD game files, INI and logs are not
+shipped**. The complete release will embed verified GameFrame/SDL3 libraries
+once integrated and attributable.
 
-## Launcher workflow
+## Automatic workflow (implemented foundation, incomplete game runtime)
 
-1. On start, determine the directory containing **Rayman2Fix.exe**, regardless
-   of shell working directory. Create `Rayman2Fix/` and only generate
-   `Rayman2Fix.ini` if absent. Do not delete user settings.
-2. Write exactly one `Rayman2Fix.log` *beside the launcher*, beginning with
-   build/commit ID and passive machine inventory. Avoid personal identifiers,
-   usernames, home paths, serials, IP and private environment values.
-3. If an installed game is present, **verify** assets, executable hash, edition
-   manifest and our runtime DLL versions; only then launch.
-4. Otherwise discover exactly one supported CD image (or request an explicit
-   source); fail on ambiguous choices. Inspect ISO/CUE layouts and verify a
-   strict edition manifest, not merely a disc volume name.
-5. Extract into a temporary staging directory. Reconstruct the game files
-   and language resources using edition-specific extraction/copy rules.
-6. Validate hashes, and only then promote staging to `Rayman2Fix/` (with
-   backups and safe recovery). Never silently overwrite modified user assets.
-7. Launch the verified 3dfx game with the exact expected Glide DLL, our
-   runtime DLL and SDL3 in the same installation directory. Diagnose runtime
-   errors in the single launcher log.
+1. Execute **`Rayman2Fix.exe` without arguments**. The former `--init`
+   command has been deleted; `--verify`, `--inspect` and `--extract`
+   remain diagnostic commands.
+2. Use the executable's own directory as the root, create `Rayman2Fix/`
+   and a minimal `Rayman2Fix.ini` only when missing. Deploy the bundled
+   `Rayman2Fix.dll`, backing up mismatched versions without deleting them.
+   Write a single optional log beside the launcher with passive system info.
+3. If `Rayman2Fix/rayman2.exe` exists, check its **local CD receipt**:
+   expected file names and sizes, sound initialization and game executable.
+   If any file is missing or changed, refuse startup, **never auto-repair or
+   overwrite**. This is not yet a cryptographic retail-edition verification.
+4. If there is no installed game, discover exactly one adjacent `.iso` or
+   `.cue` and examine it. Require volume `RAYMAN2`, essential game files
+   and no unrecognized suspect entries. Refuse missing or ambiguous images.
+5. Extract only the historically necessary CD files into a sibling staging
+   directory, using Joliet long names, lowercase paths and writable output.
+   Duplicate `dll/snd_cpa_mmx.ini` as `dll/snd_cpa.ini` and create a
+   size receipt listing all extracted files.
+6. Preserve launcher-generated INI/runtime and earlier DLL backups from
+   the bootstrap folder. Refuse unexpected existing files; promote the
+   prepared installation to `Rayman2Fix/`, with rollback on failure.
+   The original CD image and executable are never modified.
+7. Reverify the published files. **Do not start the game yet**: there is no
+   trusted retail executable/hash profile, working no-CD runtime, GameFrame
+   Glide 2 or SDL3 integration. Log the exact blocker rather than claiming
+   a successful launch. This stage is a safe *installation foundation*.
+
+**Future launch contract:** after a verified retail executable profile and
+working fixes are added, the default command must launch the game only
+after strict hashes, data and runtime checks pass. The original CD will
+not be needed for subsequent validated launches.
 
 ## Diagnostic inventory (independently implemented, same categories as SpiderMan2k1Fix)
 
@@ -135,12 +152,16 @@ features have been tested.
 
 ## Current PR #1 bootstrap status
 
-- `--init` prepares the launcher-relative workspace and log.
-- `--inspect` and `--extract` implement cautious MODE1 ISO/CUE handling.
-- The Windows x86 runtime DLL is **inert**.
-- Installer, no-CD play, pirate-head fixes, GameFrame and SDL3 are **planned**.
-- Synthetic Windows x86 and Linux tests establish the build baseline, not real
-  retail CD compatibility.
+- Default bare execution performs **automatic CD detection, staged extraction,
+  preparation, local-size verification** or verification of an existing game.
+  `--init` is removed.
+- `--inspect`, `--extract` and `--verify` are available for diagnostics.
+- The **single Windows EXE** embeds its own inert x86 DLL and creates its
+  INI when absent; the workflow archive has no sidecar files.
+- **No game launch**, no SafeDisc/no-CD compatibility, no verified retail
+  executable hash, no pirate-head fixes, no GameFrame or SDL3 yet.
+- Synthetic Windows x86/Linux tests validate the installer and refusal
+  paths, but NOT real retail disc playability.
 
 ## Licensing
 
