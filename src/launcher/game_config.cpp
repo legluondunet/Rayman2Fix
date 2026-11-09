@@ -34,6 +34,11 @@ std::string upper(std::string v) {
 }
 bool section(const std::string& line, std::string& value) {
     auto t = trim(line);
+    if (t.size() >= 3 &&
+        static_cast<unsigned char>(t[0]) == 0xef &&
+        static_cast<unsigned char>(t[1]) == 0xbb &&
+        static_cast<unsigned char>(t[2]) == 0xbf)
+        t.erase(0, 3);
     if (t.size() < 2 || t.front() != '[' || t.back() != ']') return false;
     value = upper(trim(t.substr(1, t.size() - 2)));
     return true;
@@ -156,8 +161,10 @@ std::string generated_ubi(const std::vector<std::string>& original,
     return text;
 }
 void atomically_install(const fs::path& output, const std::string& bytes) {
-    const fs::path pending = output.string() + ".rayman2fix-new";
-    const fs::path previous = output.string() + ".rayman2fix-previous";
+    fs::path pending = output;
+    pending += ".rayman2fix-new";
+    fs::path previous = output;
+    previous += ".rayman2fix-previous";
     if (fs::exists(pending) || fs::is_symlink(pending) ||
         fs::exists(previous) || fs::is_symlink(previous))
         throw std::runtime_error("unresolved ubi.ini update staging files");
