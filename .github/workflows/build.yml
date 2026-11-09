@@ -63,24 +63,36 @@ jobs:
           # PowerShell propagates the last nonzero native exit code even
           # after all expected-error assertions have passed.
           $global:LASTEXITCODE = 0
-      - name: Stage launcher and private runtime directory
+      - name: Stage single executable and verify embedded DLL deployment
         shell: pwsh
         run: |
-          New-Item -Path package/Rayman2Fix -ItemType Directory -Force | Out-Null
+          New-Item -Path package -ItemType Directory -Force | Out-Null
           Copy-Item build/Release/Rayman2Fix.exe package/Rayman2Fix.exe
-          Copy-Item build/Release/Rayman2Fix.dll package/Rayman2Fix/Rayman2Fix.dll
-          if (!(Test-Path package/Rayman2Fix.exe) -or
-              !(Test-Path package/Rayman2Fix/Rayman2Fix.dll)) {
-            throw 'Incomplete Rayman2Fix bootstrap package'
+          if (!(Test-Path package/Rayman2Fix.exe)) {
+            throw 'Missing Rayman2Fix.exe in bootstrap package'
           }
-          # User options are created only by Rayman2Fix.exe on first run.
-          # Enforce this for all CI artifacts and future releases.
-          if (Get-ChildItem -Path package -Recurse -File -Filter Rayman2Fix.ini) {
-            throw 'Never ship generated Rayman2Fix.ini in CI or release packages'
+          if ((Get-ChildItem package -Recurse -File).Count -ne 1) {
+            throw 'The bootstrap archive must contain exactly one EXE'
           }
-          if (Get-ChildItem -Path package -Recurse -File -Filter Rayman2Fix.log) {
-            throw 'Never ship diagnostic logs in CI or release packages'
+          # Exercise the executable WITHOUT a pre-populated Rayman2Fix folder.
+          New-Item -Path package-smoke -ItemType Directory -Force | Out-Null
+          Copy-Item package/Rayman2Fix.exe package-smoke/Rayman2Fix.exe
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2) { throw 'No-media bootstrap must fail safely' }
+          if (!(Test-Path package-smoke/Rayman2Fix/Rayman2Fix.dll) -or
+              !(Test-Path package-smoke/Rayman2Fix/Rayman2Fix.ini)) {
+            throw 'Single EXE failed to create runtime and ini on first launch'
           }
+          $expected = (Get-FileHash build/Release/Rayman2Fix.dll -Algorithm SHA256).Hash
+          $actual = (Get-FileHash package-smoke/Rayman2Fix/Rayman2Fix.dll -Algorithm SHA256).Hash
+          if ($expected -ne $actual) {
+            throw 'Embedded DLL is not identical to build output'
+          }
+          Remove-Item package-smoke -Recurse -Force
+          if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix.dll) {
+            throw 'Never include generated INI, logs or DLL sidecars in artifacts/releases'
+          }
+          $global:LASTEXITCODE = 0
       - name: Upload bootstrap package
         uses: actions/upload-artifact@v4
         with:
