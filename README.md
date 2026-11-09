@@ -165,13 +165,16 @@ If the CD has **no Joliet tree**, the inspector clearly reports that it
 only has primary ISO 9660 names and that original long names may be
 unavailable. No invented name mapping is applied to necessary game files.
 
-On the original `RAYMAN2` CD, these **six exact root-level paths**
+On the original `RAYMAN2` CD, these **ten exact root-level paths**
 are excluded from the installation:
 
 - `00000001.tmp`, `0000040c.016`, `0000040c.256` (original
   SafeDisc-era auxiliaries).
-- `secdrv.sys`, `rayman2.icd`, `dxplayerx.dll` (additional exclusions
-  explicitly requested by the project owner).
+- `secdrv.sys`, `rayman2.icd`, `dxplayerx.dll` (existing
+  owner-approved exclusions, kept for backward compatibility).
+- `clcd32.dll`, `clokspl.exe`, `dplayerx.dll`, `drvmgt.dll`
+  (additional SafeDisc-era auxiliaries, approved for exclusion).
+  Note: `dplayerx.dll` and `dxplayerx.dll` are different filenames.
 
 The exclusion never matches other files by extension or similarly named
 files under `data/`. Existing installations are migrated without the CD:

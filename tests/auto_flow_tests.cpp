@@ -42,11 +42,11 @@ static std::size_t record(std::uint8_t* p, std::uint32_t extent,
     return length;
 }
 static std::vector<std::uint8_t> test_disc() {
-    std::vector<std::uint8_t> iso(33 * 2048, 0);
+    std::vector<std::uint8_t> iso(37 * 2048, 0);
     auto* pvd = iso.data() + 16 * 2048;
     pvd[0] = 1; pvd[1] = 'C'; pvd[2] = 'D'; pvd[3] = '0';
     pvd[4] = '0'; pvd[5] = '1'; pvd[6] = 1;
-    put32(pvd + 80, 33);
+    put32(pvd + 80, 37);
     const char* name = "RAYMAN2";
     std::copy(name, name + 7, pvd + 40);
     record(pvd + 156, 20, 2048, true, std::string(1, '\0'));
@@ -63,6 +63,10 @@ static std::vector<std::uint8_t> test_disc() {
     p += record(root + p, 29, 4, false, "SECDRV.SYS;1");
     p += record(root + p, 30, 4, false, "RAYMAN2.ICD;1");
     p += record(root + p, 31, 4, false, "DXPLAYERX.DLL;1");
+    p += record(root + p, 33, 4, false, "CLCD32.DLL;1");
+    p += record(root + p, 34, 4, false, "CLOKSPL.EXE;1");
+    p += record(root + p, 35, 4, false, "DPLAYERX.DLL;1");
+    p += record(root + p, 36, 4, false, "DRVMGT.DLL;1");
     const std::string original_ubi =
         "[Rayman2]\r\nLanguage=French\r\nGLI_Dll=DirectX6\r\n"
         "GLI_Mode=1 - 640 x 480 x 16\r\n[Other]\r\nKeep=present\r\n";
@@ -88,6 +92,10 @@ static std::vector<std::uint8_t> test_disc() {
     std::copy_n("DRV!", 4, iso.data() + 29 * 2048);
     std::copy_n("ICD!", 4, iso.data() + 30 * 2048);
     std::copy_n("DXP!", 4, iso.data() + 31 * 2048);
+    std::copy_n("CL32", 4, iso.data() + 33 * 2048);
+    std::copy_n("CLOK", 4, iso.data() + 34 * 2048);
+    std::copy_n("DPLY", 4, iso.data() + 35 * 2048);
+    std::copy_n("DRVM", 4, iso.data() + 36 * 2048);
     std::copy(original_ubi.begin(), original_ubi.end(), iso.begin() + 32 * 2048);
     return iso;
 }
@@ -199,11 +207,13 @@ int main() {
               "managed ubi.ini must not be recorded as an immutable CD asset");
         check(fs::exists(game / ".rayman2fix-cd-files.tsv"),
               "local installation receipt created");
-        // All six exact root-only exclusions must be absent from fresh
+        // All ten exact root-only exclusions must be absent from fresh
         // installation and from the local SHA256 receipt.
         for (const auto* filename : {"00000001.tmp", "0000040c.016",
                                      "0000040c.256", "secdrv.sys",
-                                     "rayman2.icd", "dxplayerx.dll"}) {
+                                     "rayman2.icd", "dxplayerx.dll",
+                                     "clcd32.dll", "clokspl.exe",
+                                     "dplayerx.dll", "drvmgt.dll"}) {
             check(!fs::exists(game / filename), "obsolete protection file not extracted");
             check(contents(game / ".rayman2fix-cd-files.tsv").find(filename) ==
                       std::string::npos,
@@ -215,14 +225,18 @@ int main() {
               "installed game resources verify from local receipt");
 
         // Simulate an already-installed copy made by an older Rayman2Fix
-        // build: the receipt used to list six now-excluded root files.
-        const std::array<std::pair<const char*, const char*>, 6> legacy = {{
+        // build: the receipt used to list now-excluded root files.
+        const std::array<std::pair<const char*, const char*>, 10> legacy = {{
             {"00000001.tmp", "TEMP"},
             {"0000040c.016", "ICON"},
             {"0000040c.256", "LOGO"},
             {"secdrv.sys", "DRV!"},
             {"rayman2.icd", "ICD!"},
-            {"dxplayerx.dll", "DXP!"}
+            {"dxplayerx.dll", "DXP!"},
+            {"clcd32.dll", "CL32"},
+            {"clokspl.exe", "CLOK"},
+            {"dplayerx.dll", "DPLY"},
+            {"drvmgt.dll", "DRVM"}
         }};
         {
             std::ofstream receipt(game / ".rayman2fix-cd-files.tsv",
