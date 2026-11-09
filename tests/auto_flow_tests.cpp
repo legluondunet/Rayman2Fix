@@ -248,6 +248,20 @@ int main() {
         check(r2fix::verify_installation(app) == 0,
               "recreated game config passes CD asset verification");
 
+        // Invalid resolutions fail before rewriting any game-facing
+        // configuration, and a corrected user INI works on the next start.
+        const auto good_ubi = contents(game / "ubi.ini");
+        write(game / "Rayman2Fix.ini",
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=invalid\n");
+        bool rejected_resolution = false;
+        try { r2fix::run_automatic(app); }
+        catch (const std::exception&) { rejected_resolution = true; }
+        check(rejected_resolution &&
+              contents(game / "ubi.ini") == good_ubi,
+              "invalid Rayman2Fix.ini resolution refused with legacy config unchanged");
+        write(game / "Rayman2Fix.ini",
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1280x720\n");
+
         // Same-size corruption: size-only verification would have missed it.
         write(game / "data" / "game.dat", "OTHER");
         check(r2fix::verify_installation(app) == 2,
