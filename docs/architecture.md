@@ -160,6 +160,21 @@ cursor behavior and pause/resume across Windows/Wine/Proton; never force
 topmost over another application. Handle 4:3, 16:9, high DPI and multimonitor.
 Avoid game-specific resolution hacks.
 
+### FPS cap at the Glide frame boundary (active experimental integration)
+
+The user maintains only `[Graphics] FPSLimit=60` in `Rayman2Fix.ini`.
+0 disables the cap; valid nonzero values are 15..240. The launcher parses
+this setting and passes `RAYMAN2FIX_FPS_LIMIT` to the child game process
+only, restoring its previous environment after CreateProcessW. In CI the
+exact pinned Apache-2.0 GameFrame source receives a reproducible,
+fail-closed addition in `grBufferSwap`, after the game's submitted frame
+is flushed. It schedules the next frame on the **producer** (game) thread
+using `Instant` and `sleep` so the asynchronous renderer cannot build up
+an unbounded backlog; stalls reset the cadence. No new DLL or other
+user-facing INI is added. Unit tests cover source-anchor safety and
+configuration/child environment behavior. Real game timing at 60 FPS
+still requires testing on Windows and Wine.
+
 ### 6. Integrate SDL3 and options — deferred
 
 Native x86 SDL3 gamepad support (hotplug, consistent mappings, controller
