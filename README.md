@@ -31,7 +31,10 @@ has been removed.
   unrelated files are preserved; an incomplete/unrecognized installation is
   never silently overwritten.
 - The launcher embeds and deploys its own x86 `Rayman2Fix.dll`, creating
-  the `Rayman2Fix/` directory and minimal INI automatically.
+  the `Rayman2Fix/` directory and minimal INI automatically. If the
+  runtime DLL changes, its **immediately previous version** is kept as
+  `Rayman2Fix.dll.bak`; the older backup is replaced, never accumulated
+  as numbered history.
 
 **Important:** a SHA-256 receipt generated from the same CD verifies subsequent
 file integrity, but does not authenticate the original retail edition. Starting the game is still **blocked** until the original retail EXE and
@@ -60,6 +63,7 @@ Rayman2Fix.exe
 Rayman2Fix.log                  (generated beside EXE when Log=1)
 Rayman2Fix/
     Rayman2Fix.dll             (unpacked from the EXE; inert placeholder)
+    Rayman2Fix.dll.bak         (only if updated; one latest backup)
     Rayman2Fix.ini             (generated once if missing)
     rayman2.exe                (from original CD)
     dll/
@@ -111,14 +115,19 @@ If the CD has **no Joliet tree**, the inspector clearly reports that it
 only has primary ISO 9660 names and that original long names may be
 unavailable. No invented name mapping is applied to necessary game files.
 
-On the same `RAYMAN2` CD, three additional root-level obsolete
-copy-protection helpers are **intentionally excluded**:
-`00000001.tmp`, `0000040c.016`, and `0000040c.256`.
-These match only exact root paths, never all `.tmp`, `.016` or `.256` files.
-When opening an installation created by an older Rayman2Fix build, the
-launcher automatically removes those three files and their SHA-256 receipt
-entries **after validating all remaining game files**; the CD does not need
-to be extracted again. Other assets and user settings are preserved.
+On the original `RAYMAN2` CD, these **six exact root-level paths**
+are excluded from the installation:
+
+- `00000001.tmp`, `0000040c.016`, `0000040c.256` (original
+  SafeDisc-era auxiliaries).
+- `secdrv.sys`, `rayman2.icd`, `dxplayerx.dll` (additional exclusions
+  explicitly requested by the project owner).
+
+The exclusion never matches other files by extension or similarly named
+files under `data/`. Existing installations are migrated without the CD:
+after verifying all retained files by SHA-256, the launcher removes these
+exact root files and their receipt entries. User settings and other game
+assets are preserved.
 
 On a disc whose volume label is exactly `RAYMAN2`, we recognize **23 exact
 `Data/World/Levels/*.DAT` paths** discarded by the author's original
