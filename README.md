@@ -165,20 +165,36 @@ The retail executable/no-CD launch gate remains deliberately active.
 
 ## Original executable and patch backup
 
-The user supplied an unprotected **x86 `Rayman2.exe`** for compatibility
-research (size **1,468,928 bytes**, SHA-256
-`9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`).
-This commercial executable is **never committed or distributed**.
+The user **already supplied both x86 executables** in the conversation
+(November 9, 2026). Both have identical PE timestamps and entry-point
+RVA, and their source/target SHA-256 identities are:
 
-A patch generator and strict R2FXP01 binary-delta interpreter are included:
+- **Protected original**: `rayman2(1).exe`, **676,352 bytes**,
+  `7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`.
+- **Unprotected target**: `Rayman2.exe`, **1,468,928 bytes**,
+  `9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`.
 
-- `tools/build_exe_patch.py` requires the **original CD `rayman2.exe`**
-  and the independently supplied unprotected executable. It generates a
-  SHA-256-locked candidate patch only if it can reconstruct the exact target.
-  It rejects patches containing too much literal target content.
-- Future verified patch data can be embedded as RCDATA resource `#1102`.
-  The current GitHub build contains **no executable patch resource**, because
-  the original protected CD EXE bytes are not yet available for comparison.
+A **46,841-byte R2FXP01 delta** was generated and independently
+round-trip-checked against these two user-owned inputs. Approximately
+89% of the target bytes are copied from the protected EXE; the remaining
+bytes are stored in small compressed LZ4 payloads (42,039 encoded bytes).
+The underlying game executables are **never distributed or committed**.
+
+- `tools/build_exe_patch.py` now supports pure-Python LZ4 compression
+  of unmatched spans, and refuses large encoded target payloads.
+- The cross-platform C++ decoder supports the compressed `Z` operation
+  with strict bounds, and validates the exact SHA-256 and sizes of the
+  **approved original and target** before replacing either executable.
+- To test an owner-provided delta without uploading game-derived patch
+  material to GitHub, place `Rayman2Fix-executable.r2patch` beside
+  `Rayman2Fix.exe`. An installed matching retail executable is then
+  upgraded on the next no-argument launch. On a different edition, the
+  source is preserved unchanged.
+- The final one-EXE packaging remains available: local Windows builds
+  may pass `-DRAYMAN2FIX_EXE_PATCH=<absolute delta path>` to embed the
+  approved binary delta as RCDATA resource `#1102`. The standard public
+  GitHub CI archive **does not yet contain the private delta**, and thus
+  does not auto-patch unless the owner provides the sidecar.
 - On an exactly recognized original SHA-256, the installer writes and
   verifies the new executable to a temporary file, **renames the untouched
   original to `rayman2.exe.bak`**, publishes the new `rayman2.exe`, and
@@ -187,11 +203,13 @@ A patch generator and strict R2FXP01 binary-delta interpreter are included:
   **backup**, and the patch target hash against the installed EXE. An existing
   backup is *never* silently overwritten; a failed replacement rolls back.
 
-**No EXE patch is applied and no `rayman2.exe.bak` is created until the
-source CD version has been matched and a verified delta is bundled.** A
-file-size receipt or volume label cannot establish a safe patch target.
-Game launch still requires no-CD and actual Glide renderer validation;
-SDL3 is explicitly out of scope for this stage.
+**The EXE patch is already generated and verified**, but is not
+present in the public CI build. When the owner adds the matching local
+delta (or builds with it embedded), Rayman2Fix creates
+`rayman2.exe.bak` only after reconstructing and SHA-256-checking
+the unprotected executable. The game launcher still remains blocked
+pending actual compatibility and Glide rendering tests; SDL3 is
+out of scope for this stage.
 
 ## Build
 
