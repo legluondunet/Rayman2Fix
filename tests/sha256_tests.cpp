@@ -1,5 +1,6 @@
 #include "rayman2fix/sha256.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
