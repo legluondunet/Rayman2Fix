@@ -131,6 +131,37 @@ jobs:
           if ($expected -ne $actual) {
             throw 'Embedded DLL is not identical to build output'
           }
+          # Retain exactly one original runtime .bak, never numbered histories.
+          $runtimeDir = (Resolve-Path 'package-smoke/Rayman2Fix').Path
+          $runtime = Join-Path $runtimeDir 'Rayman2Fix.dll'
+          $backup = Join-Path $runtimeDir 'Rayman2Fix.dll.bak'
+          [IO.File]::WriteAllText($runtime, 'outdated-runtime-A')
+          [IO.File]::WriteAllText($backup, 'outdated-older-backup')
+          [IO.File]::WriteAllText((Join-Path $runtimeDir 'Rayman2Fix.dll.backup.1'), 'legacy-one')
+          [IO.File]::WriteAllText((Join-Path $runtimeDir 'Rayman2Fix.dll.backup.2'), 'legacy-two')
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2) { throw 'Runtime update must preserve no-media exit code' }
+          if ((Get-Content -Raw $backup) -ne 'outdated-runtime-A' -or
+              (Get-FileHash $runtime -Algorithm SHA256).Hash -ne $expected) {
+            throw 'Runtime must replace its single .bak with newest previous DLL'
+          }
+          if (@(Get-ChildItem $runtimeDir -File -Filter 'Rayman2Fix.dll.backup.*').Count -ne 0 -or
+              (Test-Path (Join-Path $runtimeDir 'Rayman2Fix.dll.bak.previous'))) {
+            throw 'Old numbered runtime backups must be cleaned up'
+          }
+          [IO.File]::WriteAllText($runtime, 'outdated-runtime-B')
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or
+              (Get-Content -Raw $backup) -ne 'outdated-runtime-B') {
+            throw 'Second DLL replacement must rotate the single .bak'
+          }
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or
+              (Get-Content -Raw $backup) -ne 'outdated-runtime-B' -or
+              @(Get-ChildItem $runtimeDir -File -Filter 'Rayman2Fix.dll.bak*').Count -ne 1) {
+            throw 'Unchanged runtime must preserve exactly one backup'
+          }
+          Write-Host 'Single Rayman2Fix.dll.bak rotation and old backup cleanup: PASS'
           if (!(Test-Path package-smoke/Rayman2Fix/glide2x.dll) -or
               !(Test-Path package-smoke/Rayman2Fix/GameFrame-LICENSE-APACHE.txt)) {
             throw 'Single EXE failed to unpack GameFrame Glide or Apache license'
