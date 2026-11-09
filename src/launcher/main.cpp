@@ -30,8 +30,7 @@ static int run(const std::string& command, const fs::path& disc,
     const auto image = r2fix::DiscImage::open(disc);
     const auto& info = image.info();
     startup.log("DISC: filename_source=" + info.filename_source +
-                " output_case=lowercase merged_directory_aliases=" +
-                std::to_string(info.merged_directory_aliases));
+                " output_case=lowercase");
     startup.log("DISC: format=" + info.format + " volume=" + info.volume_id +
                 " files=" + std::to_string(info.files.size()) +
                 " declared_bytes=" + std::to_string(info.total_bytes) +
@@ -60,7 +59,6 @@ static int run(const std::string& command, const fs::path& disc,
               << "Format: " << info.format << '\n'
               << "Filename source: " << info.filename_source << '\n'
               << "Extraction filename case: lowercase\n"
-              << "Merged case-variant directories: " << info.merged_directory_aliases << '\n'
               << "ISO volume: " << info.volume_id << '\n'
               << "Files: " << info.files.size() << '\n'
               << "Declared file bytes: " << info.total_bytes << '\n'
