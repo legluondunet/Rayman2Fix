@@ -23,6 +23,7 @@ endif()
 add_executable(Rayman2Fix
   src/launcher/main.cpp
   src/launcher/auto_flow.cpp
+  src/launcher/extraction_console.cpp
   src/launcher/game_config.cpp
   src/launcher/gameframe.cpp
   src/launcher/patch_install.cpp
@@ -143,9 +144,16 @@ if(BUILD_TESTING)
   target_link_libraries(disc_tests PRIVATE rayman2_disc)
   add_test(NAME disc-image-parser COMMAND disc_tests)
 
+  add_executable(extraction_console_tests
+    tests/extraction_console_tests.cpp
+    src/launcher/extraction_console.cpp)
+  target_link_libraries(extraction_console_tests PRIVATE rayman2_disc)
+  add_test(NAME extraction-progress-console COMMAND extraction_console_tests)
+
   add_executable(auto_flow_tests
     tests/auto_flow_tests.cpp
     src/launcher/auto_flow.cpp
+    src/launcher/extraction_console.cpp
     src/launcher/game_config.cpp
     src/launcher/gameframe.cpp
     src/launcher/patch_install.cpp
