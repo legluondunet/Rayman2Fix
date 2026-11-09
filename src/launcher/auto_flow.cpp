@@ -1,4 +1,5 @@
 #include "rayman2fix/auto_flow.hpp"
+#include "rayman2fix/cd_exclusions.hpp"
 #include "rayman2fix/disc.hpp"
 #include "rayman2fix/sha256.hpp"
 #include "rayman2fix/startup.hpp"
@@ -171,6 +172,14 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
         if (!safe_relative(relative) || count >= 50000)
             return false;
         const fs::path file = root / relative;
+        // These three root-only auxiliary files were previously copied and
+        // recorded by older Rayman2Fix builds. They are now omitted. Permit
+        // their absence (e.g. already removed manually), but never relax
+        // validation of any other file in the receipt.
+        if (excluded_cd_protection_auxiliary(relative)) {
+            ++count;
+            continue;
+        }
         if (!exists_file(file) || fs::file_size(file) != expected) {
             startup.log("VERIFY: missing or size-mismatched game file=" +
                         relative.generic_u8string());
@@ -198,6 +207,102 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
                 std::to_string(count) +
                 " (local integrity only; NOT authenticated edition hashes)");
     return true;
+}
+
+// Upgrade an already installed original CD without requiring a second
+// extraction. Old Rayman2Fix receipts list these three ancillary files.
+// Only an otherwise verified RAYMAN2 installation is eligible; the receipt
+// is replaced with rollback before any original files are removed.
+void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {
+    const fs::path receipt = root / kReceipt;
+    std::ifstream input(receipt, std::ios::binary);
+    if (!input) throw std::runtime_error("CD receipt missing during cleanup");
+    std::string line;
+    if (!std::getline(input, line) || line != kReceiptHeader ||
+        !std::getline(input, line) || line != "VOLUME\tRAYMAN2")
+        throw std::runtime_error("CD cleanup requires an authenticated receipt format");
+
+    std::vector<std::string> retained;
+    retained.emplace_back(kReceiptHeader);
+    retained.emplace_back("VOLUME\tRAYMAN2");
+    std::size_t removed_receipt_entries = 0;
+    while (std::getline(input, line)) {
+        const auto last_tab = line.rfind('\t');
+        if (line.rfind("FILE\t", 0) != 0 || last_tab == std::string::npos)
+            throw std::runtime_error("invalid CD receipt during cleanup");
+        const auto path = fs::u8path(line.substr(last_tab + 1));
+        if (!safe_relative(path))
+            throw std::runtime_error("unsafe CD receipt path during cleanup");
+        if (excluded_cd_protection_auxiliary(path))
+            ++removed_receipt_entries;
+        else
+            retained.push_back(line);
+    }
+    if (input.bad()) throw std::runtime_error("cannot read CD receipt during cleanup");
+
+    const std::array<const char*, 3> names = {
+        "00000001.tmp", "0000040c.016", "0000040c.256"
+    };
+    std::size_t present = 0;
+    for (const auto* name : names) {
+        const fs::path file = root / name;
+        // Never follow links, remove directories, or touch similarly named
+        // game assets in nested directories.
+        if (fs::is_symlink(fs::symlink_status(file)))
+            throw std::runtime_error("refusing to delete symlinked CD auxiliary");
+        if (fs::exists(file)) {
+            if (!exists_file(file))
+                throw std::runtime_error("unexpected non-file CD auxiliary path");
+            ++present;
+        }
+    }
+    if (!removed_receipt_entries && !present) return;
+
+    if (removed_receipt_entries) {
+        fs::path pending = receipt;
+        pending += ".new";
+        fs::path backup = receipt;
+        backup += ".previous";
+        if (fs::exists(pending) || fs::exists(backup))
+            throw std::runtime_error("CD receipt cleanup staging exists; refusing overwrite");
+        {
+            std::ofstream out(pending, std::ios::binary | std::ios::trunc);
+            if (!out) throw std::runtime_error("cannot stage cleaned CD receipt");
+            for (const auto& entry : retained) out << entry << '\n';
+            out.flush();
+            if (!out) {
+                out.close();
+                fs::remove(pending);
+                throw std::runtime_error("cannot write cleaned CD receipt");
+            }
+        }
+        fs::rename(receipt, backup);
+        try {
+            fs::rename(pending, receipt);
+        } catch (...) {
+            std::error_code ignored;
+            fs::rename(backup, receipt, ignored);
+            fs::remove(pending, ignored);
+            throw;
+        }
+        std::error_code ignored;
+        fs::remove(backup, ignored);
+        startup.log("CLEANUP: removed obsolete auxiliary entries from local SHA256 receipt=" +
+                    std::to_string(removed_receipt_entries));
+    }
+
+    for (const auto* name : names) {
+        const fs::path file = root / name;
+        if (!fs::exists(file)) continue;
+        std::error_code err;
+        fs::permissions(file, fs::perms::owner_write, fs::perm_options::add, err);
+        if (err) throw std::runtime_error("cannot make obsolete auxiliary writable");
+        if (!fs::remove(file))
+            throw std::runtime_error("cannot delete obsolete auxiliary file");
+        startup.log(std::string("CLEANUP-OMIT: deleted obsolete CD auxiliary ") + name);
+    }
+    startup.log("CLEANUP: original CD protections auxiliaries excluded; "
+                "game data and user settings retained");
 }
 
 void copy_bootstrap_files(const fs::path& original, const fs::path& staged) {
@@ -283,6 +388,13 @@ int verify_installation(Startup& startup) {
     }
     if (!verify_local_receipt(root, startup)) {
         std::cerr << "Installation verification failed. Existing user files are unchanged.\n";
+        return 2;
+    }
+    // One-time cleanup of files included by older installers. After this,
+    // the receipt must still verify normally, without requiring the CD.
+    remove_excluded_cd_auxiliaries(root, startup);
+    if (!verify_local_receipt(root, startup)) {
+        startup.log("VERIFY: installed game failed after auxiliary cleanup");
         return 2;
     }
     return 0;
