@@ -15,6 +15,7 @@ endif()
 
 add_executable(Rayman2Fix
   src/launcher/main.cpp
+  src/launcher/auto_flow.cpp
   src/launcher/startup.cpp
   src/launcher/system_inventory.cpp)
 target_link_libraries(Rayman2Fix PRIVATE rayman2_disc)
@@ -61,4 +62,11 @@ if(BUILD_TESTING)
   add_executable(disc_tests tests/disc_tests.cpp)
   target_link_libraries(disc_tests PRIVATE rayman2_disc)
   add_test(NAME disc-image-parser COMMAND disc_tests)
+
+  add_executable(auto_flow_tests
+    tests/auto_flow_tests.cpp
+    src/launcher/auto_flow.cpp
+    src/launcher/startup.cpp)
+  target_link_libraries(auto_flow_tests PRIVATE rayman2_disc)
+  add_test(NAME automatic-cd-install COMMAND auto_flow_tests)
 endif()
