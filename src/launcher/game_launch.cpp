@@ -308,7 +308,18 @@ int launch_verified_game(Startup& startup) {
     std::cout << "Launching Rayman 2 (Glide2)...\n" << std::flush;
     startup.log("LAUNCH-START: child=rayman2.exe working_directory=Rayman2Fix");
     const auto started = std::chrono::steady_clock::now();
-    const auto result = run_child_process(root / "rayman2.exe", root, display);
+    // The child runtime and launcher share one log. Closing the MSVC
+    // ofstream temporarily avoids Windows file-sharing denial when the
+    // injected DLL appends its diagnostics during gameplay.
+    startup.suspend_logging_for_child();
+    ChildProcessResult result{};
+    try {
+        result = run_child_process(root / "rayman2.exe", root, display);
+    } catch (...) {
+        startup.resume_logging_after_child();
+        throw;
+    }
+    startup.resume_logging_after_child();
     const auto seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - started).count();
     if (!result.started) {

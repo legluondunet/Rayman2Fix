@@ -306,6 +306,19 @@ void Startup::initialize() {
     log("INSTALL: no verified CD edition profile, no playable installation");
 }
 
+void Startup::suspend_logging_for_child() {
+    if (!logging_enabled_ || !log_stream_.is_open()) return;
+    log_stream_.flush();
+    if (!log_stream_) throw std::runtime_error("cannot flush launcher log before game");
+    log_stream_.close();
+}
+
+void Startup::resume_logging_after_child() {
+    if (!logging_enabled_ || log_stream_.is_open()) return;
+    log_stream_.open(log_path_, std::ios::binary | std::ios::app);
+    if (!log_stream_) throw std::runtime_error("cannot resume launcher log after game");
+}
+
 void Startup::log(const std::string& line) {
     if (log_stream_) {
         log_stream_ << line << '\n';

@@ -19,6 +19,10 @@ public:
 
     void initialize();
     void log(const std::string& line);
+    // Release the launcher-owned log handle while the injected runtime writes
+    // to the same one-file log, then reopen in append mode after game exit.
+    void suspend_logging_for_child();
+    void resume_logging_after_child();
     bool has_runtime_dll() const;
     bool logging_enabled() const noexcept { return logging_enabled_; }
 private:

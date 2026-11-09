@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
 
 #if !defined(_M_IX86)
 #error Rayman2Fix camera runtime requires Windows x86
@@ -35,6 +36,13 @@ bool g_log = false;
 float g_hud_scale = 1.0f;
 std::atomic<void*> g_plain_sprite_original{nullptr};
 std::atomic<void*> g_uv_sprite_original{nullptr};
+std::atomic<void*> g_color_sprite_original{nullptr};
+std::atomic<bool> g_plain_seen{false};
+std::atomic<bool> g_uv_seen{false};
+std::atomic<bool> g_color_seen{false};
+std::atomic<bool> g_plain_corrected{false};
+std::atomic<bool> g_uv_corrected{false};
+std::atomic<bool> g_color_corrected{false};
 volatile LONG g_hud_worker_started = 0;
 
 struct RuntimeOptions {
@@ -57,8 +65,12 @@ void log_line(const char* message) {
     // level up beside Rayman2Fix.exe. Use append-only, no extra log file.
     wchar_t* last = wcsrchr(path, L'\\');
     if (!last) return;
+    *last = L'\0'; // Remove rayman2.exe
+    last = wcsrchr(path, L'\\');
+    if (!last) return;
+    // Direct parent path instead of ..\\ so Win32/Wine resolve identically.
     wcscpy_s(last + 1, MAX_PATH - static_cast<std::size_t>(last + 1 - path),
-             L"..\\Rayman2Fix.log");
+             L"Rayman2Fix.log");
     HANDLE file = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) return;
@@ -135,24 +147,34 @@ DWORD install_camera_hook() {
     return 1;
 }
 
-// Two game-side GLI driver callback slots, verified only for the SHA256-locked
+// Three game-side GLI driver callback slots, verified only for the SHA256-locked
 // retail executable supported by this project. Unlike a Glide-wide heuristic,
 // these callbacks are used for sprites, not every 3D triangle. The additional
 // xOoZ=1 check preserves perspective-projected world sprites.
 constexpr uintptr_t kPlainSpriteSlotRva = 0x104530; // VA 0x504530
 constexpr uintptr_t kUvSpriteSlotRva = 0x104524;    // VA 0x504524
+// The colored variant is used by the GLI font/sprite path in Rayman 2.
+constexpr uintptr_t kColorSpriteSlotRva = 0x104838; // VA 0x504838
 constexpr float kInternalGlideWidth = 1024.0f;
 using PlainSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float, void*);
 using UvSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float*, float, void*);
+using ColorSpriteFn = void (__cdecl*)(r2fix::HudVertex*, void*, float, void*);
+
+void report_first(std::atomic<bool>& flag, const char* line) {
+    if (!flag.exchange(true, std::memory_order_relaxed))
+        log_line(line);
+}
 
 void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
     const auto original = reinterpret_cast<PlainSpriteFn>(
         g_plain_sprite_original.load(std::memory_order_acquire));
     if (!original) return;
+    report_first(g_plain_seen, "RUNTIME-HUD: plain sprite callback reached");
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, z, globals);
         return;
     }
+    report_first(g_plain_corrected, "RUNTIME-HUD: plain sprite 4:3 correction applied");
     r2fix::HudVertex centered[4];
     std::memcpy(centered, quad, sizeof(centered));
     r2fix::center_screen_sprite_quad(centered, kInternalGlideWidth, g_hud_scale);
@@ -164,14 +186,34 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
     const auto original = reinterpret_cast<UvSpriteFn>(
         g_uv_sprite_original.load(std::memory_order_acquire));
     if (!original) return;
+    report_first(g_uv_seen, "RUNTIME-HUD: UV sprite callback reached");
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, uv, z, globals);
         return;
     }
+    report_first(g_uv_corrected, "RUNTIME-HUD: UV sprite 4:3 correction applied");
     r2fix::HudVertex centered[4];
     std::memcpy(centered, quad, sizeof(centered));
     r2fix::center_screen_sprite_quad(centered, kInternalGlideWidth, g_hud_scale);
     original(centered, uv, z, globals);
+}
+
+
+void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
+                              float z, void* globals) {
+    const auto original = reinterpret_cast<ColorSpriteFn>(
+        g_color_sprite_original.load(std::memory_order_acquire));
+    if (!original) return;
+    report_first(g_color_seen, "RUNTIME-HUD: colored sprite callback reached");
+    if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
+        original(quad, colors, z, globals);
+        return;
+    }
+    report_first(g_color_corrected, "RUNTIME-HUD: colored sprite 4:3 correction applied");
+    r2fix::HudVertex centered[4];
+    std::memcpy(centered, quad, sizeof(centered));
+    r2fix::center_screen_sprite_quad(centered, kInternalGlideWidth, g_hud_scale);
+    original(centered, colors, z, globals);
 }
 
 bool executable_callback(const void* address) {
@@ -221,7 +263,7 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
     const auto* pe = reinterpret_cast<const IMAGE_NT_HEADERS32*>(module + dos->e_lfanew);
     if (pe->Signature != IMAGE_NT_SIGNATURE ||
-        pe->OptionalHeader.SizeOfImage < kPlainSpriteSlotRva + sizeof(void*)) {
+        pe->OptionalHeader.SizeOfImage < kColorSpriteSlotRva + sizeof(void*)) {
         log_line("RUNTIME-HUD: callback slots outside approved executable image");
         return 0;
     }
@@ -231,9 +273,13 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
         const_cast<BYTE*>(module + kPlainSpriteSlotRva));
     auto* uv = reinterpret_cast<void* volatile*>(
         const_cast<BYTE*>(module + kUvSpriteSlotRva));
+    auto* colors = reinterpret_cast<void* volatile*>(
+        const_cast<BYTE*>(module + kColorSpriteSlotRva));
     bool plain_logged = false;
     bool uv_logged = false;
-    for (;;) {
+    bool color_logged = false;
+    log_line("RUNTIME-HUD: 4:3 sprite callback monitor started");
+    for (unsigned iteration = 0;; ++iteration) {
         install_callback(plain, reinterpret_cast<void*>(&hud_plain_sprite),
                          g_plain_sprite_original,
                          "RUNTIME-HUD: centered 4:3 screen-space sprites enabled",
@@ -242,6 +288,21 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                          g_uv_sprite_original,
                          "RUNTIME-HUD: centered 4:3 UV sprites enabled",
                          uv_logged);
+        install_callback(colors, reinterpret_cast<void*>(&hud_color_sprite),
+                         g_color_sprite_original,
+                         "RUNTIME-HUD: centered 4:3 colored sprites enabled",
+                         color_logged);
+        if (iteration == 10 || iteration == 120) {
+            // No raw addresses or personal data; useful if callbacks never
+            // become available, or become available but never execute.
+            char status[160]{};
+            std::snprintf(status, sizeof(status),
+                          "RUNTIME-HUD: callback installed plain=%d uv=%d colors=%d; invoked plain=%d uv=%d colors=%d",
+                          plain_logged ? 1 : 0, uv_logged ? 1 : 0, color_logged ? 1 : 0,
+                          g_plain_seen.load() ? 1 : 0, g_uv_seen.load() ? 1 : 0,
+                          g_color_seen.load() ? 1 : 0);
+            log_line(status);
+        }
         Sleep(500);
     }
 }
