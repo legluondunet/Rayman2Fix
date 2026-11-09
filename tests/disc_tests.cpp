@@ -115,6 +115,8 @@ int main() {
         check(parsed.info().image_bytes == iso.size(), "physical image size");
         check(parsed.info().volume_bytes == iso.size(), "ISO logical volume size");
         check(parsed.info().distinct_extent_bytes == 6, "unique file extents");
+        check(parsed.info().filename_source.find("primary") != std::string::npos,
+              "short-name fallback is explicitly identified");
 
         // A valid ISO may reuse the same physical extent for different filenames.
         // In that case sum of declared file lengths can exceed the image size.
@@ -163,9 +165,9 @@ int main() {
         check(r2.info().files.size() == 2, "full directory inventory retained");
         check(r2.info().files[0].skipped_by_cd_recipe, "explicitly marked ignored file");
         r2.extract(root / "filtered");
-        check(!fs::exists(root / "filtered" / "DATA" / "WORLD" / "LEVELS" / "MAP0.DAT"),
+        check(!fs::exists(root / "filtered" / "data" / "world" / "levels" / "map0.dat"),
               "historical excluded file not extracted");
-        std::ifstream real(root / "filtered" / "DATA" / "WORLD" / "LEVELS" / "REAL.DAT",
+        std::ifstream real(root / "filtered" / "data" / "world" / "levels" / "real.dat",
                            std::ios::binary);
         check(static_cast<bool>(real), "real nested file exists");
         std::string real_text((std::istreambuf_iterator<char>(real)), {});
@@ -193,9 +195,9 @@ int main() {
         check(aliased.info().suspect_files == 0, "Lutris SFN exclusions are not suspects");
         check(aliased.info().extract_bytes == 6, "only real data selected");
         aliased.extract(root / "aliases-extracted");
-        check(fs::exists(root / "aliases-extracted" / "DATA" / "WORLD" / "LEVELS" / "REAL.DAT"),
+        check(fs::exists(root / "aliases-extracted" / "data" / "world" / "levels" / "real.dat"),
               "needed game data preserved alongside short-name exclusions");
-        check(!fs::exists(root / "aliases-extracted" / "DATA" / "WORLD" / "LEVELS" / "GRAPHI~3.DAT"),
+        check(!fs::exists(root / "aliases-extracted" / "data" / "world" / "levels" / "graphi~3.dat"),
               "the observed GRAPHI~3.DAT is not extracted");
 
         auto unrecognized_alias = make_rayman2_with_dummy();
@@ -243,7 +245,7 @@ int main() {
         check(dx.info().skipped_files == 2 && dx.info().suspect_files == 0,
               "root installer directories skipped recursively");
         dx.extract(root / "installer-dir-extracted");
-        check(!fs::exists(root / "installer-dir-extracted" / "DIRECTX"),
+        check(!fs::exists(root / "installer-dir-extracted" / "directx"),
               "excluded installer-only tree is never copied");
 
         write_file(root / "not_rayman2.iso", make_rayman2_with_dummy(false, true));
@@ -295,7 +297,7 @@ int main() {
 
         const auto target = root / "Rayman2Fix" / "DiscContent";
         parsed.extract(target);
-        std::ifstream content(target / "DATA.TXT", std::ios::binary);
+        std::ifstream content(target / "data.txt", std::ios::binary);
         std::string text((std::istreambuf_iterator<char>(content)), {});
         check(text == "HELLO\n", "extraction data");
         content.close();  // Windows cannot delete an open output file.
