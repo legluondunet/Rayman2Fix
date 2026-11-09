@@ -11,8 +11,9 @@ Rayman2Fix.log                       one log, reset at each launcher start
 Rayman2Fix/
     rayman2.exe                      copied from original CD (not yet playable)
     Rayman2Fix.dll                   unpacked from launcher (currently inert)
-    glide2x.dll                      GameFrame x86 Glide 2 DLL (future)
-    SDL3.dll                         SDL3 x86 controller DLL (future)
+    glide2x.dll                      pinned GameFrame x86 Glide 2 wrapper (deployed)
+    GameFrame-LICENSE-APACHE.txt      license copied from embedded resource
+    SDL3.dll                         future phase; not required at startup
     Rayman2Fix.ini                   generated if missing, user-owned
     dll/snd_cpa.ini                  copied from CD's snd_cpa_mmx.ini
     data/...                         original CD content, lowercase and writable
@@ -30,9 +31,10 @@ overwriting unknown existing user files. `Rayman2Fix/DiscContent` is used
 
 The Windows CI archive now contains **only `Rayman2Fix.exe`**, with the
 project's own inert x86 DLL embedded as an RCDATA resource; it is unpacked
-automatically. **GameFrame, SDL3, CD game files, INI and logs are not
-shipped**. The complete release will embed verified GameFrame/SDL3 libraries
-once integrated and attributable.
+automatically. **GameFrame's pinned 32-bit glide2x.dll and its Apache
+license are now embedded** in the single EXE, installed and SHA-256 checked
+on first launch. SDL3, CD game files, INI and logs are not shipped.
+SDL3 and controller support are deferred to a subsequent phase.
 
 ## Automatic workflow (implemented foundation, incomplete game runtime)
 
@@ -60,9 +62,11 @@ a cryptographic authentication of a specific trusted retail edition.
    prepared installation to `Rayman2Fix/`, with rollback on failure.
    The original CD image and executable are never modified.
 7. Reverify the published files by size and SHA-256. **Do not start the game yet**: there is no
-   trusted retail executable/hash profile, working no-CD runtime, GameFrame
-   Glide 2 or SDL3 integration. Log the exact blocker rather than claiming
-   a successful launch. This stage is a safe *installation foundation*.
+   trusted retail executable/hash profile, working no-CD runtime or tested
+   Rayman 2 graphics. The **GameFrame 32-bit Glide wrapper is now integrated**
+   and SHA-256 verified, while SDL3 is deliberately deferred. Log the
+   blocker rather than claiming gameplay support. This stage remains a safe
+   *installation foundation*.
 
 **Future launch contract:** after a verified retail executable profile and
 working fixes are added, the default command must launch the game only
@@ -117,12 +121,19 @@ research reference, without redistributing it or importing another project's
 code. Any binary or memory correction requires exact-version gating,
 original-byte validation, backups and reproducible before/after tests.
 
-### 4. Add GameFrame, and support only the 3dfx renderer
+### 4. GameFrame Glide 2x integration — DLL complete; game validation pending
 
-Build or bundle a pinned, attributed open-source GameFrame Glide2x x86
-library with the expected `glide2x.dll` exports. Verify textures,
-lighting, videos, HUD, aspect correction, horizontal FOV and proper
-4:3 positioning of overlays. The DirectX *game renderer* is unsupported.
+The pinned Apache-2.0 GameFrame source
+(`f195a074a63cc150673c38becdec696163b0b3d1`) is compiled to x86
+`glide2x.dll` by Windows CI. Its 156 canonical decorated Glide exports
+are verified, then its SHA-256 and Apache license are embedded in the
+standalone launcher. On startup an incorrect or unknown Glide DLL is backed
+up to `glide2x.dll.bak` (or unique numbered backup) and replaced by
+the correct bundled library. Pre-existing backups are preserved.
+
+**Still to validate in Rayman 2:** textures, lighting, video, HUD, aspect
+correction, horizontal FOV and proper 4:3 positioning of overlays.
+The DirectX *game renderer* is unsupported.
 Avoid treating a Win32 diagnostic API (D3D9 GPU enumeration) as a game renderer.
 
 ### 5. Replace exclusive fullscreen with stable borderless fullscreen
@@ -133,7 +144,7 @@ cursor behavior and pause/resume across Windows/Wine/Proton; never force
 topmost over another application. Handle 4:3, 16:9, high DPI and multimonitor.
 Avoid game-specific resolution hacks.
 
-### 6. Integrate SDL3 and options
+### 6. Integrate SDL3 and options — deferred
 
 Native x86 SDL3 gamepad support (hotplug, consistent mappings, controller
 reconnection, keyboard fallback), initialized outside `DllMain`.
@@ -159,8 +170,12 @@ features have been tested.
 - `--inspect`, `--extract` and `--verify` are available for diagnostics.
 - The **single Windows EXE** embeds its own inert x86 DLL and creates its
   INI when absent; the workflow archive has no sidecar files.
-- **No game launch**, no SafeDisc/no-CD compatibility, no verified retail
-  executable hash, no pirate-head fixes, no GameFrame or SDL3 yet.
+- The Windows EXE now embeds the pinned 32-bit GameFrame Glide library and
+  its Apache license. Windows CI verifies the DLL and the SHA-256, while
+  preserving replaced versions under `glide2x.dll.bak`.
+- **No game launch yet**, no SafeDisc/no-CD compatibility, no verified
+  executable hash and no pirate-head fixes. Actual graphics compatibility
+  has not been tested. **SDL3 is deferred** and is not a startup requirement.
 - Synthetic Windows x86/Linux tests validate the installer and refusal
   paths, but NOT real retail disc playability.
 
