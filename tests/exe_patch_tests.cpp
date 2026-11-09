@@ -72,7 +72,7 @@ static std::vector<unsigned char> compressed_fixture(const std::string& source,
     digest(data, r2fix::sha256_text(target));
     data.push_back('C'); append64(data, 0); append32(data, 8);
     data.push_back('Z'); append32(data, 64); append32(data, 9);
-    data.insert(data.end(), {0x4f, 'A','B','C','D', 4, 0, 45, 0});
+    data.insert(data.end(), {0x4f, 'A','B','C','D', 4, 0, 41, 0});
     data.push_back('C'); append64(data, 8); append32(data, 7);
     data.push_back('E');
     return data;
@@ -139,7 +139,7 @@ int main() {
         // A corrupt offset in the LZ4 block is not accepted.
         auto corrupt_lz4 = zipped;
         // Search instead of hardcoding the encoded patch's header offset.
-        const std::string signature("\x4f" "ABCD" "\x04\x00\x2d\x00", 9);
+        const std::string signature("\x4f" "ABCD" "\x04\x00\x29\x00", 9);
         auto it = std::search(corrupt_lz4.begin(), corrupt_lz4.end(),
                               signature.begin(), signature.end());
         check(it != corrupt_lz4.end(), "LZ4 sequence in patch found");
