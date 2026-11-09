@@ -2,6 +2,8 @@
 #include "rayman2fix/cd_exclusions.hpp"
 #include "rayman2fix/disc.hpp"
 #include "rayman2fix/sha256.hpp"
+#include "rayman2fix/patch_install.hpp"
+#include "rayman2fix/exe_patch.hpp"
 #include "rayman2fix/startup.hpp"
 
 #include <algorithm>
@@ -21,6 +23,10 @@ namespace r2fix {
 namespace {
 constexpr const char* kReceipt = ".rayman2fix-cd-files.tsv";
 constexpr const char* kReceiptHeader = "RAYMAN2FIX-CD-FILES\t2";
+// The unprotected executable supplied by the project owner. No commercial
+// EXE is bundled; only a verified byte-delta may eventually be added.
+constexpr const char* kApprovedUnprotectedExeSha256 =
+    "9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713";
 
 std::string upper(std::string s) {
     for (auto& c : s)
@@ -143,6 +149,8 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
     }
     std::size_t count = 0;
     bool exe_listed = false, audio_listed = false;
+    std::string original_exe_hash;
+    std::uint64_t original_exe_size = 0;
     while (std::getline(in, line)) {
         if (line.rfind("FILE\t", 0) != 0) {
             startup.log("VERIFY: unexpected CD receipt entry");
@@ -180,6 +188,14 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
             ++count;
             continue;
         }
+        if (relative.generic_u8string() == "rayman2.exe") {
+            if (exe_listed) return false;
+            exe_listed = true;
+            original_exe_hash = expected_hash;
+            original_exe_size = expected;
+            ++count;
+            continue; // The original has moved to .bak after a verified patch.
+        }
         if (!exists_file(file) || fs::file_size(file) != expected) {
             startup.log("VERIFY: missing or size-mismatched game file=" +
                         relative.generic_u8string());
@@ -191,19 +207,26 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
             std::cerr << "Game file SHA256 mismatch: " << relative.u8string() << '\n';
             return false;
         }
-        exe_listed |= relative.generic_u8string() == "rayman2.exe";
         audio_listed |= relative.generic_u8string() == "dll/snd_cpa_mmx.ini";
         ++count;
     }
+    // A patched CD EXE is verified against the patch marker; the original
+    // SHA256 in the CD receipt must then match rayman2.exe.bak.
+    std::string exe_reason;
+    if (!exe_listed || !verify_exe_replacement(
+            root, original_exe_hash, original_exe_size, exe_reason)) {
+        startup.log("VERIFY: original/patched executable check failed: " + exe_reason);
+        return false;
+    }
     // Audio initialization duplicates the source but does not modify it.
-    if (!count || !exe_listed || !audio_listed ||
+    if (!count || !audio_listed ||
         !exists_file(root / "dll" / "snd_cpa.ini") ||
         fs::file_size(root / "dll" / "snd_cpa.ini") !=
             fs::file_size(root / "dll" / "snd_cpa_mmx.ini")) {
         startup.log("VERIFY: missing core executable/audio assets");
         return false;
     }
-    startup.log("VERIFY: local CD receipt size+SHA256 OK files=" +
+    startup.log("VERIFY: local CD receipt size+SHA256 OK, original/backup+patched EXE OK files=" +
                 std::to_string(count) +
                 " (local integrity only; NOT authenticated edition hashes)");
     return true;
