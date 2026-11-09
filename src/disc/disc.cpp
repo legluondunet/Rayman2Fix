@@ -239,11 +239,10 @@ bool ignored_by_lutris_rayman2_cd(const std::string& volume_id,
             return true;
     }
 
-    // The same Lutris installation recipe removes installer-only root
-    // files and folders after copying the CD. Do not remove either DLL or
-    // Dll here: the original recipe MERGES them first, before removing the
-    // duplicate. That separate, order-dependent step belongs to the final
-    // edition-verified installer, not this generic ISO extraction pass.
+    // The original CD contains one DLL directory. The legacy Lutris
+    // DLL/Dll consolidation existed solely because Ray2Fix and dgVoodoo2
+    // introduced additional files with inconsistent path casing. We do not
+    // import those components and therefore do not merge DLL directories.
     constexpr const char* excluded_dirs[] = {
         "ACROBAT", "DIRECTX", "DRIVERS", "INSTDATA", "PADS",
         "TONIC TROUBLE", "TONICT~1"
@@ -401,7 +400,7 @@ void DiscImage::scan_directory(std::uint32_t extent,
     validate_extent(extent, size);
     ancestors.push_back(extent);
     const auto bytes = read_user(extent, 0, size);
-    std::map<std::string, bool> names; // Lowercase target name -> is directory
+    std::set<std::string> names; // Reject ambiguous lowercase output paths
     std::size_t pos = 0;
     while (pos < bytes.size()) {
         const auto len = bytes[pos];
@@ -422,15 +421,9 @@ void DiscImage::scan_directory(std::uint32_t extent,
         pos += len;
         if (name.empty()) continue;  // dot/dot-dot
         const bool directory = (flags & 0x02) != 0;
-        const auto result = names.emplace(name, directory);
-        if (!result.second) {
-            if (!directory || !result.first->second)
-                fail("filename collision after lowercase conversion: " +
-                     (parent / fs::u8path(name)).generic_u8string());
-            // Legacy CD installations may contain both DLL/ and Dll/. They
-            // must become one lowercase dll/ directory, not two overwrites.
-            ++info_.merged_directory_aliases;
-        }
+        if (!names.insert(name).second)
+            fail("filename collision after lowercase conversion: " +
+                 (parent / fs::u8path(name)).generic_u8string());
         const fs::path relative = parent / fs::u8path(name);
         // An exact historical exclusion may be unreadable; do not generalize
         // that rule to other files just because their declared sizes are huge.
@@ -462,7 +455,7 @@ void DiscImage::scan_directory(std::uint32_t extent,
                 }
             }
             if (!skipped && !output_file_paths_.insert(relative).second)
-                fail("duplicate lowercase output file (merge conflict): " +
+                fail("duplicate lowercase output file: " +
                      relative.generic_u8string());
             info_.files.push_back({relative, child_extent, child_size,
                                    skipped, !issue.empty(), issue});
