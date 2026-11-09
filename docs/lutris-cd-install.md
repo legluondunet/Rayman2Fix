@@ -116,11 +116,13 @@ The script also removes these **root files**: `Autorun.inf`,
 (or the original `DSETUP*` pattern), not by arbitrary filename matches
 elsewhere in game directories.
 
-**Special case: `DLL/` and `Dll/`.** The Lutris script first merges
-`DLL/` into `Dll/`, *then* removes the redundant `DLL/`. Our bootstrap
-does **not** omit either directory: the proper merge and conflict handling
-must be performed by the later edition-verified installer, otherwise we
-could discard required game DLLs.
+**Correction — the original CD contains a single DLL directory.**
+The historical Lutris script merged `DLL/` and `Dll/` only because the
+external dgVoodoo2 and Ray2Fix components used inconsistent capitalization.
+**Rayman2Fix does not use either component**, so it simply extracts the
+original CD directory as `dll/`, with no dedicated merge, deletion, or
+conflict-resolution step. Unexpected duplicate paths after lowercasing
+are rejected rather than silently overwritten.
 
 The exclusions are an **installation recipe** based on a version of the
 author's CD script, not a universal claim about every possible Rayman 2
