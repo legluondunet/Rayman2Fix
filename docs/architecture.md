@@ -37,7 +37,7 @@ license are now embedded** in the single EXE, installed and SHA-256 checked
 on first launch. SDL3, CD game files, INI and logs are not shipped.
 SDL3 and controller support are deferred to a subsequent phase.
 
-## Automatic workflow (implemented foundation, incomplete game runtime)
+## Automatic workflow (installer complete; first supported EXE launch test)
 
 1. Execute **`Rayman2Fix.exe` without arguments**. The former `--init`
    command has been deleted; `--verify`, `--inspect` and `--extract`
@@ -71,17 +71,22 @@ a cryptographic authentication of a specific trusted retail edition.
 7. Reverify the published files by size and SHA-256. Translate the user
    `Rayman2Fix.ini` graphics resolution into game-facing `ubi.ini` on
    installation and at each launcher run. Preserve other existing CD keys.
-   **Do not start the game yet**: there is no
-   trusted retail executable/hash profile, working no-CD runtime or tested
-   Rayman 2 graphics. The **GameFrame 32-bit Glide wrapper is now integrated**
-   and SHA-256 verified, while SDL3 is deliberately deferred. Log the
-   blocker rather than claiming gameplay support. This stage remains a safe
-   *installation foundation*.
+   After this verification, launch **only** the exact authenticated
+   unprotected executable supplied by the owner (SHA-256
+   `9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`).
+   The original `rayman2.exe.bak` must match the protected SHA-256
+   `7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`,
+   and the patch marker and GameFrame must pass integrity checks.
+   Spawn `rayman2.exe` via Win32 `CreateProcessW`, with `Rayman2Fix/`
+   as current directory, then wait and log the real exit code/duration.
+   **Do not assert successful gameplay or no-CD rendering before tests.**
+   SDL3 is deferred.
 
-**Future launch contract:** after a verified retail executable profile and
-working fixes are added, the default command must launch the game only
-after strict hashes, data and runtime checks pass. The original CD will
-not be needed for subsequent validated launches.
+**Current launch contract:** the exact approved protected/unprotected
+executable pair is the only recognized launchable candidate. All other
+editions are refused. The first Wine/Windows tests will establish whether
+Rayman 2 itself launches without CD or requires additional compatibility
+work. Future editions require separate validated hash profiles.
 
 ## Diagnostic inventory (independently implemented, same categories as SpiderMan2k1Fix)
 
@@ -185,9 +190,12 @@ written automatically. SDL3-related options remain deferred.
 - The Windows EXE now embeds the pinned 32-bit GameFrame Glide library and
   its Apache license. Windows CI verifies the DLL and the SHA-256, while
   preserving replaced versions under `glide2x.dll.bak`.
-- **No game launch yet**, no SafeDisc/no-CD compatibility, no verified
-  executable hash and no pirate-head fixes. Actual graphics compatibility
-  has not been tested. **SDL3 is deferred** and is not a startup requirement.
+- The initial **game launch is implemented** for the one known and
+  SHA256-verified unprotected EXE, with the protected original retained
+  under `rayman2.exe.bak`. The game is created with an explicit working
+  directory and its actual exit code is logged. No-CD gameplay, Glide
+  rendering and pirate-head behavior are **not yet validated**.
+  SDL3 remains deferred.
 - Synthetic Windows x86/Linux tests validate the installer and refusal
   paths, but NOT real retail disc playability.
 
