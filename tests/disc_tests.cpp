@@ -172,6 +172,79 @@ int main() {
         check(real_text == "HELLO\n", "real nested file contents preserved");
         real.close();
 
+        // 8.3 primary ISO names for the six long GRAPHICS*/TEXTURES*
+        // exclusions in the user's Lutris CD installer. One bogus alias had
+        // appeared as GRAPHI~3.DAT in a real RAYMAN2 ISO log.
+        auto dos_aliases = make_rayman2_with_dummy();
+        auto* levels = dos_aliases.data() + 23 * 2048;
+        std::fill(levels, levels + 2048, 0);
+        std::size_t alias_pos = record(levels, 23, 2048, 2, std::string(1, '\0'));
+        alias_pos += record(levels + alias_pos, 22, 2048, 2, std::string(1, '\1'));
+        const char* ignored_aliases[] = {
+            "GRAPHI~1.DAT;1", "GRAPHI~2.DAT;1", "GRAPHI~3.DAT;1",
+            "TEXTUR~1.DAT;1", "TEXTUR~2.DAT;1", "TEXTUR~3.DAT;1"
+        };
+        for (const char* alias : ignored_aliases)
+            alias_pos += record(levels + alias_pos, 200578, 437458886, 0, alias);
+        record(levels + alias_pos, 25, 6, 0, "REAL.DAT;1");
+        write_file(root / "dos_aliases.iso", dos_aliases);
+        const auto aliased = r2fix::DiscImage::open(root / "dos_aliases.iso");
+        check(aliased.info().skipped_files == 6, "all six SFN aliases omitted");
+        check(aliased.info().suspect_files == 0, "Lutris SFN exclusions are not suspects");
+        check(aliased.info().extract_bytes == 6, "only real data selected");
+        aliased.extract(root / "aliases-extracted");
+        check(fs::exists(root / "aliases-extracted" / "DATA" / "WORLD" / "LEVELS" / "REAL.DAT"),
+              "needed game data preserved alongside short-name exclusions");
+        check(!fs::exists(root / "aliases-extracted" / "DATA" / "WORLD" / "LEVELS" / "GRAPHI~3.DAT"),
+              "the observed GRAPHI~3.DAT is not extracted");
+
+        auto unrecognized_alias = make_rayman2_with_dummy();
+        auto* other_levels = unrecognized_alias.data() + 23 * 2048;
+        std::size_t other_pos = record(other_levels, 23, 2048, 2, std::string(1, '\0'));
+        other_pos += record(other_levels + other_pos, 22, 2048, 2, std::string(1, '\1'));
+        other_pos += record(other_levels + other_pos, 200578, 437458886, 0,
+                            "GRAPHI~4.DAT;1");
+        record(other_levels + other_pos, 25, 6, 0, "REAL.DAT;1");
+        write_file(root / "unknown_alias.iso", unrecognized_alias);
+        const auto unknown_alias = r2fix::DiscImage::open(root / "unknown_alias.iso");
+        check(unknown_alias.info().suspect_files == 1 &&
+              unknown_alias.info().skipped_files == 0,
+              "do not widen exact SFN exclusions to unexpected suffixes");
+
+        // The installer removes root setup files and directories as well.
+        auto setup_files = make_rayman2_with_dummy();
+        auto* setup_root = setup_files.data() + 20 * 2048;
+        std::size_t setup_pos = record(setup_root, 20, 2048, 2, std::string(1, '\0'));
+        setup_pos += record(setup_root + setup_pos, 20, 2048, 2, std::string(1, '\1'));
+        setup_pos += record(setup_root + setup_pos, 21, 2048, 2, "DATA");
+        record(setup_root + setup_pos, 200578, 437458886, 0, "SETUP.EXE;1");
+        write_file(root / "installer_setup.iso", setup_files);
+        const auto setup = r2fix::DiscImage::open(root / "installer_setup.iso");
+        check(setup.info().skipped_files == 2, "setup exe and MAP0.DAT skipped");
+        check(setup.info().suspect_files == 0, "known installer-only paths are excluded");
+
+        // A root DIRECTX directory is excluded recursively, but unrelated
+        // subdirectories are still traversed and validated.
+        auto setup_dir = make_rayman2_with_dummy();
+        setup_dir.resize(28 * 2048);
+        put32(setup_dir.data() + 16 * 2048 + 80, 28);
+        auto* dir_root = setup_dir.data() + 20 * 2048;
+        std::size_t dir_pos = record(dir_root, 20, 2048, 2, std::string(1, '\0'));
+        dir_pos += record(dir_root + dir_pos, 20, 2048, 2, std::string(1, '\1'));
+        dir_pos += record(dir_root + dir_pos, 21, 2048, 2, "DATA");
+        record(dir_root + dir_pos, 26, 2048, 2, "DIRECTX");
+        auto* directx_dir = setup_dir.data() + 26 * 2048;
+        std::size_t dx_pos = record(directx_dir, 26, 2048, 2, std::string(1, '\0'));
+        dx_pos += record(directx_dir + dx_pos, 20, 2048, 2, std::string(1, '\1'));
+        record(directx_dir + dx_pos, 200578, 437458886, 0, "DSETUP.DLL;1");
+        write_file(root / "installer_dir.iso", setup_dir);
+        const auto dx = r2fix::DiscImage::open(root / "installer_dir.iso");
+        check(dx.info().skipped_files == 2 && dx.info().suspect_files == 0,
+              "root installer directories skipped recursively");
+        dx.extract(root / "installer-dir-extracted");
+        check(!fs::exists(root / "installer-dir-extracted" / "DIRECTX"),
+              "excluded installer-only tree is never copied");
+
         write_file(root / "not_rayman2.iso", make_rayman2_with_dummy(false, true));
         const auto unrelated = r2fix::DiscImage::open(root / "not_rayman2.iso");
         check(unrelated.info().suspect_files == 1 && unrelated.info().skipped_files == 0,
