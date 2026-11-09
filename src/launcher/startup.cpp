@@ -58,23 +58,13 @@ void Startup::initialize() {
     if (!fs::exists(ini_path_)) {
         std::ofstream ini(ini_path_, std::ios::binary | std::ios::out);
         if (!ini) throw std::runtime_error("cannot create Rayman2Fix.ini");
-        ini << "; Rayman2Fix bootstrap configuration\n"
-               "; Graphical rendering and SDL3 runtime are not enabled yet.\n"
-               "; Display and input sections become active after validation.\n"
-               "[Graphics]\n"
-               "DisplayMode=BorderlessFullscreen\n"
-               "\n"
-               "[Input]\n"
-               "GamepadBackend=SDL3\n"
-               "\n"
-               "[Debug]\n"
+        ini << "[Debug]\n"
                "Log=1\n";
         if (!ini) throw std::runtime_error("failed writing Rayman2Fix.ini");
     }
 
-    // Exactly one diagnostic file beside the launcher. Clear it each run.
-    log_stream_.open(log_path_, std::ios::binary | std::ios::trunc);
-    if (!log_stream_) throw std::runtime_error("cannot create Rayman2Fix.log");
+    // Parse the only supported option before opening a log file.
+    // Log=0 is an opt-out; never create a diagnostic log in that mode.
     const auto now = std::chrono::system_clock::to_time_t(
         std::chrono::system_clock::now());
     std::tm local{};
@@ -91,19 +81,23 @@ void Startup::initialize() {
 #ifndef RAYMAN2FIX_BUILD_COMMIT
 #define RAYMAN2FIX_BUILD_COMMIT "unknown"
 #endif
-    log(std::string("Rayman2Fix ") + RAYMAN2FIX_VERSION + "-bootstrap commit=" + RAYMAN2FIX_BUILD_COMMIT);
-    log(std::string("START: local_time=") + when);
-    log("LAYOUT: launcher=Rayman2Fix.exe install=Rayman2Fix/ config=Rayman2Fix/Rayman2Fix.ini log=Rayman2Fix.log");
     // Log only specific, public configuration enums. Do not expose arbitrary
     // INI strings (which may contain private filesystem paths or tokens).
     auto option = [&](const std::string& section, const std::string& key) {
         std::ifstream in(ini_path_, std::ios::binary);
         std::string current, line;
+        bool first_line = true;
         while (std::getline(in, line)) {
+            if (first_line && line.size() >= 3 &&
+                static_cast<unsigned char>(line[0]) == 0xEF &&
+                static_cast<unsigned char>(line[1]) == 0xBB &&
+                static_cast<unsigned char>(line[2]) == 0xBF)
+                line.erase(0, 3);
+            first_line = false;
             const auto trim = [](std::string v) {
-                const auto first = v.find_first_not_of(" \\t\\r\\n");
+                const auto first = v.find_first_not_of(" \t\r\n");
                 if (first == std::string::npos) return std::string();
-                return v.substr(first, v.find_last_not_of(" \\t\\r\\n") - first + 1);
+                return v.substr(first, v.find_last_not_of(" \t\r\n") - first + 1);
             };
             line = trim(line);
             if (line.empty() || line[0] == ';' || line[0] == '#') continue;
@@ -118,19 +112,22 @@ void Startup::initialize() {
         }
         return std::string();
     };
-    const auto display = option("Graphics", "DisplayMode");
-    const auto pad = option("Input", "GamepadBackend");
     const auto debug = option("Debug", "Log");
-    log("CONFIG: Graphics.DisplayMode=" +
-        std::string(display == "BorderlessFullscreen" ? "BorderlessFullscreen" :
-                    display == "Windowed" ? "Windowed" : "Unrecognized or unset") +
-        " (bootstrap option, inactive)");
-    log("CONFIG: Input.GamepadBackend=" +
-        std::string(pad == "SDL3" ? "SDL3" : "Unrecognized or unset") +
-        " (bootstrap option, inactive)");
+    logging_enabled_ = debug != "0";
+    if (!logging_enabled_) {
+        // Prevent a stale log from looking like the latest run.
+        std::error_code ignored;
+        fs::remove(log_path_, ignored);
+        return;
+    }
+    // Exactly one diagnostic file beside the launcher. Clear it each run.
+    log_stream_.open(log_path_, std::ios::binary | std::ios::trunc);
+    if (!log_stream_) throw std::runtime_error("cannot create Rayman2Fix.log");
+    log(std::string("Rayman2Fix ") + RAYMAN2FIX_VERSION + "-bootstrap commit=" + RAYMAN2FIX_BUILD_COMMIT);
+    log(std::string("START: local_time=") + when);
+    log("LAYOUT: launcher=Rayman2Fix.exe install=Rayman2Fix/ config=Rayman2Fix/Rayman2Fix.ini log=Rayman2Fix.log");
     log("CONFIG: Debug.Log=" +
-        std::string(debug == "1" ? "1" : debug == "0" ? "0" : "Unrecognized or unset") +
-        " (bootstrap always writes startup log)");
+        std::string(debug == "1" ? "1" : "invalid or missing (default 1)"));
 
     log("RUNTIME: Rayman2Fix.dll=" +
         std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));
