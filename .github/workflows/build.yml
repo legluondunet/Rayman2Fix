@@ -1,0 +1,251 @@
+name: Build Rayman2Fix bootstrap
+
+on:
+  push:
+    branches: [ main, feat/bootstrap-cd-images ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out pinned Apache 2.0 GameFrame
+        uses: actions/checkout@v4
+        with:
+          repository: tanepiper/game-frame
+          ref: f195a074a63cc150673c38becdec696163b0b3d1
+          path: third_party/game-frame
+          persist-credentials: false
+      - name: Install Rust Windows x86 toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-pc-windows-msvc
+      - name: Build pinned GameFrame 32-bit glide2x.dll
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = (Resolve-Path 'third_party/game-frame/wrappers/Cargo.toml').Path
+          $upstreamDef = (Resolve-Path 'third_party/game-frame/wrappers/glide/glide2x.def').Path
+          # Adapt GNU internal symbols to 32-bit MSVC, keep 156 public exports.
+          $def = Join-Path $env:RUNNER_TEMP 'rayman2fix-glide-msvc.def'
+          $original = (Get-Content -Raw $upstreamDef).Replace([string][char]13, '')
+          $converted = [regex]::Replace($original, '(?m)^(_[A-Za-z0-9_]+@[0-9]+)=([A-Za-z0-9_]+@[0-9]+)$', '$1=_$2')
+          $count = ([regex]::Matches($converted, '(?m)^_[A-Za-z0-9_]+@[0-9]+=_[A-Za-z0-9_]+@[0-9]+$')).Count
+          if ($count -ne 156) { throw "Expected 156 Glide exports, got $count" }
+          Set-Content -Path $def -Value $converted -Encoding ascii
+          python tools/gameframe/apply_fps_limit.py third_party/game-frame
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned GameFrame FPS patch failed' }
+          $env:RUSTFLAGS = "-C link-arg=/DEF:$def"
+          cargo build -p glide --release --target i686-pc-windows-msvc --manifest-path $manifest
+          if ($LASTEXITCODE -ne 0) { throw 'GameFrame x86 compilation failed' }
+      - name: Audit GameFrame 32-bit Glide export ABI
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pefile
+          if ($LASTEXITCODE -ne 0) { throw 'PE auditor dependency failed' }
+          $dll = 'third_party/game-frame/wrappers/target/i686-pc-windows-msvc/release/glide2x.dll'
+          python tools/gameframe/audit_exports.py $dll third_party/game-frame/wrappers/glide/glide2x.def
+          if ($LASTEXITCODE -ne 0) { throw 'GameFrame ABI audit failed' }
+          $sha = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          "RAYMAN2FIX_GAMEFRAME_SHA256=$sha" >> $env:GITHUB_ENV
+          Write-Host "Pinned GameFrame x86 SHA256=$sha"
+      - name: Configure 32-bit Windows with embedded GameFrame
+        shell: pwsh
+        run: |
+          $dll = (Resolve-Path 'third_party/game-frame/wrappers/target/i686-pc-windows-msvc/release/glide2x.dll').Path
+          $license = (Resolve-Path 'third_party/game-frame/LICENSE-APACHE').Path
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=ON "-DRAYMAN2FIX_GLIDE_DLL=$dll" "-DRAYMAN2FIX_GLIDE_LICENSE=$license" "-DRAYMAN2FIX_GLIDE_SHA256=$env:RAYMAN2FIX_GAMEFRAME_SHA256"
+          if ($LASTEXITCODE -ne 0) { throw 'Launcher/GameFrame configure failed' }
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Verify launcher workspace and diagnostics
+        shell: pwsh
+        run: |
+          # Bare execution is the default workflow. With no CD or installed
+          # game the launcher must fail safely while still generating config/log.
+          & ./build/Release/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2) { throw "Bare launcher must report missing CD" }
+          & ./build/Release/Rayman2Fix.exe --init
+          if ($LASTEXITCODE -ne 2) { throw "--init must no longer be supported" }
+          if (!(Test-Path build/Release/Rayman2Fix/Rayman2Fix.ini)) {
+            throw "Expected persistent Rayman2Fix.ini alongside launcher"
+          }
+          if (!(Test-Path build/Release/Rayman2Fix.log)) {
+            throw "Expected single launcher-side log"
+          }
+          if (!(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'SYS-OS:')) {
+            throw "Expected system inventory in the launcher log"
+          }
+          $ini = 'build/Release/Rayman2Fix/Rayman2Fix.ini'
+          $initial = (Get-Content $ini | Where-Object {
+            $_.Trim() -and !$_.Trim().StartsWith(';')
+          })
+          if ($initial.Count -ne 5 -or $initial[0] -ne '[Debug]' -or
+              $initial[1] -ne 'Log=1' -or $initial[2] -ne '[Graphics]' -or
+              $initial[3] -ne 'Resolution=Desktop' -or
+              $initial[4] -ne 'FPSLimit=60') {
+            throw "Bootstrap INI must contain Debug.Log, Graphics.Resolution and Graphics.FPSLimit"
+          }
+          # Exercise Win32 CRLF and UTF-8 BOM parsing, plus log opt-out.
+          [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=0`r`n", [Text.UTF8Encoding]::new($true))
+          & ./build/Release/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or (Test-Path build/Release/Rayman2Fix.log)) {
+            throw "Log=0 must prevent log creation (and remove stale log)"
+          }
+          [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=1`r`n", [Text.UTF8Encoding]::new($true))
+          & ./build/Release/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or !(Test-Path build/Release/Rayman2Fix.log) -or
+              !(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'CONFIG: Debug.Log=1')) {
+            throw "Log=1 must generate correctly configured log"
+          }
+          # PowerShell propagates the last nonzero native exit code even
+          # after all expected-error assertions have passed.
+          $global:LASTEXITCODE = 0
+      - name: Stage single executable and verify embedded DLL deployment
+        shell: pwsh
+        run: |
+          New-Item -Path package -ItemType Directory -Force | Out-Null
+          Copy-Item build/Release/Rayman2Fix.exe package/Rayman2Fix.exe
+          if (!(Test-Path package/Rayman2Fix.exe)) {
+            throw 'Missing Rayman2Fix.exe in bootstrap package'
+          }
+          if ((Get-ChildItem package -Recurse -File).Count -ne 1) {
+            throw 'The bootstrap archive must contain exactly one EXE'
+          }
+          # Exercise the executable WITHOUT a pre-populated Rayman2Fix folder.
+          New-Item -Path package-smoke -ItemType Directory -Force | Out-Null
+          Copy-Item package/Rayman2Fix.exe package-smoke/Rayman2Fix.exe
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2) { throw 'No-media bootstrap must fail safely' }
+          if (!(Test-Path package-smoke/Rayman2Fix/Rayman2Fix.dll) -or
+              !(Test-Path package-smoke/Rayman2Fix/Rayman2Fix.ini)) {
+            throw 'Single EXE failed to create runtime and ini on first launch'
+          }
+          $expected = (Get-FileHash build/Release/Rayman2Fix.dll -Algorithm SHA256).Hash
+          $actual = (Get-FileHash package-smoke/Rayman2Fix/Rayman2Fix.dll -Algorithm SHA256).Hash
+          if ($expected -ne $actual) {
+            throw 'Embedded DLL is not identical to build output'
+          }
+          # Retain exactly one original runtime .bak, never numbered histories.
+          $runtimeDir = (Resolve-Path 'package-smoke/Rayman2Fix').Path
+          $runtime = Join-Path $runtimeDir 'Rayman2Fix.dll'
+          $backup = Join-Path $runtimeDir 'Rayman2Fix.dll.bak'
+          [IO.File]::WriteAllText($runtime, 'outdated-runtime-A')
+          [IO.File]::WriteAllText($backup, 'outdated-older-backup')
+          [IO.File]::WriteAllText((Join-Path $runtimeDir 'Rayman2Fix.dll.backup.1'), 'legacy-one')
+          [IO.File]::WriteAllText((Join-Path $runtimeDir 'Rayman2Fix.dll.backup.2'), 'legacy-two')
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2) { throw 'Runtime update must preserve no-media exit code' }
+          if ((Get-Content -Raw $backup) -ne 'outdated-runtime-A' -or
+              (Get-FileHash $runtime -Algorithm SHA256).Hash -ne $expected) {
+            throw 'Runtime must replace its single .bak with newest previous DLL'
+          }
+          if (@(Get-ChildItem $runtimeDir -File -Filter 'Rayman2Fix.dll.backup.*').Count -ne 0 -or
+              (Test-Path (Join-Path $runtimeDir 'Rayman2Fix.dll.bak.previous'))) {
+            throw 'Old numbered runtime backups must be cleaned up'
+          }
+          [IO.File]::WriteAllText($runtime, 'outdated-runtime-B')
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or
+              (Get-Content -Raw $backup) -ne 'outdated-runtime-B') {
+            throw 'Second DLL replacement must rotate the single .bak'
+          }
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or
+              (Get-Content -Raw $backup) -ne 'outdated-runtime-B' -or
+              @(Get-ChildItem $runtimeDir -File -Filter 'Rayman2Fix.dll.bak*').Count -ne 1) {
+            throw 'Unchanged runtime must preserve exactly one backup'
+          }
+          Write-Host 'Single Rayman2Fix.dll.bak rotation and old backup cleanup: PASS'
+          if (!(Test-Path package-smoke/Rayman2Fix/glide2x.dll) -or
+              !(Test-Path package-smoke/Rayman2Fix/GameFrame-LICENSE-APACHE.txt)) {
+            throw 'Single EXE failed to unpack GameFrame Glide or Apache license'
+          }
+          $glide = (Get-FileHash package-smoke/Rayman2Fix/glide2x.dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($glide -cne $env:RAYMAN2FIX_GAMEFRAME_SHA256) {
+            throw "GameFrame embedded payload SHA256 mismatch: $glide"
+          }
+          $sourceLicense = (Get-FileHash third_party/game-frame/LICENSE-APACHE -Algorithm SHA256).Hash
+          $localLicense = (Get-FileHash package-smoke/Rayman2Fix/GameFrame-LICENSE-APACHE.txt -Algorithm SHA256).Hash
+          if ($sourceLicense -ne $localLicense) {
+            throw 'Embedded Apache 2.0 license is not from pinned GameFrame source'
+          }
+          Write-Host "Standalone EXE deploys pinned x86 GameFrame: $glide"
+          # Existing, unknown Glide DLL must be backed up, not lost, while
+          # the pinned GameFrame DLL is reinstalled from the same EXE.
+          [IO.File]::WriteAllText(
+            (Resolve-Path 'package-smoke/Rayman2Fix/glide2x.dll'),
+            'unknown-legacy-glide', [Text.Encoding]::ASCII)
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2) { throw 'Existing Glide upgrade failed unexpectedly' }
+          $backup = 'package-smoke/Rayman2Fix/glide2x.dll.bak'
+          if (!(Test-Path $backup) -or
+              (Get-Content -Raw $backup) -ne 'unknown-legacy-glide') {
+            throw 'Unknown old Glide DLL must be preserved under .bak'
+          }
+          $replacement = (Get-FileHash package-smoke/Rayman2Fix/glide2x.dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($replacement -cne $glide) {
+            throw 'GameFrame Glide replacement did not match the bundled SHA256'
+          }
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2) { throw 'Idempotent GameFrame upgrade failed' }
+          if (Test-Path 'package-smoke/Rayman2Fix/glide2x.dll.bak.1') {
+            throw 'Already-correct GameFrame DLL must not generate another backup'
+          }
+          Write-Host 'GameFrame Glide restore/backup smoke test: PASS'
+          Remove-Item package-smoke -Recurse -Force
+          if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix.dll,glide2x.dll) {
+            throw 'One-file build must never include generated INI, logs or DLL sidecars'
+          }
+          $global:LASTEXITCODE = 0
+      - name: Upload bootstrap package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rayman2Fix-Windows-x86-bootstrap
+          path: package/
+          if-no-files-found: error
+          retention-days: 30
+
+  linux-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test pinned GameFrame limiter source integration
+        run: python3 -m unittest discover -s tests -p 'test_fps_limit_patch.py'
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Verify Linux bootstrap workspace
+        run: |
+          result=0
+          ./build/rayman2fix_cli || result=$?
+          test "$result" -eq 2
+          test -f build/Rayman2Fix/Rayman2Fix.ini
+          test -f build/Rayman2Fix.log
+          grep -q 'SYS-INFO: END' build/Rayman2Fix.log
+          test "$(grep -v '^;' build/Rayman2Fix/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nResolution=Desktop\nFPSLimit=60')" || exit 1
+          printf '[Debug]\r\nLog=0\r\n' > build/Rayman2Fix/Rayman2Fix.ini
+          result=0
+          ./build/rayman2fix_cli || result=$?
+          test "$result" -eq 2
+          test ! -e build/Rayman2Fix.log
+          printf '[Debug]\r\nLog=1\r\n' > build/Rayman2Fix/Rayman2Fix.ini
+          result=0
+          ./build/rayman2fix_cli || result=$?
+          test "$result" -eq 2
+          grep -q 'CONFIG: Debug.Log=1' build/Rayman2Fix.log
