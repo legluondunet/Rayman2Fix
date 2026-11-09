@@ -502,28 +502,45 @@ DiscImage DiscImage::open(const fs::path& source) {
     image.sector_bytes_ = track.sector_bytes;
     image.user_data_offset_ = track.payload_offset;
 
-    // ISO 9660 permits boot and supplementary descriptors before the PVD.
-    std::vector<unsigned char> pvd;
+    // ISO 9660: type 1 is the primary volume descriptor (possibly only
+    // 8.3 filenames); type 2 may be a Joliet supplementary descriptor.
+    // Search all consecutive descriptors, NOT just the first primary one.
+    std::vector<unsigned char> pvd, joliet;
     for (std::uint64_t sector = 16; sector < 48; ++sector) {
         const auto descriptor = image.read_user(sector, 0, 2048);
-        if (std::string(reinterpret_cast<const char*>(descriptor.data() + 1), 5) != "CD001" ||
-            descriptor[6] != 1)
-            fail("invalid ISO 9660 volume descriptor");
-        if (descriptor[0] == 1) {
-            pvd = descriptor;
-            break;
+        const bool signature =
+            std::string(reinterpret_cast<const char*>(descriptor.data() + 1), 5)
+                == "CD001" && descriptor[6] == 1;
+        if (!signature) {
+            if (pvd.empty()) fail("invalid ISO 9660 volume descriptor");
+            break; // Permits minimal synthetic images lacking a terminator.
         }
+        if (descriptor[0] == 1 && pvd.empty())
+            pvd = descriptor;
+        if (descriptor[0] == 2 && joliet.empty() &&
+            descriptor[88] == '%' && descriptor[89] == '/' &&
+            (descriptor[90] == '@' || descriptor[90] == 'C' || descriptor[90] == 'E'))
+            joliet = descriptor;
         if (descriptor[0] == 255) break;
     }
     if (pvd.empty()) fail("ISO 9660 primary volume descriptor not found");
+
+    // The volume label is identified from the primary descriptor for the
+    // installed-edition filter; the file/directory root comes from Joliet.
     std::string volume(reinterpret_cast<const char*>(pvd.data() + 40), 32);
     volume.erase(std::find(volume.begin(), volume.end(), '\0'), volume.end());
     image.info_.volume_id = trim(volume);
-    const auto volume_sectors = iso733(pvd.data() + 80);
+
+    image.joliet_ = !joliet.empty();
+    image.info_.filename_source = image.joliet_ ?
+        "Joliet (UCS-2 long filenames)" :
+        "ISO9660 primary (long filenames unavailable; 8.3 aliases possible)";
+    const auto& chosen = image.joliet_ ? joliet : pvd;
+    const auto volume_sectors = iso733(chosen.data() + 80);
     if (volume_sectors < 17)
         fail("invalid ISO 9660 volume space size");
     image.info_.volume_bytes = static_cast<std::uint64_t>(volume_sectors) * 2048;
-    const auto* root = pvd.data() + 156;
+    const auto* root = chosen.data() + 156;
     if (root[0] < 34 || !(root[25] & 0x02))
         fail("invalid ISO 9660 root directory");
     std::vector<std::uint32_t> ancestors;
