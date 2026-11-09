@@ -31,12 +31,20 @@ static int run(const std::string& command, const fs::path& disc,
     const auto& info = image.info();
     startup.log("DISC: format=" + info.format + " volume=" + info.volume_id +
                 " files=" + std::to_string(info.files.size()) +
-                " content_bytes=" + std::to_string(info.total_bytes));
+                " declared_bytes=" + std::to_string(info.total_bytes) +
+                " distinct_extent_bytes=" + std::to_string(info.distinct_extent_bytes) +
+                " shared_extent_references=" + std::to_string(info.shared_extent_references) +
+                " image_bytes=" + std::to_string(info.image_bytes) +
+                " volume_bytes=" + std::to_string(info.volume_bytes));
     std::cout << "Disc image: " << disc.string() << '\n'
               << "Format: " << info.format << '\n'
               << "ISO volume: " << info.volume_id << '\n'
               << "Files: " << info.files.size() << '\n'
-              << "Content bytes: " << info.total_bytes << '\n'
+              << "Declared file bytes: " << info.total_bytes << '\n'
+              << "Distinct extent bytes: " << info.distinct_extent_bytes << '\n'
+              << "Shared extent references: " << info.shared_extent_references << '\n'
+              << "ISO volume bytes: " << info.volume_bytes << '\n'
+              << "Physical image bytes: " << info.image_bytes << '\n'
               << "Edition: UNKNOWN (no trusted executable/hash profile yet)\n";
     if (command == "--extract") {
         image.extract(destination);
