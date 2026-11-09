@@ -151,6 +151,35 @@ but is not a trusted retail-edition allowlist/profile check.
 The runtime remains deliberately gated: a successful CD extraction is
 **not** a playable Windows/Wine game installation.
 
+## Original executable and patch backup
+
+The user supplied an unprotected **x86 `Rayman2.exe`** for compatibility
+research (size **1,468,928 bytes**, SHA-256
+`9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`).
+This commercial executable is **never committed or distributed**.
+
+A patch generator and strict R2FXP01 binary-delta interpreter are included:
+
+- `tools/build_exe_patch.py` requires the **original CD `rayman2.exe`**
+  and the independently supplied unprotected executable. It generates a
+  SHA-256-locked candidate patch only if it can reconstruct the exact target.
+  It rejects patches containing too much literal target content.
+- Future verified patch data can be embedded as RCDATA resource `#1102`.
+  The current GitHub build contains **no executable patch resource**, because
+  the original protected CD EXE bytes are not yet available for comparison.
+- On an exactly recognized original SHA-256, the installer writes and
+  verifies the new executable to a temporary file, **renames the untouched
+  original to `rayman2.exe.bak`**, publishes the new `rayman2.exe`, and
+  records both SHA-256 hashes in `.rayman2fix-exe-patch.tsv`.
+- A subsequent `--verify` checks the CD's original hash against the
+  **backup**, and the patch target hash against the installed EXE. An existing
+  backup is *never* silently overwritten; a failed replacement rolls back.
+
+**No patch is applied and no `.bak` is created until the source CD version
+has been matched and a verified delta is bundled.** A file-size receipt or a
+volume label alone cannot establish that an EXE is safe to patch. Game
+launch remains disabled until further no-CD, GameFrame and SDL3 testing.
+
 ## Build
 
 The source uses C++17 and CMake. On Windows, build in 32-bit mode:
