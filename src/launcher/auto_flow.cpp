@@ -239,6 +239,9 @@ void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {
             retained.push_back(line);
     }
     if (input.bad()) throw std::runtime_error("cannot read CD receipt during cleanup");
+    // Windows does not allow renaming an open file. Close the receipt before
+    // the transactional .previous/.new replacement below.
+    input.close();
 
     const std::array<const char*, 3> names = {
         "00000001.tmp", "0000040c.016", "0000040c.256"
