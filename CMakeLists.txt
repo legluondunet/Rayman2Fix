@@ -26,6 +26,7 @@ add_executable(Rayman2Fix
   src/launcher/extraction_console.cpp
   src/launcher/game_config.cpp
   src/launcher/gameframe.cpp
+  src/launcher/game_launch.cpp
   src/launcher/patch_install.cpp
   src/launcher/startup.cpp
   src/launcher/system_inventory.cpp)
@@ -156,6 +157,7 @@ if(BUILD_TESTING)
     src/launcher/extraction_console.cpp
     src/launcher/game_config.cpp
     src/launcher/gameframe.cpp
+    src/launcher/game_launch.cpp
     src/launcher/patch_install.cpp
     src/launcher/startup.cpp)
   target_link_libraries(auto_flow_tests PRIVATE rayman2_disc rayman2_patch)
@@ -172,6 +174,26 @@ if(BUILD_TESTING)
     endif()
   endif()
   add_test(NAME automatic-cd-install COMMAND auto_flow_tests)
+
+  # Pure preflight test verifies that unsupported/unpatched installations are
+  # never executed, even when the rest of the CD receipt looks valid.
+  add_executable(game_launch_tests
+    tests/game_launch_tests.cpp
+    src/launcher/game_launch.cpp
+    src/launcher/gameframe.cpp
+    src/launcher/patch_install.cpp)
+  target_link_libraries(game_launch_tests PRIVATE rayman2_patch)
+  add_test(NAME game-launch-preflight COMMAND game_launch_tests)
+
+  if(WIN32)
+    # Harmless child executable for a Win32 CreateProcessW smoke test. This
+    # checks spaces in paths and explicit game working directory, without
+    # launching any commercial executable.
+    add_executable(test_child_process tests/test_child_process.cpp)
+    target_compile_definitions(game_launch_tests PRIVATE
+      TEST_CHILD_EXECUTABLE="$<TARGET_FILE:test_child_process>")
+    add_dependencies(game_launch_tests test_child_process)
+  endif()
 
   add_executable(sha256_tests tests/sha256_tests.cpp)
   target_link_libraries(sha256_tests PRIVATE rayman2_crypto)
