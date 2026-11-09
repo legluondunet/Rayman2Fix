@@ -23,6 +23,7 @@ endif()
 add_executable(Rayman2Fix
   src/launcher/main.cpp
   src/launcher/auto_flow.cpp
+  src/launcher/patch_install.cpp
   src/launcher/startup.cpp
   src/launcher/system_inventory.cpp)
 target_link_libraries(Rayman2Fix PRIVATE rayman2_disc rayman2_patch)
@@ -88,6 +89,7 @@ if(BUILD_TESTING)
   add_executable(auto_flow_tests
     tests/auto_flow_tests.cpp
     src/launcher/auto_flow.cpp
+    src/launcher/patch_install.cpp
     src/launcher/startup.cpp)
   target_link_libraries(auto_flow_tests PRIVATE rayman2_disc rayman2_patch)
   if(WIN32)
@@ -105,4 +107,10 @@ if(BUILD_TESTING)
   add_executable(exe_patch_tests tests/exe_patch_tests.cpp)
   target_link_libraries(exe_patch_tests PRIVATE rayman2_patch)
   add_test(NAME executable-delta-safety COMMAND exe_patch_tests)
+
+  add_executable(patch_install_tests
+    tests/patch_install_tests.cpp
+    src/launcher/patch_install.cpp)
+  target_link_libraries(patch_install_tests PRIVATE rayman2_patch)
+  add_test(NAME original-exe-backup-safety COMMAND patch_install_tests)
 endif()
