@@ -575,7 +575,8 @@ void make_writable(const fs::path& p) {
 
 } // namespace
 
-void DiscImage::extract(const fs::path& destination) const {
+ExtractionResult DiscImage::extract(
+    const fs::path& destination, const ExtractionCallback& progress) const {
     if (destination.empty() || destination == "." || destination == "/")
         fail("unsafe extraction destination");
     // Abort before touching disk: --inspect is tolerant but --extract is not.
@@ -587,12 +588,24 @@ void DiscImage::extract(const fs::path& destination) const {
     if (fs::exists(destination)) fail("destination already exists; no files overwritten");
     if (!destination.parent_path().empty())
         fs::create_directories(destination.parent_path());
-    const fs::path staging(destination.string() + ".staging");
+    fs::path staging = destination;
+    staging += ".staging";
     if (fs::exists(staging)) fail("staging directory exists; inspect/remove manually");
+
+    ExtractionResult result{};
+    result.skipped_files = info_.skipped_files;
+    result.skipped_bytes = info_.skipped_bytes;
+    const auto expected_files = info_.files.size() - info_.skipped_files;
+    auto notify = [&](const fs::path& current) {
+        if (progress) progress(ExtractionProgress{
+            result.copied_files, expected_files,
+            result.copied_bytes, info_.extract_bytes, current});
+    };
 
     fs::create_directory(staging);
     try {
         make_writable(staging);
+        notify({});
         for (const auto& file : info_.files) {
             if (file.skipped_by_cd_recipe) continue;
             const fs::path out = staging / file.relative_path;
@@ -601,6 +614,7 @@ void DiscImage::extract(const fs::path& destination) const {
             std::ofstream dest(out, std::ios::binary | std::ios::trunc);
             if (!dest) fail("cannot create output: " + out.u8string());
             std::uint64_t pos = 0;
+            std::uint64_t since_notify = 0;
             while (pos < file.size_bytes) {
                 const auto n = static_cast<std::size_t>(
                     std::min<std::uint64_t>(file.size_bytes - pos, 2048));
@@ -609,12 +623,28 @@ void DiscImage::extract(const fs::path& destination) const {
                            static_cast<std::streamsize>(chunk.size()));
                 if (!dest) fail("cannot write output: " + out.u8string());
                 pos += n;
+                since_notify += n;
+                if (since_notify >= 1024u * 1024u) {
+                    // Include bytes written to the in-flight file. The output
+                    // is not reported as finished until the file is closed.
+                    if (progress) progress(ExtractionProgress{
+                        result.copied_files, expected_files,
+                        result.copied_bytes + pos, info_.extract_bytes,
+                        file.relative_path});
+                    since_notify = 0;
+                }
             }
             dest.close();
             if (!dest) fail("error closing extracted file: " + out.u8string());
             make_writable(out);
+            ++result.copied_files;
+            result.copied_bytes += file.size_bytes;
+            notify(file.relative_path);
         }
+        // Never announce a successful extraction before the staging directory
+        // is safely promoted to the final destination.
         fs::rename(staging, destination);
+        return result;
     } catch (...) {
         std::error_code ec;
         fs::remove_all(staging, ec);
