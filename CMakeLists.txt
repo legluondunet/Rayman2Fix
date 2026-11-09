@@ -21,7 +21,25 @@ target_link_libraries(Rayman2Fix PRIVATE rayman2_disc)
 if(WIN32)
   target_link_libraries(Rayman2Fix PRIVATE dxguid)
 endif()
-target_compile_definitions(Rayman2Fix PRIVATE RAYMAN2FIX_VERSION="${PROJECT_VERSION}")
+find_package(Git QUIET)
+set(RAYMAN2FIX_BUILD_COMMIT "unknown")
+if(GIT_FOUND)
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse --short=8 HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE RAYMAN2FIX_GIT_RESULT
+    OUTPUT_VARIABLE RAYMAN2FIX_GIT_OUTPUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(RAYMAN2FIX_GIT_RESULT EQUAL 0)
+    set(RAYMAN2FIX_BUILD_COMMIT "${RAYMAN2FIX_GIT_OUTPUT}")
+  endif()
+endif()
+target_compile_definitions(Rayman2Fix PRIVATE
+  RAYMAN2FIX_VERSION="${PROJECT_VERSION}"
+  RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}"
+)
 
 # Rayman 2 itself is 32-bit. This DLL is intentionally only a benign,
 # loadable placeholder until per-build injection/hooks are verified.
