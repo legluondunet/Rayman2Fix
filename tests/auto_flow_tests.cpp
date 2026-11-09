@@ -1,4 +1,5 @@
 #include "rayman2fix/auto_flow.hpp"
+#include "rayman2fix/game_config.hpp"
 #include "rayman2fix/sha256.hpp"
 #include "rayman2fix/startup.hpp"
 
@@ -228,8 +229,12 @@ int main() {
         check(r2fix::run_automatic(app) == 2,
               "reconfigure graphics from one INI with no CD present");
         ubi = contents(game / "ubi.ini");
-        check(ubi.find("GLI_Mode=1 - 1280 x 720 x 16") != std::string::npos,
-              "game-facing configuration updates after user resolution change");
+        check(ubi.find("GLI_Mode=1 - 1024 x 768 x 16") != std::string::npos &&
+              ubi.find("GLI_Mode=1 - 1280 x 720 x 16") == std::string::npos,
+              "game-facing config retains supported internal Glide 1024x768 regardless of monitor output");
+        const auto selected = r2fix::configured_output_resolution(app.ini_path());
+        check(selected.first == 1280 && selected.second == 720,
+              "single user INI controls native output dimensions separately from internal Glide mode");
         check(ubi.find("Language=French") != std::string::npos &&
               ubi.find("Keep=present") != std::string::npos,
               "regenerated config retains other original CD options");
@@ -242,9 +247,9 @@ int main() {
         fs::remove(game / "ubi.ini");
         check(r2fix::run_automatic(app) == 2,
               "missing managed ubi.ini is automatically recreated");
-        check(contents(game / "ubi.ini").find("GLI_Mode=1 - 1280 x 720 x 16") !=
+        check(contents(game / "ubi.ini").find("GLI_Mode=1 - 1024 x 768 x 16") !=
                   std::string::npos,
-              "ubi.ini is generated when missing");
+              "missing ubi.ini rebuilt in safe internal Glide 4:3 mode");
         check(r2fix::verify_installation(app) == 0,
               "recreated game config passes CD asset verification");
 
