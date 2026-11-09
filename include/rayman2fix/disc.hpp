@@ -11,16 +11,20 @@ struct DiscEntry {
     std::filesystem::path relative_path;
     std::uint32_t extent_lba = 0;
     std::uint32_t size_bytes = 0;
+    bool skipped_by_cd_recipe = false; // Known legacy installer exclusion, not a verified DRM classification
 };
 
 struct DiscInfo {
     std::string volume_id;
     std::string format;
     std::vector<DiscEntry> files;
-    std::uint64_t total_bytes = 0;
+    std::uint64_t total_bytes = 0; // All ISO directory declarations, including skipped entries
+    std::uint64_t extract_bytes = 0; // Planned output size after exact legacy exclusions
+    std::uint64_t skipped_bytes = 0;
+    std::size_t skipped_files = 0;
     std::uint64_t image_bytes = 0;         // Source ISO/BIN file size
     std::uint64_t volume_bytes = 0;        // ISO 9660 logical volume size
-    std::uint64_t distinct_extent_bytes = 0; // Sum of distinct extent/size pairs (may overlap)
+    std::uint64_t distinct_extent_bytes = 0; // Sum of distinct extractable extent/size pairs (may overlap)
     std::size_t shared_extent_references = 0;
 };
 
