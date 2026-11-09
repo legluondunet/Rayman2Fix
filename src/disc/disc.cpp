@@ -245,9 +245,20 @@ DiscImage DiscImage::open(const fs::path& source) {
     image.sector_bytes_ = track.sector_bytes;
     image.user_data_offset_ = track.payload_offset;
 
-    const auto pvd = image.read_user(16, 0, 2048);
-    if (pvd[0] != 1 || std::string(reinterpret_cast<const char*>(pvd.data() + 1), 5) != "CD001" || pvd[6] != 1)
-        fail("ISO 9660 primary volume descriptor not found at sector 16");
+    // ISO 9660 permits boot and supplementary descriptors before the PVD.
+    std::vector<unsigned char> pvd;
+    for (std::uint64_t sector = 16; sector < 48; ++sector) {
+        const auto descriptor = image.read_user(sector, 0, 2048);
+        if (std::string(reinterpret_cast<const char*>(descriptor.data() + 1), 5) != "CD001" ||
+            descriptor[6] != 1)
+            fail("invalid ISO 9660 volume descriptor");
+        if (descriptor[0] == 1) {
+            pvd = descriptor;
+            break;
+        }
+        if (descriptor[0] == 255) break;
+    }
+    if (pvd.empty()) fail("ISO 9660 primary volume descriptor not found");
     std::string volume(reinterpret_cast<const char*>(pvd.data() + 40), 32);
     volume.erase(std::find(volume.begin(), volume.end(), '\0'), volume.end());
     image.info_.volume_id = trim(volume);
