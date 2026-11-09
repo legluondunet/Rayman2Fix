@@ -38,7 +38,14 @@ patches. Copying the CD on its own **does not demonstrate** no-CD gameplay.
 For volume identifier **`RAYMAN2`** only, the ISO 9660 scanner may
 recognize these **exact paths** from the author's Lutris recipe.
 
-**Retail ISO 9660 short-name aliases:** an actual RAYMAN2 CD inspection
+**Long name source:** the installer now prefers the disc's **Joliet supplementary
+directory** over ISO 9660 primary 8.3 names, and exports all filenames and
+directories in lowercase, with writable attributes. Both source identifiers
+and output paths can therefore be diagnosed. Where no Joliet tree exists,
+the reader cannot invent arbitrary long names and clearly reports the ISO
+primary fallback.
+
+**Retail ISO 9660 short-name aliases (fallback):** an actual RAYMAN2 CD inspection
 reported `DATA/WORLD/LEVELS/GRAPHI~3.DAT`, while the existing script
 removes `GRAPHICS0.DAT`, `GRAPHICS1.DAT`, and `GRAPHICS2.DAT`.
 The primary-volume directory exposes short 8.3 names rather than the
