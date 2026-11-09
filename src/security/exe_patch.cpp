@@ -47,6 +47,53 @@ std::string hex(const unsigned char* p, std::size_t n) {
 [[noreturn]] void fail(const std::string& message) {
     throw std::runtime_error("executable patch: " + message);
 }
+
+// Decode a raw LZ4 block without an external library. Limits are checked
+// against the trusted target size from the signed-off SHA256 patch header.
+// Z commands carry [decoded_bytes:u32][encoded_bytes:u32][LZ4 block].
+std::vector<char> decompress_lz4(const unsigned char* block, std::size_t length,
+                                  std::uint32_t expected) {
+    std::vector<char> decoded;
+    decoded.reserve(expected);
+    std::size_t p = 0;
+    auto add_length = [&](std::size_t value) {
+        if (value == 15) {
+            while (true) {
+                if (p >= length) fail("truncated LZ4 length extension");
+                const auto n = block[p++];
+                if (value > expected || n > expected - value)
+                    fail("LZ4 decoded size overflow");
+                value += n;
+                if (n != 255) break;
+            }
+        }
+        return value;
+    };
+    while (p < length) {
+        const unsigned char token = block[p++];
+        const auto literals = add_length(token >> 4);
+        if (literals > expected - decoded.size() || literals > length - p)
+            fail("LZ4 literal length exceeds input or expected output");
+        decoded.insert(decoded.end(),
+                       reinterpret_cast<const char*>(block + p),
+                       reinterpret_cast<const char*>(block + p + literals));
+        p += literals;
+        if (p == length) break;
+        if (length - p < 2) fail("missing LZ4 match offset");
+        const auto offset = static_cast<std::size_t>(block[p]) |
+                            (static_cast<std::size_t>(block[p + 1]) << 8);
+        p += 2;
+        if (!offset || offset > decoded.size()) fail("invalid LZ4 back-reference");
+        auto count = add_length(token & 15);
+        if (count > expected - decoded.size() - 4)
+            fail("LZ4 match overflows expected result");
+        count += 4;
+        for (std::size_t n = 0; n < count; ++n)
+            decoded.push_back(decoded[decoded.size() - offset]);
+    }
+    if (decoded.size() != expected) fail("LZ4 decompression output size mismatch");
+    return decoded;
+}
 }
 
 ExePatchHeader inspect_exe_patch(const std::vector<unsigned char>& patch) {
@@ -116,6 +163,21 @@ ExePatchHeader apply_exe_patch(const fs::path& original,
                     remaining -= static_cast<std::uint32_t>(n);
                 }
                 produced += count;
+            } else if (command == 'Z') {
+                if (patch.size() - pos < 8) fail("truncated LZ4 block header");
+                const auto unpacked = le32(patch.data() + pos);
+                const auto packed = le32(patch.data() + pos + 4);
+                pos += 8;
+                if (!unpacked || !packed || packed > patch.size() - pos ||
+                    unpacked > info.patched_size - produced ||
+                    packed > kMaxLiterals - literal_total)
+                    fail("compressed literal too large or truncated");
+                const auto block = decompress_lz4(patch.data() + pos, packed, unpacked);
+                out.write(block.data(), static_cast<std::streamsize>(block.size()));
+                if (!out) fail("cannot write uncompressed LZ4 bytes");
+                pos += packed;
+                literal_total += packed;
+                produced += unpacked;
             } else if (command == 'L') {
                 if (patch.size() - pos < 4) fail("truncated literal-length field");
                 const auto count = le32(patch.data() + pos);
