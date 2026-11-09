@@ -58,6 +58,10 @@ a cryptographic authentication of a specific trusted retail edition.
    and no unrecognized suspect entries. Refuse missing or ambiguous images.
 5. Extract only the historically necessary CD files into a sibling staging
    directory, using Joliet long names, lowercase paths and writable output.
+   Show real progress (bytes and completed files) through a callback, with
+   a throttled human-readable command-line reporter shared by the automatic
+   and diagnostic `--extract` workflows. Summaries must count actual
+   completed output, and appear only after successful publish/verification.
    Duplicate `dll/snd_cpa_mmx.ini` as `dll/snd_cpa.ini` and create a
    SHA-256 receipt listing immutable extracted files (not mutable `ubi.ini`).
 6. Preserve launcher-generated INI/runtime and its single latest DLL backup from
