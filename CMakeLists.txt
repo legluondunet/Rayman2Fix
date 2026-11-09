@@ -181,7 +181,8 @@ if(BUILD_TESTING)
     tests/game_launch_tests.cpp
     src/launcher/game_launch.cpp
     src/launcher/gameframe.cpp
-    src/launcher/patch_install.cpp)
+    src/launcher/patch_install.cpp
+    src/launcher/startup.cpp)
   target_link_libraries(game_launch_tests PRIVATE rayman2_patch)
   add_test(NAME game-launch-preflight COMMAND game_launch_tests)
 
@@ -190,8 +191,6 @@ if(BUILD_TESTING)
     # checks spaces in paths and explicit game working directory, without
     # launching any commercial executable.
     add_executable(test_child_process tests/test_child_process.cpp)
-    target_compile_definitions(game_launch_tests PRIVATE
-      TEST_CHILD_EXECUTABLE="$<TARGET_FILE:test_child_process>")
     add_dependencies(game_launch_tests test_child_process)
   endif()
 
