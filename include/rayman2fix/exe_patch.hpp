@@ -26,4 +26,11 @@ ExePatchHeader apply_exe_patch(const std::filesystem::path& original,
 // Empty until a verified hash-locked retail patch has been generated.
 std::vector<unsigned char> bundled_exe_patch();
 
+// For developer tests only: use a locally supplied, hash-locked
+// Rayman2Fix-executable.r2patch beside Rayman2Fix.exe if no embedded
+// patch is available. This sidecar is not part of release artifacts;
+// the final build embeds the same verified bytes in the single EXE.
+std::vector<unsigned char> available_exe_patch(
+    const std::filesystem::path& launcher_root);
+
 } // namespace r2fix
