@@ -125,7 +125,11 @@ static std::vector<std::uint8_t> make_joliet_iso() {
     std::copy_n("HELLO\n", 6, iso.data() + 27 * 2048);
     return iso;
 }
-static std::vector<std::uint8_t> make_joliet_merged_dll_iso(bool collision = false) {
+// Original retail CD has one DLL tree. The other directory is unrelated.
+// Case-variant duplicate directories are a malformed/unexpected CD, not a
+// reason to perform the old Ray2Fix/dgVoodoo packaging merge.
+static std::vector<std::uint8_t> make_joliet_cd_dirs_iso(
+    bool duplicate_case_directory = false, bool duplicate_case_file = false) {
     auto iso = make_joliet_iso();
     iso.resize(34 * 2048);
     put32(iso.data() + 16 * 2048 + 80, 34);
@@ -135,15 +139,17 @@ static std::vector<std::uint8_t> make_joliet_merged_dll_iso(bool collision = fal
     std::size_t pos = record(root, 24, 2048, 2, std::string(1, '\0'));
     pos += record(root + pos, 24, 2048, 2, std::string(1, '\1'));
     pos += record(root + pos, 28, 2048, 2, joliet_ucs2(u"DLL"));
-    record(root + pos, 29, 2048, 2, joliet_ucs2(u"Dll"));
+    record(root + pos, 29, 2048, 2,
+           joliet_ucs2(duplicate_case_directory ? u"Dll" : u"Assets"));
     for (int i = 0; i < 2; ++i) {
         const int sector = 28 + i;
         auto* dir = iso.data() + sector * 2048;
         std::size_t p = record(dir, sector, 2048, 2, std::string(1, '\0'));
         p += record(dir + p, 24, 2048, 2, std::string(1, '\1'));
-        record(dir + p, 30 + i, 6, 0,
-               joliet_ucs2(collision ? (i == 0 ? u"Same.DLL;1" : u"SAME.dll;1")
-                                    : (i == 0 ? u"First.DLL;1" : u"SECOND.dll;1")));
+        p += record(dir + p, 30 + i, 6, 0,
+                    joliet_ucs2(i == 0 ? u"First.DLL;1" : u"SECOND.dll;1"));
+        if (duplicate_case_file && i == 0)
+            record(dir + p, 31, 6, 0, joliet_ucs2(u"FIRST.dll;1"));
         std::copy_n("HELLO\n", 6, iso.data() + (30 + i) * 2048);
     }
     return iso;
@@ -205,20 +211,26 @@ int main() {
                 != fs::perms::none,
               "extracted directory is writable");
 
-        const auto merged_iso = make_joliet_merged_dll_iso();
-        write_file(root / "joliet-merge.iso", merged_iso);
-        const auto merged = r2fix::DiscImage::open(root / "joliet-merge.iso");
-        check(merged.info().merged_directory_aliases == 1,
-              "DLL and Dll directories are merged into lowercase dll");
-        check(merged.info().files.size() == 2, "both case-variant folder contents retained");
-        merged.extract(root / "joliet-merge-extracted");
-        check(fs::exists(root / "joliet-merge-extracted" / "dll" / "first.dll"),
-              "first library retained in common dll directory");
-        check(fs::exists(root / "joliet-merge-extracted" / "dll" / "second.dll"),
-              "second library retained in common dll directory");
-        write_file(root / "joliet-conflict.iso", make_joliet_merged_dll_iso(true));
-        check(fails(root / "joliet-conflict.iso"),
-              "two different file extents must not overwrite one lowercase output path");
+        const auto cd_dirs_iso = make_joliet_cd_dirs_iso();
+        write_file(root / "joliet-single-dll.iso", cd_dirs_iso);
+        const auto cd = r2fix::DiscImage::open(root / "joliet-single-dll.iso");
+        check(cd.info().files.size() == 2, "one CD DLL tree and one assets tree");
+        cd.extract(root / "joliet-single-dll-extracted");
+        check(fs::exists(root / "joliet-single-dll-extracted" / "dll" / "first.dll"),
+              "original disc DLL directory extracted in lowercase");
+        check(fs::exists(root / "joliet-single-dll-extracted" / "assets" / "second.dll"),
+              "unrelated source tree retained");
+        check(!fs::exists(root / "joliet-single-dll-extracted" / "DLL"),
+              "no uppercase duplicate or special DLL folder merge");
+
+        write_file(root / "unexpected-case-folders.iso",
+                   make_joliet_cd_dirs_iso(true));
+        check(fails(root / "unexpected-case-folders.iso"),
+              "unexpected same-target directories are rejected instead of merged");
+        write_file(root / "unexpected-case-files.iso",
+                   make_joliet_cd_dirs_iso(false, true));
+        check(fails(root / "unexpected-case-files.iso"),
+              "unexpected colliding lowercase files cannot overwrite each other");
 
         // A valid ISO may reuse the same physical extent for different filenames.
         // In that case sum of declared file lengths can exceed the image size.
