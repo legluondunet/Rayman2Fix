@@ -465,7 +465,20 @@ int main() {
               "PVD after boot descriptor");
 
         const auto target = root / "Rayman2Fix" / "DiscContent";
-        parsed.extract(target);
+        std::vector<r2fix::ExtractionProgress> notifications;
+        const auto extracted = parsed.extract(target,
+            [&](const r2fix::ExtractionProgress& update) {
+                notifications.push_back(update);
+            });
+        check(extracted.copied_files == 1 && extracted.copied_bytes == 6 &&
+              extracted.skipped_files == 0 && extracted.skipped_bytes == 0,
+              "actual extracted file/byte summary reports successful writes");
+        check(notifications.size() >= 2 && notifications.front().copied_bytes == 0 &&
+              notifications.front().total_files == 1 &&
+              notifications.back().copied_files == 1 &&
+              notifications.back().copied_bytes == 6 &&
+              notifications.back().total_bytes == 6,
+              "real extraction emits start and finished progress snapshots");
         std::ifstream content(target / "data.txt", std::ios::binary);
         std::string text((std::istreambuf_iterator<char>(content)), {});
         check(text == "HELLO\n", "extraction data");
