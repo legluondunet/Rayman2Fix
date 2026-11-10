@@ -40,7 +40,13 @@ constexpr unsigned kLearnHandoverBit = 1091;
 constexpr uintptr_t kRaymanSuperObjectRva = 0x100578; // VA 0x500578
 constexpr uintptr_t kFixCameraActorRva = 0x0B7308; // VA 0x4B7308
 constexpr DWORD kNaturalHandoverFollowupMillis = 1000;
-constexpr DWORD kNaturalTraceTimes[] = {250, 1000, 2500, 5000, 10000, 20000, 35000, 50000};
+// Dense observation around the native 25-second handover (reference Wine
+// trace), but still bounded to a handful of reads. Never force a scene exit.
+constexpr DWORD kNaturalTraceTimes[] = {
+    250, 1000, 2500, 5000, 10000, 20000,
+    21000, 22000, 23000, 24000, 24500, 25000, 25500,
+    27000, 35000, 50000
+};
 constexpr std::size_t kHookLength = 7;
 constexpr BYTE kExpected[kHookLength] = {0x83, 0xEC, 0x0C, 0x8B, 0x4C, 0x24, 0x14};
 // Rayman 2's GLI_tdstCamera (owner's approved Win32 executable).
