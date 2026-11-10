@@ -160,6 +160,51 @@ inline Learn10NoMoviesGateShape inspect_learn10_nomovies_gate(
     return shape;
 }
 
+// This is a second arm of the ORIGINAL first rule: at the top-level
+// Else when the NOMOVIES flag is set, the director tests V119 and
+// can run an alternate initialization / behaviour selection path.
+// IMPORTANT: it is NOT proof that the silver Lum scene auto-skips.
+struct Learn10NoMoviesAlternativeShape {
+    bool top_level_else=false;
+    bool mode_condition=false;
+    bool continuation=false;
+    bool native_behaviour_change=false;
+    bool matched() const {
+        return top_level_else && mode_condition && continuation &&
+               native_behaviour_change;
+    }
+};
+inline Learn10NoMoviesAlternativeShape inspect_learn10_nomovies_alternative(
+    const SceneScriptProbe& p) {
+    Learn10NoMoviesAlternativeShape result{};
+    if (!p.complete || p.malformed || !p.context_selected) return result;
+    const auto has=[&](unsigned node,unsigned depth,unsigned type,
+                       std::uint32_t value) {
+        for(unsigned i=0;i<p.context_selected;++i) {
+            const auto& n=p.context[i];
+            if(n.node==node && n.indent==depth &&
+               n.type==type && n.param==value) return true;
+        }
+        return false;
+    };
+    const auto has_pointer_type=[&](unsigned node,unsigned depth,
+                                    unsigned type) {
+        for(unsigned i=0;i<p.context_selected;++i) {
+            const auto& n=p.context[i];
+            if(n.node==node && n.indent==depth && n.type==type)
+                return true; // never compare or dereference pointer value
+        }
+        return false;
+    };
+    result.top_level_else=has(100,1,0,9);
+    result.mode_condition=has(101,2,0,1) &&
+                          has(102,3,11,119);
+    result.continuation=has(103,2,0,8);
+    result.native_behaviour_change=
+        has(263,4,4,69) && has_pointer_type(264,5,28);
+    return result;
+}
+
 // An early native exit case exists at v96==104, BEFORE the six normal
 // v96==110 progression pulses. This is only a script fingerprint.
 // It does not authorize writing designer variables or invoking AI code.
@@ -200,8 +245,8 @@ inline Learn10EarlyExitShape inspect_learn10_early_exit(
         has(174,11,12,1) && has(175,10,4,139);
     shape.actor_reactivation=
         has(217,10,4,84) && has(219,10,4,67) &&
-        has(222,10,4,68) && has(237,10,4,318) &&
-        has(241,10,4,312);
+        has(222,10,4,68) && has(237,11,4,318) &&
+        has(241,11,4,312);
     shape.rayman_restoration=
         has(227,11,4,174) && has(228,12,12,14) &&
         has(229,12,12,0) && has(232,11,4,174) &&

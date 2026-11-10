@@ -301,6 +301,19 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
             unsigned(nm.cheat_bit),unsigned(nm.then_branch));
         log_line(message);
         --line_budget;
+        // The game does not merely check the cheat; it has a separate
+        // top-level ELSE arm. Probe its structure before considering
+        // any emulation of the native NOMOVIES feature.
+        const auto other=r2fix::inspect_learn10_nomovies_alternative(p);
+        if (line_budget) {
+            std::snprintf(message,sizeof(message),
+                "RUNTIME-INTRO: native-nomovies-alternative match=%u else=%u mode119=%u then=%u behaviour_change=%u (read-only; not auto-skip)",
+                unsigned(other.matched()),unsigned(other.top_level_else),
+                unsigned(other.mode_condition),unsigned(other.continuation),
+                unsigned(other.native_behaviour_change));
+            log_line(message);
+            --line_budget;
+        }
     }
     // The signature is a read-only diagnostic, never an enablement gate
     // for a shortcut. The actual engine's cleanup must still run.

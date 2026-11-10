@@ -239,6 +239,26 @@ and natural end of the cinematic, and prints bounded rule-1 nodes
 100–265 to inspect the other branch. The existing story-array locator
 already supports bit 1188; there is no new pointer traversal.
 
+**Results of the first NOMOVIES test (log 20261110-152709):**
+the real script gate matches perfectly, and the original cheat
+bit 1188 is **0 both at level entry and at natural handover**.
+The game plays its six ordinary stage transitions and returns control
+normally at 25.413 seconds, with all 30 events retained. The exact
+NOMOVIES alternate path starts with a **top-level Else at node 100**
+followed by `IfNot(V119)` at nodes 101–103 and, later, a
+`ChangeMyComport`-style native procedure at node 263.
+This shows an alternate director path, but does not by itself
+demonstrate an immediate movie skip. Independent Rayman 2 PC cheat
+documentation explains that NOMOVIES **enables skipping with Enter**;
+it is not an automatic fast-forward.
+
+The same log exposed a **false-negative in our native early-exit
+diagnostic**, not in the game: its `actors=0` was caused by expecting
+two P318/P312 instructions at depth 10 when they are actually at
+depth **11** (nodes 237 and 241). The updated read-only matcher now
+uses the observed depths, with regression tests, and separately
+fingerprints the NOMOVIES alternate Else arm.
+
 **Unresolved:** switching the bit after Learn_10 has initialized
 may be too late to alter native cutscene flow; setting it earlier
 could affect a progress array that is later serialized in save data.

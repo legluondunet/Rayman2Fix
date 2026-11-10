@@ -162,8 +162,8 @@ int main(){
         add(172,10,2,11);add(173,11,11,110);
         add(174,11,12,1);add(175,10,4,139);
         add(217,10,4,84);add(219,10,4,67);
-        add(222,10,4,68);add(237,10,4,318);
-        add(241,10,4,312);
+        add(222,10,4,68);add(237,11,4,318);
+        add(241,11,4,312);
         add(227,11,4,174);add(228,12,12,14);add(229,12,12,0);
         add(232,11,4,174);add(233,12,12,17);add(234,12,12,0);
         add(244,10,2,11);add(245,11,2,12);
@@ -184,6 +184,10 @@ int main(){
         bad=early;
         for(unsigned i=0;i<bad.context_selected;++i)
             if(bad.context[i].node==232) bad.context[i].param=318;
+        assert(!r2fix::inspect_learn10_early_exit(bad).matched());
+        bad=early;
+        for(unsigned i=0;i<bad.context_selected;++i)
+            if(bad.context[i].node==241) bad.context[i].indent=10;
         assert(!r2fix::inspect_learn10_early_exit(bad).matched());
         bad=early;bad.complete=false;
         assert(!r2fix::inspect_learn10_early_exit(bad).matched());
@@ -222,6 +226,37 @@ int main(){
         assert(!r2fix::inspect_learn10_nomovies_gate(bad).matched());
         bad=script;bad.complete=false;
         assert(!r2fix::inspect_learn10_nomovies_gate(bad).matched());
+    }
+    // NOMOVIES=true enters the original top-level Else arm.
+    // This includes a separate mode check and native behaviour
+    // transition; it is NOT itself a user-visible skip.
+    {
+        r2fix::SceneScriptProbe alternative{};
+        alternative.complete=true;
+        const auto add=[&](unsigned node,unsigned depth,unsigned type,
+                           unsigned param) {
+            assert(alternative.context_selected<alternative.context.size());
+            alternative.context[alternative.context_selected++]={
+                node,param,std::uint8_t(depth),std::uint8_t(type)};
+        };
+        add(100,1,0,9); add(101,2,0,1); add(102,3,11,119);
+        add(103,2,0,8); add(263,4,4,69);
+        add(264,5,28,0xCAFEBABE); // pointer value not inspected
+        assert(r2fix::inspect_learn10_nomovies_alternative(alternative).matched());
+        auto bad=alternative;
+        for(unsigned i=0;i<bad.context_selected;++i)
+            if(bad.context[i].node==100) bad.context[i].indent=2;
+        assert(!r2fix::inspect_learn10_nomovies_alternative(bad).matched());
+        bad=alternative;
+        for(unsigned i=0;i<bad.context_selected;++i)
+            if(bad.context[i].node==102) bad.context[i].param=1188;
+        assert(!r2fix::inspect_learn10_nomovies_alternative(bad).matched());
+        bad=alternative;
+        for(unsigned i=0;i<bad.context_selected;++i)
+            if(bad.context[i].node==264) bad.context[i].type=11;
+        assert(!r2fix::inspect_learn10_nomovies_alternative(bad).matched());
+        bad=alternative;bad.complete=false;
+        assert(!r2fix::inspect_learn10_nomovies_alternative(bad).matched());
     }
     // The known retail script has distinct If/Then/Else NESTING and a
     // model-relative behaviour-1 reference. Refuse lookalikes that have
