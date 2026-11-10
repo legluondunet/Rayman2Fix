@@ -60,17 +60,14 @@ class Learn10SafeFallback(unittest.TestCase):
         self.assertIn("read-only",source)
         self.assertNotIn("AI_fn_ucChangeComportIntell",source)
 
-    def test_experimental_counter_skip_requires_explicit_opt_in(self):
+    def test_rejected_counter_only_experiment_is_gone(self):
         runtime=(ROOT/"src/runtime/runtime.cpp").read_text(encoding="utf-8")
-        self.assertIn("RAYMAN2FIX_EXPERIMENT_LEARN10_COUNTER_EXIT",runtime)
-        self.assertIn("g_log && GetEnvironmentVariableA(",runtime)
-        self.assertIn("can_experiment_learn10_counter_exit(state)",runtime)
-        self.assertIn("memory.Type!=MEM_PRIVATE",runtime)
-        self.assertIn("g_director_var83.previous=target",runtime)
-        self.assertIn("g_experiment_learn10_requested=true",runtime)
-        self.assertNotIn("ChangeMyComport",runtime)
-        self.assertNotIn("AI_fn_ucChangeComportIntell",runtime)
-        self.assertIn("poll_learn10_counter_experiment();",runtime)
+        self.assertNotIn("WriteProcessMemory(",runtime)
+        self.assertNotIn("RAYMAN2FIX_EXPERIMENT_LEARN10_COUNTER_EXIT",runtime)
+        self.assertNotIn("poll_learn10_counter_experiment(",runtime)
+        self.assertIn("read_director_phase_integer(",runtime)
+        self.assertIn("director-phase=",runtime)
+        self.assertIn("read_director_phase_integer(director.superobject,96",runtime)
 
     def test_retains_jail_20_skip_only(self):
         source=(ROOT/"src/runtime/runtime.cpp").read_text(encoding="utf-8")

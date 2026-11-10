@@ -137,28 +137,21 @@ gate. This explains why simply forcing behaviour 1 can bypass cleanup.
 It does not demonstrate that manipulating `var83` is safe: the
 cinematic's actor positions, camera and script phase would still differ.
 
-**Opt-in experimental native counter exit (NOT validated for normal use):**
-The only experimental action is a one-byte update to the director's
-`var83` progression counter, setting it to `var14-1`, then waiting for
-the **original game script** to execute its terminal branch. Unlike the
-previously corrupting direct 3→1 behaviour change, the experiment does
-not set `var110`, story bits, camera matrices, actor bits or save data.
-However, early actor and camera state may differ from natural ending;
-**graphics corruption, hangs or incorrect gameplay remain possible**.
+**Failed counter-only experiment (10 November 2026, reverted):**
+The disposable Wine test set director var83 from 0 to 6 after 1.0s;
+the write was accepted but the engine stayed in behaviour 3, Rayman and
+the camera remained stationary, and var50/var110 stayed at 0 with no
+native progression pulses. It never reached story bit 1091 before the
+user closed the game. Reaching var83=var14-1 is NOT a native completion
+request. The optional environment variable and all code that wrote
+var83 have been **removed**; do not re-enable this attempt.
 
-To enable for a disposable Wine test session, launch with:
-`RAYMAN2FIX_EXPERIMENT_LEARN10_COUNTER_EXIT=1 WINEDEBUG=-all wine Rayman2Fix.exe`
-and keep `[Debug] Log=1`. After entering `Learn_10`, release all skip
-keys and press **Enter**, **Space** or **Escape** once. The request is
-accepted only for the approved executable, with the known full script
-shape, exactly one director, the native intro behaviour active, the
-stand-in present, Rayman suspended, `var14=7`, a stable `var50=0` and
-`var110=0`, and the game in the foreground at least one second after
-the introduction begins. One request is permitted per entry into the
-level. The game may wait until its next native progression checkpoint
-before completing the sequence. Exit/relaunch without the variable to
-return to the unchanged default. Do not use the experiment with an
-important unsaved game session.
+To investigate the missing prerequisite without repeating a failed
+write, the normal read-only snapshots now also report exact-width
+integer scalar AI variables 16, 17, 95 and 96 (if they are declared
+integer and readable). Arrays, floats, pointers and actor references
+are not decoded or logged. This is diagnostic only. It may identify
+the missing phase gate, but no causal interpretation is assumed.
 
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,
