@@ -18,7 +18,7 @@ class RenderProbePatchTests(unittest.TestCase):
             '    shim::call!("guFbWriteRegion", x, y, w, h, crate::callargs::Region(src, w, h, stride, with(|l| if wide(l.mode) { 4 } else { 2 })), stride);\n    finish_write();\n')
         (base / "api/tex.rs").write_text(
             "    let Some(i) = (unsafe { info.as_ref() }) else { return };\n"
-            "    if tmu != 0 || data.is_null() { return; }\n")
+            '    shim::call!("grTexDownloadTablePartial", tmu, kind, crate::callargs::table(kind, data, first, last), first, last);\n')
         return base
 
     def test_probe_is_bounded_and_read_only(self):

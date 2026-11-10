@@ -125,9 +125,10 @@ def install(root: pathlib.Path) -> None:
     d = substitute(d, "    let Some(i) = (unsafe { info.as_ref() }) else { return };",
                    "    let Some(i) = (unsafe { info.as_ref() }) else { return };\n"
                    "    crate::render_probe::texture(i.format, i.large_lod, i.small_lod);")
-    d = substitute(d, "    if tmu != 0 || data.is_null() { return; }",
-                   "    crate::render_probe::palette(kind, first, last);\n"
-                   "    if tmu != 0 || data.is_null() { return; }")
+    d = substitute(d,
+                   '    shim::call!("grTexDownloadTablePartial", tmu, kind, crate::callargs::table(kind, data, first, last), first, last);',
+                   '    shim::call!("grTexDownloadTablePartial", tmu, kind, crate::callargs::table(kind, data, first, last), first, last);\n'
+                   "    crate::render_probe::palette(kind, first, last);")
     # All replacements have been verified before mutating any upstream file.
     for path, contents in ((lib,a),(sst,b),(lfb,c),(tex,d)):
         path.write_text(contents,encoding="utf-8")
