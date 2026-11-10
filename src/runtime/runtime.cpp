@@ -271,11 +271,16 @@ void poll_learn_intro_skip() {
     const auto director = find_intro_director(matched, visited, stats);
     char message[240]{};
     std::snprintf(message, sizeof(message),
-                  "RUNTIME-INTRO: Learn_10 scan visited=%u matched=%u actors=%u armed=%u models=%u self=%u rayman=%u standin=%u",
+                  "RUNTIME-INTRO: Learn_10 scan visited=%u matched=%u actors=%u armed=%u models=%u",
                   unsigned(visited), unsigned(matched), stats.actor_objects,
-                  stats.armed_directors, stats.models_with_variables,
-                  stats.verified_self, stats.verified_rayman,
-                  stats.verified_standin);
+                  stats.armed_directors, stats.models_with_variables);
+    log_line(message);
+    std::snprintf(message, sizeof(message),
+                  "RUNTIME-INTRO: director checks waypoint_type=%u waypoint_value=%u self_type=%u self_value=%u self_match=%u subject_type=%u subject_value=%u rayman_match=%u standin_type=%u standin_match=%u",
+                  stats.waypoint_kind, stats.waypoint_value,
+                  stats.self_kind, stats.self_value, stats.verified_self,
+                  stats.subject_kind, stats.subject_value, stats.verified_rayman,
+                  stats.standin_kind, stats.verified_standin);
     log_line(message);
     if (!director.valid()) {
         log_line("RUNTIME-INTRO: no unique verified scene director; release Enter and retry while intro active");

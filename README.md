@@ -40,8 +40,9 @@ restarts the level. If identification is uncertain, it does nothing. A rejected 
 does **not** consume the Enter shortcut for the rest of the visit: release
 Enter and press it again while the scripted intro is still active.
 The outcome is still **unverified under Wine/Windows**. The one-file log
-reports how many objects reach each validation stage (actors, armed,
-variables, self, Rayman, stand-in), the attempted action and any
+reports the exact validation stage (actor, armed, variables, waypoint
+kind/pointer, self kind/pointer/match, Rayman and stand-in), without
+revealing memory addresses; it also records any accepted action and
 actual story-bit 1091 handover. An observed handover after a rejected
 attempt is the normal cinematic completing, **not** proof of a skip.
 Use a test save for this experimental scene manipulation.

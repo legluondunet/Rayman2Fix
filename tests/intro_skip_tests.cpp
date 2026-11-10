@@ -187,6 +187,30 @@ int main() {
     assert(stats.actor_objects==1 && stats.armed_directors==1);
     assert(stats.models_with_variables==1 && stats.verified_self==1);
     assert(stats.verified_rayman==1 && stats.verified_standin==1);
+    assert(stats.waypoint_kind==1 && stats.waypoint_value==1);
+    assert(stats.self_kind==1 && stats.self_value==1);
+    assert(stats.subject_kind==1 && stats.subject_value==1);
+    assert(stats.standin_kind==1);
+    demo.a[infos+1*16+4]=9;
+    r2fix::IntroDirectorScanStats wrongWaypointType{};
+    assert(!r2fix::recognize_intro_director(
+        scene,ray,
+        [&](std::uintptr_t p,std::uint32_t& v){return demo.read32(p,v);},
+        [&](std::uintptr_t p,std::uint8_t& v){return demo.read8(p,v);},
+        &wrongWaypointType).valid());
+    assert(wrongWaypointType.models_with_variables==1);
+    assert(wrongWaypointType.waypoint_kind==0);
+    demo.a[infos+1*16+4]=8;
+    demo.a[buffer+16]=0;
+    r2fix::IntroDirectorScanStats missingSelf{};
+    assert(!r2fix::recognize_intro_director(
+        scene,ray,
+        [&](std::uintptr_t p,std::uint32_t& v){return demo.read32(p,v);},
+        [&](std::uintptr_t p,std::uint8_t& v){return demo.read8(p,v);},
+        &missingSelf).valid());
+    assert(missingSelf.waypoint_value==1);
+    assert(missingSelf.self_kind==1 && missingSelf.self_value==0);
+    demo.a[buffer+16]=scene;
     demo.a[buffer+24]=scene;
     assert(!detect().valid());       // never skip scene with incorrect Rayman
     demo.a[buffer+24]=ray;

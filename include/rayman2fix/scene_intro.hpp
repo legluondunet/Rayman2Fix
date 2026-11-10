@@ -14,8 +14,15 @@ struct IntroDirectorScanStats {
     unsigned actor_objects = 0;
     unsigned armed_directors = 0;
     unsigned models_with_variables = 0;
+    unsigned waypoint_kind = 0;
+    unsigned waypoint_value = 0;
+    unsigned self_kind = 0;
+    unsigned self_value = 0;
     unsigned verified_self = 0;
+    unsigned subject_kind = 0;
+    unsigned subject_value = 0;
     unsigned verified_rayman = 0;
+    unsigned standin_kind = 0;
     unsigned verified_standin = 0;
 };
 
@@ -64,15 +71,30 @@ IntroDirector recognize_intro_director(std::uintptr_t so,
             return false;
         return rd32(std::uintptr_t(buffer) + offset, value);
     };
+    // Keep the reads strictly passive and separate each validation stage.
+    // The existing report only said "self=0" even when the actual failure
+    // was an earlier waypoint *type* mismatch. These counters distinguish
+    // those cases without exposing game pointers or changing actor state.
     std::uint32_t waypoint = 0, self = 0, subject = 0, standin = 0;
-    if (!variable(1, 8, waypoint) || !waypoint ||
-        !variable(2, 9, self) || self != so) return answer;
+    if (!variable(1, 8, waypoint)) return answer;
+    if (stats) ++stats->waypoint_kind;
+    if (!waypoint) return answer;
+    if (stats) ++stats->waypoint_value;
+    if (!variable(2, 9, self)) return answer;
+    if (stats) ++stats->self_kind;
+    if (!self) return answer;
+    if (stats) ++stats->self_value;
+    if (self != so) return answer;
     if (stats) ++stats->verified_self;
-    if (!variable(3, 9, subject) || subject != rayman_so)
-        return answer;
+    if (!variable(3, 9, subject)) return answer;
+    if (stats) ++stats->subject_kind;
+    if (!subject) return answer;
+    if (stats) ++stats->subject_value;
+    if (subject != rayman_so) return answer;
     if (stats) ++stats->verified_rayman;
-    if (!variable(4, 9, standin) || !standin || standin == rayman_so)
-        return answer;
+    if (!variable(4, 9, standin)) return answer;
+    if (stats) ++stats->standin_kind;
+    if (!standin || standin == rayman_so) return answer;
     if (stats) ++stats->verified_standin;
     // A dynamic/attached waypoint needs a world-transform calculation:
     // refuse rather than teleport the stand-in to local coordinates.
