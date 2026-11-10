@@ -38,6 +38,17 @@ show the exact outcome. Space/Esc mapping for this particular scripted
 scene requires confirmation before enabling. The earlier jail_20 skip is
 unchanged.
 
+## Experimental loading-image colour diagnostics
+
+The currently approved 3D/2D rendering is unchanged. While `[Debug] Log=1`,
+the pinned GameFrame Glide wrapper emits a **small capped number** of
+`RUNTIME-GLIDE:` lines to the existing `Rayman2Fix.log` (no second log):
+framebuffer pixel mode and colour format, large CPU framebuffer transfers,
+and early texture/palette uploads. These diagnostics let us distinguish a
+16-bit R/B ordering error in LFB images from palette/texture upload errors.
+No pixels are changed and there is no user-visible configuration setting.
+This is investigative pending in-game comparison of the loading artwork.
+
 ## Automatic launcher workflow
 
 Run **`Rayman2Fix.exe` without arguments**. The obsolete `--init` command

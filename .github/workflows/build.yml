@@ -45,6 +45,8 @@ jobs:
           Set-Content -Path $def -Value $converted -Encoding ascii
           python tools/gameframe/apply_fps_limit.py third_party/game-frame
           if ($LASTEXITCODE -ne 0) { throw 'Pinned GameFrame FPS patch failed' }
+          python tools/gameframe/apply_render_probe.py third_party/game-frame
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned GameFrame color-path diagnostic patch failed' }
           $env:RUSTFLAGS = "-C link-arg=/DEF:$def"
           cargo build -p glide --release --target i686-pc-windows-msvc --manifest-path $manifest
           if ($LASTEXITCODE -ne 0) { throw 'GameFrame x86 compilation failed' }
