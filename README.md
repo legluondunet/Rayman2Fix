@@ -166,6 +166,26 @@ events themselves; phase_valid marks successful readings (1=var16,
 enable any shortcut. For var17, only the declared type is now exposed
 when the value is not a scalar integer; its content remains untouched.
 
+**Current targeted script investigation (10 November 2026):**
+`NOMOVIES` requires a playable in-game pause menu, but the user's
+Wine test confirms that ESC cannot open Pause during first-visit
+`Learn_10`. The game therefore cannot accept the cheat there; this
+does not prove that its native skip handler is ineffective. The
+[PC fast-reset speedrun instructions](https://www.speedrun.com/r2/guides/xin1n)
+also explicitly require watching the silver-Lum cinematic before
+preparing their reusable save, so they are NOT a no-save workaround.
+
+The earlier read-only trace identified exactly six `v96=110` pulses,
+coincident with six native `var83` increments, while normal cleanup
+resumes Rayman at 25.4 s. An additional bounded *read-only* script
+locator now looks specifically for a native comparison of variable
+96 with integer literal 110, with verified expression nesting.
+Only if one is present does it print a short excerpt around its
+first occurrence; if none is found it says so. The excerpt contains
+sanitized opcodes and integer variable IDs, not pointers or asset
+data. **Neither a matched predicate nor the value 110 authorizes a
+skip.** The first-visit `Learn_10` cinematic remains untouched.
+
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,
 Hor+ 3D and the 4:3 HUD. This rollback does not merge the PR.

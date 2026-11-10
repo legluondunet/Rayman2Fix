@@ -300,6 +300,14 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
         log_line(message);
         --line_budget;
     }
+    if (long_rule && line_budget) {
+        std::snprintf(message,sizeof(message),
+            "RUNTIME-INTRO: phase110-predicates count=%u first_node=%u first_condition=%u (script-only, no state writes)",
+            p.phase110_predicates,p.phase110_first_node,
+            p.phase110_first_condition);
+        log_line(message);
+        --line_budget;
+    }
 
     char tokens[260]{};
     unsigned used=0;
@@ -429,6 +437,25 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
             --line_budget;
         }
     };
+    // A second bounded, read-only excerpt is produced ONLY if the
+    // script actually contains a condition comparing V96 against 110.
+    // It targets the missing middle of the large original rule rather
+    // than dumping a second copy of its 1000+ nodes.
+    if (p.phase110_predicates && line_budget) {
+        const unsigned first=p.phase110_first_node;
+        const unsigned begin=first>22 ? first-22 : 1;
+        const unsigned end=first+38;
+        const auto around=r2fix::observe_scene_script(
+            script_slot,
+            [](std::uintptr_t a,std::uint32_t& v){return read_u32(a,v);},
+            [](std::uintptr_t a,std::uint8_t& v){return read_u8(a,v);},
+            8192u,begin,end);
+        if (around.complete && !around.malformed)
+            emit_excerpt("phase110-context",around.context.data(),
+                         around.context_selected,
+                         around.context_selected,
+                         unsigned(around.context.size()));
+    }
     emit_excerpt("exit-context",p.context.data(),
                  p.context_selected,p.context_selected,
                  unsigned(p.context.size()));

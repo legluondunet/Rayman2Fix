@@ -28,6 +28,11 @@ struct SceneScriptProbe {
     unsigned critical_total = 0;
     unsigned critical_selected = 0;
     unsigned context_selected = 0;
+    // First exact comparison of integer variable 96 to literal 110.
+    // These are bounds-checked script node indices, never memory pointers.
+    unsigned phase110_predicates = 0;
+    unsigned phase110_first_node = 0;
+    unsigned phase110_first_condition = 0;
     std::array<SceneScriptEvent, 128> events{};
     // An optional bounded context window around the native exit branch.
     // No script parameter is dereferenced or returned as a process address.
@@ -60,6 +65,8 @@ SceneScriptProbe observe_scene_script(std::uintptr_t script_slot,
         p.malformed=true;
         return p;
     }
+    SceneScriptEvent previous{}, before_previous{};
+    unsigned recent=0;
     for (unsigned i=0;i<max_nodes;++i) {
         const auto at=std::uintptr_t(nodes)+std::uintptr_t(i)*8u;
         std::uint32_t param=0;
@@ -76,6 +83,25 @@ SceneScriptProbe observe_scene_script(std::uintptr_t script_slot,
             p.malformed=!p.complete;
             return p;
         }
+        // A tightly scoped read-only locator: Condition(4..7)
+        //  variable(96), int(110), all at the expected expression
+        //  nesting depth. A matching expression is NOT proof of a
+        //  skippable cinematic; it just identifies relevant script data.
+        if (recent>=2 && type==12 && param==110 &&
+            previous.type==11 && previous.param==96 &&
+            previous.indent==indent &&
+            before_previous.type==1 &&
+            before_previous.param>=4 && before_previous.param<=7 &&
+            unsigned(before_previous.indent)+1==unsigned(indent)) {
+            ++p.phase110_predicates;
+            if (p.phase110_predicates==1) {
+                p.phase110_first_node=before_previous.node;
+                p.phase110_first_condition=before_previous.param;
+            }
+        }
+        before_previous=previous;
+        previous={i,param,indent,type};
+        if (recent<2) ++recent;
         if (interesting_scene_opcode(type)) {
             const SceneScriptEvent event{i,param,indent,type};
             if (p.selected<p.events.size())

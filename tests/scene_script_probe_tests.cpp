@@ -164,5 +164,50 @@ int main(){
         assert(!r2fix::inspect_learn10_native_exit(bad,behaviours,6).matched());
         assert(!r2fix::inspect_learn10_native_exit(known,0,6).matched());
     }
+    // The phase locator must match an actual nested condition with
+    // contiguous operands. A coincidental literal 110 or unrelated V96
+    // must not be misidentified as the phase comparison.
+    {
+        Mock phase{};
+        phase.words[slot]=nodes;
+        auto set_phase=[&](unsigned i,unsigned type,unsigned depth,
+                           std::uint32_t value) {
+            phase.words[nodes+std::uintptr_t(i)*8]=value;
+            phase.bytes[nodes+std::uintptr_t(i)*8+6]=std::uint8_t(depth);
+            phase.bytes[nodes+std::uintptr_t(i)*8+7]=std::uint8_t(type);
+        };
+        set_phase(0,0,1,0); // if
+        set_phase(1,1,2,4); // Equal
+        set_phase(2,11,3,96); // var96
+        set_phase(3,12,3,110); // literal 110
+        set_phase(4,0,1,8); // then
+        set_phase(5,8,0,0); // end
+        const auto scan_phase=[&] {
+            return r2fix::observe_scene_script(slot,
+                [&](std::uintptr_t a,std::uint32_t& v){return phase.read32(a,v);},
+                [&](std::uintptr_t a,std::uint8_t& v){return phase.read8(a,v);});
+        };
+        auto p=scan_phase();
+        assert(p.complete && !p.malformed && p.phase110_predicates==1);
+        assert(p.phase110_first_node==1 && p.phase110_first_condition==4);
+        set_phase(3,12,3,111);
+        assert(scan_phase().phase110_predicates==0);
+        set_phase(3,12,3,110);
+        set_phase(2,11,3,95);
+        assert(scan_phase().phase110_predicates==0);
+        set_phase(2,11,3,96);
+        set_phase(2,11,2,96); // wrong nested operand
+        assert(scan_phase().phase110_predicates==0);
+        set_phase(2,11,3,96);
+        set_phase(1,1,2,49); // unrelated condition
+        assert(scan_phase().phase110_predicates==0);
+        set_phase(1,1,2,6); // lesser-than comparison
+        assert(scan_phase().phase110_predicates==1);
+        // An unrelated node between the variable and literal breaks
+        // the exact expression fingerprint.
+        set_phase(3,2,3,11);
+        set_phase(4,12,3,110);
+        assert(scan_phase().phase110_predicates==0);
+    }
     return 0;
 }
