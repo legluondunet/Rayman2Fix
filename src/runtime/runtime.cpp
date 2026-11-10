@@ -366,6 +366,27 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
         log_line(message);
         --line_budget;
     }
+    // The original rule has an EARLIER exit branch (v96==104)
+    // independent of the six v96==110 stage pulses. Verify exact
+    // opcode nesting and native cleanup, without writing v96 or
+    // calling AI functions. A positive shape is a fact about the
+    // compiled script, NOT proof that forcing the branch is safe.
+    if (long_rule && line_budget) {
+        const auto early=r2fix::observe_scene_script(
+            script_slot,
+            [](std::uintptr_t a,std::uint32_t& v){return read_u32(a,v);},
+            [](std::uintptr_t a,std::uint8_t& v){return read_u8(a,v);},
+            8192u,156u,249u);
+        const auto shape=r2fix::inspect_learn10_early_exit(early);
+        std::snprintf(message,sizeof(message),
+            "RUNTIME-INTRO: native-early-exit-shape match=%u phase104=%u signal=%u actors=%u rayman=%u control=%u (read-only; NOT a skip)",
+            unsigned(shape.matched()),unsigned(shape.phase104_branch),
+            unsigned(shape.exit_signal),unsigned(shape.actor_reactivation),
+            unsigned(shape.rayman_restoration),
+            unsigned(shape.control_restoration));
+        log_line(message);
+        --line_budget;
+    }
     // Only the previously capped long rule needs the extra output.
     // Ring-order chronology is reconstructed using total counters,
     // while pointer-typed operands are replaced by labels.

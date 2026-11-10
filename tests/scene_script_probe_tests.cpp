@@ -144,6 +144,52 @@ int main(){
             }
         }
     }
+    // Early original exit (v96==104) is not the six-stage pulse (110):
+    // test the entire branch signature and reject missing cleanup,
+    // wrong signal values and incorrect If/Then nesting.
+    {
+        r2fix::SceneScriptProbe early{};
+        early.complete=true;
+        const auto add=[&](unsigned node,unsigned depth,unsigned type,
+                           unsigned param) {
+            assert(early.context_selected<early.context.size());
+            early.context[early.context_selected++]={
+                node,param,std::uint8_t(depth),std::uint8_t(type)};
+        };
+        add(156,8,0,9); add(157,9,0,0); add(158,10,1,4);
+        add(159,11,11,96);add(160,11,12,104);
+        add(161,9,0,8);add(249,9,0,9);
+        add(172,10,2,11);add(173,11,11,110);
+        add(174,11,12,1);add(175,10,4,139);
+        add(217,10,4,84);add(219,10,4,67);
+        add(222,10,4,68);add(237,10,4,318);
+        add(241,10,4,312);
+        add(227,11,4,174);add(228,12,12,14);add(229,12,12,0);
+        add(232,11,4,174);add(233,12,12,17);add(234,12,12,0);
+        add(244,10,2,11);add(245,11,2,12);
+        add(247,12,11,16);add(248,11,12,1);
+        assert(r2fix::inspect_learn10_early_exit(early).matched());
+        auto bad=early;
+        for(unsigned i=0;i<bad.context_selected;++i)
+            if(bad.context[i].node==160) bad.context[i].param=110;
+        assert(!r2fix::inspect_learn10_early_exit(bad).matched());
+        bad=early;
+        for(unsigned i=0;i<bad.context_selected;++i)
+            if(bad.context[i].node==173) bad.context[i].param=109;
+        assert(!r2fix::inspect_learn10_early_exit(bad).matched());
+        bad=early;
+        for(unsigned i=0;i<bad.context_selected;++i)
+            if(bad.context[i].node==161) bad.context[i].indent=10;
+        assert(!r2fix::inspect_learn10_early_exit(bad).matched());
+        bad=early;
+        for(unsigned i=0;i<bad.context_selected;++i)
+            if(bad.context[i].node==232) bad.context[i].param=318;
+        assert(!r2fix::inspect_learn10_early_exit(bad).matched());
+        bad=early;bad.complete=false;
+        assert(!r2fix::inspect_learn10_early_exit(bad).matched());
+        bad=early;bad.malformed=true;
+        assert(!r2fix::inspect_learn10_early_exit(bad).matched());
+    }
     // The known retail script has distinct If/Then/Else NESTING and a
     // model-relative behaviour-1 reference. Refuse lookalikes that have
     // the same opcodes but wrong nesting, target, or opcode values.

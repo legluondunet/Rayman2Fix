@@ -128,6 +128,58 @@ SceneScriptProbe observe_scene_script(std::uintptr_t script_slot,
     return p;
 }
 
+// An early native exit case exists at v96==104, BEFORE the six normal
+// v96==110 progression pulses. This is only a script fingerprint.
+// It does not authorize writing designer variables or invoking AI code.
+struct Learn10EarlyExitShape {
+    bool phase104_branch=false;
+    bool exit_signal=false;
+    bool actor_reactivation=false;
+    bool rayman_restoration=false;
+    bool control_restoration=false;
+    bool matched() const {
+        return phase104_branch && exit_signal && actor_reactivation &&
+               rayman_restoration && control_restoration;
+    }
+};
+inline Learn10EarlyExitShape inspect_learn10_early_exit(
+    const SceneScriptProbe& probe) {
+    Learn10EarlyExitShape shape{};
+    if (!probe.complete || probe.malformed || probe.context_selected==0)
+        return shape;
+    const auto has=[&](unsigned node,unsigned depth,unsigned type,
+                       std::uint32_t value) {
+        for(unsigned i=0;i<probe.context_selected;++i) {
+            const auto& e=probe.context[i];
+            if(e.node==node && e.indent==depth &&
+               e.type==type && e.param==value) return true;
+        }
+        return false;
+    };
+    // Nested Else/If(v96==104)/Then/Else in the exact compiled rule.
+    shape.phase104_branch=
+        has(156,8,0,9) && has(157,9,0,0) &&
+        has(158,10,1,4) && has(159,11,11,96) &&
+        has(160,11,12,104) && has(161,9,0,8) &&
+        has(249,9,0,9);
+    // The early branch signals var110=1 and clears the active effect.
+    shape.exit_signal=
+        has(172,10,2,11) && has(173,11,11,110) &&
+        has(174,11,12,1) && has(175,10,4,139);
+    shape.actor_reactivation=
+        has(217,10,4,84) && has(219,10,4,67) &&
+        has(222,10,4,68) && has(237,10,4,318) &&
+        has(241,10,4,312);
+    shape.rayman_restoration=
+        has(227,11,4,174) && has(228,12,12,14) &&
+        has(229,12,12,0) && has(232,11,4,174) &&
+        has(233,12,12,17) && has(234,12,12,0);
+    shape.control_restoration=
+        has(244,10,2,11) && has(245,11,2,12) &&
+        has(247,12,11,16) && has(248,11,12,1);
+    return shape;
+}
+
 // Read-only fingerprint of the exact native Learn_10 script from the approved
 // executable. OpCode *order and nesting* matter; a coincidental list of
 // instructions is NOT a matching exit path. Never use a match to enable a skip.

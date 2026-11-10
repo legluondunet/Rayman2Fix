@@ -206,6 +206,33 @@ should allow static reconstruction of what lies BETWEEN stage
 completions and the engine's real exit, without another speculative
 memory write.
 
+**Full middle-branch trace (10 November 2026, log 150453):**
+the behaviour-3 rule-2 script reveals an *independent, earlier*
+condition `v96 == 104` near nodes 157–161. Its Then branch assigns
+`var110 = 1` (nodes 172–174), deactivates the temporary script actor,
+reactivates native actors, switches their behaviour and reflex, clears
+Rayman's custom bits 14 and 17, and restores his animation/control
+flag. This resembles the later terminal restoration at nodes
+~966–1055, but is NOT identical in every instruction.
+
+By contrast, `v96 == 110` near node 317 sets `var110 = 2` and
+`var50 = 1`, signalling an ordinary stage progression pulse;
+this is not an exit instruction. An exact nesting and cleanup-shape
+probe now checks the `v96 == 104` branch separately and reports
+`native-early-exit-shape`, without enabling it. The native rule also
+checks `var110 == 1` at nodes 926–939 and switches the director
+to behaviour 1, which suggests that the early `104` branch is a
+plausible native completion mechanism.
+
+**Outstanding unknown:** `v96` is normally assigned from the
+director's compiled `F158` function (cross-reference name
+`DisplayText` in ACP_Ray2), which may recompute the signal every
+game tick. Therefore forcibly writing `v96=104` has not been
+validated as a safe or effective user shortcut. No script designer
+variable is changed, no skip is enabled and no saving logic is
+modified. Further experimentation must prove how to request that
+signal coherently rather than jumping past cleanup.
+
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,
 Hor+ 3D and the 4:3 HUD. This rollback does not merge the PR.
