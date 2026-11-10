@@ -102,15 +102,13 @@ SceneScriptProbe observe_scene_script(std::uintptr_t script_slot,
     return p;
 }
 
-// A read-only fingerprint of the *observed* Learn_10 director script.
-// These node numbers are from the single approved executable's behaviour 3,
-// rule 2. The fingerprint must never be interpreted as permission to skip:
-// recognising script structure does not execute its cleanup or prove that
-// any early entry into it would be safe.
+// Read-only fingerprint of the exact native Learn_10 script from the approved
+// executable. OpCode *order and nesting* matter; a coincidental list of
+// instructions is NOT a matching exit path. Never use a match to enable a skip.
 struct Learn10NativeExitShape {
-    bool exit_gate = false;        // var110 == 1 -> native behaviour change
-    bool counter_branch = false;   // var83 < (var14 - 1), then var83 += 1
-    bool terminal_signal = false;  // alternative branch sets var110 = 1
+    bool exit_gate = false;
+    bool counter_branch = false;
+    bool terminal_signal = false;
     bool actor_reactivation = false;
     bool rayman_restoration = false;
     bool native_retirement = false;
@@ -121,46 +119,57 @@ struct Learn10NativeExitShape {
     }
 };
 inline Learn10NativeExitShape inspect_learn10_native_exit(
-    const SceneScriptProbe& probe) {
+    const SceneScriptProbe& probe, std::uintptr_t behaviour_table,
+    unsigned behaviour_count) {
     Learn10NativeExitShape shape{};
-    if (!probe.complete || probe.malformed || probe.context_selected == 0)
+    if (!probe.complete || probe.malformed || probe.context_selected==0 ||
+        behaviour_table < 0x10000u || behaviour_count<6 ||
+        behaviour_count>64 ||
+        behaviour_table > std::uintptr_t(0xFFFFFFFFu) -
+                          std::uintptr_t(behaviour_count)*12u)
         return shape;
-    const auto has = [&](std::uint32_t node, std::uint8_t type,
-                         std::uint32_t value) {
-        for (unsigned i = 0; i < probe.context_selected; ++i) {
-            const auto& e = probe.context[i];
-            if (e.node == node && e.type == type && e.param == value)
+    const auto has = [&](std::uint32_t node, std::uint8_t depth,
+                         std::uint8_t type, std::uint32_t value) {
+        for (unsigned i=0; i<probe.context_selected; ++i) {
+            const auto& e=probe.context[i];
+            if (e.node==node && e.indent==depth &&
+                e.type==type && e.param==value)
                 return true;
         }
         return false;
     };
-    const auto has_type = [&](std::uint32_t node, std::uint8_t type) {
-        for (unsigned i = 0; i < probe.context_selected; ++i) {
-            const auto& e = probe.context[i];
-            if (e.node == node && e.type == type) return true;
-        }
-        return false;
-    };
-    // Script node types: 1=condition, 2=operator, 4=procedure,
-    // 11=designer variable, 12=integer literal, 28=local behaviour.
-    // No pointer-valued parameter is dereferenced, copied or logged.
+    // C4 is Equal, C6 is Lesser; O1 subtracts, O5 increments and
+    // O11 assigns; K0 / K8 / K9 mean If / Then / Else respectively.
+    // The original IF(var110==1) moves the director into behaviour 1.
+    // Its ELSE branch contains the terminal counter and actor restoration.
     shape.exit_gate =
-        has(927, 1, 4) && has(928, 11, 110) && has(929, 12, 1);
+        has(926,3,0,0) && has(927,4,1,4) &&
+        has(928,5,11,110) && has(929,5,12,1) &&
+        has(930,3,0,8) && has(940,2,0,9);
     shape.counter_branch =
-        has(957, 1, 6) && has(958, 11, 83) &&
-        has(959, 2, 1) && has(960, 11, 14) &&
-        has(961, 12, 1) && has(963, 2, 5) &&
-        has(964, 11, 83) && has(965, 12, 1);
+        has(956,3,0,0) && has(957,4,1,6) &&
+        has(958,5,11,83) && has(959,5,2,1) &&
+        has(960,6,11,14) && has(961,6,12,1) &&
+        has(962,3,0,8) && has(963,4,2,5) &&
+        has(964,5,11,83) && has(965,5,12,1);
     shape.terminal_signal =
-        has(967, 2, 11) && has(968, 11, 110) && has(969, 12, 1);
+        has(966,3,0,9) && has(967,4,2,11) &&
+        has(968,5,11,110) && has(969,5,12,1) &&
+        has(970,4,4,139);
     shape.actor_reactivation =
-        has(1022, 4, 84) && has(1031, 4, 67) && has(1034, 4, 68);
+        has(1022,4,4,84) && has(1028,5,4,312) &&
+        has(1031,4,4,67) && has(1034,4,4,68) &&
+        has(1049,5,4,318);
     shape.rayman_restoration =
-        has(1039, 4, 174) && has(1040, 12, 14) && has(1041, 12, 0) &&
-        has(1044, 4, 174) && has(1045, 12, 17) && has(1046, 12, 0);
+        has(1039,5,4,174) && has(1040,6,12,14) &&
+        has(1041,6,12,0) && has(1044,5,4,174) &&
+        has(1045,6,12,17) && has(1046,6,12,0);
+    // The behaviour-reference operand must target index 1 of this
+    // *same verified model*, not merely be an arbitrary node type 28.
     shape.native_retirement =
-        has(933, 4, 174) && has(934, 12, 30) && has(935, 12, 0) &&
-        has(938, 4, 69) && has_type(939, 28);
+        has(933,5,4,174) && has(934,6,12,30) &&
+        has(935,6,12,0) && has(938,4,4,69) &&
+        has(939,5,28,std::uint32_t(behaviour_table+12u));
     return shape;
 }
 

@@ -287,7 +287,7 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
     // The signature is a read-only diagnostic, never an enablement gate
     // for a shortcut. The actual engine's cleanup must still run.
     if (long_rule && line_budget) {
-        const auto shape=r2fix::inspect_learn10_native_exit(p);
+        const auto shape=r2fix::inspect_learn10_native_exit(p,list,list_count);
         std::snprintf(message,sizeof(message),
             "RUNTIME-INTRO: native-exit-shape match=%u exit_gate=%u counter=%u terminal=%u actor=%u rayman=%u retire=%u (read-only; NOT a skip)",
             unsigned(shape.matched()),unsigned(shape.exit_gate),

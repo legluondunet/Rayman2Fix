@@ -126,6 +126,17 @@ eligibility**. A mismatch is informative and does not change
 gameplay. The previous early jump remains disabled until the original
 cleanup can be exercised safely and validated visually.
 
+The script shape check additionally verifies the **If/Then/Else nesting**
+of the native exit branches and that `ChangeMyComport` targets behaviour
+1 in the same verified director model. A correct opcode list with
+incorrect nesting or an unrelated behaviour pointer is rejected. In the
+original script, a `var83 >= (var14 - 1)` event assigns
+`var110=1` within the **Else** branch, executes the engine's actor/Rayman
+restoration, and is followed by the separate `var110==1` director-exit
+gate. This explains why simply forcing behaviour 1 can bypass cleanup.
+It does not demonstrate that manipulating `var83` is safe: the
+cinematic's actor positions, camera and script phase would still differ.
+
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,
 Hor+ 3D and the 4:3 HUD. This rollback does not merge the PR.

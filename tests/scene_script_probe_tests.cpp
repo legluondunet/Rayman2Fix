@@ -111,38 +111,58 @@ int main(){
         assert(p2.context[0].node==100u && p2.context[59].node==159u);
         assert(p2.context[20].param==69u);
     }
-    // Real node-index/opcode landmarks observed in the Wine Learn_10
-    // read-only trace. A complete matching fingerprint is an analysis
-    // result, NOT authorisation to fast-forward or modify game state.
+    // The known retail script has distinct If/Then/Else NESTING and a
+    // model-relative behaviour-1 reference. Refuse lookalikes that have
+    // the same opcodes but wrong nesting, target, or opcode values.
     {
+        constexpr std::uintptr_t behaviours=0x44000;
         r2fix::SceneScriptProbe known{};
-        known.complete = true;
-        const auto add=[&](unsigned node,unsigned type,unsigned param) {
-            assert(known.context_selected < known.context.size());
-            known.context[known.context_selected++] = {
-                node, param, 1, static_cast<std::uint8_t>(type)};
-        };
-        add(927,1,4);add(928,11,110);add(929,12,1);
-        add(957,1,6);add(958,11,83);add(959,2,1);
-        add(960,11,14);add(961,12,1);add(963,2,5);
-        add(964,11,83);add(965,12,1);
-        add(967,2,11);add(968,11,110);add(969,12,1);
-        add(1022,4,84);add(1031,4,67);add(1034,4,68);
-        add(1039,4,174);add(1040,12,14);add(1041,12,0);
-        add(1044,4,174);add(1045,12,17);add(1046,12,0);
-        add(933,4,174);add(934,12,30);add(935,12,0);
-        add(938,4,69);add(939,28,0xDEADBEEF); // pointer ignored
-        assert(r2fix::inspect_learn10_native_exit(known).matched());
-        known.context[0].param=5;
-        assert(!r2fix::inspect_learn10_native_exit(known).matched());
-        known.context[0].param=4;
-        known.context[known.context_selected-1].param=0xABCD1234;
-        assert(r2fix::inspect_learn10_native_exit(known).matched());
-        known.complete=false;
-        assert(!r2fix::inspect_learn10_native_exit(known).matched());
         known.complete=true;
-        known.malformed=true;
-        assert(!r2fix::inspect_learn10_native_exit(known).matched());
+        const auto add=[&](unsigned node,unsigned depth,unsigned type,
+                           std::uint32_t param) {
+            assert(known.context_selected<known.context.size());
+            known.context[known.context_selected++]={
+                node,param,static_cast<std::uint8_t>(depth),
+                static_cast<std::uint8_t>(type)};
+        };
+        add(926,3,0,0);add(927,4,1,4);add(928,5,11,110);
+        add(929,5,12,1);add(930,3,0,8);
+        add(933,5,4,174);add(934,6,12,30);add(935,6,12,0);
+        add(938,4,4,69);add(939,5,28,std::uint32_t(behaviours+12u));
+        add(940,2,0,9);
+        add(956,3,0,0);add(957,4,1,6);add(958,5,11,83);
+        add(959,5,2,1);add(960,6,11,14);add(961,6,12,1);
+        add(962,3,0,8);add(963,4,2,5);add(964,5,11,83);
+        add(965,5,12,1);add(966,3,0,9);
+        add(967,4,2,11);add(968,5,11,110);add(969,5,12,1);
+        add(970,4,4,139);
+        add(1022,4,4,84);add(1028,5,4,312);
+        add(1031,4,4,67);add(1034,4,4,68);
+        add(1039,5,4,174);add(1040,6,12,14);add(1041,6,12,0);
+        add(1044,5,4,174);add(1045,6,12,17);add(1046,6,12,0);
+        add(1049,5,4,318);
+        assert(r2fix::inspect_learn10_native_exit(known,behaviours,6).matched());
+        auto bad=known;
+        for(unsigned i=0;i<bad.context_selected;++i)
+            if(bad.context[i].node==966) bad.context[i].indent=2;
+        assert(!r2fix::inspect_learn10_native_exit(bad,behaviours,6).matched());
+        bad=known;
+        for(unsigned i=0;i<bad.context_selected;++i)
+            if(bad.context[i].node==939) bad.context[i].param=
+                std::uint32_t(behaviours+24u); // wrong behaviour
+        assert(!r2fix::inspect_learn10_native_exit(bad,behaviours,6).matched());
+        assert(!r2fix::inspect_learn10_native_exit(known,behaviours+12u,6).matched());
+        bad=known;
+        for(unsigned i=0;i<bad.context_selected;++i)
+            if(bad.context[i].node==927) bad.context[i].param=5;
+        assert(!r2fix::inspect_learn10_native_exit(bad,behaviours,6).matched());
+        bad=known;
+        bad.complete=false;
+        assert(!r2fix::inspect_learn10_native_exit(bad,behaviours,6).matched());
+        bad=known;
+        bad.malformed=true;
+        assert(!r2fix::inspect_learn10_native_exit(bad,behaviours,6).matched());
+        assert(!r2fix::inspect_learn10_native_exit(known,0,6).matched());
     }
     return 0;
 }
