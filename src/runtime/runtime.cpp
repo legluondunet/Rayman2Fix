@@ -10,14 +10,11 @@
 #include "rayman2fix/hud_math.hpp"
 #include "rayman2fix/intro_skip.hpp"
 #include "rayman2fix/story_lookup.hpp"
-#include "rayman2fix/scene_intro.hpp"
 #include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
-#include <unordered_set>
-#include <vector>
 
 #if !defined(_M_IX86)
 #error Rayman2Fix camera runtime requires Windows x86
@@ -36,10 +33,10 @@ constexpr char kAfterIntroLevel[] = "learn_10";
 // (designer variable 42). Read dynamically; do NOT assume heap pointers.
 constexpr uintptr_t kFixActorListRva = 0x0B7300; // VA 0x4B7300: count, then direct actor pointers
 constexpr unsigned kLearnHandoverBit = 1091;
-// Runtime objects are discovered read-only at the moment the user presses
-// Enter, never addressed by unsafe scene-node IDs.
+// Read-only diagnostics for natural Learn_10 handover.
 constexpr uintptr_t kRaymanSuperObjectRva = 0x100578; // VA 0x500578
-constexpr DWORD kSceneSkipMonitorMillis = 8000;
+constexpr uintptr_t kFixCameraActorRva = 0x0B7308; // VA 0x4B7308
+constexpr DWORD kNaturalHandoverFollowupMillis = 1000;
 constexpr std::size_t kHookLength = 7;
 constexpr BYTE kExpected[kHookLength] = {0x83, 0xEC, 0x0C, 0x8B, 0x4C, 0x24, 0x14};
 // Rayman 2's GLI_tdstCamera (owner's approved Win32 executable).
@@ -53,12 +50,10 @@ std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
 r2fix::IntroSkipGuard g_intro_guard;
 bool g_intro_level_logged = false;
-r2fix::LearnIntroGuard g_learn_guard;
 bool g_learn_logged = false;
-DWORD g_learn_intro_start = 0;
-bool g_learn_requested = false;
+bool g_learn_intro_seen = false;
 bool g_learn_handover = false;
-DWORD g_learn_skip_start = 0;
+DWORD g_learn_handover_start = 0;
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
@@ -151,87 +146,60 @@ bool game_story_bit(std::uintptr_t words, unsigned bit, bool& value) {
     return true;
 }
 
-r2fix::IntroDirector find_intro_director(
-    std::size_t& matched, std::size_t& visited,
-    r2fix::IntroDirectorScanStats& stats) {
-    matched = visited = 0;
-    r2fix::IntroDirector found{};
+// Read-only samples of the genuine game handover. The previous experimental
+// behaviour-3->1 shortcut corrupted graphics despite story bit 1091 changing.
+// No native scene function is called and no game state is changed here.
+bool read_superobject_position(std::uintptr_t so, float (&xyz)[3]) {
+    std::uint32_t matrix = 0;
+    if (!so || !read_u32(so + 0x24, matrix) || !matrix) return false;
+    for (unsigned i = 0; i < 3; ++i) {
+        std::uint32_t bits = 0;
+        if (!read_u32(std::uintptr_t(matrix) + 4 + 4 * i, bits)) return false;
+        std::memcpy(&xyz[i], &bits, sizeof(bits));
+        if (!std::isfinite(xyz[i]) || std::fabs(xyz[i]) > 100000.0f)
+            return false;
+    }
+    return true;
+}
+void log_natural_intro_snapshot(const char* stage) {
+    if (!g_log) return;
     const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
-    std::uint32_t rayman_so = 0;
-    if (!base || !read_u32(base + kRaymanSuperObjectRva, rayman_so) || !rayman_so)
-        return found;
-    std::uintptr_t root = rayman_so;
-    std::unordered_set<std::uintptr_t> parents;
-    for (unsigned i=0;i<16;++i) {
-        if (!parents.insert(root).second) return {};
-        std::uint32_t parent=0;
-        if (!read_u32(root+0x1c,parent) || !parent) break;
-        root=parent;
+    if (!base) return;
+    std::uint32_t ray_so=0, ray_actor=0, ray_standard=0, custom=0;
+    std::uint8_t flags=0;
+    if (!read_u32(base + kRaymanSuperObjectRva, ray_so) || !ray_so ||
+        !read_u32(std::uintptr_t(ray_so) + 4, ray_actor) || !ray_actor ||
+        !read_u32(std::uintptr_t(ray_actor) + 4, ray_standard) || !ray_standard ||
+        !read_u32(std::uintptr_t(ray_standard) + 0x24, custom) ||
+        !read_u8(std::uintptr_t(ray_standard) + 0x29, flags)) {
+        log_line("RUNTIME-INTRO: natural snapshot unavailable (Rayman data)");
+        return;
     }
-    std::vector<std::uintptr_t> pending{root};
-    std::unordered_set<std::uintptr_t> seen;
-    while (!pending.empty() && seen.size()<4096) {
-        const auto so=pending.back();
-        pending.pop_back();
-        if (!so || !seen.insert(so).second) continue;
-        ++visited;
-        std::uint32_t child=0,sibling=0;
-        if (read_u32(so+0x08,child) && child) pending.push_back(child);
-        if (read_u32(so+0x14,sibling) && sibling) pending.push_back(sibling);
-        auto candidate=r2fix::recognize_intro_director(
-            so,rayman_so,
-            [](std::uintptr_t p,std::uint32_t& v){return read_u32(p,v);},
-            [](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);},
-            &stats);
-        if (candidate.valid()) {
-            ++matched;
-            found=candidate;
-        }
-    }
-    // Never choose an actor if multiple cutscenes match.
-    return matched==1 ? found : r2fix::IntroDirector{};
+    float xyz[3]{};
+    const bool ray_ok = read_superobject_position(ray_so, xyz);
+    std::uint32_t cam_actor=0, cam_standard=0, cam_so=0;
+    float cam[3]{};
+    const bool cam_ok =
+        read_u32(base + kFixCameraActorRva, cam_actor) && cam_actor &&
+        read_u32(std::uintptr_t(cam_actor) + 4, cam_standard) && cam_standard &&
+        read_u32(std::uintptr_t(cam_standard) + 0x0c, cam_so) && cam_so &&
+        read_superobject_position(cam_so, cam);
+    char message[320]{};
+    std::snprintf(message, sizeof(message),
+        "RUNTIME-INTRO: natural=%s ray_custom=0x%08X ray_flags=0x%02X ray_xyz_valid=%u ray=(%.2f,%.2f,%.2f) camera_xyz_valid=%u camera=(%.2f,%.2f,%.2f)",
+        stage, unsigned(custom), unsigned(flags), unsigned(ray_ok),
+        double(xyz[0]),double(xyz[1]),double(xyz[2]),unsigned(cam_ok),
+        double(cam[0]),double(cam[1]),double(cam[2]));
+    log_line(message);
 }
-
-// AI_fn_ucChangeComportIntell, original Rayman2.exe VA=0x481080.
-// Camera callback executes on the game's main thread; this is a native
-// deferred script transition, NOT a manual modification of Rayman's
-// coordinates, story bits, camera or saved game.
-bool request_native_scene_finish(const r2fix::IntroDirector& candidate) {
-    if (!candidate.valid()) return false;
-    const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
-    if (!module) return false;
-    const void* native_function=module+0x81080;
-    MEMORY_BASIC_INFORMATION info{};
-    if (!VirtualQuery(native_function,&info,sizeof(info)) ||
-        info.State!=MEM_COMMIT || (info.Protect & PAGE_GUARD) ||
-        (info.Protect & PAGE_NOACCESS)) return false;
-    const DWORD protection=info.Protect & 0xffu;
-    if (protection!=PAGE_EXECUTE && protection!=PAGE_EXECUTE_READ &&
-        protection!=PAGE_EXECUTE_READWRITE &&
-        protection!=PAGE_EXECUTE_WRITECOPY) return false;
-    using ChangeBehaviour=unsigned char (__cdecl*)(void*,void*);
-    auto* fn=reinterpret_cast<ChangeBehaviour>(
-        const_cast<void*>(native_function));
-    // The return byte's meaning isn't documented; confirm actual game
-    // state instead. This also avoids retrying a transition that succeeded
-    // but returned zero.
-    fn(reinterpret_cast<void*>(candidate.intelligence),
-       reinterpret_cast<void*>(candidate.ending_behaviour));
-    std::uint32_t current=0;
-    return read_u32(candidate.intelligence+8,current) &&
-           std::uintptr_t(current)==candidate.ending_behaviour;
-}
-
 void poll_learn_intro_skip() {
     if (!g_current_level) return;
     if (!r2fix::is_first_playable_level(g_current_level)) {
-        g_learn_guard.update(g_current_level, false, false);
         g_progress_words = 0;
         g_learn_logged = false;
-        g_learn_intro_start = 0;
-        g_learn_requested = false;
+        g_learn_intro_seen = false;
         g_learn_handover = false;
-        g_learn_skip_start = 0;
+        g_learn_handover_start = 0;
         return;
     }
     if (!g_progress_words) {
@@ -242,7 +210,7 @@ void poll_learn_intro_skip() {
     if (!g_progress_words) {
         if (!g_learn_logged) {
             g_learn_logged = true;
-            log_line("RUNTIME-INTRO: learn_10 progress array unavailable, skip safely disabled");
+            log_line("RUNTIME-INTRO: learn_10 progress unavailable; skip disabled");
         }
         return;
     }
@@ -251,61 +219,23 @@ void poll_learn_intro_skip() {
         return;
     if (!g_learn_logged) {
         g_learn_logged = true;
-        g_learn_intro_start = GetTickCount();
+        g_learn_intro_seen = !handed_over;
         log_line(handed_over
-            ? "RUNTIME-INTRO: learn_10 already playable, skip disabled"
-            : "RUNTIME-INTRO: learn_10 scripted intro active; Enter requests guarded native exit");
+            ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
+            : "RUNTIME-INTRO: learn_10 skip disabled after visual regression; natural scene unchanged");
+        if (g_learn_intro_seen) log_natural_intro_snapshot("opening");
     }
-    if (handed_over && g_learn_requested && !g_learn_handover) {
+    if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
-        log_line("RUNTIME-INTRO: learn_10 handover confirmed following accepted skip (story bit 1091)");
+        g_learn_handover_start = GetTickCount();
+        log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
+        log_natural_intro_snapshot("handover");
     }
-    if (!handed_over && g_learn_skip_start &&
-        DWORD(GetTickCount() - g_learn_skip_start) > kSceneSkipMonitorMillis) {
-        g_learn_skip_start = 0;
-        log_line("RUNTIME-INTRO: native end behaviour requested but handover not observed within 8s");
+    if (handed_over && g_learn_handover_start &&
+        DWORD(GetTickCount() - g_learn_handover_start) >= kNaturalHandoverFollowupMillis) {
+        g_learn_handover_start = 0;
+        log_natural_intro_snapshot("handover-plus-1s");
     }
-    const bool foreground = game_window_is_foreground();
-    const bool down = foreground && (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
-    if (!g_learn_guard.update(g_current_level, !handed_over, down) || !foreground)
-        return;
-    // Do not treat a failed candidate scan as a successful skip.
-    // Fresh Enter presses can retry while the original scripted scene
-    // is still active; holding Enter cannot repeatedly scan the tree.
-    if (g_learn_requested) return;
-
-    std::size_t matched = 0, visited = 0;
-    r2fix::IntroDirectorScanStats stats{};
-    const auto director = find_intro_director(matched, visited, stats);
-    char message[240]{};
-    std::snprintf(message, sizeof(message),
-                  "RUNTIME-INTRO: Learn_10 scan t=%ums visited=%u matched=%u actors=%u armed=%u models=%u",
-                  unsigned(DWORD(GetTickCount() - g_learn_intro_start)),
-                  unsigned(visited), unsigned(matched), stats.actor_objects,
-                  stats.armed_directors, stats.models_with_variables);
-    log_line(message);
-    std::snprintf(message, sizeof(message),
-                  "RUNTIME-INTRO: director identified=%u null_waypoint=%u table=%u active_index=%d index5=%u other=%u",
-                  stats.identified_directors,stats.null_waypoints,
-                  stats.valid_behaviour_tables,stats.current_behaviour_index,
-                  stats.in_intro_behaviour,stats.other_behaviours);
-    log_line(message);
-    std::snprintf(message, sizeof(message),
-                  "RUNTIME-INTRO: director guards foreign_behaviour=%u already_ending=%u rayman_suspended=%u",
-                  stats.outside_table,stats.already_ending,
-                  stats.rayman_suspended);
-    log_line(message);
-    if (!director.valid()) {
-        log_line("RUNTIME-INTRO: no unique verified suspended-Rayman scene director; release Enter to retry");
-        return;
-    }
-    if (!request_native_scene_finish(director)) {
-        log_line("RUNTIME-INTRO: native end-behaviour request refused; release Enter and retry while intro active");
-        return;
-    }
-    g_learn_requested = true;
-    g_learn_skip_start = GetTickCount();
-    log_line("RUNTIME-INTRO: native director end-behaviour 1 accepted; awaiting scripted handover");
 }
 
 void poll_second_intro_skip() {
@@ -442,7 +372,7 @@ void initialize_native_intro_skip() {
     g_request_intro_level.store(
         reinterpret_cast<RequestLevel>(const_cast<void*>(request)),
         std::memory_order_release);
-    log_line("RUNTIME-INTRO: native Jail_20 skip armed; Learn_10 native end-behaviour probe enabled");
+    log_line("RUNTIME-INTRO: native Jail_20 skip armed; Learn_10 skip disabled after visual regression");
 }
 
 // Three game-side GLI driver callback slots, verified only for the SHA256-locked
