@@ -186,6 +186,26 @@ sanitized opcodes and integer variable IDs, not pointers or asset
 data. **Neither a matched predicate nor the value 110 authorizes a
 skip.** The first-visit `Learn_10` cinematic remains untouched.
 
+**Result of the first phase-110 probe (log 20261110-145401):**
+the approved compiled script has exactly one matched `V96 == I110`
+predicate (node 317, native Equal condition). Its Then branch
+(nodes 320–326) assigns `var110 = 2` and `var50 = 1`.
+This matches all six naturally observed gate pulses. **Code 110
+means completion of an intermediate stage, not completion of the
+cinematic.** The final exit/restore logic belongs to the separate
+native branch at nodes ~926–1055. `var83` must not be forged to 6,
+and `v96=110` must not be written blindly.
+
+For the next one-time diagnostic, the validated behaviour-3 rule-2
+probe additionally reports sanitized nodes in the previously unread
+ranges 134–383, 384–639 and 640–869, alongside the already bounded
+prefix and native exit context. These are three disjoint windows of
+at most 256 nodes each. The full game remains unmodified, and no
+pointer-type operands or copyrighted game assets are logged. This
+should allow static reconstruction of what lies BETWEEN stage
+completions and the engine's real exit, without another speculative
+memory write.
+
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,
 Hor+ 3D and the 4:3 HUD. This rollback does not merge the PR.

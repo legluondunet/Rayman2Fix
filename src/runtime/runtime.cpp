@@ -456,6 +456,34 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
                          around.context_selected,
                          unsigned(around.context.size()));
     }
+    // The complete stage decision tree was missing between the
+    // first-128-node prefix and native exit at node 870. Only for the
+    // single approved exact shape, copy sanitized OPCODES from three
+    // bounded, non-overlapping windows. This is a one-time read-only
+    // diagnostic; it neither changes state nor invokes AI procedures.
+    if (p.complete && !p.malformed && p.phase110_predicates==1 &&
+        p.phase110_first_node==317 && line_budget) {
+        struct Window { unsigned first,last; const char* label; };
+        constexpr Window windows[]={
+            {134u,383u,"middle-134-383"},
+            {384u,639u,"middle-384-639"},
+            {640u,869u,"middle-640-869"}
+        };
+        for (const auto& w : windows) {
+            if (!line_budget) break;
+            const auto middle=r2fix::observe_scene_script(
+                script_slot,
+                [](std::uintptr_t a,std::uint32_t& v){return read_u32(a,v);},
+                [](std::uintptr_t a,std::uint8_t& v){return read_u8(a,v);},
+                8192u,w.first,w.last);
+            if (!middle.complete || middle.malformed ||
+                middle.context_selected==0) continue;
+            emit_excerpt(w.label,middle.context.data(),
+                         middle.context_selected,
+                         middle.context_selected,
+                         unsigned(middle.context.size()));
+        }
+    }
     emit_excerpt("exit-context",p.context.data(),
                  p.context_selected,p.context_selected,
                  unsigned(p.context.size()));
@@ -467,7 +495,9 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
 void log_compiled_director_model(std::uintptr_t behaviours) {
     if (!g_log || !behaviours) return;
     log_line("RUNTIME-INTRO: compiled-script legend K=keyword C=condition O=operator F=function P=procedure A=meta H=field V=var I=int M=mask B=local-behaviour (pointer types redacted)");
-    unsigned budget=80;
+    // A capped once-per-intro full middle-branch dump adds up to roughly
+    // 50 lines. Preserve the other director behaviours in the same log.
+    unsigned budget=160;
     for (unsigned behaviour : {1u,3u,5u}) {
         const auto b=behaviours+behaviour*12u;
         std::uint32_t rules=0,schedule=0;

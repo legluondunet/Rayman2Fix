@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstdint>
 #include <unordered_map>
+#include <utility>
 
 struct Mock {
     std::unordered_map<std::uintptr_t,std::uint32_t> words;
@@ -110,6 +111,38 @@ int main(){
         assert(p2.complete && p2.context_selected==60u);
         assert(p2.context[0].node==100u && p2.context[59].node==159u);
         assert(p2.context[20].param==69u);
+    }
+    // Additional disjoint bounded windows must retain exactly the
+    // selected node IDs and never include nodes outside their bounds.
+    // The runtime uses the same observer to reconstruct the unread
+    // centre of the actual retail director script.
+    {
+        Mock middle{};
+        middle.words[slot]=nodes;
+        for (unsigned i=0;i<1094;++i) {
+            middle.words[nodes+std::uintptr_t(i)*8]=i;
+            middle.bytes[nodes+std::uintptr_t(i)*8+6]=1;
+            middle.bytes[nodes+std::uintptr_t(i)*8+7]=11;
+        }
+        middle.words[nodes+1093u*8]=0;
+        middle.bytes[nodes+1093u*8+6]=0;
+        middle.bytes[nodes+1093u*8+7]=8;
+        const auto window=[&](unsigned first,unsigned last) {
+            return r2fix::observe_scene_script(slot,
+                [&](std::uintptr_t a,std::uint32_t& v){return middle.read32(a,v);},
+                [&](std::uintptr_t a,std::uint8_t& v){return middle.read8(a,v);},
+                8192u,first,last);
+        };
+        for (const auto& bounds : {std::pair<unsigned,unsigned>{134,383},
+                                   {384,639},{640,869}}) {
+            const auto p=window(bounds.first,bounds.second);
+            assert(p.complete && !p.malformed);
+            assert(p.context_selected==bounds.second-bounds.first+1);
+            for (unsigned i=0;i<p.context_selected;++i) {
+                assert(p.context[i].node==bounds.first+i);
+                assert(p.context[i].param==bounds.first+i);
+            }
+        }
     }
     // The known retail script has distinct If/Then/Else NESTING and a
     // model-relative behaviour-1 reference. Refuse lookalikes that have
