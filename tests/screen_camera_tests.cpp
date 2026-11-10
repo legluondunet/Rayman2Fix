@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
+#include <initializer_list>
 int main() {
     const auto near=[](float a,float b){return std::fabs(a-b)<0.0001f;};
     int overlay=1,world=2;
