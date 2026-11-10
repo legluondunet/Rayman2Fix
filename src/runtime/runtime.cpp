@@ -150,8 +150,9 @@ bool game_story_bit(std::uintptr_t words, unsigned bit, bool& value) {
     return true;
 }
 
-r2fix::IntroDirector find_intro_director(std::size_t& matched,
-                                          std::size_t& visited) {
+r2fix::IntroDirector find_intro_director(
+    std::size_t& matched, std::size_t& visited,
+    r2fix::IntroDirectorScanStats& stats) {
     matched = visited = 0;
     r2fix::IntroDirector found{};
     const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
@@ -183,7 +184,8 @@ r2fix::IntroDirector find_intro_director(std::size_t& matched,
         const auto candidate = r2fix::recognize_intro_director(
             so, rayman_so,
             [](std::uintptr_t p, std::uint32_t& v) { return read_u32(p, v); },
-            [](std::uintptr_t p, std::uint8_t& v) { return read_u8(p, v); });
+            [](std::uintptr_t p, std::uint8_t& v) { return read_u8(p, v); },
+            &stats);
         if (candidate.valid()) {
             ++matched;
             found = candidate;
@@ -244,11 +246,11 @@ void poll_learn_intro_skip() {
         g_learn_logged = true;
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable, skip disabled"
-            : "RUNTIME-INTRO: learn_10 scripted director active; Enter can request ending");
+            : "RUNTIME-INTRO: learn_10 intro active; each fresh Enter may request native ending");
     }
     if (handed_over && g_learn_requested && !g_learn_handover) {
         g_learn_handover = true;
-        log_line("RUNTIME-INTRO: learn_10 handover observed after skip request (story bit 1091)");
+        log_line("RUNTIME-INTRO: learn_10 handover confirmed following accepted skip (story bit 1091)");
     }
     if (!handed_over && g_learn_skip_start &&
         DWORD(GetTickCount() - g_learn_skip_start) > kSceneSkipMonitorMillis) {
@@ -259,24 +261,31 @@ void poll_learn_intro_skip() {
     const bool down = foreground && (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
     if (!g_learn_guard.update(g_current_level, !handed_over, down) || !foreground)
         return;
+    // Do not treat a failed candidate scan as a successful skip.
+    // Fresh Enter presses can retry while the original scripted scene
+    // is still active; holding Enter cannot repeatedly scan the tree.
     if (g_learn_requested) return;
-    g_learn_requested = true;
 
     std::size_t matched = 0, visited = 0;
-    const auto director = find_intro_director(matched, visited);
-    char message[180]{};
+    r2fix::IntroDirectorScanStats stats{};
+    const auto director = find_intro_director(matched, visited, stats);
+    char message[240]{};
     std::snprintf(message, sizeof(message),
-                  "RUNTIME-INTRO: Learn_10 scene scan visited=%u matching_directors=%u",
-                  unsigned(visited), unsigned(matched));
+                  "RUNTIME-INTRO: Learn_10 scan visited=%u matched=%u actors=%u armed=%u models=%u self=%u rayman=%u standin=%u",
+                  unsigned(visited), unsigned(matched), stats.actor_objects,
+                  stats.armed_directors, stats.models_with_variables,
+                  stats.verified_self, stats.verified_rayman,
+                  stats.verified_standin);
     log_line(message);
     if (!director.valid()) {
-        log_line("RUNTIME-INTRO: no unique verified scene director; game state unchanged");
+        log_line("RUNTIME-INTRO: no unique verified scene director; release Enter and retry while intro active");
         return;
     }
     if (!request_native_scene_finish(director)) {
-        log_line("RUNTIME-INTRO: stand-in waypoint request refused; game state unchanged");
+        log_line("RUNTIME-INTRO: stand-in waypoint request refused; release Enter and retry while intro active");
         return;
     }
+    g_learn_requested = true;
     g_learn_skip_start = GetTickCount();
     log_line("RUNTIME-INTRO: stand-in moved to scene waypoint; awaiting native handover");
 }

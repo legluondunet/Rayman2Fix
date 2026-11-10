@@ -55,7 +55,8 @@ struct IntroSkipGuard {
 // The third *sequence* happens inside the first playable level, Learn_10.
 // Unlike jail_20, a level-change request here would restart the sequence or
 // skip gameplay. Only arm on a fresh press while the native intro is active;
-// one request per entrance, with the scene marked complete by the game itself.
+// one request per physical key press, with the scene marked complete
+// by the game itself. A failed lookup must not permanently disarm the key.
 inline bool is_first_playable_level(const char* level) {
     if (!level) return false;
     constexpr char expected[] = "learn_10";
@@ -93,7 +94,10 @@ struct LearnIntroGuard {
             return false;
         }
         if (!enter_down) {
+            // Re-arm only after a genuine key release. A rejected/unsafe
+            // attempt must not consume Enter for the entire level.
             released = true;
+            requested = false;
             return false;
         }
         if (released && !requested) {

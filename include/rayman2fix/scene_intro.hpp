@@ -10,6 +10,15 @@ namespace r2fix {
 //   var1 = destination waypoint, var2 = self, var3 = Rayman, var4 = stand-in.
 // Type 9 variables contain SUPER-OBJECT pointers, not actor pointers.
 // All reads must be guarded by the passed in validated memory reader.
+struct IntroDirectorScanStats {
+    unsigned actor_objects = 0;
+    unsigned armed_directors = 0;
+    unsigned models_with_variables = 0;
+    unsigned verified_self = 0;
+    unsigned verified_rayman = 0;
+    unsigned verified_standin = 0;
+};
+
 struct IntroDirector {
     std::uintptr_t actor_superobject = 0;
     std::uintptr_t standin_superobject = 0;
@@ -21,27 +30,31 @@ struct IntroDirector {
 template <typename Read32, typename Read8>
 IntroDirector recognize_intro_director(std::uintptr_t so,
                                        std::uintptr_t rayman_so,
-                                       Read32 rd32, Read8 rd8) {
+                                       Read32 rd32, Read8 rd8,
+                                       IntroDirectorScanStats* stats = nullptr) {
     IntroDirector answer{};
     if (!so || !rayman_so || so == rayman_so) return answer;
     std::uint32_t kind = 0, actor = 0, standard = 0, flags = 0;
     std::uint32_t brain = 0, mind = 0, memory = 0, decl_ref = 0;
     std::uint32_t decl = 0, infos = 0, buffer = 0;
     std::uint8_t vars = 0;
-    if (!rd32(so, kind) || kind != 2 ||
-        !rd32(so + 4, actor) || !actor ||
+    if (!rd32(so, kind) || kind != 2) return answer;
+    if (stats) ++stats->actor_objects;
+    if (!rd32(so + 4, actor) || !actor ||
         !rd32(std::uintptr_t(actor) + 4, standard) || !standard ||
         !rd32(std::uintptr_t(standard) + 0x24, flags) ||
-        (flags & (1u << 27)) == 0 ||
-        !rd32(std::uintptr_t(actor) + 0x0c, brain) || !brain ||
+        (flags & (1u << 27)) == 0) return answer;
+    if (stats) ++stats->armed_directors;
+    if (!rd32(std::uintptr_t(actor) + 0x0c, brain) || !brain ||
         !rd32(brain, mind) || !mind ||
         !rd32(std::uintptr_t(mind) + 0x0c, memory) || !memory ||
         !rd32(memory, decl_ref) || !decl_ref ||
         !rd32(decl_ref, decl) || !decl ||
         !rd32(std::uintptr_t(decl) + 4, infos) || !infos ||
-        !rd8(std::uintptr_t(decl) + 0x0c, vars) || vars < 7 ||
+        !rd8(std::uintptr_t(decl) + 0x0c, vars) || vars < 5 ||
         !rd32(std::uintptr_t(memory) + 8, buffer) || !buffer)
         return answer;
+    if (stats) ++stats->models_with_variables;
 
     auto variable = [&](unsigned i, std::uint32_t type, std::uint32_t& value) {
         std::uint32_t offset = 0, kind = 0;
@@ -53,10 +66,14 @@ IntroDirector recognize_intro_director(std::uintptr_t so,
     };
     std::uint32_t waypoint = 0, self = 0, subject = 0, standin = 0;
     if (!variable(1, 8, waypoint) || !waypoint ||
-        !variable(2, 9, self) || self != so ||
-        !variable(3, 9, subject) || subject != rayman_so ||
-        !variable(4, 9, standin) || !standin || standin == rayman_so)
+        !variable(2, 9, self) || self != so) return answer;
+    if (stats) ++stats->verified_self;
+    if (!variable(3, 9, subject) || subject != rayman_so)
         return answer;
+    if (stats) ++stats->verified_rayman;
+    if (!variable(4, 9, standin) || !standin || standin == rayman_so)
+        return answer;
+    if (stats) ++stats->verified_standin;
     // A dynamic/attached waypoint needs a world-transform calculation:
     // refuse rather than teleport the stand-in to local coordinates.
     std::uint32_t attached = 0, standin_kind = 0, transform = 0;

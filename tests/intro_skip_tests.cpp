@@ -51,7 +51,8 @@ int main() {
     assert(learn.update("learn_10", true, true));
     assert(!learn.update("learn_10", true, true));
     assert(!learn.update("learn_10", true, false));
-    assert(!learn.update("learn_10", true, true));
+    assert(learn.update("learn_10", true, true)); // retry after failed attempt
+    assert(!learn.update("learn_10", true, true)); // holding won't repeat
     assert(!learn.update("learn_10", false, false));
     assert(!learn.update("learn_10", true, false));
     assert(!learn.update("learn_10", true, false));
@@ -176,6 +177,16 @@ int main() {
     assert(candidate.valid());
     assert(candidate.standin_transform==transform);
     assert(candidate.destination[0]==30.0f);
+    r2fix::IntroDirectorScanStats stats{};
+    const auto withStats=r2fix::recognize_intro_director(
+        scene,ray,
+        [&](std::uintptr_t p,std::uint32_t& v){return demo.read32(p,v);},
+        [&](std::uintptr_t p,std::uint8_t& v){return demo.read8(p,v);},
+        &stats);
+    assert(withStats.valid());
+    assert(stats.actor_objects==1 && stats.armed_directors==1);
+    assert(stats.models_with_variables==1 && stats.verified_self==1);
+    assert(stats.verified_rayman==1 && stats.verified_standin==1);
     demo.a[buffer+24]=scene;
     assert(!detect().valid());       // never skip scene with incorrect Rayman
     demo.a[buffer+24]=ray;
