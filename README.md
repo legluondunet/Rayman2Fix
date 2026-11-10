@@ -100,6 +100,32 @@ nor any other script variable is used to bypass the cutscene. **It does not exec
 modify a script.** We will use the data to identify which native
 cleanup operations a safe future skip must preserve.
 
+
+**Native ending structure (observed on Wine, 10 November 2026):**
+the complete gate history contained 30 events (none dropped). Director
+variable 83 advanced 0→1→2→3→4→5→6 with variable 14 fixed at 7,
+then the native director changed from behaviour 3 to 1 at ~25.397 s;
+story bit 1091 was observed at ~25.414 s. Six 0→2→0 pulses of the
+32-bit variable 110 were sampled, but no value 1 was observed. A
+shorter pulse between callbacks remains possible.
+
+Cross-referencing the numeric script IDs with the public raytools
+\`ACP_Ray2/src/AI/AI_Const.h\` enumeration identifies native
+\`ChangeMyComport\` (P69), \`ChangeComport\` (P67),
+\`ChangeComportReflex\` (P68), \`ActivateObject\` (P84),
+\`KillPerso\` (P139), and \`ChangeOneCustomBit\` (P174).
+Near nodes 1022–1046, the original script includes actor
+reactivation, behaviour/reflex transitions and clearing of Rayman's
+custom bits 14 and 17. The normal ending therefore involves more than
+a jump to behaviour 1.
+
+The read-only \`native-exit-shape\` diagnostic now checks those exact
+node/opcode landmarks against the live compiled script. It is a
+**version-specific script fingerprint, not proof of safe shortcut
+eligibility**. A mismatch is informative and does not change
+gameplay. The previous early jump remains disabled until the original
+cleanup can be exercised safely and validated visually.
+
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,
 Hor+ 3D and the 4:3 HUD. This rollback does not merge the PR.
