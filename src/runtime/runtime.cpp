@@ -212,8 +212,14 @@ bool request_native_scene_finish(const r2fix::IntroDirector& candidate) {
     using ChangeBehaviour=unsigned char (__cdecl*)(void*,void*);
     auto* fn=reinterpret_cast<ChangeBehaviour>(
         const_cast<void*>(native_function));
-    return fn(reinterpret_cast<void*>(candidate.intelligence),
-              reinterpret_cast<void*>(candidate.ending_behaviour))!=0;
+    // The return byte's meaning isn't documented; confirm actual game
+    // state instead. This also avoids retrying a transition that succeeded
+    // but returned zero.
+    fn(reinterpret_cast<void*>(candidate.intelligence),
+       reinterpret_cast<void*>(candidate.ending_behaviour));
+    std::uint32_t current=0;
+    return read_u32(candidate.intelligence+8,current) &&
+           std::uintptr_t(current)==candidate.ending_behaviour;
 }
 
 void poll_learn_intro_skip() {
