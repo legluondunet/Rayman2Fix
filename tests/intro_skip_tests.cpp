@@ -126,115 +126,66 @@ int main() {
 
 
     {
-    // A read-only candidate search only accepts a scene actor owning
-    // its own custom bit 28, directing Rayman and a distinct stand-in
-    // toward an unattached valid waypoint.
-    struct Demo {
+    struct FakeActorMemory {
         std::unordered_map<std::uintptr_t,std::uint32_t> a;
         std::unordered_map<std::uintptr_t,std::uint8_t> b;
-        bool read32(std::uintptr_t p,std::uint32_t& v) const {
+        bool u32(std::uintptr_t p,std::uint32_t& v) const {
             auto it=a.find(p); if(it==a.end()) return false;
-            v=it->second; return true;
+            v=it->second;return true;
         }
-        bool read8(std::uintptr_t p,std::uint8_t& v) const {
+        bool u8(std::uintptr_t p,std::uint8_t& v) const {
             auto it=b.find(p); if(it==b.end()) return false;
-            v=it->second; return true;
+            v=it->second;return true;
         }
-    } demo;
-    constexpr std::uintptr_t scene=0x70000, ray=0x80000, actor=0x90000,
-       standard=0xA0000, brain=0xB0000, mind=0xC0000, memory=0xD0000,
-       ref=0xE0000, decl=0xF0000, infos=0x100000, buffer=0x110000,
-       waypoint=0x120000, standin=0x130000, transform=0x140000;
-    demo.a[scene]=2; demo.a[scene+4]=actor;
-    demo.a[actor+4]=standard; demo.a[standard+0x24]=1u<<27;
-    demo.a[actor+0x0c]=brain; demo.a[brain]=mind; demo.a[mind+0x0c]=memory;
-    demo.a[memory]=ref; demo.a[ref]=decl;
-    demo.a[decl+4]=infos; demo.b[decl+0x0c]=7;
-    demo.a[memory+8]=buffer;
-    for(unsigned i : {1u,2u,3u,4u}) demo.a[infos+i*16]=i*8;
-    demo.a[infos+1*16+4]=8; demo.a[infos+2*16+4]=9;
-    demo.a[infos+3*16+4]=9; demo.a[infos+4*16+4]=9;
-    demo.a[buffer+8]=waypoint; demo.a[buffer+16]=scene;
-    demo.a[buffer+24]=ray; demo.a[buffer+32]=standin;
-    demo.a[waypoint+0x10]=0; demo.a[standin]=2;
-    demo.a[standin+0x24]=transform;
-    auto fbits=[](float x) {
-        std::uint32_t v; std::memcpy(&v,&x,sizeof(v)); return v;
+    } m;
+    constexpr std::uintptr_t so=0x70000,ray=0x80000,actor=0x90000;
+    constexpr std::uintptr_t standard=0xA0000,brain=0xB0000,mind=0xC0000;
+    constexpr std::uintptr_t mem=0xD0000,ref=0xE0000,decl=0xF0000;
+    constexpr std::uintptr_t infos=0x100000,buffer=0x110000,standin=0x130000;
+    constexpr std::uintptr_t model=0x140000,script=0x150000,behaviours=0x160000;
+    constexpr std::uintptr_t normal=0x170000;
+    m.a[so]=2;m.a[so+4]=actor;
+    m.a[actor+4]=standard;m.a[standard+0x24]=1u<<27;
+    m.a[actor+0x0c]=brain;m.a[brain]=mind;
+    m.a[mind+0x0c]=mem;m.a[mem]=ref;m.a[ref]=decl;
+    m.a[decl+4]=infos;m.b[decl+0x0c]=7;m.a[mem+8]=buffer;
+    for(unsigned i:{1u,2u,3u,4u})m.a[infos+i*16]=i*8;
+    m.a[infos+1*16+4]=8;
+    for(unsigned i:{2u,3u,4u})m.a[infos+i*16+4]=9;
+    m.a[buffer+8]=0; // The ACTUAL intro's destination remains null.
+    m.a[buffer+16]=so;m.a[buffer+24]=ray;m.a[buffer+32]=standin;
+    m.a[standin]=2;
+    m.a[mind]=model;m.a[model]=script;
+    m.a[script]=behaviours;m.a[script+4]=7;
+    m.a[mind+4]=normal;m.a[normal+8]=behaviours+5*12;
+    m.a[behaviours+12]=0x180000;
+    m.a[behaviours+16]=0x190000;
+    auto detect=[&](r2fix::IntroDirectorScanStats* stats=nullptr){
+        return r2fix::recognize_intro_director(so,ray,
+            [&](std::uintptr_t p,std::uint32_t& v){return m.u32(p,v);},
+            [&](std::uintptr_t p,std::uint8_t& v){return m.u8(p,v);},stats);
     };
-    demo.a[waypoint]=fbits(30.0f);
-    demo.a[waypoint+4]=fbits(295.0f);
-    demo.a[waypoint+8]=fbits(-7.0f);
-    demo.a[transform+4]=fbits(55.0f);
-    demo.a[transform+8]=fbits(260.0f);
-    demo.a[transform+12]=fbits(-7.0f);
-    auto detect=[&] {
-        return r2fix::recognize_intro_director(
-            scene,ray,
-            [&](std::uintptr_t p,std::uint32_t& v){return demo.read32(p,v);},
-            [&](std::uintptr_t p,std::uint8_t& v){return demo.read8(p,v);});
-    };
-    const auto candidate=detect();
-    assert(candidate.valid());
-    assert(candidate.standin_transform==transform);
-    assert(candidate.destination[0]==30.0f);
     r2fix::IntroDirectorScanStats stats{};
-    const auto withStats=r2fix::recognize_intro_director(
-        scene,ray,
-        [&](std::uintptr_t p,std::uint32_t& v){return demo.read32(p,v);},
-        [&](std::uintptr_t p,std::uint8_t& v){return demo.read8(p,v);},
-        &stats);
-    assert(withStats.valid());
-    assert(stats.actor_objects==1 && stats.armed_directors==1);
-    assert(stats.models_with_variables==1 && stats.verified_self==1);
-    assert(stats.verified_rayman==1 && stats.verified_standin==1);
-    assert(stats.waypoint_kind==1 && stats.waypoint_value==1);
-    assert(stats.self_kind==1 && stats.self_value==1);
-    assert(stats.subject_kind==1 && stats.subject_value==1);
-    assert(stats.standin_kind==1 && stats.identified_with_null_waypoint==0);
-    // A null waypoint must not suppress checks of the other director links.
-    demo.a[buffer+8]=0;
-    r2fix::IntroDirectorScanStats pending{};
-    assert(!r2fix::recognize_intro_director(
-        scene,ray,
-        [&](std::uintptr_t p,std::uint32_t& v){return demo.read32(p,v);},
-        [&](std::uintptr_t p,std::uint8_t& v){return demo.read8(p,v);},
-        &pending).valid());
-    assert(pending.waypoint_kind==1 && pending.waypoint_value==0);
-    assert(pending.verified_self==1 && pending.verified_rayman==1);
-    assert(pending.verified_standin==1 && pending.identified_with_null_waypoint==1);
-    demo.a[buffer+8]=waypoint;
-    demo.a[infos+1*16+4]=9;
-    r2fix::IntroDirectorScanStats wrongWaypointType{};
-    assert(!r2fix::recognize_intro_director(
-        scene,ray,
-        [&](std::uintptr_t p,std::uint32_t& v){return demo.read32(p,v);},
-        [&](std::uintptr_t p,std::uint8_t& v){return demo.read8(p,v);},
-        &wrongWaypointType).valid());
-    assert(wrongWaypointType.models_with_variables==1);
-    assert(wrongWaypointType.waypoint_kind==0);
-    demo.a[infos+1*16+4]=8;
-    demo.a[buffer+16]=0;
-    r2fix::IntroDirectorScanStats missingSelf{};
-    assert(!r2fix::recognize_intro_director(
-        scene,ray,
-        [&](std::uintptr_t p,std::uint32_t& v){return demo.read32(p,v);},
-        [&](std::uintptr_t p,std::uint8_t& v){return demo.read8(p,v);},
-        &missingSelf).valid());
-    assert(missingSelf.waypoint_value==1);
-    assert(missingSelf.self_kind==1 && missingSelf.self_value==0);
-    demo.a[buffer+16]=scene;
-    demo.a[buffer+24]=scene;
-    assert(!detect().valid());       // never skip scene with incorrect Rayman
-    demo.a[buffer+24]=ray;
-    demo.a[infos+4*16+4]=5;
-    assert(!detect().valid());       // wrong variable kind
-    demo.a[infos+4*16+4]=9;
-    demo.a[waypoint+0x10]=scene;
-    assert(!detect().valid());       // attached waypoint cannot be teleported to
-    demo.a[waypoint+0x10]=0;
-    demo.a[standard+0x24]=0;
-    assert(!detect().valid());       // director isn't armed
-    demo.a[standard+0x24]=1u<<27;
+    auto found=detect(&stats);
+    assert(found.valid());
+    assert(found.superobject==so && found.intelligence==normal);
+    assert(found.ending_behaviour==behaviours+12);
+    assert(stats.identified_directors==1 && stats.null_waypoints==1);
+    assert(stats.valid_behaviour_tables==1 && stats.in_intro_behaviour==1);
+    m.a[normal+8]=behaviours+2*12;
+    r2fix::IntroDirectorScanStats other{};
+    assert(!detect(&other).valid());
+    assert(other.other_behaviours==1);
+    m.a[normal+8]=behaviours+5*12;
+    m.a[script+4]=3;
+    assert(!detect().valid()); // Need >=6 possible behaviours
+    m.a[script+4]=7;
+    m.a[buffer+24]=so;
+    assert(!detect().valid()); // Wrong Rayman pointer
+    m.a[buffer+24]=ray;
+    m.a[standard+0x24]=0;
+    assert(!detect().valid()); // Controller isn't armed
+    m.a[standard+0x24]=1u<<27;
     assert(detect().valid());
     }
 

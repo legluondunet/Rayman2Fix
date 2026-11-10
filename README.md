@@ -23,33 +23,34 @@ The game uses its own deferred level-change request, with no save operation;
 full in-game transition still needs validation under Windows and Wine.
 `RUNTIME-INTRO:` lines in the one-file log identify activation and requests.
 
-## Learn_10 opening cinematic (experimental scene-director skip)
+## Learn_10 opening cinematic (experimental native behaviour handover)
 
-\`Learn_10\` is a playable level: \`NOMOVIES\` does not skip its in-engine
-intro. The old 2.5-second story-bit toggle was removed after an actual
-Wine test proved that it timed out while the scene continued normally.
+\`Learn_10\` is the first playable level. The original \`NOMOVIES\` toggle
+does not skip its scripted introduction (verified under Wine). A previous
+stand-in-position attempt could not function either: the actual
+intro director's waypoint variable remains NULL throughout the scene.
+**Never move Rayman or its stand-in to invented coordinates.**
 
-On a fresh **Enter** press during the opening scene, the experimental
-implementation now scans the live scene's actors, accepting exactly one
-director that owns its bit 28, refers to Rayman in var3 and a separate
-stand-in in var4, and gives the stand-in a valid unattached waypoint in
-var1. Only then does it move the temporary stand-in to that waypoint so
-the ORIGINAL Rayman 2 scene script can perform its own handover. It never
-teleports Rayman, changes the saved story bits, removes an actor, or
-restarts the level. If identification is uncertain, it does nothing. A null destination no
-longer prevents the scanner from checking the controller's own identity,
-Rayman and its stand-in: diagnostic-only checks remain independent, while
-any write still requires a valid non-null waypoint. Logs also include
-elapsed time since the intro was entered. A rejected attempt
-does **not** consume the Enter shortcut for the rest of the visit: release
-Enter and press it again while the scripted intro is still active.
-The outcome is still **unverified under Wine/Windows**. The one-file log
-reports the exact validation stage (actor, armed, variables, waypoint
-kind/pointer, self kind/pointer/match, Rayman and stand-in), without
-revealing memory addresses; it also records any accepted action and
-actual story-bit 1091 handover. An observed handover after a rejected
-attempt is the normal cinematic completing, **not** proof of a skip.
-Use a test save for this experimental scene manipulation.
+On a fresh Enter press while story bit 1091 is clear, the runtime
+recognizes the director through its armed flag 28 and independent
+references (var2=self, var3=Rayman, var4=stand-in). If and only if
+**one** matching director is currently running original normal behaviour
+**5**, it invokes the original x86 engine's
+\`AI_fn_ucChangeComportIntell\` (VA \`0x481080\`) to select that
+model's behaviour **1**, the original ending script.
+The model, normal intelligence and behaviour pointers are resolved
+from the live game structures rather than per-level addresses.
+The scene itself remains responsible for clearing its flags and
+restoring control. No direct edits to story bits, coordinates, the
+camera or save files. If any structural check is missing or ambiguous,
+nothing is changed. Presses can be retried after release.
+
+This is a **new unverified experiment**. Under Wine/Windows, use a
+test save and confirm that the normal gameplay, camera, HUD and
+Rayman's controls work immediately after the transition. The
+\`RUNTIME-INTRO:\` log differentiates an accepted native behaviour
+request from the later story bit 1091 handover. A successful build or
+a naturally ending cinematic is NOT proof that skipping worked.
 
 ## Experimental loading-image colour diagnostics
 

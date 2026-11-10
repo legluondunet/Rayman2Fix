@@ -1,147 +1,117 @@
 #pragma once
 #include <cstdint>
-#include <cstring>
-#include <cmath>
 
 namespace r2fix {
 
-// Rayman 2's live actor tables on the SHA256-validated original executable.
-// The scene director in Learn_10 has actor variables:
-//   var1 = destination waypoint, var2 = self, var3 = Rayman, var4 = stand-in.
-// Type 9 variables contain SUPER-OBJECT pointers, not actor pointers.
-// All reads must be guarded by the passed in validated memory reader.
+// The original Rayman 2 engine's Learn_10 first-visit director is an
+// actor with custom bit 28, var2 naming itself, var3 naming Rayman and
+// var4 naming a distinct stand-in. var1 (waypoint) may be NULL throughout
+// the intro; it is deliberately NOT a precondition for the native
+// behaviour transition.
+//
+// AI_tdstMind +4 = normal intelligence
+// AI_tdstMind +0 = model
+// AI_tdstAIModel +0 = normal script (AI_tdstScriptAI)
+// AI_tdstScriptAI +0 = behaviour array; +4 = behaviour count
+// AI_tdstIntelligence +8 = current behaviour
+// AI_tdstComport = 12 bytes on x86.
+// See original symbols in raytools/ACP_Ray2, AI/AI.h and AI/AI_Scr.h.
+//
+// Behaviour 5 performs the cutscene. Behaviour 1 is the original
+// controller's end script (clear bit 28, retire director). Switching to it
+// through AI_fn_ucChangeComportIntell keeps the game's own script cleanup.
 struct IntroDirectorScanStats {
     unsigned actor_objects = 0;
     unsigned armed_directors = 0;
     unsigned models_with_variables = 0;
-    unsigned waypoint_kind = 0;
-    unsigned waypoint_value = 0;
-    unsigned self_kind = 0;
-    unsigned self_value = 0;
-    unsigned verified_self = 0;
-    unsigned subject_kind = 0;
-    unsigned subject_value = 0;
-    unsigned verified_rayman = 0;
-    unsigned standin_kind = 0;
-    unsigned verified_standin = 0;
-    unsigned identified_with_null_waypoint = 0;
+    unsigned identified_directors = 0;
+    unsigned null_waypoints = 0;
+    unsigned valid_behaviour_tables = 0;
+    unsigned in_intro_behaviour = 0;
+    unsigned other_behaviours = 0;
 };
 
 struct IntroDirector {
-    std::uintptr_t actor_superobject = 0;
-    std::uintptr_t standin_superobject = 0;
-    std::uintptr_t standin_transform = 0;
-    float destination[3] = {};
-    bool valid() const { return standin_transform != 0; }
+    std::uintptr_t superobject = 0;
+    std::uintptr_t intelligence = 0;
+    std::uintptr_t ending_behaviour = 0;
+    bool valid() const {
+        return superobject != 0 && intelligence != 0 && ending_behaviour != 0;
+    }
 };
 
 template <typename Read32, typename Read8>
 IntroDirector recognize_intro_director(std::uintptr_t so,
                                        std::uintptr_t rayman_so,
-                                       Read32 rd32, Read8 rd8,
+                                       Read32 read32, Read8 read8,
                                        IntroDirectorScanStats* stats = nullptr) {
-    IntroDirector answer{};
-    if (!so || !rayman_so || so == rayman_so) return answer;
-    std::uint32_t kind = 0, actor = 0, standard = 0, flags = 0;
-    std::uint32_t brain = 0, mind = 0, memory = 0, decl_ref = 0;
-    std::uint32_t decl = 0, infos = 0, buffer = 0;
-    std::uint8_t vars = 0;
-    if (!rd32(so, kind) || kind != 2) return answer;
+    IntroDirector result{};
+    if (!so || !rayman_so || so == rayman_so) return result;
+    std::uint32_t type=0, actor=0, standard=0, flags=0;
+    std::uint32_t brain=0, mind=0, memory=0, declaration_ref=0;
+    std::uint32_t declaration=0, infos=0, buffer=0;
+    std::uint8_t variables=0;
+    if (!read32(so,type) || type!=2) return result;
     if (stats) ++stats->actor_objects;
-    if (!rd32(so + 4, actor) || !actor ||
-        !rd32(std::uintptr_t(actor) + 4, standard) || !standard ||
-        !rd32(std::uintptr_t(standard) + 0x24, flags) ||
-        (flags & (1u << 27)) == 0) return answer;
+    if (!read32(so+4,actor) || !actor ||
+        !read32(std::uintptr_t(actor)+4,standard) || !standard ||
+        !read32(std::uintptr_t(standard)+0x24,flags) ||
+        !(flags & (1u<<27))) return result;
     if (stats) ++stats->armed_directors;
-    if (!rd32(std::uintptr_t(actor) + 0x0c, brain) || !brain ||
-        !rd32(brain, mind) || !mind ||
-        !rd32(std::uintptr_t(mind) + 0x0c, memory) || !memory ||
-        !rd32(memory, decl_ref) || !decl_ref ||
-        !rd32(decl_ref, decl) || !decl ||
-        !rd32(std::uintptr_t(decl) + 4, infos) || !infos ||
-        !rd8(std::uintptr_t(decl) + 0x0c, vars) || vars < 5 ||
-        !rd32(std::uintptr_t(memory) + 8, buffer) || !buffer)
-        return answer;
+    if (!read32(std::uintptr_t(actor)+0x0c,brain) || !brain ||
+        !read32(brain,mind) || !mind ||
+        !read32(std::uintptr_t(mind)+0x0c,memory) || !memory ||
+        !read32(memory,declaration_ref) || !declaration_ref ||
+        !read32(declaration_ref,declaration) || !declaration ||
+        !read32(std::uintptr_t(declaration)+4,infos) || !infos ||
+        !read8(std::uintptr_t(declaration)+0x0c,variables) || variables < 5 ||
+        !read32(std::uintptr_t(memory)+8,buffer) || !buffer) return result;
     if (stats) ++stats->models_with_variables;
 
-    auto variable = [&](unsigned i, std::uint32_t type, std::uint32_t& value) {
-        std::uint32_t offset = 0, kind = 0;
-        if (!rd32(std::uintptr_t(infos) + i * 16, offset) ||
-            !rd32(std::uintptr_t(infos) + i * 16 + 4, kind) ||
-            kind != type || offset > 65536)
-            return false;
-        return rd32(std::uintptr_t(buffer) + offset, value);
+    auto variable = [&](unsigned index, unsigned kind, std::uint32_t& value) {
+        std::uint32_t offset=0, type=0;
+        return read32(std::uintptr_t(infos)+index*16,offset) &&
+               read32(std::uintptr_t(infos)+index*16+4,type) &&
+               type==kind && offset<=65536 &&
+               read32(std::uintptr_t(buffer)+offset,value);
     };
-    // Diagnose independent designer variables even when the destination
-    // waypoint is temporarily null. All final write preconditions remain
-    // unchanged: a valid destination is REQUIRED.
-    std::uint32_t waypoint = 0, self = 0, subject = 0, standin = 0;
-    const bool waypoint_typed = variable(1, 8, waypoint);
-    const bool self_typed = variable(2, 9, self);
-    const bool subject_typed = variable(3, 9, subject);
-    const bool standin_typed = variable(4, 9, standin);
+    std::uint32_t waypoint=0,self=0,subject=0,standin=0;
+    if (!variable(1,8,waypoint) || !variable(2,9,self) ||
+        !variable(3,9,subject) || !variable(4,9,standin) ||
+        self!=so || subject!=rayman_so || !standin ||
+        standin==rayman_so || standin==so) return result;
+    std::uint32_t standin_type=0;
+    if (!read32(standin,standin_type) || standin_type!=2) return result;
     if (stats) {
-        if (waypoint_typed) {
-            ++stats->waypoint_kind;
-            if (waypoint) ++stats->waypoint_value;
-        }
-        if (self_typed) {
-            ++stats->self_kind;
-            if (self) ++stats->self_value;
-            if (self == so) ++stats->verified_self;
-        }
-        if (subject_typed) {
-            ++stats->subject_kind;
-            if (subject) ++stats->subject_value;
-            if (subject == rayman_so) ++stats->verified_rayman;
-        }
-        if (standin_typed) {
-            ++stats->standin_kind;
-            if (standin && standin != rayman_so) ++stats->verified_standin;
-        }
-        if (waypoint_typed && !waypoint &&
-            self_typed && self == so &&
-            subject_typed && subject == rayman_so &&
-            standin_typed && standin && standin != rayman_so)
-            ++stats->identified_with_null_waypoint;
+        ++stats->identified_directors;
+        if (!waypoint) ++stats->null_waypoints;
     }
-    if (!waypoint_typed || !waypoint ||
-        !self_typed || self != so ||
-        !subject_typed || subject != rayman_so ||
-        !standin_typed || !standin || standin == rayman_so)
-        return answer;
-    // A dynamic/attached waypoint needs a world-transform calculation:
-    // refuse rather than teleport the stand-in to local coordinates.
-    std::uint32_t attached = 0, standin_kind = 0, transform = 0;
-    if (!rd32(std::uintptr_t(waypoint) + 0x10, attached) || attached ||
-        !rd32(standin, standin_kind) || standin_kind != 2 ||
-        !rd32(std::uintptr_t(standin) + 0x24, transform) || !transform)
-        return answer;
 
-    float dest[3], origin[3];
-    for (unsigned i = 0; i < 3; ++i) {
-        std::uint32_t x = 0, y = 0;
-        if (!rd32(std::uintptr_t(waypoint) + i * 4, x) ||
-            !rd32(std::uintptr_t(transform) + 4 + i * 4, y))
-            return answer;
-        std::memcpy(&dest[i], &x, sizeof(float));
-        std::memcpy(&origin[i], &y, sizeof(float));
-        if (!std::isfinite(dest[i]) || !std::isfinite(origin[i]) ||
-            std::fabs(dest[i]) > 100000 || std::fabs(origin[i]) > 100000)
-            return answer;
+    // Use *actual live engine model* instead of invented addresses or
+    // per-level offsets. Require one of its six+ native behaviours to be
+    // running and exactly the documented intro behaviour (index 5).
+    std::uint32_t model=0, script=0, behaviours=0, count=0;
+    std::uint32_t intelligence=0,current=0,rule=0,schedule=0;
+    if (!read32(mind,model) || !model ||
+        !read32(model,script) || !script ||
+        !read32(script,behaviours) || !behaviours ||
+        !read32(std::uintptr_t(script)+4,count) || count<6 || count>64 ||
+        !read32(std::uintptr_t(mind)+4,intelligence) || !intelligence ||
+        !read32(std::uintptr_t(intelligence)+8,current) || !current ||
+        !read32(std::uintptr_t(behaviours)+12,rule) ||
+        !read32(std::uintptr_t(behaviours)+16,schedule) ||
+        (!rule && !schedule)) return result;
+    if (stats) ++stats->valid_behaviour_tables;
+
+    const std::uintptr_t intro=std::uintptr_t(behaviours)+5*12;
+    if (current!=intro) {
+        if (stats) ++stats->other_behaviours;
+        return result;
     }
-    const double dx = double(dest[0]) - origin[0];
-    const double dy = double(dest[1]) - origin[1];
-    const double dz = double(dest[2]) - origin[2];
-    const double distance = dx * dx + dy * dy + dz * dz;
-    // Extremely remote coordinates or already-arrived stand-ins are
-    // ambiguous. Do not modify actor state in these cases.
-    if (distance < 0.04 || distance > 1000000.0)
-        return answer;
-    answer.actor_superobject = so;
-    answer.standin_superobject = standin;
-    answer.standin_transform = transform;
-    for (unsigned i = 0; i < 3; ++i) answer.destination[i] = dest[i];
-    return answer;
+    if (stats) ++stats->in_intro_behaviour;
+    result.superobject=so;
+    result.intelligence=intelligence;
+    result.ending_behaviour=std::uintptr_t(behaviours)+12;
+    return result;
 }
 } // namespace r2fix
