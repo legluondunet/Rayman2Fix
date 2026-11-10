@@ -259,6 +259,19 @@ depth **11** (nodes 237 and 241). The updated read-only matcher now
 uses the observed depths, with regression tests, and separately
 fingerprints the NOMOVIES alternate Else arm.
 
+**New native input clue:** the original AI enum identifies condition
+45 as `JustPressedBut` and condition 48 as `IsTimeElapsed`.
+Both branches of the NOMOVIES-controlled director rule 1 contain
+`JustPressedBut`: at node 8 (cheat bit false) and node 106 (cheat
+bit true, with a 1000-time-unit guard using `IsTimeElapsed`).
+The old probe omitted the operands to these conditions because their
+node type, `AI_E_ti_Button` (14), was not selected. The new
+read-only diagnostic includes such nodes in sanitized script excerpts.
+Only small IDs 0–255 are printed; pointer-like values are hidden.
+This will reveal which original engine input each branch uses and
+allow comparison to PC Enter without guessing a Windows virtual-key
+mapping. It does NOT synthesize a key or toggle the cheat bit.
+
 **Unresolved:** switching the bit after Learn_10 has initialized
 may be too late to alter native cutscene flow; setting it earlier
 could affect a progress array that is later serialized in save data.

@@ -355,6 +355,7 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
             case 9:prefix="H";break; // actor field
             case 11:prefix="V";break; // designer variable
             case 12:prefix="I";break; // integer literal
+            case 14:prefix="button";has_number=(e.param<=255u);break;
             case 17:prefix="M";break; // mask
             case 23:prefix="actor";has_number=false;break;
             case 39:prefix="macro";has_number=false;break;
@@ -442,6 +443,7 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
                 case 9:opcode="H";break;
                 case 11:opcode="V";break;
                 case 12:opcode="I";break;
+                case 14:opcode="button";show_number=(e.param<=255u);break;
                 case 17:opcode="M";break;
                 case 23:opcode="actor";show_number=false;break;
                 case 39:opcode="macro";show_number=false;break;
@@ -552,7 +554,7 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
 }
 void log_compiled_director_model(std::uintptr_t behaviours) {
     if (!g_log || !behaviours) return;
-    log_line("RUNTIME-INTRO: compiled-script legend K=keyword C=condition O=operator F=function P=procedure A=meta H=field V=var I=int M=mask B=local-behaviour (pointer types redacted)");
+    log_line("RUNTIME-INTRO: compiled-script legend K=keyword C=condition O=operator F=function P=procedure A=meta H=field V=var I=int M=mask B=local-behaviour button=engine-input-id (values >255 and pointer types redacted)");
     // A capped once-per-intro full middle-branch dump adds up to roughly
     // 50 lines. Preserve the other director behaviours in the same log.
     unsigned budget=160;

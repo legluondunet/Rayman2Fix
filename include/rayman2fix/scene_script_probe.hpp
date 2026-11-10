@@ -43,11 +43,14 @@ struct SceneScriptProbe {
 inline bool interesting_scene_opcode(std::uint8_t t) {
     switch(t) {
         case 0: case 1: case 2: case 3: case 4: case 5:
-        case 9: case 11: case 12: case 17: case 23: case 28:
+        case 9: case 11: case 12: case 14: case 17: case 23: case 28:
         case 39: return true;
         default: return false;
     }
 }
+// AI_E_ti_Button (type 14) is retained so the real JustPressedBut
+// operand can be inspected. Its value is only printable if <=255;
+// larger values are redacted. No node parameter is dereferenced.
 // This intentionally never follows pointer-typed node parameters.
 // It reads only the script's own bounds-checked node array.
 template<class Read32, class Read8>

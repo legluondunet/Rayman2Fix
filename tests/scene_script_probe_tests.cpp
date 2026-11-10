@@ -56,6 +56,36 @@ int main(){
     m.words[nodes+2*8]=139;
     m.words[slot]=0; p=scan();
     assert(!p.complete && p.visited==0);
+    // Native JustPressedBut(C45) operands are type 14 (Button).
+    // They must be present in the sanitized event stream without
+    // dereferencing them or interpreting large pointer-like values.
+    {
+        Mock button{};
+        button.words[slot]=nodes;
+        const auto set_button=[&](unsigned i,unsigned type,
+                                  unsigned depth,unsigned value) {
+            button.words[nodes+std::uintptr_t(i)*8]=value;
+            button.bytes[nodes+std::uintptr_t(i)*8+6]=
+                std::uint8_t(depth);
+            button.bytes[nodes+std::uintptr_t(i)*8+7]=
+                std::uint8_t(type);
+        };
+        set_button(0,0,1,0); // If
+        set_button(1,1,2,45); // JustPressedBut
+        set_button(2,14,3,42); // engine-defined button ID
+        set_button(3,8,0,0); // end
+        const auto result=r2fix::observe_scene_script(slot,
+            [&](std::uintptr_t a,std::uint32_t& v){return button.read32(a,v);},
+            [&](std::uintptr_t a,std::uint8_t& v){return button.read8(a,v);});
+        assert(result.complete && !result.malformed);
+        assert(result.selected==3);
+        assert(result.events[2].type==14 && result.events[2].param==42u);
+        set_button(2,14,3,0xFEEDC0DE); // never follows pointer-like data
+        const auto opaque=r2fix::observe_scene_script(slot,
+            [&](std::uintptr_t a,std::uint32_t& v){return button.read32(a,v);},
+            [&](std::uintptr_t a,std::uint8_t& v){return button.read8(a,v);});
+        assert(opaque.complete && opaque.events[2].param==0xFEEDC0DE);
+    }
     // The large Learn_10 behaviour-3 rule 2 exceeded the old 1024-node
     // cap. Confirm that the targeted deeper probe is bounded and keeps
     // the LAST events and procedures in their original script order.
