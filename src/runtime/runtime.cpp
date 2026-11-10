@@ -93,6 +93,9 @@ ObservedDirectorByte g_director_var50{};
 ObservedDirectorByte g_director_var110{};
 ObservedDirectorByte g_director_var83{};
 ObservedDirectorByte g_director_var14{};
+ObservedDirectorByte g_director_var16{};
+ObservedDirectorByte g_director_var95{};
+ObservedDirectorByte g_director_var96{};
 r2fix::IntroGateTimeline<48> g_director_gate_history{};
 bool g_director_gate_history_reported = false;
 std::uintptr_t g_progress_words = 0;
@@ -488,10 +491,13 @@ bool read_director_integer_low_byte(std::uintptr_t so,unsigned index,
         !read_u32(std::uintptr_t(memory)+8,buffer) || !buffer ||
         !read_u32(std::uintptr_t(infos)+index*16u,offset) ||
         !read_u32(std::uintptr_t(infos)+index*16u+4,type) ||
-        type>6 || offset>65536 ||
-        !read_u8(std::uintptr_t(buffer)+offset,value))
+        offset>65536)
         return false;
+    // Publish the declared kind even when the contents are non-integer.
+    // Never read a pointer/array/float value as an integer.
     kind=unsigned(type);
+    if (type>6 || !read_u8(std::uintptr_t(buffer)+offset,value))
+        return false;
     low=unsigned(value);
     if (location) *location=std::uintptr_t(buffer)+offset;
     return true;
@@ -500,15 +506,18 @@ bool read_director_integer_low_byte(std::uintptr_t so,unsigned index,
 // types (arrays, pointers, objects and float data) are deliberately skipped;
 // this does not inspect or follow variable contents.
 bool read_director_phase_integer(std::uintptr_t so,unsigned index,
-                                 unsigned& kind,std::int32_t& value) {
+                                 unsigned& kind,std::int32_t& value,
+                                 std::uintptr_t* location=nullptr) {
     unsigned low=0;
     std::uintptr_t address=0;
     if (!read_director_integer_low_byte(so,index,kind,low,&address))
         return false;
-    return r2fix::read_intro_integer(address,kind,
+    const bool ok=r2fix::read_intro_integer(address,kind,
         [](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);},
         [](std::uintptr_t p,std::uint32_t& v){return read_u32(p,v);},
         value);
+    if (ok && location) *location=address;
+    return ok;
 }
 
 bool log_natural_intro_snapshot(const char* stage, DWORD t) {
@@ -580,14 +589,23 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     // natural checkpoints / state changes. No extra polling or writes.
     unsigned k16=0,k17=0,k95=0,k96=0;
     std::int32_t n16=0,n17=0,n95=0,n96=0;
+    std::uintptr_t address16=0,address95=0,address96=0;
     const bool phase16=director.superobject &&
-        read_director_phase_integer(director.superobject,16,k16,n16);
+        read_director_phase_integer(director.superobject,16,k16,n16,&address16);
     const bool phase17=director.superobject &&
         read_director_phase_integer(director.superobject,17,k17,n17);
     const bool phase95=director.superobject &&
-        read_director_phase_integer(director.superobject,95,k95,n95);
+        read_director_phase_integer(director.superobject,95,k95,n95,&address95);
     const bool phase96=director.superobject &&
-        read_director_phase_integer(director.superobject,96,k96,n96);
+        read_director_phase_integer(director.superobject,96,k96,n96,&address96);
+    // Cache only verified integer locations; sample them again solely at
+    // the native gate changes. Never dereference variable values as pointers.
+    if (phase16 && address16 && g_director_var16.location!=address16)
+        g_director_var16={address16,k16,std::uint32_t(n16)};
+    if (phase95 && address95 && g_director_var95.location!=address95)
+        g_director_var95={address95,k95,std::uint32_t(n95)};
+    if (phase96 && address96 && g_director_var96.location!=address96)
+        g_director_var96={address96,k96,std::uint32_t(n96)};
     std::snprintf(msg,sizeof(msg),
         "RUNTIME-INTRO: director-phase=%s t=%ums v16_valid=%u v16_type=%u v16=%d v17_valid=%u v17_type=%u v17=%d v95_valid=%u v95_type=%u v95=%d v96_valid=%u v96_type=%u v96=%d (read-only)",
         stage,unsigned(t),unsigned(phase16),k16,int(n16),
@@ -708,20 +726,36 @@ void trace_natural_intro_changes(DWORD elapsed) {
 // natural exit without modifying any script-owned value.
 void trace_native_exit_gates(DWORD elapsed) {
     if (!g_log) return;
+    const auto read_cached=[](const ObservedDirectorByte& v,
+                              std::int32_t& out) {
+        return v.location && r2fix::read_intro_integer(v.location,v.type,
+            [](std::uintptr_t p,std::uint8_t& b){return read_u8(p,b);},
+            [](std::uintptr_t p,std::uint32_t& w){return read_u32(p,w);},
+            out);
+    };
+    // Read v16/95/96 only on a native change, once per callback. Reuse
+    // the existing 48-entry event ring; no additional per-frame tracing.
+    bool sampled=false;
+    r2fix::IntroPhaseSample phase{};
+    const auto capture_phase=[&]() -> const r2fix::IntroPhaseSample& {
+        if (!sampled) {
+            if (read_cached(g_director_var16,phase.v16)) phase.valid|=1;
+            if (read_cached(g_director_var95,phase.v95)) phase.valid|=2;
+            if (read_cached(g_director_var96,phase.v96)) phase.valid|=4;
+            sampled=true;
+        }
+        return phase;
+    };
     const auto sample=[&](unsigned index,ObservedDirectorByte& v) {
         if (!v.location || (index==50 && v.type!=0) ||
             (index==110 && v.type!=5)) return;
         std::int32_t signed_value=0;
-        if (!r2fix::read_intro_integer(v.location,v.type,
-            [](std::uintptr_t p,std::uint8_t& b){return read_u8(p,b);},
-            [](std::uintptr_t p,std::uint32_t& w){return read_u32(p,w);},
-            signed_value))
-            return;
+        if (!read_cached(v,signed_value)) return;
         const std::uint32_t value=static_cast<std::uint32_t>(signed_value);
         if (value==v.previous) return;
         g_director_gate_history.record(
             elapsed,std::uint8_t(index),
-            std::uint32_t(v.previous),value);
+            std::uint32_t(v.previous),value,capture_phase());
         v.previous=value;
     };
     sample(50,g_director_var50);
@@ -737,7 +771,7 @@ void log_native_gate_history(DWORD elapsed) {
     if (!g_log || g_director_gate_history_reported) return;
     g_director_gate_history_reported=true;
     const auto& trace=g_director_gate_history;
-    char message[240]{};
+    char message[320]{};
     std::snprintf(message,sizeof(message),
         "RUNTIME-INTRO: director-gate-history t=%ums total=%u retained=%u dropped=%u var110_eq1=%u var83_last=%d var14_last=%d (read-only, last changes)",
         unsigned(elapsed),unsigned(trace.total),
@@ -749,9 +783,11 @@ void log_native_gate_history(DWORD elapsed) {
     for(std::size_t i=0;i<trace.retained();++i) {
         const auto& e=trace.chronological(i);
         std::snprintf(message,sizeof(message),
-            "RUNTIME-INTRO: director-gate-event t=%ums var%u old=%u new=%u (observed, not written)",
+            "RUNTIME-INTRO: director-gate-event t=%ums var%u old=%u new=%u phase_valid=0x%02X v16=%d v95=%d v96=%d (observed, not written)",
             unsigned(e.elapsed_ms),unsigned(e.variable),
-            unsigned(e.previous),unsigned(e.current));
+            unsigned(e.previous),unsigned(e.current),
+            unsigned(e.phase.valid),int(e.phase.v16),
+            int(e.phase.v95),int(e.phase.v96));
         log_line(message);
     }
 }
@@ -779,6 +815,9 @@ void poll_learn_intro_skip() {
         g_director_var110={};
         g_director_var83={};
         g_director_var14={};
+        g_director_var16={};
+        g_director_var95={};
+        g_director_var96={};
         g_director_gate_history={};
         g_director_gate_history_reported=false;
         return;

@@ -67,6 +67,10 @@ class Learn10SafeFallback(unittest.TestCase):
         self.assertNotIn("poll_learn10_counter_experiment(",runtime)
         self.assertIn("read_director_phase_integer(",runtime)
         self.assertIn("director-phase=",runtime)
+        self.assertIn("phase_valid=0x%02X",runtime)
+        self.assertIn("capture_phase()",runtime)
+        self.assertIn("g_director_var95={}",runtime)
+        self.assertIn("kind=unsigned(type)",runtime)
         self.assertIn("read_director_phase_integer(director.superobject,96",runtime)
 
     def test_retains_jail_20_skip_only(self):

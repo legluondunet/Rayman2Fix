@@ -153,6 +153,19 @@ integer and readable). Arrays, floats, pointers and actor references
 are not decoded or logged. This is diagnostic only. It may identify
 the missing phase gate, but no causal interpretation is assumed.
 
+**Native pulse/phase correlation (10 November 2026):**
+The newest unmodified Wine 11.17 run again completes Learn_10 naturally
+at 25.406 s and preserves all 30 gate transitions. During behaviour 3,
+var16 was 1; var95 moved through 10, 2000, 4100, 1000, 1500 and
+500 while var83 advanced at separate moments. Var96 remained zero at
+coarse checkpoints, but a short intermediate value may have escaped
+observation. The next diagnostic build records scalar var16/95/96 values
+in the EXISTING native var50/110/83 gate-event ring only at the
+events themselves; phase_valid marks successful readings (1=var16,
+2=var95, 4=var96). These observations are read-only and do not
+enable any shortcut. For var17, only the declared type is now exposed
+when the value is not a scalar integer; its content remains untouched.
+
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,
 Hor+ 3D and the 4:3 HUD. This rollback does not merge the PR.
