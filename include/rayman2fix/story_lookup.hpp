@@ -8,6 +8,10 @@ namespace r2fix {
 // Those entries are not super objects: the actor's brain is at +0x0C,
 // not at actor->superobject->actor+0x0C.
 //
+// Designer variable memory+0 points to a pointer to its declaration:
+// memory -> declaration pointer -> declaration. The extra indirection is
+// required by this game's AI variable layout (see r2live story_array).
+//
 // The story progress array is designer variable 42 (type 21). Its
 // header has a byte word-count at +4 and u32 bitfield words at +8.
 // All game-memory reads come from the provided checked functions.
@@ -21,13 +25,14 @@ std::uintptr_t locate_story_words(std::uintptr_t fix_list,
     if (actors > 32) actors = 32;
     for (std::uint32_t i = 0; i < actors; ++i) {
         std::uint32_t actor = 0, brain = 0, mind = 0, memory = 0;
-        std::uint32_t decl = 0, infos = 0, buffer = 0, offset = 0, kind = 0;
+        std::uint32_t decl_ref = 0, decl = 0, infos = 0, buffer = 0, offset = 0, kind = 0;
         std::uint8_t variables = 0, words = 0;
         if (!read32(fix_list + 4u + 4u * i, actor) || !actor ||
             !read32(std::uintptr_t(actor) + 0x0Cu, brain) || !brain ||
             !read32(brain, mind) || !mind ||
             !read32(std::uintptr_t(mind) + 0x0Cu, memory) || !memory ||
-            !read32(memory, decl) || !decl ||
+            !read32(memory, decl_ref) || !decl_ref ||
+            !read32(decl_ref, decl) || !decl ||
             !read32(std::uintptr_t(decl) + 4u, infos) || !infos ||
             !read8(std::uintptr_t(decl) + 0x0Cu, variables) || variables <= 42 ||
             !read32(std::uintptr_t(memory) + 8u, buffer) || !buffer ||

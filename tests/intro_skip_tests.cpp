@@ -81,6 +81,7 @@ int main() {
     constexpr std::uintptr_t brain = 0x130000;
     constexpr std::uintptr_t mind = 0x140000;
     constexpr std::uintptr_t dsg = 0x150000;
+    constexpr std::uintptr_t decl_ref = 0x158000;
     constexpr std::uintptr_t decl = 0x160000;
     constexpr std::uintptr_t infos = 0x170000;
     constexpr std::uintptr_t buffer = 0x180000;
@@ -92,7 +93,8 @@ int main() {
     mem.u32[actor + 0x0C] = brain;       // actor's brain, NOT actor->superobject
     mem.u32[brain] = mind;
     mem.u32[mind + 0x0C] = dsg;
-    mem.u32[dsg] = decl;
+    mem.u32[dsg] = decl_ref;
+    mem.u32[decl_ref] = decl;
     mem.u32[decl + 4] = infos;
     mem.u8[decl + 0x0C] = 43;
     mem.u32[dsg + 8] = buffer;
@@ -108,6 +110,9 @@ int main() {
             [&](std::uintptr_t p, std::uint8_t& v) { return mem.rd8(p, v); });
     };
     assert(lookup() == values);
+    mem.u32.erase(decl_ref);
+    assert(lookup() == 0);             // missing second indirection
+    mem.u32[decl_ref] = decl;
     mem.u32[infos + 42 * 16 + 4] = 7;
     assert(lookup() == 0);              // wrong variable type
     mem.u32[infos + 42 * 16 + 4] = 21;
