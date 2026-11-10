@@ -14,6 +14,7 @@
 #include "rayman2fix/scene_script_probe.hpp"
 #include "rayman2fix/intro_gate_timeline.hpp"
 #include "rayman2fix/intro_integer_reader.hpp"
+#include "rayman2fix/learn10_counter_experiment.hpp"
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -95,6 +96,11 @@ ObservedDirectorByte g_director_var83{};
 ObservedDirectorByte g_director_var14{};
 r2fix::IntroGateTimeline<48> g_director_gate_history{};
 bool g_director_gate_history_reported = false;
+bool g_experiment_learn10_enabled = false;
+bool g_experiment_learn10_shape_match = false;
+bool g_experiment_learn10_requested = false;
+r2fix::LearnIntroGuard g_experiment_learn10_key_guard;
+
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
@@ -288,6 +294,7 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
     // for a shortcut. The actual engine's cleanup must still run.
     if (long_rule && line_budget) {
         const auto shape=r2fix::inspect_learn10_native_exit(p,list,list_count);
+        g_experiment_learn10_shape_match=shape.matched();
         std::snprintf(message,sizeof(message),
             "RUNTIME-INTRO: native-exit-shape match=%u exit_gate=%u counter=%u terminal=%u actor=%u rayman=%u retire=%u (read-only; NOT a skip)",
             unsigned(shape.matched()),unsigned(shape.exit_gate),
@@ -744,6 +751,9 @@ void poll_learn_intro_skip() {
         g_director_var14={};
         g_director_gate_history={};
         g_director_gate_history_reported=false;
+        g_experiment_learn10_shape_match=false;
+        g_experiment_learn10_requested=false;
+        g_experiment_learn10_key_guard={};
         return;
     }
     if (!g_progress_words) {
@@ -847,6 +857,99 @@ void poll_second_intro_skip() {
     native_change(kAfterIntroLevel, 0);
 }
 
+// Explicitly opt-in experiment for a *single* counter write in the
+// verified game, gated by the original script fingerprint and live actor
+// state. Unlike the failed direct director 3->1 jump, this asks the game
+// to reach its terminal branch on its own next native progression step.
+// The restoration path may still depend on camera/actor progress; this
+// is NOT yet approved for normal users.
+void poll_learn10_counter_experiment() {
+    if (!g_experiment_learn10_enabled || !g_learn_intro_seen ||
+        !g_experiment_learn10_shape_match || g_learn_handover ||
+        g_experiment_learn10_requested || !g_current_level ||
+        !r2fix::is_first_playable_level(g_current_level) ||
+        !g_progress_words) return;
+    bool handed_over=false;
+    if (!game_story_bit(g_progress_words,kLearnHandoverBit,handed_over))
+        return;
+    const bool foreground=game_window_is_foreground();
+    const bool pressed=foreground &&
+        (((GetAsyncKeyState(VK_RETURN)&0x8000)!=0) ||
+         ((GetAsyncKeyState(VK_SPACE)&0x8000)!=0) ||
+         ((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
+    if (!g_experiment_learn10_key_guard.update(
+            g_current_level,!handed_over,pressed)) return;
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    std::uint32_t rayman=0;
+    if (!base || !read_u32(base+kRaymanSuperObjectRva,rayman) || !rayman)
+        return;
+    const auto director=sample_natural_director(rayman);
+    float standin_xyz[3]{};
+    const bool standin_ok=director.standin &&
+        read_superobject_position(director.standin,standin_xyz);
+    const auto read_variable=[](const ObservedDirectorByte& variable,
+                                std::int32_t& out) {
+        if (!variable.location) return false;
+        return r2fix::read_intro_integer(variable.location,variable.type,
+            [](std::uintptr_t a,std::uint8_t& v){return read_u8(a,v);},
+            [](std::uintptr_t a,std::uint32_t& v){return read_u32(a,v);},out);
+    };
+    std::int32_t counter=0,total=0,pulse=0,signal=0;
+    const bool values_ok =
+        g_director_var83.type==2 && g_director_var14.type==2 &&
+        g_director_var50.type==0 && g_director_var110.type==5 &&
+        read_variable(g_director_var83,counter) &&
+        read_variable(g_director_var14,total) &&
+        read_variable(g_director_var50,pulse) &&
+        read_variable(g_director_var110,signal);
+    const r2fix::Learn10CounterExitInput state{
+        g_experiment_learn10_enabled && values_ok,
+        foreground,g_experiment_learn10_shape_match,
+        director.matches==1 && director.superobject &&
+            director.intelligence==g_observed_director_intelligence &&
+            director.behaviours==g_observed_director_behaviours,
+        director.counters.current_behaviour_index==3,
+        director.counters.rayman_suspended==1,
+        standin_ok,!handed_over,
+        static_cast<std::uint32_t>(GetTickCount()-g_learn_intro_start),
+        counter,total,pulse,signal
+    };
+    if (!r2fix::can_experiment_learn10_counter_exit(state)) {
+        log_line("RUNTIME-INTRO: experimental counter exit rejected by live safety guards; natural scene unchanged");
+        return;
+    }
+    // Reject code/image locations. This must be a writable private game
+    // designer-variable buffer and never modify actor pointers or scripts.
+    MEMORY_BASIC_INFORMATION memory{};
+    const auto address=g_director_var83.location;
+    if (!VirtualQuery(reinterpret_cast<const void*>(address),
+                      &memory,sizeof(memory)) ||
+        memory.State!=MEM_COMMIT || memory.Type!=MEM_PRIVATE ||
+        (memory.Protect & (PAGE_GUARD|PAGE_NOACCESS)) ||
+        (memory.Protect&0xffu)!=PAGE_READWRITE) {
+        log_line("RUNTIME-INTRO: experimental counter exit rejected: variable is not private writable data");
+        return;
+    }
+    const auto region_start=reinterpret_cast<std::uintptr_t>(memory.BaseAddress);
+    if (address<region_start || address-region_start>=memory.RegionSize)
+        return;
+    const auto target=static_cast<std::uint8_t>(total-1);
+    SIZE_T written=0;
+    if (!WriteProcessMemory(GetCurrentProcess(),
+                            reinterpret_cast<void*>(address),
+                            &target,1,&written) || written!=1) {
+        log_line("RUNTIME-INTRO: experimental counter exit write FAILED; natural scene may continue");
+        return;
+    }
+    g_experiment_learn10_requested=true;
+    g_director_var83.previous=target; // do not mislabel our own write as a native event
+    char message[220]{};
+    std::snprintf(message,sizeof(message),
+        "RUNTIME-INTRO: EXPERIMENTAL user-requested var83=%d->%u var14=%d; waiting for original native cleanup, no director/camera/story-bit write",
+        int(counter),unsigned(target),int(total));
+    log_line(message);
+}
+
 void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // Preserve the vertical viewing angle and expand the horizontal angle
     // as 4:3 -> the actual monitor aspect. Never modify 4:3 camera state.
@@ -863,6 +966,7 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // Use it only as a safe tick to request a *deferred* native transition.
     poll_second_intro_skip();
     poll_learn_intro_skip();
+    poll_learn10_counter_experiment();
 }
 void write_jump(BYTE* at, const void* destination) {
     at[0] = 0xE9;  // JMP rel32
@@ -1158,6 +1262,15 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
+    char experimental_value[3]{};
+    g_experiment_learn10_enabled =
+        g_log && GetEnvironmentVariableA(
+            "RAYMAN2FIX_EXPERIMENT_LEARN10_COUNTER_EXIT",
+            experimental_value, sizeof(experimental_value))==1 &&
+        experimental_value[0]=='1';
+    if (g_experiment_learn10_enabled)
+        log_line("RUNTIME-INTRO: EXPERIMENTAL Learn_10 counter exit enabled by environment variable; may corrupt gameplay, no direct director jump");
+
     // This hook is also used for the targeted intro-skip poll on 4:3.
     // For narrow monitors camera_hor_plus leaves the FOV unchanged.
     const DWORD camera_status = install_camera_hook();

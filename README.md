@@ -137,6 +137,29 @@ gate. This explains why simply forcing behaviour 1 can bypass cleanup.
 It does not demonstrate that manipulating `var83` is safe: the
 cinematic's actor positions, camera and script phase would still differ.
 
+**Opt-in experimental native counter exit (NOT validated for normal use):**
+The only experimental action is a one-byte update to the director's
+`var83` progression counter, setting it to `var14-1`, then waiting for
+the **original game script** to execute its terminal branch. Unlike the
+previously corrupting direct 3→1 behaviour change, the experiment does
+not set `var110`, story bits, camera matrices, actor bits or save data.
+However, early actor and camera state may differ from natural ending;
+**graphics corruption, hangs or incorrect gameplay remain possible**.
+
+To enable for a disposable Wine test session, launch with:
+`RAYMAN2FIX_EXPERIMENT_LEARN10_COUNTER_EXIT=1 WINEDEBUG=-all wine Rayman2Fix.exe`
+and keep `[Debug] Log=1`. After entering `Learn_10`, release all skip
+keys and press **Enter**, **Space** or **Escape** once. The request is
+accepted only for the approved executable, with the known full script
+shape, exactly one director, the native intro behaviour active, the
+stand-in present, Rayman suspended, `var14=7`, a stable `var50=0` and
+`var110=0`, and the game in the foreground at least one second after
+the introduction begins. One request is permitted per entry into the
+level. The game may wait until its next native progression checkpoint
+before completing the sequence. Exit/relaunch without the variable to
+return to the unchanged default. Do not use the experiment with an
+important unsaved game session.
+
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,
 Hor+ 3D and the 4:3 HUD. This rollback does not merge the PR.
