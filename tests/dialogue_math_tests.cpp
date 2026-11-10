@@ -37,7 +37,17 @@ int main() {
     assert(!r2fix::fit_learn10_dialogue_text(bad,0.75f,a));
     bad=native;bad.x=1001.0f;
     assert(!r2fix::fit_learn10_dialogue_text(bad,0.75f,a));
-    bad=native;bad.size=17.0f;
+    // Sizes 18 and 20 are actually used by the native JFFTXT renderer;
+    // keep them eligible in the original lower dialogue band.
+    bad=native;bad.size=18.0f;
+    assert(r2fix::fit_learn10_dialogue_text(bad,0.75f,a));
+    assert(near(a.size,13.5f));
+    bad=native;bad.size=20.0f;
+    assert(r2fix::fit_learn10_dialogue_text(bad,0.75f,a));
+    assert(near(a.size,15.0f));
+    bad=native;bad.size=26.0f;
+    assert(r2fix::fit_learn10_dialogue_text(bad,0.75f,a));
+    bad=native;bad.size=26.01f;
     assert(!r2fix::fit_learn10_dialogue_text(bad,0.75f,a));
     bad=native;bad.size=std::numeric_limits<float>::infinity();
     assert(!r2fix::fit_learn10_dialogue_text(bad,0.75f,a));

@@ -76,7 +76,11 @@ std::atomic<bool> g_dialogue_draw_reached{false};
 std::atomic<unsigned> g_dialogue_total_calls{0};
 std::atomic<unsigned> g_dialogue_learn_calls{0};
 std::atomic<unsigned> g_dialogue_applied_calls{0};
+std::atomic<unsigned> g_dialogue_lower_band_calls{0};
+std::atomic<unsigned> g_dialogue_lower_band_samples{0};
 bool g_dialogue_counter_reported=false;
+bool g_dialogue_posthandover_reported=false;
+DWORD g_dialogue_posthandover_start=0;
 using RequestLevel = void (__cdecl*)(const char*, unsigned char);
 std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
@@ -975,7 +979,11 @@ void poll_learn_intro_skip() {
         g_learn_script_probe_done = false;
         g_learn_nomovies_conditions_logged = false;
         g_dialogue_counter_reported=false;
+        g_dialogue_posthandover_reported=false;
+        g_dialogue_posthandover_start=0;
         g_dialogue_learn_calls.store(0,std::memory_order_relaxed);
+        g_dialogue_lower_band_calls.store(0,std::memory_order_relaxed);
+        g_dialogue_lower_band_samples.store(0,std::memory_order_relaxed);
         g_observed_director_intelligence = 0;
         g_observed_director_behaviours = 0;
         g_observed_director_index = -1;
@@ -1080,6 +1088,7 @@ void poll_learn_intro_skip() {
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
         g_learn_handover_start = GetTickCount();
+        g_dialogue_posthandover_start=g_learn_handover_start;
         log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
         bool nomovies=false;
         const bool known=game_story_bit(g_progress_words,
@@ -1090,6 +1099,22 @@ void poll_learn_intro_skip() {
             unsigned(known),unsigned(nomovies));
         log_line(flag);
         log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
+    }
+    // Murfy's on-screen instructions occur after the initial 25-second
+    // script. An intro+3.5-second callback count is too early to prove
+    // that the native font path is unused for these captions.
+    if (g_dialogue_posthandover_start &&
+        !g_dialogue_posthandover_reported &&
+        DWORD(GetTickCount()-g_dialogue_posthandover_start)>=5000) {
+        g_dialogue_posthandover_reported=true;
+        char summary[240]{};
+        std::snprintf(summary,sizeof(summary),
+            "RUNTIME-DIALOGUE: learn_10 handover-plus-5s font_calls_total=%u font_calls_learn=%u lower_band=%u corrections=%u (geometry only)",
+            g_dialogue_total_calls.load(std::memory_order_relaxed),
+            g_dialogue_learn_calls.load(std::memory_order_relaxed),
+            g_dialogue_lower_band_calls.load(std::memory_order_relaxed),
+            g_dialogue_applied_calls.load(std::memory_order_relaxed));
+        log_line(summary);
     }
     if (handed_over && g_learn_handover_start &&
         DWORD(GetTickCount() - g_learn_handover_start) >= kNaturalHandoverFollowupMillis) {
@@ -1217,6 +1242,30 @@ void __cdecl corrected_dialogue_text(void* context,
     r2fix::JffTextString32 adapted{};
     const bool eligible=learn && string &&
         r2fix::fit_learn10_dialogue_text(*string,g_hud_scale,adapted);
+    // The original filter required size <=16. The owner's log contains
+    // real text sizes 18 and 20, but not their bottom-line coordinates.
+    // Record the first 12 native lower-band geometries even when size
+    // or screen coordinates exclude them from the actual correction.
+    // This avoids another speculative fontsize adjustment.
+    if (learn && string && std::isfinite(string->x) &&
+        std::isfinite(string->y) && std::isfinite(string->size) &&
+        string->y>=500.0f && string->y<=1100.0f &&
+        string->x>=-100.0f && string->x<=1100.0f &&
+        string->size>0.0f && string->size<=40.0f) {
+        const unsigned seq=g_dialogue_lower_band_calls.fetch_add(
+            1,std::memory_order_relaxed)+1;
+        if (seq<=12u) {
+            g_dialogue_lower_band_samples.fetch_add(
+                1,std::memory_order_relaxed);
+            char geometry[260]{};
+            std::snprintf(geometry,sizeof(geometry),
+                "RUNTIME-DIALOGUE: lower-band sample=%u x=%.2f y=%.2f size=%.2f flags=0x%02X match=%u (read-only, no text/addresses)",
+                seq,double(string->x),double(string->y),
+                double(string->size),unsigned(string->flags),
+                unsigned(eligible));
+            log_line(geometry);
+        }
+    }
     // Small bounded, read-only geometry samples, deliberately not the
     // dialogue string or memory address. Capture both the early and
     // later native caption phases without flooding the existing log.

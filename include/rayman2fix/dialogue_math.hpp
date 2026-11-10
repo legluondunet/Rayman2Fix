@@ -36,6 +36,11 @@ static_assert(offsetof(JffTextString32,effect)==20, "JFFTXT effect");
 // leaving the panel, face portrait, arrow, glyph content, colors and
 // on-disk assets entirely untouched. Preserve native Y/line placement;
 // the JFFTXT font engine derives its glyph height/line spacing from size.
+// Native JFFTXT sizes 18.0 and 20.0 are directly observed in the
+// owner's Wine trace; the old <=16 predicate excluded legitimate font
+// draws. A 26-unit ceiling retains conservative protection against
+// non-dialogue/abnormally-sized text. This does not prove any *specific*
+// bottom dialogue geometry, which the runtime separately samples.
 // This intentionally only targets the bottom dialogue band in Learn_10,
 // not arbitrary HUD text or other 3D/screen overlays.
 inline bool fit_learn10_dialogue_text(const JffTextString32& original,
@@ -49,7 +54,7 @@ inline bool fit_learn10_dialogue_text(const JffTextString32& original,
         !std::isfinite(original.size) ||
         original.x<0.0f || original.x>1000.0f ||
         original.y<660.0f || original.y>1000.0f ||
-        original.size<3.0f || original.size>16.0f)
+        original.size<3.0f || original.size>26.0f)
         return false;
     adjusted=original;
     adjusted.x=500.0f+(original.x-500.0f)*hud_scale;

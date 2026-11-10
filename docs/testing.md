@@ -224,6 +224,29 @@ locate the actual dialogue renderer instead. If positive but
 The native game pixels and all dialogue sizes are unchanged by this
 diagnostic-only follow-up.
 
+**Result of bounded native-font trace (20261110-163648.log):**
+the native JFFTXT callback **is invoked**. The earlier 3.5-second
+snapshot reports `font_calls_total=1845 font_calls_learn=0`,
+because the initial in-engine cinematic takes ~25.4 seconds and
+Murfy's actual bottom-of-screen dialogue occurs later. Therefore
+this early report cannot disprove that the caption uses JFFTXT.
+During later gameplay the hook observes valid descriptor sizes
+**18.00 and 20.00**, both excluded by the first trial's artificial
+maximum of 16.0. One `native Learn_10 bottom text size/X
+corrected` event was eventually recorded, but that alone is not
+proof the target caption now fits inside the panel.
+
+The latest guarded change permits native sizes **3..26** (rather
+than 3..16) for already eligible bottom-band text in `Learn_10`
+only. A new bounded read-only log samples the first 12 lower-band
+draw requests with `y>=500` (even when not eligible) and emits
+a fresh summary **five seconds AFTER handover**:
+`handover-plus-5s font_calls_learn/lower_band/corrections`.
+This isolates whether Murfy's visible words genuinely meet the
+native text geometry gate, without recording their contents.
+The old black panel, portrait and arrow are not modified.
+The screenshot result remains unverified until a Wine visual test.
+
 ## Manual checks
 
 - `Rayman2Fix.exe --help` and `--version`.
