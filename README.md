@@ -110,16 +110,16 @@ story bit 1091 was observed at ~25.414 s. Six 0→2→0 pulses of the
 shorter pulse between callbacks remains possible.
 
 Cross-referencing the numeric script IDs with the public raytools
-\`ACP_Ray2/src/AI/AI_Const.h\` enumeration identifies native
-\`ChangeMyComport\` (P69), \`ChangeComport\` (P67),
-\`ChangeComportReflex\` (P68), \`ActivateObject\` (P84),
-\`KillPerso\` (P139), and \`ChangeOneCustomBit\` (P174).
+`ACP_Ray2/src/AI/AI_Const.h` enumeration identifies native
+`ChangeMyComport` (P69), `ChangeComport` (P67),
+`ChangeComportReflex` (P68), `ActivateObject` (P84),
+`KillPerso` (P139), and `ChangeOneCustomBit` (P174).
 Near nodes 1022–1046, the original script includes actor
 reactivation, behaviour/reflex transitions and clearing of Rayman's
 custom bits 14 and 17. The normal ending therefore involves more than
 a jump to behaviour 1.
 
-The read-only \`native-exit-shape\` diagnostic now checks those exact
+The read-only `native-exit-shape` diagnostic now checks those exact
 node/opcode landmarks against the live compiled script. It is a
 **version-specific script fingerprint, not proof of safe shortcut
 eligibility**. A mismatch is informative and does not change
