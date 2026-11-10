@@ -163,6 +163,41 @@ inline Learn10NoMoviesGateShape inspect_learn10_nomovies_gate(
     return shape;
 }
 
+// Compare opaque original button operands WITHOUT exposing values or
+// dereferencing their potentially pointer-like contents. Both C45
+// conditions are in the same native director rule. Equal operands
+// indicate the same operand in that script, not a proven VK mapping.
+struct Learn10NoMoviesButtonPair {
+    bool first_gate=false, second_gate=false;
+    bool same_operand=false;
+    bool first_opaque=false, second_opaque=false;
+    bool known() const { return first_gate && second_gate; }
+};
+inline Learn10NoMoviesButtonPair inspect_learn10_nomovies_buttons(
+    const SceneScriptProbe& p) {
+    Learn10NoMoviesButtonPair out{};
+    if (!p.complete || p.malformed) return out;
+    SceneScriptEvent a{},b{},ca{},cb{};
+    bool a_found=false,b_found=false,ca_found=false,cb_found=false;
+    for(unsigned i=0;i<p.selected;++i) {
+        const auto& e=p.events[i];
+        if(e.node==8) {ca=e;ca_found=true;}
+        if(e.node==9) {a=e;a_found=true;}
+        if(e.node==106) {cb=e;cb_found=true;}
+        if(e.node==107) {b=e;b_found=true;}
+    }
+    out.first_gate=ca_found && a_found &&
+        ca.type==1 && ca.param==45 && ca.indent==3 &&
+        a.type==14 && a.indent==4 && a.node==ca.node+1;
+    out.second_gate=cb_found && b_found &&
+        cb.type==1 && cb.param==45 && cb.indent==5 &&
+        b.type==14 && b.indent==6 && b.node==cb.node+1;
+    out.first_opaque=out.first_gate && a.param>255u;
+    out.second_opaque=out.second_gate && b.param>255u;
+    out.same_operand=out.known() && a.param==b.param;
+    return out;
+}
+
 // This is a second arm of the ORIGINAL first rule: at the top-level
 // Else when the NOMOVIES flag is set, the director tests V119 and
 // can run an alternate initialization / behaviour selection path.

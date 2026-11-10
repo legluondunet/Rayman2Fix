@@ -272,6 +272,24 @@ This will reveal which original engine input each branch uses and
 allow comparison to PC Enter without guessing a Windows virtual-key
 mapping. It does NOT synthesize a key or toggle the cheat bit.
 
+**Native button operands observed (Wine log 20261110-154233):**
+both `JustPressedBut` conditions now have explicit type-14
+`button` operands (nodes 9 and 107), but their raw 32-bit values
+exceed 255 and are intentionally REDACTED. They must **not** be
+presented as small button IDs or Windows VK codes. The same log
+confirms all three exact read-only script fingerprints, including
+the repaired early-exit actor cleanup. The original first-visit
+scene still completes at ~25.416 s, with NOMOVIES bit 1188 OFF.
+
+To resolve whether those two branches refer to the **same native
+button operand**, the new static script check compares their full
+values solely inside the game's process, logs only an equality
+boolean and opaque-vs-small status, and never prints/reads a pointer
+target. A one-time read-only snapshot also records the integer types
+and values (when valid) of V11, V49, V93 and V119, the extra
+conditions used by the native first-visit and cheat-enabled branches.
+Neither observation maps a button to Enter or forces any game state.
+
 **Unresolved:** switching the bit after Learn_10 has initialized
 may be too late to alter native cutscene flow; setting it earlier
 could affect a progress array that is later serialized in save data.

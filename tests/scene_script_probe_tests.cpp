@@ -288,6 +288,38 @@ int main(){
         bad=alternative;bad.complete=false;
         assert(!r2fix::inspect_learn10_nomovies_alternative(bad).matched());
     }
+    // Both NOMOVIES-controlled native If arms test JustPressedBut
+    // with an opaque Button operand. Compare equality without ever
+    // exposing an address or trying to convert it to a VK code.
+    {
+        r2fix::SceneScriptProbe p{};
+        p.complete=true;
+        p.selected=4;
+        p.events[0]={8,45,3,1};
+        p.events[1]={9,0xDEADBEEFu,4,14};
+        p.events[2]={106,45,5,1};
+        p.events[3]={107,0xDEADBEEFu,6,14};
+        const auto good=r2fix::inspect_learn10_nomovies_buttons(p);
+        assert(good.known() && good.same_operand);
+        assert(good.first_opaque && good.second_opaque);
+        auto bad=p;bad.events[3].param=0xCAFEBABEu;
+        const auto different=r2fix::inspect_learn10_nomovies_buttons(bad);
+        assert(different.known() && !different.same_operand);
+        bad=p;bad.events[3].type=12;
+        assert(!r2fix::inspect_learn10_nomovies_buttons(bad).known());
+        bad=p;bad.events[0].param=44;
+        assert(!r2fix::inspect_learn10_nomovies_buttons(bad).known());
+        bad=p;bad.events[1].indent=5;
+        assert(!r2fix::inspect_learn10_nomovies_buttons(bad).known());
+        bad=p;bad.events[3].param=23;
+        const auto mixed=r2fix::inspect_learn10_nomovies_buttons(bad);
+        assert(mixed.known() && mixed.first_opaque &&
+               !mixed.second_opaque && !mixed.same_operand);
+        bad=p;bad.complete=false;
+        assert(!r2fix::inspect_learn10_nomovies_buttons(bad).known());
+        bad=p;bad.malformed=true;
+        assert(!r2fix::inspect_learn10_nomovies_buttons(bad).known());
+    }
     // The known retail script has distinct If/Then/Else NESTING and a
     // model-relative behaviour-1 reference. Refuse lookalikes that have
     // the same opcodes but wrong nesting, target, or opcode values.

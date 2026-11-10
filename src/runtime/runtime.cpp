@@ -73,6 +73,7 @@ DWORD g_learn_intro_start = 0;
 unsigned g_learn_trace_index = 0;
 bool g_learn_first_valid_seen = false;
 bool g_learn_script_probe_done = false;
+bool g_learn_nomovies_conditions_logged = false;
 // Cached *read-only* pointers are sampled only during Learn_10 and
 // validated with ReadProcessMemory before every use.
 std::uintptr_t g_observed_director_intelligence = 0;
@@ -311,6 +312,16 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
                 unsigned(other.matched()),unsigned(other.top_level_else),
                 unsigned(other.mode_condition),unsigned(other.continuation),
                 unsigned(other.native_behaviour_change));
+            log_line(message);
+            --line_budget;
+        }
+        if (line_budget) {
+            const auto pair=r2fix::inspect_learn10_nomovies_buttons(p);
+            std::snprintf(message,sizeof(message),
+                "RUNTIME-INTRO: native-nomovies-buttons known=%u first_gate=%u second_gate=%u same_operand=%u first_opaque=%u second_opaque=%u (pointer values never logged, no key mapping inferred)",
+                unsigned(pair.known()),unsigned(pair.first_gate),
+                unsigned(pair.second_gate),unsigned(pair.same_operand),
+                unsigned(pair.first_opaque),unsigned(pair.second_opaque));
             log_line(message);
             --line_budget;
         }
@@ -674,6 +685,30 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
         g_observed_director_intelligence=director.intelligence;
         g_observed_director_behaviours=director.behaviours;
         g_observed_director_index=director.counters.current_behaviour_index;
+        if (director.counters.current_behaviour_index==3 &&
+            !g_learn_nomovies_conditions_logged) {
+            g_learn_nomovies_conditions_logged=true;
+            // The first-visit branch checks progress(V49) && V11.
+            // NOMOVIES's ELSE branch additionally checks !V119 and
+            // a time guard(V93). Observe only integer scalar values,
+            // never follow arbitrary pointer/array designer variables.
+            unsigned k11=0,k49=0,k93=0,k119=0;
+            std::int32_t v11=0,v49=0,v93=0,v119=0;
+            const bool ok11=read_director_phase_integer(
+                director.superobject,11,k11,v11);
+            const bool ok49=read_director_phase_integer(
+                director.superobject,49,k49,v49);
+            const bool ok93=read_director_phase_integer(
+                director.superobject,93,k93,v93);
+            const bool ok119=read_director_phase_integer(
+                director.superobject,119,k119,v119);
+            char conditions[320]{};
+            std::snprintf(conditions,sizeof(conditions),
+                "RUNTIME-INTRO: native-nomovies-conditions at-first-b3 V11=%d(valid=%u,type=%u) V49=%d(valid=%u,type=%u) V93=%d(valid=%u,type=%u) V119=%d(valid=%u,type=%u) (read-only)",
+                int(v11),unsigned(ok11),k11,int(v49),unsigned(ok49),k49,
+                int(v93),unsigned(ok93),k93,int(v119),unsigned(ok119),k119);
+            log_line(conditions);
+        }
         // Run the one-time script probe only after the normal intro's
         // behaviour 3 is live; diagnostic is skipped if never observed.
         if (!g_learn_script_probe_done &&
@@ -921,6 +956,7 @@ void poll_learn_intro_skip() {
         g_learn_trace_index = 0;
         g_learn_first_valid_seen = false;
         g_learn_script_probe_done = false;
+        g_learn_nomovies_conditions_logged = false;
         g_observed_director_intelligence = 0;
         g_observed_director_behaviours = 0;
         g_observed_director_index = -1;
