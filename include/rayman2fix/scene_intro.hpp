@@ -6,8 +6,8 @@ namespace r2fix {
 // The original Rayman 2 engine's Learn_10 first-visit director is an
 // actor with custom bit 28, var2 naming itself, var3 naming Rayman and
 // var4 naming a distinct stand-in. var1 (waypoint) may be NULL throughout
-// the intro; it is deliberately NOT a precondition for the native
-// behaviour transition.
+// the intro. This recognizer is used for passive diagnostics only.
+// It must never be used to force a behaviour transition.
 //
 // AI_tdstMind +4 = normal intelligence
 // AI_tdstMind +0 = model
@@ -18,10 +18,9 @@ namespace r2fix {
 // See original symbols in raytools/ACP_Ray2, AI/AI.h and AI/AI_Scr.h.
 //
 // Behaviour 1 is the native director's ending script (clear bit 28,
-// retire director). Other behaviours can be active during the opening.
-// Accept only a real normal-behaviour index in the director's own table,
-// never the end index 1, and require Rayman to actually be suspended.
-// Switching via AI_fn_ucChangeComportIntell keeps the native cleanup.
+// retire director). An attempted direct 3->1 transition caused corrupted
+// graphics; all discovered pointers and behaviours are OBSERVATION ONLY.
+// Do not use these pointers to change scene state or Rayman flags.
 struct IntroDirectorScanStats {
     unsigned actor_objects = 0;
     unsigned armed_directors = 0;

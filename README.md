@@ -48,9 +48,14 @@ Additional late checkpoints are kept at 27, 35 and 50 seconds
 if the cinematic runs longer than usual. The first sample may be unavailable until Rayman is loaded.
 The diagnostics capture Rayman's flags/position, camera position,
 director behaviour index and stand-in position, if available.
-A fixed sampling schedule bounds the log size; there are no writes
-to game state or logged process addresses. This provides a timeline
-for a future safe skip.
+Missed checkpoints are skipped instead of replayed in a burst when the
+camera callback resumes after a gap. A bounded, read-only change detector
+(maximum eight event snapshots) additionally records actual changes in
+Rayman's flags and in the director's behaviour index. The callback is
+only an observation opportunity, not a clock: a gap in the log is not
+evidence of what happened inside the game during that gap. No game data
+is written, no process addresses are logged and no new thread is made.
+These observations provide a reference for a future safe skip.
 
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,

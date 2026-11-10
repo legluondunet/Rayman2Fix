@@ -26,6 +26,11 @@ class Learn10SafeFallback(unittest.TestCase):
         self.assertIn('log_natural_intro_snapshot("during",',block)
         self.assertIn("24500, 25000, 25500",source)
         self.assertIn("g_learn_trace_index",block)
+        self.assertIn("while (g_learn_trace_index <",block)
+        self.assertIn("missed time checkpoints skipped",block)
+        self.assertIn("trace_natural_intro_changes(elapsed)",block)
+        self.assertIn("kMaxLearnChangeSnapshots = 8",source)
+        self.assertNotIn("CreateThread(",block)
         self.assertIn("sample_natural_director(",source)
         self.assertNotIn("AI_fn_ucChangeComportIntell",source)
 

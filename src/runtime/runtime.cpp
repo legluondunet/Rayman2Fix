@@ -40,8 +40,9 @@ constexpr unsigned kLearnHandoverBit = 1091;
 constexpr uintptr_t kRaymanSuperObjectRva = 0x100578; // VA 0x500578
 constexpr uintptr_t kFixCameraActorRva = 0x0B7308; // VA 0x4B7308
 constexpr DWORD kNaturalHandoverFollowupMillis = 1000;
-// Dense observation around the native 25-second handover (reference Wine
-// trace), but still bounded to a handful of reads. Never force a scene exit.
+// Checkpoints are elapsed wall time, not cutscene progress: the native
+// handover has been observed at both 25s and 40s. Skipped deadlines are
+// discarded, never replayed in a burst. Never force a scene exit.
 constexpr DWORD kNaturalTraceTimes[] = {
     250, 1000, 2500, 5000, 10000, 20000,
     21000, 22000, 23000, 24000, 24500, 25000, 25500,
@@ -67,6 +68,16 @@ DWORD g_learn_handover_start = 0;
 DWORD g_learn_intro_start = 0;
 unsigned g_learn_trace_index = 0;
 bool g_learn_first_valid_seen = false;
+// Cached *read-only* pointers are sampled only during Learn_10 and
+// validated with ReadProcessMemory before every use.
+std::uintptr_t g_observed_director_intelligence = 0;
+std::uintptr_t g_observed_director_behaviours = 0;
+int g_observed_director_index = -1;
+bool g_have_ray_state = false;
+std::uint32_t g_last_ray_custom = 0;
+std::uint8_t g_last_ray_flags = 0;
+unsigned g_learn_change_snapshots = 0;
+constexpr unsigned kMaxLearnChangeSnapshots = 8;
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
@@ -180,6 +191,8 @@ struct NaturalDirectorSample {
     unsigned matches=0,visited=0;
     r2fix::IntroDirectorScanStats counters{};
     std::uintptr_t standin=0;
+    std::uintptr_t intelligence=0;
+    std::uintptr_t behaviours=0;
 };
 NaturalDirectorSample sample_natural_director(std::uintptr_t ray_so) {
     NaturalDirectorSample sample{};
@@ -210,9 +223,16 @@ NaturalDirectorSample sample_natural_director(std::uintptr_t ray_so) {
         if (director.valid()) {
             ++sample.matches;
             sample.standin=director.standin_superobject;
+            sample.intelligence=director.intelligence;
+            // ending_behaviour is index 1 in the validated model array.
+            sample.behaviours=director.ending_behaviour-12;
         }
     }
-    if (sample.matches!=1) sample.standin=0;
+    if (sample.matches!=1) {
+        sample.standin=0;
+        sample.intelligence=0;
+        sample.behaviours=0;
+    }
     return sample;
 }
 bool log_natural_intro_snapshot(const char* stage, DWORD t) {
@@ -248,6 +268,11 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
         double(camera[0]),double(camera[1]),double(camera[2]));
     log_line(msg);
     const auto director=sample_natural_director(ray_so);
+    if (director.matches==1 && director.intelligence && director.behaviours) {
+        g_observed_director_intelligence=director.intelligence;
+        g_observed_director_behaviours=director.behaviours;
+        g_observed_director_index=director.counters.current_behaviour_index;
+    }
     const bool standin_ok=director.standin &&
         read_superobject_position(director.standin,standin);
     std::snprintf(msg,sizeof(msg),
@@ -261,6 +286,57 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     log_line(msg);
     return true;
 }
+// Cheap change detector: the camera callback may not run for many
+// seconds during an engine-managed sequence, so fixed wall-clock
+// checkpoints cannot reconstruct that gap. When frames ARE observed,
+// capture state transitions immediately, without writing to any actor.
+void trace_natural_intro_changes(DWORD elapsed) {
+    if (!g_log || g_learn_change_snapshots >= kMaxLearnChangeSnapshots)
+        return;
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    std::uint32_t ray=0,actor=0,standard=0,custom=0;
+    std::uint8_t flags=0;
+    if (base &&
+        read_u32(base+kRaymanSuperObjectRva,ray) && ray &&
+        read_u32(std::uintptr_t(ray)+4,actor) && actor &&
+        read_u32(std::uintptr_t(actor)+4,standard) && standard &&
+        read_u32(std::uintptr_t(standard)+0x24,custom) &&
+        read_u8(std::uintptr_t(standard)+0x29,flags)) {
+        if (!g_have_ray_state) {
+            g_have_ray_state=true;
+            g_last_ray_custom=custom;
+            g_last_ray_flags=flags;
+        } else if (custom!=g_last_ray_custom || flags!=g_last_ray_flags) {
+            g_last_ray_custom=custom;
+            g_last_ray_flags=flags;
+            ++g_learn_change_snapshots;
+            log_natural_intro_snapshot("rayman-state-change",elapsed);
+        }
+    }
+    if (g_observed_director_intelligence && g_observed_director_behaviours &&
+        g_learn_change_snapshots < kMaxLearnChangeSnapshots) {
+        std::uint32_t current=0;
+        if (read_u32(g_observed_director_intelligence+8,current)) {
+            const auto first=g_observed_director_behaviours;
+            const auto active=std::uintptr_t(current);
+            if (active>=first && active<first+64u*12u &&
+                (active-first)%12u==0u) {
+                const int index=int((active-first)/12u);
+                if (index!=g_observed_director_index) {
+                    g_observed_director_index=index;
+                    ++g_learn_change_snapshots;
+                    char msg[160]{};
+                    std::snprintf(msg,sizeof(msg),
+                        "RUNTIME-INTRO: director behaviour transition t=%ums index=%d (observed only)",
+                        unsigned(elapsed),index);
+                    log_line(msg);
+                    log_natural_intro_snapshot("director-state-change",elapsed);
+                }
+            }
+        }
+    }
+}
+
 void poll_learn_intro_skip() {
     if (!g_current_level) return;
     if (!r2fix::is_first_playable_level(g_current_level)) {
@@ -272,6 +348,13 @@ void poll_learn_intro_skip() {
         g_learn_intro_start = 0;
         g_learn_trace_index = 0;
         g_learn_first_valid_seen = false;
+        g_observed_director_intelligence = 0;
+        g_observed_director_behaviours = 0;
+        g_observed_director_index = -1;
+        g_have_ray_state = false;
+        g_last_ray_custom = 0;
+        g_last_ray_flags = 0;
+        g_learn_change_snapshots = 0;
         return;
     }
     if (!g_progress_words) {
@@ -299,12 +382,29 @@ void poll_learn_intro_skip() {
         if (g_learn_intro_seen)
             g_learn_first_valid_seen=log_natural_intro_snapshot("opening",0);
     }
-    // Fixed-rate snapshots only while the natural introduction is active.
+    // Sample state changes whenever the callback actually runs; no timer
+    // or secondary thread is created. A handover may take 25-40+ seconds.
+    const DWORD elapsed=DWORD(GetTickCount()-g_learn_intro_start);
+    if (g_learn_intro_seen && !g_learn_handover && g_log)
+        trace_natural_intro_changes(elapsed);
+
+    // Consume overdue checkpoints in ONE pass. An earlier build replayed
+    // every missed deadline at 32s, creating nine near-duplicate snapshots.
     if (!handed_over && g_learn_intro_seen && g_log &&
         g_learn_trace_index<sizeof(kNaturalTraceTimes)/sizeof(kNaturalTraceTimes[0])) {
-        const DWORD elapsed=DWORD(GetTickCount()-g_learn_intro_start);
-        if (elapsed>=kNaturalTraceTimes[g_learn_trace_index]) {
+        const unsigned before=g_learn_trace_index;
+        while (g_learn_trace_index <
+                   sizeof(kNaturalTraceTimes)/sizeof(kNaturalTraceTimes[0]) &&
+               elapsed>=kNaturalTraceTimes[g_learn_trace_index])
             ++g_learn_trace_index;
+        if (g_learn_trace_index!=before) {
+            if (g_learn_trace_index-before>1) {
+                char gap[176]{};
+                std::snprintf(gap,sizeof(gap),
+                    "RUNTIME-INTRO: %u missed time checkpoints skipped at t=%ums (no retrospective samples)",
+                    g_learn_trace_index-before-1,unsigned(elapsed));
+                log_line(gap);
+            }
             if (log_natural_intro_snapshot("during",elapsed) &&
                 !g_learn_first_valid_seen) {
                 g_learn_first_valid_seen=true;
