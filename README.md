@@ -23,38 +23,33 @@ The game uses its own deferred level-change request, with no save operation;
 full in-game transition still needs validation under Windows and Wine.
 `RUNTIME-INTRO:` lines in the one-file log identify activation and requests.
 
-## Learn_10 opening cinematic (experimental native behaviour handover)
+## Learn_10 opening cinematic (skip disabled after visual regression)
 
-\`Learn_10\` is the first playable level. The original \`NOMOVIES\` toggle
-does not skip its scripted introduction (verified under Wine). A previous
-stand-in-position attempt could not function either: the actual
-intro director's waypoint variable remains NULL throughout the scene.
-**Never move Rayman or its stand-in to invented coordinates.**
+The first playable level's original cutscene is **not skippable with
+Rayman2Fix at present**. The experimental jump directly from the
+director's native behaviour 3 to behaviour 1 was found unsafe during a
+Wine gameplay test: story bit 1091 changed, but the graphics became
+corrupted. That handover is **not** sufficient to restore the camera,
+Rayman and all scene state. The previous `NOMOVIES` and stand-in
+waypoint attempts were ineffective. Do not re-enable any of them without
+a complete, gameplay-tested restoration path.
 
-On a fresh Enter press while story bit 1091 is clear, the runtime
-recognizes the director through its armed flag 28 and independent
-references (var2=self, var3=Rayman, var4=stand-in). If and only if
-**one** matching director has an active normal behaviour in its own
-model table (index 0 to 5, excluding the existing exit index 1), **and**
-Rayman has both native suspended-scene custom bits 14 and 17 set,
-it invokes the original x86 engine's
-\`AI_fn_ucChangeComportIntell\` (VA \`0x481080\`) to select that
-model's behaviour **1**, the original ending script.
-The current native behaviour index is recorded in the log; foreign,
-misaligned, late or already-ending behaviour pointers are rejected.
-The model, normal intelligence and behaviour pointers are resolved
-from the live game structures rather than per-level addresses.
-The scene itself remains responsible for clearing its flags and
-restoring control. No direct edits to story bits, coordinates, the
-camera or save files. If any structural check is missing or ambiguous,
-nothing is changed. Presses can be retried after release.
+**Safety rollback:** The runtime never requests a native director
+transition, edits the scene's story bits, moves Rayman, writes camera
+matrices or changes saves to bypass this introduction. All original
+`Learn_10` scripts run normally. Enter is not intercepted by this
+feature.
 
-This is a **new unverified experiment**. Under Wine/Windows, use a
-test save and confirm that the normal gameplay, camera, HUD and
-Rayman's controls work immediately after the transition. The
-\`RUNTIME-INTRO:\` log differentiates an accepted native behaviour
-request from the later story bit 1091 handover. A successful build or
-a naturally ending cinematic is NOT proof that skipping worked.
+With `[Debug] Log=1`, the runtime now takes **read-only** samples of
+the natural scene at its start, when story bit 1091 is set, and
+approximately one second after that. Those include Rayman's custom and
+active flags and Rayman/camera positions, but no memory addresses.
+They provide a reference for a future safe implementation.
+
+The separately validated native `Jail_20 -> Learn_10` level change
+remains enabled, as do GameFrame loading-image colours and 4:3 framing,
+Hor+ 3D and the 4:3 HUD. This rollback does not merge the PR.
+
 
 ## Experimental loading-image colour diagnostics
 
