@@ -171,104 +171,52 @@ on disk. Unlike the main launcher, this game runtime has not yet been
 validated by real visual screenshots; in particular **HUD overlays may
 still require their own aspect correction**.
 
-## Learn_10 native dialogue text layout (widescreen)
+## Screen-world interface camera versus panoramic world camera
 
-The owner supplied three reference screenshots (two PC 1920x1080, one
-Dreamcast 4:3). The PC tutorial/dialogue glyphs overflow the already
-properly centered black conversation panel. The panel, narrator icon
-and arrow must NOT be widened, redrawn or repositioned to mask the bug.
+Rayman 2 has TWO 3D rendering passes. The gameplay camera uses Hor+;
+the original game's **screen-world overlay** draws UI actors, including
+conversation glyphs, through its own camera and viewport.
 
-On 16:9, Rayman2Fix now hooks the **owner-verified original**
-`JFFTXT_vDrawString` (RVA 0x660B0, seven complete checked x86
-instructions; exact original and patched EXE hash verified during launch).
-For the bottom-of-screen text of `learn_10` only, it passes a
-**temporary copy** of the original game text descriptor to the native
-renderer. It maps X from the 1000-unit screen-space canvas into the
-same centered 4:3 region as the panel and scales the native font size
-by `(4/3) / monitor_aspect`. Native Y, dialogue wording, colors,
-line breaks, texture data and other HUD sprites remain untouched.
-On 4:3 and in all other levels the hook simply passes the
-original descriptor through unchanged. Failure to match exact
-original prologue refuses the hook and logs this safely.
+Disassembly of the exact owner-approved patched executable shows:
+- `0x4052C0` creates the original screen camera whose pointer is
+  stored at **0x50054C** and sets alphaX=**1.5**, alphaY=**0.75**.
+- `0x405180` configures the dedicated 100×100 / 1000-unit viewport
+  at **0x5004D4** and renders through that same screen camera.
+- The game's `0x422AB0` camera-adjustment path is called through
+  `0x4228D0` for both overlay and ordinary gameplay cameras.
 
-**Required visual check** under Wine and Windows:
-1. At 1920x1080, start a new game, skip `Jail_20` and watch `Learn_10`.
-   Compare `SALUT RAYMAN ! CONTENT ...` and the tutorial
-   `PRESSE Q POUR SAUTER ...` to the Dreamcast reference.
-2. Verify that every line remains inside the original black box with
-   a visible margin; the narrator portrait and continuation arrow
-   must not be distorted. The font must keep the game's native color,
-   outline, accents and punctuation.
-3. Check after leaving the dialogue that all regular HUD sprites,
-   pauses, menus and gameplay remain unchanged. Recheck 4:3 and one
-   alternative wide aspect when possible.
-4. The log should include `RUNTIME-DIALOGUE: verified native JFFTXT...`
-   and, on an actual bottom dialogue, `RUNTIME-DIALOGUE: native Learn_10
-   bottom text size/X corrected`. A successful CI **cannot** prove
-   that the three screenshot compositions now match. Keep PR draft
-   until the owner validates the visual result.
+Earlier code erroneously applied the gameplay Hor+ formula to ALL
+cameras. At 16:9 that changes the screen camera's alphaX from its
+native 1.5 to ~1.259, plausibly magnifying the glyph geometry. The
+user's Wine screenshots confirm that JFFTXT font-descriptor scaling
+does **not** solve the overflowing speech text.
 
-**Failed Wine visual check (2026-11-10, 162311.log and 162303.png):**
-the black panel still overflows, and the log confirms the x86 font
-detour **installed** but NEVER emitted `native Learn_10 bottom text
-size/X corrected`. There is no evidence that the affected dialogue
-font used JFFTXT_vDrawString or that the eligibility conditions matched.
-This is *not* a reason to change the scale coefficient blindly.
-The next read-only patch therefore logs `native JFFTXT draw callback
-reached` once, a handful of `font-probe sample` geometry records
-(x,y,size,alpha,flags, but NEVER text content or addresses), and
-`learn_10 after 3.5s font_calls_total/learn/corrections` even if
-none matched. If `font_calls_learn=0`, stop working on JFFTXT and
-locate the actual dialogue renderer instead. If positive but
-`match=0`, refine only the exact observed eligibility constraints.
-The native game pixels and all dialogue sizes are unchanged by this
-diagnostic-only follow-up.
+**Universal correction:** consult the ORIGINAL engine-owned camera
+pointer slot (VA 0x50054C) during the SHA/PE-approved camera detour.
+When the camera equals that original UI camera, preserve BOTH original
+FOV angles; for other gameplay cameras continue Hor+ unchanged.
+This is a renderer-level rule, not a level, language, font, string,
+coordinate, or resolution exception. The 2D HUD/sprite callbacks
+still use the centered 4:3 canvas. Remove the entire former
+`JFFTXT_vDrawString` interception and all Learn_10-specific font
+heuristics/tests, without touching original dialogue assets/saves.
 
-**Result of bounded native-font trace (20261110-163648.log):**
-the native JFFTXT callback **is invoked**. The earlier 3.5-second
-snapshot reports `font_calls_total=1845 font_calls_learn=0`,
-because the initial in-engine cinematic takes ~25.4 seconds and
-Murfy's actual bottom-of-screen dialogue occurs later. Therefore
-this early report cannot disprove that the caption uses JFFTXT.
-During later gameplay the hook observes valid descriptor sizes
-**18.00 and 20.00**, both excluded by the first trial's artificial
-maximum of 16.0. One `native Learn_10 bottom text size/X
-corrected` event was eventually recorded, but that alone is not
-proof the target caption now fits inside the panel.
+**Visual validation required on Windows and Wine:**
+- Verify the log says `RUNTIME-FOV: native 4:3 screen-world camera
+  preserved`, ideally alphaX≈1.500 and alphaY≈0.750.
+- Verify `RUNTIME-FOV: Hor+ enabled for world cameras` and that the
+  playable 3D world still uses monitor-wide FOV.
+- Compare the original Murfy dialogue and tutorial panels in Learn_10
+  with the supplied 4:3 Dreamcast reference.
+- Also test other levels, UI text, menus and at least one other aspect
+  ratio if practical. The layout must not rely on level-specific
+  tweaks or grow any text box to cover overflow.
+- There should be NO `RUNTIME-DIALOGUE:` log entries because the
+  experimental JFFTXT detour is removed.
 
-The latest guarded change permits native sizes **3..26** (rather
-than 3..16) for already eligible bottom-band text in `Learn_10`
-only. A new bounded read-only log samples the first 12 lower-band
-draw requests with `y>=500` (even when not eligible) and emits
-a fresh summary **five seconds AFTER handover**:
-`handover-plus-5s font_calls_learn/lower_band/corrections`.
-This isolates whether Murfy's visible words genuinely meet the
-native text geometry gate, without recording their contents.
-The old black panel, portrait and arrow are not modified.
-The screenshot result remains unverified until a Wine visual test.
-
-**Full Wine log 20261110-165832 (most recent test of commit 611c23a):**
-The native font detour executes, but the selected adjustment was
-**uneven**. The new read-only `lower-band` samples show repeated
-triplets of original centered JFFTXT descriptors
-`x=500,size=20,flags=0` at native `Y=500`, `Y=600`, `Y=700`.
-The old test `Y>=660` rejects the first two (`match=0`) and
-modifies only the third (`match=1`). This is strong evidence that
-the previous geometry filter is incorrect, though a descriptor's
-exact correspondence to a visible screenshot line remains to be
-confirmed. User reports **no visible improvement** with 611c23a.
-
-The follow-up candidate now limits the correction to **the entire
-observed centered-caption family**, requiring x≈500, size≈20,
-flags=0 and one of the three y origins 500/600/700 (±1 original
-unit). The same Hor+ aspect-based native size reduction is used for
-each; no other font sizes, menu/HUD positions, text content or
-game-owned descriptors are changed. A single bounded
-`native centered caption Y=... size=...->...` line is emitted on
-first adjustment of each Y origin to make the next Wine test
-diagnostic. Three accepted rows, unrelated rejected rows and
-unaltered input descriptors are covered by the unit test.
-**Visual correctness is NOT established by the unit tests.**
+CI and pure policy unit tests cannot confirm on-screen correctness;
+keep draft PR #2 unmerged until screenshots are validated.
+The Learn_10 movie skip is still disabled; NOMOVIES work remains paused.
 
 ## Manual checks
 

@@ -8,7 +8,7 @@
 #include <windows.h>
 #include "rayman2fix/fov_math.hpp"
 #include "rayman2fix/hud_math.hpp"
-#include "rayman2fix/dialogue_math.hpp"
+#include "rayman2fix/screen_camera.hpp"
 #include "rayman2fix/intro_skip.hpp"
 #include "rayman2fix/story_lookup.hpp"
 #include "rayman2fix/scene_intro.hpp"
@@ -31,11 +31,10 @@ namespace {
 constexpr DWORD kConfigMagic = 0x32584652; // "RFX2" in little endian
 constexpr DWORD kOriginalTimestamp = 0x3807B68B;
 constexpr uintptr_t kCameraRva = 0x22AB0; // verified VA=0x422AB0 for image base 0x400000
-// Verified against owner's SHA256-locked 1.02 EXE (SHA256 9bae484b...):
-// ACP_Ray2 JFFTXT_vDrawString at VA 0x4660B0, seven complete prologue
-// instructions: sub esp,2Ch; push ebx/ebp/esi/edi. No disk EXE edit.
-constexpr uintptr_t kTextDrawRva = 0x660B0;
-constexpr BYTE kExpectedTextDraw[7] = {0x83,0xEC,0x2C,0x53,0x55,0x56,0x57};
+// Shared screen-world UI camera pointer owned by the original engine.
+// Constructed by 0x4052C0 with FOV (1.5,0.75), displayed through
+// secondary 4:3 viewport 0x5004D4. It persists across game levels.
+constexpr uintptr_t kScreenCameraSlotRva=0x10054C; // VA 0x50054C
 // Original game's native scene names and deferred level-change API.
 // These addresses apply ONLY to the single hash-verified retail executable.
 constexpr uintptr_t kLevelNameRva = 0x100381; // VA 0x500381, char[30]
@@ -66,22 +65,9 @@ constexpr std::size_t kAlphaXOffset = 100;
 constexpr std::size_t kAlphaYOffset = 104;
 using CameraAdjust = void (__cdecl*)(void*, void*, void*);
 CameraAdjust g_original = nullptr;
-using NativeTextDraw = void (__cdecl*)(void*,r2fix::JffTextString32*);
-NativeTextDraw g_original_text_draw = nullptr;
-bool g_text_draw_hook_installed = false;
-std::atomic<bool> g_dialogue_adjustment_logged{false};
-// Bounded diagnosis for an installed font hook which did not adjust the
-// text in the owner's Wine screenshot. No user text/pointers are logged.
-std::atomic<bool> g_dialogue_draw_reached{false};
-std::atomic<unsigned> g_dialogue_total_calls{0};
-std::atomic<unsigned> g_dialogue_learn_calls{0};
-std::atomic<unsigned> g_dialogue_applied_calls{0};
-std::atomic<unsigned> g_dialogue_caption_rows_seen{0};
-std::atomic<unsigned> g_dialogue_lower_band_calls{0};
-std::atomic<unsigned> g_dialogue_lower_band_samples{0};
-bool g_dialogue_counter_reported=false;
-bool g_dialogue_posthandover_reported=false;
-DWORD g_dialogue_posthandover_start=0;
+std::uintptr_t g_screen_camera_slot = 0;
+std::atomic<bool> g_native_ui_camera_seen{false};
+std::atomic<bool> g_world_camera_seen{false};
 using RequestLevel = void (__cdecl*)(const char*, unsigned char);
 std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
@@ -979,13 +965,6 @@ void poll_learn_intro_skip() {
         g_learn_first_valid_seen = false;
         g_learn_script_probe_done = false;
         g_learn_nomovies_conditions_logged = false;
-        g_dialogue_counter_reported=false;
-        g_dialogue_posthandover_reported=false;
-        g_dialogue_posthandover_start=0;
-        g_dialogue_learn_calls.store(0,std::memory_order_relaxed);
-        g_dialogue_lower_band_calls.store(0,std::memory_order_relaxed);
-        g_dialogue_caption_rows_seen.store(0,std::memory_order_relaxed);
-        g_dialogue_lower_band_samples.store(0,std::memory_order_relaxed);
         g_observed_director_intelligence = 0;
         g_observed_director_behaviours = 0;
         g_observed_director_index = -1;
@@ -1072,25 +1051,9 @@ void poll_learn_intro_skip() {
             }
         }
     }
-    // The font renderer may never call JFFTXT_vDrawString for these
-    // special cutscene captions. Report the *observed* callback counts
-    // even if no font hook is reached or eligible: negative evidence
-    // matters more than an "installed" message.
-    if (g_learn_intro_seen && !g_dialogue_counter_reported &&
-        DWORD(GetTickCount()-g_learn_intro_start)>=3500) {
-        g_dialogue_counter_reported=true;
-        char status[224]{};
-        std::snprintf(status,sizeof(status),
-            "RUNTIME-DIALOGUE: learn_10 after 3.5s font_calls_total=%u font_calls_learn=%u corrections=%u (no text contents recorded)",
-            g_dialogue_total_calls.load(std::memory_order_relaxed),
-            g_dialogue_learn_calls.load(std::memory_order_relaxed),
-            g_dialogue_applied_calls.load(std::memory_order_relaxed));
-        log_line(status);
-    }
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
         g_learn_handover_start = GetTickCount();
-        g_dialogue_posthandover_start=g_learn_handover_start;
         log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
         bool nomovies=false;
         const bool known=game_story_bit(g_progress_words,
@@ -1101,22 +1064,6 @@ void poll_learn_intro_skip() {
             unsigned(known),unsigned(nomovies));
         log_line(flag);
         log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
-    }
-    // Murfy's on-screen instructions occur after the initial 25-second
-    // script. An intro+3.5-second callback count is too early to prove
-    // that the native font path is unused for these captions.
-    if (g_dialogue_posthandover_start &&
-        !g_dialogue_posthandover_reported &&
-        DWORD(GetTickCount()-g_dialogue_posthandover_start)>=5000) {
-        g_dialogue_posthandover_reported=true;
-        char summary[240]{};
-        std::snprintf(summary,sizeof(summary),
-            "RUNTIME-DIALOGUE: learn_10 handover-plus-5s font_calls_total=%u font_calls_learn=%u lower_band=%u corrections=%u (geometry only)",
-            g_dialogue_total_calls.load(std::memory_order_relaxed),
-            g_dialogue_learn_calls.load(std::memory_order_relaxed),
-            g_dialogue_lower_band_calls.load(std::memory_order_relaxed),
-            g_dialogue_applied_calls.load(std::memory_order_relaxed));
-        log_line(summary);
     }
     if (handed_over && g_learn_handover_start &&
         DWORD(GetTickCount() - g_learn_handover_start) >= kNaturalHandoverFollowupMillis) {
@@ -1154,15 +1101,42 @@ void poll_second_intro_skip() {
 }
 
 void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
-    // Preserve the vertical viewing angle and expand the horizontal angle
-    // as 4:3 -> the actual monitor aspect. Never modify 4:3 camera state.
-    if (camera && g_aspect > 1.334f) {
-        auto* bytes = static_cast<unsigned char*>(camera);
-        float vertical = 0.0f;
-        std::memcpy(&vertical, bytes + kAlphaYOffset, sizeof(vertical));
-        const float expanded = r2fix::hor_plus_fov(vertical, g_aspect);
-        if (valid_angle(expanded))
-            std::memcpy(bytes + kAlphaXOffset, &expanded, sizeof(expanded));
+    // The engine has a separate screen-world 3D camera for overlay
+    // actors, including dialogue glyph geometry. Preserve its NATIVE
+    // 4:3 projection. Hor+ is exclusively for other 3D world cameras.
+    void* screen_camera=nullptr;
+    if (g_screen_camera_slot)
+        std::memcpy(&screen_camera,
+            reinterpret_cast<const void*>(g_screen_camera_slot),
+            sizeof(screen_camera));
+    const bool native_ui=r2fix::is_native_screen_camera(
+        camera,screen_camera);
+    if (camera && native_ui) {
+        if (!g_native_ui_camera_seen.exchange(true,
+                                  std::memory_order_relaxed)) {
+            const auto* bytes=static_cast<const unsigned char*>(camera);
+            float ax=0.0f,ay=0.0f;
+            std::memcpy(&ax,bytes+kAlphaXOffset,sizeof(ax));
+            std::memcpy(&ay,bytes+kAlphaYOffset,sizeof(ay));
+            char line[180]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-FOV: native 4:3 screen-world camera preserved alphaX=%.3f alphaY=%.3f (Hor+ bypass)",
+                double(ax),double(ay));
+            log_line(line);
+        }
+    } else if (camera && g_aspect > 1.334f) {
+        auto* bytes=static_cast<unsigned char*>(camera);
+        float ay=0.0f,ax=0.0f;
+        std::memcpy(&ay,bytes+kAlphaYOffset,sizeof(ay));
+        std::memcpy(&ax,bytes+kAlphaXOffset,sizeof(ax));
+        const float wide=r2fix::projection_alpha_x(
+            ax,ay,g_aspect,false);
+        if (valid_angle(wide) && wide!=ax) {
+            std::memcpy(bytes+kAlphaXOffset,&wide,sizeof(wide));
+            if (!g_world_camera_seen.exchange(true,
+                                   std::memory_order_relaxed))
+                log_line("RUNTIME-FOV: Hor+ enabled for world cameras; UI screen camera excluded");
+        }
     }
     g_original(device, viewport, camera);
     // Camera adjustment executes on the game's own render/main thread.
@@ -1191,7 +1165,8 @@ DWORD install_camera_hook() {
         pe->FileHeader.TimeDateStamp != kOriginalTimestamp ||
         pe->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
         pe->OptionalHeader.AddressOfEntryPoint == 0 ||
-        pe->OptionalHeader.SizeOfImage < kCameraRva + 64)
+        pe->OptionalHeader.SizeOfImage < kCameraRva + 64 ||
+        pe->OptionalHeader.SizeOfImage < kScreenCameraSlotRva + sizeof(void*))
         return 3;
 
     auto* target = const_cast<BYTE*>(module + kCameraRva);
@@ -1208,10 +1183,13 @@ DWORD install_camera_hook() {
         return 4;
     }
     g_original = reinterpret_cast<CameraAdjust>(gateway);
+    g_screen_camera_slot=reinterpret_cast<std::uintptr_t>(
+        module+kScreenCameraSlotRva);
 
     DWORD old_target = 0;
     if (!VirtualProtect(target, kHookLength, PAGE_EXECUTE_READWRITE, &old_target)) {
         g_original = nullptr;
+        g_screen_camera_slot=0;
         VirtualFree(gateway, 0, MEM_RELEASE);
         return 4;
     }
@@ -1221,144 +1199,10 @@ DWORD install_camera_hook() {
     DWORD ignored = 0;
     VirtualProtect(target, kHookLength, old_target, &ignored);
     g_installed = true;
-    log_line("RUNTIME-FOV: Hor+ camera detour installed on approved Rayman 2 executable");
+    log_line("RUNTIME-FOV: world Hor+ camera detour installed (dedicated screen-world UI camera excluded)");
     return 1;
 }
 
-
-// Separate native font detour, limited to bottom subtitles in Learn_10.
-// It changes only the *copy* passed to the verified JFFTXT_vDrawString,
-// never the game's JFFTXT record, story bits, camera, assets or box sprites.
-void __cdecl corrected_dialogue_text(void* context,
-                                     r2fix::JffTextString32* string) {
-    const auto original=g_original_text_draw;
-    if (!original) return;
-    g_dialogue_total_calls.fetch_add(1,std::memory_order_relaxed);
-    if (!g_dialogue_draw_reached.exchange(true,std::memory_order_relaxed))
-        log_line("RUNTIME-DIALOGUE: native JFFTXT draw callback reached (not only installed)");
-    const bool learn=g_current_level &&
-        r2fix::is_first_playable_level(g_current_level);
-    unsigned call=0;
-    if (learn)
-        call=g_dialogue_learn_calls.fetch_add(1,std::memory_order_relaxed)+1;
-    r2fix::JffTextString32 adapted{};
-    const bool eligible=learn && string &&
-        r2fix::fit_learn10_dialogue_text(*string,g_hud_scale,adapted);
-    // The original filter required size <=16. The owner's log contains
-    // real text sizes 18 and 20, but not their bottom-line coordinates.
-    // Record the first 12 native lower-band geometries even when size
-    // or screen coordinates exclude them from the actual correction.
-    // This avoids another speculative fontsize adjustment.
-    if (learn && string && std::isfinite(string->x) &&
-        std::isfinite(string->y) && std::isfinite(string->size) &&
-        string->y>=500.0f && string->y<=1100.0f &&
-        string->x>=-100.0f && string->x<=1100.0f &&
-        string->size>0.0f && string->size<=40.0f) {
-        const unsigned seq=g_dialogue_lower_band_calls.fetch_add(
-            1,std::memory_order_relaxed)+1;
-        if (seq<=12u) {
-            g_dialogue_lower_band_samples.fetch_add(
-                1,std::memory_order_relaxed);
-            char geometry[260]{};
-            std::snprintf(geometry,sizeof(geometry),
-                "RUNTIME-DIALOGUE: lower-band sample=%u x=%.2f y=%.2f size=%.2f flags=0x%02X match=%u (read-only, no text/addresses)",
-                seq,double(string->x),double(string->y),
-                double(string->size),unsigned(string->flags),
-                unsigned(eligible));
-            log_line(geometry);
-        }
-    }
-    // Small bounded, read-only geometry samples, deliberately not the
-    // dialogue string or memory address. Capture both the early and
-    // later native caption phases without flooding the existing log.
-    if (learn && (call<=8u || call==20u || call==100u ||
-                  call==500u || call==1000u || call==3000u)) {
-        char sample[256]{};
-        if (string) {
-            std::snprintf(sample,sizeof(sample),
-                "RUNTIME-DIALOGUE: font-probe sample=%u x=%.2f y=%.2f size=%.2f alpha=%u flags=0x%02X ptr_nonnull=%u match=%u (read-only; no text)",
-                call,double(string->x),double(string->y),
-                double(string->size),unsigned(string->alpha),
-                unsigned(string->flags),
-                unsigned(string->text_ptr!=0),unsigned(eligible));
-        } else {
-            std::snprintf(sample,sizeof(sample),
-                "RUNTIME-DIALOGUE: font-probe sample=%u descriptor=null",
-                call);
-        }
-        log_line(sample);
-    }
-    if (eligible) {
-        g_dialogue_applied_calls.fetch_add(1,std::memory_order_relaxed);
-        // Log one event for each native Y origin to verify which of
-        // the three originally observed caption paths is transformed.
-        // No text content or game memory addresses are recorded.
-        const unsigned row=unsigned(std::lround(string->y)/100);
-        const unsigned bit=1u<<row;
-        if (!(g_dialogue_caption_rows_seen.fetch_or(bit,
-                            std::memory_order_relaxed)&bit)) {
-            char row_info[192]{};
-            std::snprintf(row_info,sizeof(row_info),
-                "RUNTIME-DIALOGUE: native centered caption Y=%u size=%.2f->%.2f (read-only source, panel unchanged)",
-                row*100u,double(string->size),double(adapted.size));
-            log_line(row_info);
-        }
-        if (!g_dialogue_adjustment_logged.exchange(true,
-                              std::memory_order_relaxed))
-            log_line("RUNTIME-DIALOGUE: native Learn_10 bottom text size/X corrected (no panel/sprite changes)");
-        original(context,&adapted);
-        return;
-    }
-    original(context,string);
-}
-void install_dialogue_text_hook() {
-    if (g_text_draw_hook_installed || g_hud_scale>=1.0f) return;
-    const auto* base=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
-    if (!base) return;
-    const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    if (dos->e_magic!=IMAGE_DOS_SIGNATURE || dos->e_lfanew<=0 ||
-        dos->e_lfanew>=0x1000) return;
-    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS32*>(
-        base+dos->e_lfanew);
-    if (pe->Signature!=IMAGE_NT_SIGNATURE ||
-        pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
-        pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
-        pe->OptionalHeader.SizeOfImage<kTextDrawRva+64)
-        return;
-    auto* target=const_cast<BYTE*>(base+kTextDrawRva);
-    constexpr std::size_t n=sizeof(kExpectedTextDraw);
-    if (std::memcmp(target,kExpectedTextDraw,n)!=0) {
-        log_line("RUNTIME-DIALOGUE: unsupported JFFTXT prologue; font correction not installed");
-        return;
-    }
-    auto* gateway=static_cast<BYTE*>(
-        VirtualAlloc(nullptr,64,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
-    if (!gateway) {
-        log_line("RUNTIME-DIALOGUE: could not allocate font detour gateway");
-        return;
-    }
-    std::memcpy(gateway,target,n);
-    write_jump(gateway+n,target+n);
-    DWORD old_gateway=0;
-    if (!VirtualProtect(gateway,64,PAGE_EXECUTE_READ,&old_gateway)) {
-        VirtualFree(gateway,0,MEM_RELEASE);
-        return;
-    }
-    FlushInstructionCache(GetCurrentProcess(),gateway,64);
-    DWORD old_target=0;
-    if (!VirtualProtect(target,n,PAGE_EXECUTE_READWRITE,&old_target)) {
-        VirtualFree(gateway,0,MEM_RELEASE);
-        return;
-    }
-    g_original_text_draw=reinterpret_cast<NativeTextDraw>(gateway);
-    write_jump(target,reinterpret_cast<void*>(&corrected_dialogue_text));
-    target[5]=target[6]=0x90;
-    FlushInstructionCache(GetCurrentProcess(),target,n);
-    DWORD ignored=0;
-    VirtualProtect(target,n,old_target,&ignored);
-    g_text_draw_hook_installed=true;
-    log_line("RUNTIME-DIALOGUE: verified native JFFTXT font draw hook installed (Learn_10 bottom text only)");
-}
 
 void initialize_native_intro_skip() {
     const auto* module = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
@@ -1604,7 +1448,6 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     // Unknown/unsupported game versions never receive additional hooks.
     if (camera_status == 1) {
         initialize_native_intro_skip();
-        install_dialogue_text_hook();
         start_hud_monitor();
     }
     return camera_status;
