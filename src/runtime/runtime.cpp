@@ -70,6 +70,13 @@ using NativeTextDraw = void (__cdecl*)(void*,r2fix::JffTextString32*);
 NativeTextDraw g_original_text_draw = nullptr;
 bool g_text_draw_hook_installed = false;
 std::atomic<bool> g_dialogue_adjustment_logged{false};
+// Bounded diagnosis for an installed font hook which did not adjust the
+// text in the owner's Wine screenshot. No user text/pointers are logged.
+std::atomic<bool> g_dialogue_draw_reached{false};
+std::atomic<unsigned> g_dialogue_total_calls{0};
+std::atomic<unsigned> g_dialogue_learn_calls{0};
+std::atomic<unsigned> g_dialogue_applied_calls{0};
+bool g_dialogue_counter_reported=false;
 using RequestLevel = void (__cdecl*)(const char*, unsigned char);
 std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
@@ -967,6 +974,8 @@ void poll_learn_intro_skip() {
         g_learn_first_valid_seen = false;
         g_learn_script_probe_done = false;
         g_learn_nomovies_conditions_logged = false;
+        g_dialogue_counter_reported=false;
+        g_dialogue_learn_calls.store(0,std::memory_order_relaxed);
         g_observed_director_intelligence = 0;
         g_observed_director_behaviours = 0;
         g_observed_director_index = -1;
@@ -1052,6 +1061,21 @@ void poll_learn_intro_skip() {
                 log_line("RUNTIME-INTRO: first valid natural state sampled");
             }
         }
+    }
+    // The font renderer may never call JFFTXT_vDrawString for these
+    // special cutscene captions. Report the *observed* callback counts
+    // even if no font hook is reached or eligible: negative evidence
+    // matters more than an "installed" message.
+    if (g_learn_intro_seen && !g_dialogue_counter_reported &&
+        DWORD(GetTickCount()-g_learn_intro_start)>=3500) {
+        g_dialogue_counter_reported=true;
+        char status[224]{};
+        std::snprintf(status,sizeof(status),
+            "RUNTIME-DIALOGUE: learn_10 after 3.5s font_calls_total=%u font_calls_learn=%u corrections=%u (no text contents recorded)",
+            g_dialogue_total_calls.load(std::memory_order_relaxed),
+            g_dialogue_learn_calls.load(std::memory_order_relaxed),
+            g_dialogue_applied_calls.load(std::memory_order_relaxed));
+        log_line(status);
     }
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
@@ -1182,10 +1206,39 @@ void __cdecl corrected_dialogue_text(void* context,
                                      r2fix::JffTextString32* string) {
     const auto original=g_original_text_draw;
     if (!original) return;
+    g_dialogue_total_calls.fetch_add(1,std::memory_order_relaxed);
+    if (!g_dialogue_draw_reached.exchange(true,std::memory_order_relaxed))
+        log_line("RUNTIME-DIALOGUE: native JFFTXT draw callback reached (not only installed)");
+    const bool learn=g_current_level &&
+        r2fix::is_first_playable_level(g_current_level);
+    unsigned call=0;
+    if (learn)
+        call=g_dialogue_learn_calls.fetch_add(1,std::memory_order_relaxed)+1;
     r2fix::JffTextString32 adapted{};
-    if (string && g_current_level &&
-        r2fix::is_first_playable_level(g_current_level) &&
-        r2fix::fit_learn10_dialogue_text(*string,g_hud_scale,adapted)) {
+    const bool eligible=learn && string &&
+        r2fix::fit_learn10_dialogue_text(*string,g_hud_scale,adapted);
+    // Small bounded, read-only geometry samples, deliberately not the
+    // dialogue string or memory address. Capture both the early and
+    // later native caption phases without flooding the existing log.
+    if (learn && (call<=8u || call==20u || call==100u ||
+                  call==500u || call==1000u || call==3000u)) {
+        char sample[256]{};
+        if (string) {
+            std::snprintf(sample,sizeof(sample),
+                "RUNTIME-DIALOGUE: font-probe sample=%u x=%.2f y=%.2f size=%.2f alpha=%u flags=0x%02X ptr_nonnull=%u match=%u (read-only; no text)",
+                call,double(string->x),double(string->y),
+                double(string->size),unsigned(string->alpha),
+                unsigned(string->flags),
+                unsigned(string->text_ptr!=0),unsigned(eligible));
+        } else {
+            std::snprintf(sample,sizeof(sample),
+                "RUNTIME-DIALOGUE: font-probe sample=%u descriptor=null",
+                call);
+        }
+        log_line(sample);
+    }
+    if (eligible) {
+        g_dialogue_applied_calls.fetch_add(1,std::memory_order_relaxed);
         if (!g_dialogue_adjustment_logged.exchange(true,
                               std::memory_order_relaxed))
             log_line("RUNTIME-DIALOGUE: native Learn_10 bottom text size/X corrected (no panel/sprite changes)");

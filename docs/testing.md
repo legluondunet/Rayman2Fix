@@ -208,6 +208,22 @@ original prologue refuses the hook and logs this safely.
    that the three screenshot compositions now match. Keep PR draft
    until the owner validates the visual result.
 
+**Failed Wine visual check (2026-11-10, 162311.log and 162303.png):**
+the black panel still overflows, and the log confirms the x86 font
+detour **installed** but NEVER emitted `native Learn_10 bottom text
+size/X corrected`. There is no evidence that the affected dialogue
+font used JFFTXT_vDrawString or that the eligibility conditions matched.
+This is *not* a reason to change the scale coefficient blindly.
+The next read-only patch therefore logs `native JFFTXT draw callback
+reached` once, a handful of `font-probe sample` geometry records
+(x,y,size,alpha,flags, but NEVER text content or addresses), and
+`learn_10 after 3.5s font_calls_total/learn/corrections` even if
+none matched. If `font_calls_learn=0`, stop working on JFFTXT and
+locate the actual dialogue renderer instead. If positive but
+`match=0`, refine only the exact observed eligibility constraints.
+The native game pixels and all dialogue sizes are unchanged by this
+diagnostic-only follow-up.
+
 ## Manual checks
 
 - `Rayman2Fix.exe --help` and `--version`.
