@@ -111,5 +111,38 @@ int main(){
         assert(p2.context[0].node==100u && p2.context[59].node==159u);
         assert(p2.context[20].param==69u);
     }
+    // Real node-index/opcode landmarks observed in the Wine Learn_10
+    // read-only trace. A complete matching fingerprint is an analysis
+    // result, NOT authorisation to fast-forward or modify game state.
+    {
+        r2fix::SceneScriptProbe known{};
+        known.complete = true;
+        const auto add=[&](unsigned node,unsigned type,unsigned param) {
+            assert(known.context_selected < known.context.size());
+            known.context[known.context_selected++] = {
+                node, param, 1, static_cast<std::uint8_t>(type)};
+        };
+        add(927,1,4);add(928,11,110);add(929,12,1);
+        add(957,1,6);add(958,11,83);add(959,2,1);
+        add(960,11,14);add(961,12,1);add(963,2,5);
+        add(964,11,83);add(965,12,1);
+        add(967,2,11);add(968,11,110);add(969,12,1);
+        add(1022,4,84);add(1031,4,67);add(1034,4,68);
+        add(1039,4,174);add(1040,12,14);add(1041,12,0);
+        add(1044,4,174);add(1045,12,17);add(1046,12,0);
+        add(933,4,174);add(934,12,30);add(935,12,0);
+        add(938,4,69);add(939,28,0xDEADBEEF); // pointer ignored
+        assert(r2fix::inspect_learn10_native_exit(known).matched());
+        known.context[0].param=5;
+        assert(!r2fix::inspect_learn10_native_exit(known).matched());
+        known.context[0].param=4;
+        known.context[known.context_selected-1].param=0xABCD1234;
+        assert(r2fix::inspect_learn10_native_exit(known).matched());
+        known.complete=false;
+        assert(!r2fix::inspect_learn10_native_exit(known).matched());
+        known.complete=true;
+        known.malformed=true;
+        assert(!r2fix::inspect_learn10_native_exit(known).matched());
+    }
     return 0;
 }
