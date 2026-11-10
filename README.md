@@ -12,6 +12,79 @@ Ray2Fix and does not contain code copied from that project.
 > Windows/Wine/Proton is still being tested; no broad game compatibility
 > is claimed.
 
+## Second introduction skip (experimental)
+
+On the known, approved retail game executable, press **Space**, **Enter** or
+**Escape** during the **second** opening cinematic (`jail_20`) to request
+the native transition to `learn_10`. The first cinematic (`jail_10`),
+the menu and later cutscenes are not affected. Holding Enter while entering
+the cutscene will not trigger a skip until the key is released and pressed again.
+The game uses its own deferred level-change request, with no save operation;
+full in-game transition still needs validation under Windows and Wine.
+`RUNTIME-INTRO:` lines in the one-file log identify activation and requests.
+
+## Learn_10 opening cinematic (skip disabled after visual regression)
+
+The first playable level's original cutscene is **not skippable with
+Rayman2Fix at present**. The experimental jump directly from the
+director's native behaviour 3 to behaviour 1 was found unsafe during a
+Wine gameplay test: story bit 1091 changed, but the graphics became
+corrupted. That handover is **not** sufficient to restore the camera,
+Rayman and all scene state. The previous `NOMOVIES` and stand-in
+waypoint attempts were ineffective. Do not re-enable any of them without
+a complete, gameplay-tested restoration path.
+
+**Safety rollback:** The runtime never requests a native director
+transition, edits the scene's story bits, moves Rayman, writes camera
+matrices or changes saves to bypass this introduction. All original
+`Learn_10` scripts run normally. Enter is not intercepted by this
+feature.
+
+With `[Debug] Log=1`, the runtime takes **read-only** samples at
+the start, 0.25, 1, 2.5, 5, 10 and 20 seconds, then more densely
+from 21 to 25.5 seconds (while the intro is still running),
+and at the natural story bit 1091 handover and a second after.
+Additional late checkpoints are kept at 27, 35 and 50 seconds
+if the cinematic runs longer than usual. The first sample may be unavailable until Rayman is loaded.
+The diagnostics capture Rayman's flags/position, camera position,
+director behaviour index and stand-in position, if available.
+Missed checkpoints are skipped instead of replayed in a burst when the
+camera callback resumes after a gap. A bounded, read-only change detector
+(maximum eight event snapshots) additionally records actual changes in
+Rayman's flags and in the director's behaviour index. The callback is
+only an observation opportunity, not a clock: a gap in the log is not
+evidence of what happened inside the game during that gap. No game data
+is written, no process addresses are logged and no new thread is made.
+These observations provide a reference for a future safe skip.
+
+The separately validated native `Jail_20 -> Learn_10` level change
+remains enabled, as do GameFrame loading-image colours and 4:3 framing,
+Hor+ 3D and the 4:3 HUD. This rollback does not merge the PR.
+
+
+## Experimental loading-image colour diagnostics
+
+The currently approved 3D/2D rendering is unchanged. While `[Debug] Log=1`,
+the pinned GameFrame Glide wrapper emits a **small capped number** of
+`RUNTIME-GLIDE:` lines to the existing `Rayman2Fix.log` (no second log):
+framebuffer pixel mode and colour format, large CPU framebuffer transfers,
+and early texture/palette uploads. These diagnostics let us distinguish a
+16-bit R/B ordering error in LFB images from palette/texture upload errors.
+No pixels are changed and there is no user-visible configuration setting.
+This is investigative pending in-game comparison of the loading artwork.
+
+## Original loading artwork: RGB565 colors and centered 4:3
+
+The loading picture is a CPU-written 1024x768 RGB565 frame while Glide
+reports ABGR. On this specific complete-frame upload, Rayman2Fix restores
+the RGB565 red/blue interpretation, preserving all regular 3D/texture
+formats and HUD rendering. The same image is projected to a centered 4:3
+canvas, with native-height scaling and automatic black pillarboxes at
+widescreen resolutions. Other LFB sizes/formats, 3D, FOV, 60 FPS, menus,
+and gameplay remain untouched. `RUNTIME-GLIDE` logs one activation line
+when debugging is enabled. The visual result must still be checked on
+Wine and Windows before the PR is merged.
+
 ## Automatic launcher workflow
 
 Run **`Rayman2Fix.exe` without arguments**. The obsolete `--init` command
@@ -165,13 +238,18 @@ If the CD has **no Joliet tree**, the inspector clearly reports that it
 only has primary ISO 9660 names and that original long names may be
 unavailable. No invented name mapping is applied to necessary game files.
 
-On the original `RAYMAN2` CD, these **six exact root-level paths**
-are excluded from the installation:
+For the `RAYMAN2` CD, these **eight exact root-level paths** are
+excluded from installation if present:
 
-- `00000001.tmp`, `0000040c.016`, `0000040c.256` (original
-  SafeDisc-era auxiliaries).
-- `secdrv.sys`, `rayman2.icd`, `dxplayerx.dll` (additional exclusions
-  explicitly requested by the project owner).
+- `00000001.tmp`, `0000040c.016`, `0000040c.256` (SafeDisc-era auxiliaries).
+- `secdrv.sys`, `rayman2.icd` (original protection-related components).
+- `clcd32.dll`, `clokspl.exe`, `drvmgt.dll` (additional owner-approved
+  SafeDisc-era auxiliary names).
+
+A verified inspection of the retail CD found `directx/dplayx.dll`,
+a DirectPlay library in the already-excluded DirectX installer folder.
+Neither `dxplayerx.dll` nor `dplayerx.dll` was present: these were
+mistyped names and have been removed from the exclusion list.
 
 The exclusion never matches other files by extension or similarly named
 files under `data/`. Existing installations are migrated without the CD:

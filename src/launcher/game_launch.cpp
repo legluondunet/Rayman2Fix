@@ -195,6 +195,9 @@ ChildProcessResult run_child_process(
     // extension RAYMAN2FIX_FPS_LIMIT for producer-side grBufferSwap pacing.
     ScopedChildEnvironment glide_size(L"GLIDE_SIZE");
     ScopedChildEnvironment fps_limit(L"RAYMAN2FIX_FPS_LIMIT");
+    ScopedChildEnvironment glide_probe(L"RAYMAN2FIX_GLIDE_PROBE");
+    if (!glide_probe.set(display.log_enabled ? L"1" : L"0"))
+        return {false, 0, glide_probe.error()};
     if (display.borderless) {
         if (!display.output_width || !display.output_height ||
             display.output_width > 16384 || display.output_height > 8640 ||
@@ -214,6 +217,7 @@ ChildProcessResult run_child_process(
                                         nullptr, nullptr, FALSE, 0, nullptr,
                                         cwd.c_str(), &startup, &raw);
     const DWORD spawn_error = created ? 0 : GetLastError();
+    glide_probe.restore();
     fps_limit.restore();
     glide_size.restore();
     if (!created) return {false, 0, spawn_error};
@@ -308,7 +312,18 @@ int launch_verified_game(Startup& startup) {
     std::cout << "Launching Rayman 2 (Glide2)...\n" << std::flush;
     startup.log("LAUNCH-START: child=rayman2.exe working_directory=Rayman2Fix");
     const auto started = std::chrono::steady_clock::now();
-    const auto result = run_child_process(root / "rayman2.exe", root, display);
+    // The child runtime and launcher share one log. Closing the MSVC
+    // ofstream temporarily avoids Windows file-sharing denial when the
+    // injected DLL appends its diagnostics during gameplay.
+    startup.suspend_logging_for_child();
+    ChildProcessResult result{};
+    try {
+        result = run_child_process(root / "rayman2.exe", root, display);
+    } catch (...) {
+        startup.resume_logging_after_child();
+        throw;
+    }
+    startup.resume_logging_after_child();
     const auto seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - started).count();
     if (!result.started) {

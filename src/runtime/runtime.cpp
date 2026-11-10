@@ -7,9 +7,17 @@
 #define NOMINMAX
 #include <windows.h>
 #include "rayman2fix/fov_math.hpp"
+#include "rayman2fix/hud_math.hpp"
+#include "rayman2fix/intro_skip.hpp"
+#include "rayman2fix/story_lookup.hpp"
+#include "rayman2fix/scene_intro.hpp"
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
+#include <unordered_set>
+#include <vector>
 
 #if !defined(_M_IX86)
 #error Rayman2Fix camera runtime requires Windows x86
@@ -19,6 +27,27 @@ namespace {
 constexpr DWORD kConfigMagic = 0x32584652; // "RFX2" in little endian
 constexpr DWORD kOriginalTimestamp = 0x3807B68B;
 constexpr uintptr_t kCameraRva = 0x22AB0; // verified VA=0x422AB0 for image base 0x400000
+// Original game's native scene names and deferred level-change API.
+// These addresses apply ONLY to the single hash-verified retail executable.
+constexpr uintptr_t kLevelNameRva = 0x100381; // VA 0x500381, char[30]
+constexpr uintptr_t kRequestLevelRva = 0x54D0; // VA 0x4054D0
+constexpr char kAfterIntroLevel[] = "learn_10";
+// GOG/retail Rayman 2 engine: Fix actor 6 owns the progress-bit array
+// (designer variable 42). Read dynamically; do NOT assume heap pointers.
+constexpr uintptr_t kFixActorListRva = 0x0B7300; // VA 0x4B7300: count, then direct actor pointers
+constexpr unsigned kLearnHandoverBit = 1091;
+// Read-only diagnostics for natural Learn_10 handover.
+constexpr uintptr_t kRaymanSuperObjectRva = 0x100578; // VA 0x500578
+constexpr uintptr_t kFixCameraActorRva = 0x0B7308; // VA 0x4B7308
+constexpr DWORD kNaturalHandoverFollowupMillis = 1000;
+// Checkpoints are elapsed wall time, not cutscene progress: the native
+// handover has been observed at both 25s and 40s. Skipped deadlines are
+// discarded, never replayed in a burst. Never force a scene exit.
+constexpr DWORD kNaturalTraceTimes[] = {
+    250, 1000, 2500, 5000, 10000, 20000,
+    21000, 22000, 23000, 24000, 24500, 25000, 25500,
+    27000, 35000, 50000
+};
 constexpr std::size_t kHookLength = 7;
 constexpr BYTE kExpected[kHookLength] = {0x83, 0xEC, 0x0C, 0x8B, 0x4C, 0x24, 0x14};
 // Rayman 2's GLI_tdstCamera (owner's approved Win32 executable).
@@ -27,9 +56,43 @@ constexpr std::size_t kAlphaXOffset = 100;
 constexpr std::size_t kAlphaYOffset = 104;
 using CameraAdjust = void (__cdecl*)(void*, void*, void*);
 CameraAdjust g_original = nullptr;
+using RequestLevel = void (__cdecl*)(const char*, unsigned char);
+std::atomic<RequestLevel> g_request_intro_level{nullptr};
+const char* g_current_level = nullptr;
+r2fix::IntroSkipGuard g_intro_guard;
+bool g_intro_level_logged = false;
+bool g_learn_logged = false;
+bool g_learn_intro_seen = false;
+bool g_learn_handover = false;
+DWORD g_learn_handover_start = 0;
+DWORD g_learn_intro_start = 0;
+unsigned g_learn_trace_index = 0;
+bool g_learn_first_valid_seen = false;
+// Cached *read-only* pointers are sampled only during Learn_10 and
+// validated with ReadProcessMemory before every use.
+std::uintptr_t g_observed_director_intelligence = 0;
+std::uintptr_t g_observed_director_behaviours = 0;
+int g_observed_director_index = -1;
+bool g_have_ray_state = false;
+std::uint32_t g_last_ray_custom = 0;
+std::uint8_t g_last_ray_flags = 0;
+unsigned g_learn_change_snapshots = 0;
+constexpr unsigned kMaxLearnChangeSnapshots = 8;
+std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
 bool g_log = false;
+float g_hud_scale = 1.0f;
+std::atomic<void*> g_plain_sprite_original{nullptr};
+std::atomic<void*> g_uv_sprite_original{nullptr};
+std::atomic<void*> g_color_sprite_original{nullptr};
+std::atomic<bool> g_plain_seen{false};
+std::atomic<bool> g_uv_seen{false};
+std::atomic<bool> g_color_seen{false};
+std::atomic<bool> g_plain_corrected{false};
+std::atomic<bool> g_uv_corrected{false};
+std::atomic<bool> g_color_corrected{false};
+volatile LONG g_hud_worker_started = 0;
 
 struct RuntimeOptions {
     DWORD size;
@@ -51,8 +114,12 @@ void log_line(const char* message) {
     // level up beside Rayman2Fix.exe. Use append-only, no extra log file.
     wchar_t* last = wcsrchr(path, L'\\');
     if (!last) return;
+    *last = L'\0'; // Remove rayman2.exe
+    last = wcsrchr(path, L'\\');
+    if (!last) return;
+    // Direct parent path instead of ..\\ so Win32/Wine resolve identically.
     wcscpy_s(last + 1, MAX_PATH - static_cast<std::size_t>(last + 1 - path),
-             L"..\\Rayman2Fix.log");
+             L"Rayman2Fix.log");
     HANDLE file = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) return;
@@ -61,6 +128,330 @@ void log_line(const char* message) {
     WriteFile(file, "\r\n", 2, &written, nullptr);
     CloseHandle(file);
 }
+bool game_window_is_foreground() {
+    HWND foreground = GetForegroundWindow();
+    DWORD pid = 0;
+    return foreground && GetWindowThreadProcessId(foreground, &pid) &&
+           pid == GetCurrentProcessId();
+}
+
+
+// Safe memory reads for recognized live game actors. No actor
+// pointer is trusted without a checked memory access.
+bool read_u32(std::uintptr_t address, std::uint32_t& value) {
+    SIZE_T copied = 0;
+    return address >= 0x10000 &&
+           ReadProcessMemory(GetCurrentProcess(),
+                             reinterpret_cast<const void*>(address),
+                             &value, sizeof(value), &copied) &&
+           copied == sizeof(value);
+}
+bool read_u8(std::uintptr_t address, std::uint8_t& value) {
+    SIZE_T copied = 0;
+    return address >= 0x10000 &&
+           ReadProcessMemory(GetCurrentProcess(),
+                             reinterpret_cast<const void*>(address),
+                             &value, sizeof(value), &copied) &&
+           copied == sizeof(value);
+}
+std::uintptr_t find_story_words() {
+    const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    if (!base) return 0;
+    return r2fix::locate_story_words(
+        base + kFixActorListRva,
+        [](std::uintptr_t p, std::uint32_t& v) { return read_u32(p, v); },
+        [](std::uintptr_t p, std::uint8_t& v) { return read_u8(p, v); });
+}
+bool game_story_bit(std::uintptr_t words, unsigned bit, bool& value) {
+    std::uint32_t word = 0;
+    if (!words || !read_u32(words + r2fix::story_word_index(bit) * 4, word))
+        return false;
+    value = (word & r2fix::story_word_mask(bit)) != 0;
+    return true;
+}
+
+// Read-only samples of the genuine game handover. The previous experimental
+// behaviour-3->1 shortcut corrupted graphics despite story bit 1091 changing.
+// No native scene function is called and no game state is changed here.
+bool read_superobject_position(std::uintptr_t so, float (&xyz)[3]) {
+    std::uint32_t matrix = 0;
+    if (!so || !read_u32(so + 0x24, matrix) || !matrix) return false;
+    for (unsigned i = 0; i < 3; ++i) {
+        std::uint32_t bits = 0;
+        if (!read_u32(std::uintptr_t(matrix) + 4 + 4 * i, bits)) return false;
+        std::memcpy(&xyz[i], &bits, sizeof(bits));
+        if (!std::isfinite(xyz[i]) || std::fabs(xyz[i]) > 100000.0f)
+            return false;
+    }
+    return true;
+}
+// A read-only scan of the actual scene, formerly used to locate the
+// director. It now observes the native animation without changing it.
+struct NaturalDirectorSample {
+    unsigned matches=0,visited=0;
+    r2fix::IntroDirectorScanStats counters{};
+    std::uintptr_t standin=0;
+    std::uintptr_t intelligence=0;
+    std::uintptr_t behaviours=0;
+};
+NaturalDirectorSample sample_natural_director(std::uintptr_t ray_so) {
+    NaturalDirectorSample sample{};
+    if (!ray_so) return sample;
+    std::uintptr_t root=ray_so;
+    std::unordered_set<std::uintptr_t> parents;
+    for (unsigned i=0;i<16;++i) {
+        if (!parents.insert(root).second) return {};
+        std::uint32_t up=0;
+        if (!read_u32(root+0x1c,up) || !up) break;
+        root=up;
+    }
+    std::vector<std::uintptr_t> pending{root};
+    std::unordered_set<std::uintptr_t> seen;
+    while (!pending.empty() && seen.size()<4096) {
+        const auto so=pending.back();
+        pending.pop_back();
+        if (!so || !seen.insert(so).second) continue;
+        ++sample.visited;
+        std::uint32_t child=0,next=0;
+        if (read_u32(so+0x08,child) && child) pending.push_back(child);
+        if (read_u32(so+0x14,next) && next) pending.push_back(next);
+        auto director=r2fix::recognize_intro_director(
+            so,ray_so,
+            [](std::uintptr_t p,std::uint32_t& v){return read_u32(p,v);},
+            [](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);},
+            &sample.counters);
+        if (director.valid()) {
+            ++sample.matches;
+            sample.standin=director.standin_superobject;
+            sample.intelligence=director.intelligence;
+            // ending_behaviour is index 1 in the validated model array.
+            sample.behaviours=director.ending_behaviour-12;
+        }
+    }
+    if (sample.matches!=1) {
+        sample.standin=0;
+        sample.intelligence=0;
+        sample.behaviours=0;
+    }
+    return sample;
+}
+bool log_natural_intro_snapshot(const char* stage, DWORD t) {
+    if (!g_log) return false;
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    if (!base) return false;
+    std::uint32_t ray_so=0,ray_actor=0,standard=0,custom=0;
+    std::uint8_t flags=0;
+    if (!read_u32(base+kRaymanSuperObjectRva,ray_so) || !ray_so ||
+        !read_u32(std::uintptr_t(ray_so)+4,ray_actor) || !ray_actor ||
+        !read_u32(std::uintptr_t(ray_actor)+4,standard) || !standard ||
+        !read_u32(std::uintptr_t(standard)+0x24,custom) ||
+        !read_u8(std::uintptr_t(standard)+0x29,flags)) {
+        char missing[120]{};
+        std::snprintf(missing,sizeof(missing),
+            "RUNTIME-INTRO: natural=%s t=%ums unavailable (Rayman data)",stage,unsigned(t));
+        log_line(missing);
+        return false;
+    }
+    float xyz[3]{},camera[3]{},standin[3]{};
+    const bool ray_ok=read_superobject_position(ray_so,xyz);
+    std::uint32_t cam_actor=0,cam_standard=0,cam_so=0;
+    const bool cam_ok=
+        read_u32(base+kFixCameraActorRva,cam_actor) && cam_actor &&
+        read_u32(std::uintptr_t(cam_actor)+4,cam_standard) && cam_standard &&
+        read_u32(std::uintptr_t(cam_standard)+0x0c,cam_so) && cam_so &&
+        read_superobject_position(cam_so,camera);
+    char msg[320]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-INTRO: natural=%s t=%ums ray_custom=0x%08X ray_flags=0x%02X ray_xyz_valid=%u ray=(%.2f,%.2f,%.2f) camera_xyz_valid=%u camera=(%.2f,%.2f,%.2f)",
+        stage,unsigned(t),unsigned(custom),unsigned(flags),unsigned(ray_ok),
+        double(xyz[0]),double(xyz[1]),double(xyz[2]),unsigned(cam_ok),
+        double(camera[0]),double(camera[1]),double(camera[2]));
+    log_line(msg);
+    const auto director=sample_natural_director(ray_so);
+    if (director.matches==1 && director.intelligence && director.behaviours) {
+        g_observed_director_intelligence=director.intelligence;
+        g_observed_director_behaviours=director.behaviours;
+        g_observed_director_index=director.counters.current_behaviour_index;
+    }
+    const bool standin_ok=director.standin &&
+        read_superobject_position(director.standin,standin);
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-INTRO: director=%s t=%ums visited=%u matches=%u identified=%u armed=%u behaviour=%d suspended=%u standin_valid=%u standin=(%.2f,%.2f,%.2f)",
+        stage,unsigned(t),director.visited,director.matches,
+        director.counters.identified_directors,
+        director.counters.armed_directors,
+        director.counters.current_behaviour_index,
+        director.counters.rayman_suspended,
+        unsigned(standin_ok),double(standin[0]),double(standin[1]),double(standin[2]));
+    log_line(msg);
+    return true;
+}
+// Cheap change detector: the camera callback may not run for many
+// seconds during an engine-managed sequence, so fixed wall-clock
+// checkpoints cannot reconstruct that gap. When frames ARE observed,
+// capture state transitions immediately, without writing to any actor.
+void trace_natural_intro_changes(DWORD elapsed) {
+    if (!g_log || g_learn_change_snapshots >= kMaxLearnChangeSnapshots)
+        return;
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    std::uint32_t ray=0,actor=0,standard=0,custom=0;
+    std::uint8_t flags=0;
+    if (base &&
+        read_u32(base+kRaymanSuperObjectRva,ray) && ray &&
+        read_u32(std::uintptr_t(ray)+4,actor) && actor &&
+        read_u32(std::uintptr_t(actor)+4,standard) && standard &&
+        read_u32(std::uintptr_t(standard)+0x24,custom) &&
+        read_u8(std::uintptr_t(standard)+0x29,flags)) {
+        if (!g_have_ray_state) {
+            g_have_ray_state=true;
+            g_last_ray_custom=custom;
+            g_last_ray_flags=flags;
+        } else if (custom!=g_last_ray_custom || flags!=g_last_ray_flags) {
+            g_last_ray_custom=custom;
+            g_last_ray_flags=flags;
+            ++g_learn_change_snapshots;
+            log_natural_intro_snapshot("rayman-state-change",elapsed);
+        }
+    }
+    if (g_observed_director_intelligence && g_observed_director_behaviours &&
+        g_learn_change_snapshots < kMaxLearnChangeSnapshots) {
+        std::uint32_t current=0;
+        if (read_u32(g_observed_director_intelligence+8,current)) {
+            const auto first=g_observed_director_behaviours;
+            const auto active=std::uintptr_t(current);
+            if (active>=first && active<first+64u*12u &&
+                (active-first)%12u==0u) {
+                const int index=int((active-first)/12u);
+                if (index!=g_observed_director_index) {
+                    g_observed_director_index=index;
+                    ++g_learn_change_snapshots;
+                    char msg[160]{};
+                    std::snprintf(msg,sizeof(msg),
+                        "RUNTIME-INTRO: director behaviour transition t=%ums index=%d (observed only)",
+                        unsigned(elapsed),index);
+                    log_line(msg);
+                    log_natural_intro_snapshot("director-state-change",elapsed);
+                }
+            }
+        }
+    }
+}
+
+void poll_learn_intro_skip() {
+    if (!g_current_level) return;
+    if (!r2fix::is_first_playable_level(g_current_level)) {
+        g_progress_words = 0;
+        g_learn_logged = false;
+        g_learn_intro_seen = false;
+        g_learn_handover = false;
+        g_learn_handover_start = 0;
+        g_learn_intro_start = 0;
+        g_learn_trace_index = 0;
+        g_learn_first_valid_seen = false;
+        g_observed_director_intelligence = 0;
+        g_observed_director_behaviours = 0;
+        g_observed_director_index = -1;
+        g_have_ray_state = false;
+        g_last_ray_custom = 0;
+        g_last_ray_flags = 0;
+        g_learn_change_snapshots = 0;
+        return;
+    }
+    if (!g_progress_words) {
+        g_progress_words = find_story_words();
+        if (g_progress_words)
+            log_line("RUNTIME-INTRO: learn_10 progress array located via Fix actor variable 42");
+    }
+    if (!g_progress_words) {
+        if (!g_learn_logged) {
+            g_learn_logged = true;
+            log_line("RUNTIME-INTRO: learn_10 progress unavailable; skip disabled");
+        }
+        return;
+    }
+    bool handed_over = false;
+    if (!game_story_bit(g_progress_words, kLearnHandoverBit, handed_over))
+        return;
+    if (!g_learn_logged) {
+        g_learn_logged = true;
+        g_learn_intro_seen = !handed_over;
+        g_learn_intro_start = GetTickCount();
+        log_line(handed_over
+            ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
+            : "RUNTIME-INTRO: learn_10 skip disabled after visual regression; natural scene unchanged");
+        if (g_learn_intro_seen)
+            g_learn_first_valid_seen=log_natural_intro_snapshot("opening",0);
+    }
+    // Sample state changes whenever the callback actually runs; no timer
+    // or secondary thread is created. A handover may take 25-40+ seconds.
+    const DWORD elapsed=DWORD(GetTickCount()-g_learn_intro_start);
+    if (g_learn_intro_seen && !g_learn_handover && g_log)
+        trace_natural_intro_changes(elapsed);
+
+    // Consume overdue checkpoints in ONE pass. An earlier build replayed
+    // every missed deadline at 32s, creating nine near-duplicate snapshots.
+    if (!handed_over && g_learn_intro_seen && g_log &&
+        g_learn_trace_index<sizeof(kNaturalTraceTimes)/sizeof(kNaturalTraceTimes[0])) {
+        const unsigned before=g_learn_trace_index;
+        while (g_learn_trace_index <
+                   sizeof(kNaturalTraceTimes)/sizeof(kNaturalTraceTimes[0]) &&
+               elapsed>=kNaturalTraceTimes[g_learn_trace_index])
+            ++g_learn_trace_index;
+        if (g_learn_trace_index!=before) {
+            if (g_learn_trace_index-before>1) {
+                char gap[176]{};
+                std::snprintf(gap,sizeof(gap),
+                    "RUNTIME-INTRO: %u missed time checkpoints skipped at t=%ums (no retrospective samples)",
+                    g_learn_trace_index-before-1,unsigned(elapsed));
+                log_line(gap);
+            }
+            if (log_natural_intro_snapshot("during",elapsed) &&
+                !g_learn_first_valid_seen) {
+                g_learn_first_valid_seen=true;
+                log_line("RUNTIME-INTRO: first valid natural state sampled");
+            }
+        }
+    }
+    if (handed_over && g_learn_intro_seen && !g_learn_handover) {
+        g_learn_handover = true;
+        g_learn_handover_start = GetTickCount();
+        log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
+        log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
+    }
+    if (handed_over && g_learn_handover_start &&
+        DWORD(GetTickCount() - g_learn_handover_start) >= kNaturalHandoverFollowupMillis) {
+        g_learn_handover_start = 0;
+        log_natural_intro_snapshot("handover-plus-1s",DWORD(GetTickCount()-g_learn_intro_start));
+    }
+}
+
+void poll_second_intro_skip() {
+    const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
+    if (!native_change || !g_current_level) return;
+    const bool in_intro = r2fix::is_second_intro(g_current_level);
+    if (in_intro && !g_intro_level_logged) {
+        log_line("RUNTIME-INTRO: jail_20 detected; Space/Enter/Esc can skip to learn_10");
+        g_intro_level_logged = true;
+    } else if (!in_intro && g_intro_level_logged) {
+        g_intro_level_logged = false;
+    }
+    // Never read keyboard state unless the game owns the foreground.
+    // Being unfocused or holding a key while entering the scene is not a
+    // skip request. A fresh press is required after one key-free frame.
+    const bool foreground = game_window_is_foreground();
+    const bool down = foreground &&
+        ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0 ||
+         (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0 ||
+         (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
+    if (!g_intro_guard.update(g_current_level, down) || !foreground) return;
+
+    // The game itself queues the level change for its next engine tick.
+    // Do not force a renderer switch, destroy a video window or write
+    // save data. This is the same native API used by script transitions.
+    log_line("RUNTIME-INTRO: skip requested for jail_20 -> learn_10 (native level change, no save)");
+    native_change(kAfterIntroLevel, 0);
+}
+
 void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // Preserve the vertical viewing angle and expand the horizontal angle
     // as 4:3 -> the actual monitor aspect. Never modify 4:3 camera state.
@@ -73,6 +464,10 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
             std::memcpy(bytes + kAlphaXOffset, &expanded, sizeof(expanded));
     }
     g_original(device, viewport, camera);
+    // Camera adjustment executes on the game's own render/main thread.
+    // Use it only as a safe tick to request a *deferred* native transition.
+    poll_second_intro_skip();
+    poll_learn_intro_skip();
 }
 void write_jump(BYTE* at, const void* destination) {
     at[0] = 0xE9;  // JMP rel32
@@ -128,17 +523,229 @@ DWORD install_camera_hook() {
     log_line("RUNTIME-FOV: Hor+ camera detour installed on approved Rayman 2 executable");
     return 1;
 }
+
+
+void initialize_native_intro_skip() {
+    const auto* module = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if (!module) return;
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 ||
+        dos->e_lfanew >= 0x1000) return;
+    const auto* pe = reinterpret_cast<const IMAGE_NT_HEADERS32*>(module + dos->e_lfanew);
+    if (pe->Signature != IMAGE_NT_SIGNATURE ||
+        pe->FileHeader.TimeDateStamp != kOriginalTimestamp ||
+        pe->FileHeader.Machine != IMAGE_FILE_MACHINE_I386 ||
+        pe->OptionalHeader.SizeOfImage < kLevelNameRva + 30) {
+        log_line("RUNTIME-INTRO: unknown executable layout, skip disabled");
+        return;
+    }
+    const auto* level = reinterpret_cast<const char*>(module + kLevelNameRva);
+    auto* request = reinterpret_cast<const void*>(module + kRequestLevelRva);
+    MEMORY_BASIC_INFORMATION level_memory{}, code_memory{};
+    if (!VirtualQuery(level, &level_memory, sizeof(level_memory)) ||
+        !VirtualQuery(request, &code_memory, sizeof(code_memory)) ||
+        level_memory.State != MEM_COMMIT ||
+        code_memory.State != MEM_COMMIT ||
+        (level_memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)) ||
+        (code_memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+        return;
+    const DWORD protection = code_memory.Protect & 0xffu;
+    if (protection != PAGE_EXECUTE &&
+        protection != PAGE_EXECUTE_READ &&
+        protection != PAGE_EXECUTE_READWRITE &&
+        protection != PAGE_EXECUTE_WRITECOPY)
+        return;
+    g_current_level = level;
+    g_request_intro_level.store(
+        reinterpret_cast<RequestLevel>(const_cast<void*>(request)),
+        std::memory_order_release);
+    log_line("RUNTIME-INTRO: native Jail_20 skip armed; Learn_10 skip disabled after visual regression");
+}
+
+// Three game-side GLI driver callback slots, verified only for the SHA256-locked
+// retail executable supported by this project. Unlike a Glide-wide heuristic,
+// these callbacks are used for sprites, not every 3D triangle. The additional
+// xOoZ=1 check preserves perspective-projected world sprites.
+constexpr uintptr_t kPlainSpriteSlotRva = 0x104530; // VA 0x504530
+constexpr uintptr_t kUvSpriteSlotRva = 0x104524;    // VA 0x504524
+// The colored variant is used by the GLI font/sprite path in Rayman 2.
+constexpr uintptr_t kColorSpriteSlotRva = 0x104838; // VA 0x504838
+constexpr float kInternalGlideWidth = 1024.0f;
+using PlainSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float, void*);
+using UvSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float*, float, void*);
+using ColorSpriteFn = void (__cdecl*)(r2fix::HudVertex*, void*, float, void*);
+
+void report_first(std::atomic<bool>& flag, const char* line) {
+    if (!flag.exchange(true, std::memory_order_relaxed))
+        log_line(line);
+}
+
+void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
+    const auto original = reinterpret_cast<PlainSpriteFn>(
+        g_plain_sprite_original.load(std::memory_order_acquire));
+    if (!original) return;
+    report_first(g_plain_seen, "RUNTIME-HUD: plain sprite callback reached");
+    if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
+        original(quad, z, globals);
+        return;
+    }
+    report_first(g_plain_corrected, "RUNTIME-HUD: plain sprite 4:3 correction applied");
+    r2fix::HudVertex centered[4];
+    std::memcpy(centered, quad, sizeof(centered));
+    r2fix::center_screen_sprite_quad(centered, kInternalGlideWidth, g_hud_scale);
+    original(centered, z, globals);
+}
+
+void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
+                           float z, void* globals) {
+    const auto original = reinterpret_cast<UvSpriteFn>(
+        g_uv_sprite_original.load(std::memory_order_acquire));
+    if (!original) return;
+    report_first(g_uv_seen, "RUNTIME-HUD: UV sprite callback reached");
+    if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
+        original(quad, uv, z, globals);
+        return;
+    }
+    report_first(g_uv_corrected, "RUNTIME-HUD: UV sprite 4:3 correction applied");
+    r2fix::HudVertex centered[4];
+    std::memcpy(centered, quad, sizeof(centered));
+    r2fix::center_screen_sprite_quad(centered, kInternalGlideWidth, g_hud_scale);
+    original(centered, uv, z, globals);
+}
+
+
+void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
+                              float z, void* globals) {
+    const auto original = reinterpret_cast<ColorSpriteFn>(
+        g_color_sprite_original.load(std::memory_order_acquire));
+    if (!original) return;
+    report_first(g_color_seen, "RUNTIME-HUD: colored sprite callback reached");
+    if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
+        original(quad, colors, z, globals);
+        return;
+    }
+    report_first(g_color_corrected, "RUNTIME-HUD: colored sprite 4:3 correction applied");
+    r2fix::HudVertex centered[4];
+    std::memcpy(centered, quad, sizeof(centered));
+    r2fix::center_screen_sprite_quad(centered, kInternalGlideWidth, g_hud_scale);
+    original(centered, colors, z, globals);
+}
+
+bool executable_callback(const void* address) {
+    MEMORY_BASIC_INFORMATION info{};
+    if (!address || !VirtualQuery(address, &info, sizeof(info)) ||
+        info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD))
+        return false;
+    const DWORD protection = info.Protect & 0xff;
+    return protection == PAGE_EXECUTE ||
+           protection == PAGE_EXECUTE_READ ||
+           protection == PAGE_EXECUTE_READWRITE ||
+           protection == PAGE_EXECUTE_WRITECOPY;
+}
+
+bool writable_callback_slot(std::uintptr_t address) {
+    const void* slot = reinterpret_cast<const void*>(address);
+    MEMORY_BASIC_INFORMATION info{};
+    if (!slot || !VirtualQuery(slot, &info, sizeof(info)) ||
+        info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD))
+        return false;
+    const DWORD protection = info.Protect & 0xff;
+    return protection == PAGE_READWRITE ||
+           protection == PAGE_WRITECOPY ||
+           protection == PAGE_EXECUTE_READWRITE ||
+           protection == PAGE_EXECUTE_WRITECOPY;
+}
+
+void install_callback(void* volatile* slot, void* replacement,
+                      std::atomic<void*>& original, const char* message,
+                      bool& logged) {
+    if (!writable_callback_slot(reinterpret_cast<std::uintptr_t>(slot))) return;
+    void* current = InterlockedCompareExchangePointer(slot, nullptr, nullptr);
+    if (!current || current == replacement || !executable_callback(current))
+        return;
+    original.store(current, std::memory_order_release);
+    if (InterlockedCompareExchangePointer(slot, replacement, current) == current &&
+        !logged) {
+        logged = true;
+        log_line(message);
+    }
+}
+
+DWORD WINAPI monitor_hud_callbacks(void*) {
+    auto* module = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if (!module) return 0;
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+    const auto* pe = reinterpret_cast<const IMAGE_NT_HEADERS32*>(module + dos->e_lfanew);
+    if (pe->Signature != IMAGE_NT_SIGNATURE ||
+        pe->OptionalHeader.SizeOfImage < kColorSpriteSlotRva + sizeof(void*)) {
+        log_line("RUNTIME-HUD: callback slots outside approved executable image");
+        return 0;
+    }
+    // The renderer initializes these callbacks after the early DLL injection.
+    // Keep them patched if the game later recreates its Glide driver.
+    auto* plain = reinterpret_cast<void* volatile*>(
+        const_cast<BYTE*>(module + kPlainSpriteSlotRva));
+    auto* uv = reinterpret_cast<void* volatile*>(
+        const_cast<BYTE*>(module + kUvSpriteSlotRva));
+    auto* colors = reinterpret_cast<void* volatile*>(
+        const_cast<BYTE*>(module + kColorSpriteSlotRva));
+    bool plain_logged = false;
+    bool uv_logged = false;
+    bool color_logged = false;
+    log_line("RUNTIME-HUD: 4:3 sprite callback monitor started");
+    for (unsigned iteration = 0;; ++iteration) {
+        install_callback(plain, reinterpret_cast<void*>(&hud_plain_sprite),
+                         g_plain_sprite_original,
+                         "RUNTIME-HUD: centered 4:3 screen-space sprites enabled",
+                         plain_logged);
+        install_callback(uv, reinterpret_cast<void*>(&hud_uv_sprite),
+                         g_uv_sprite_original,
+                         "RUNTIME-HUD: centered 4:3 UV sprites enabled",
+                         uv_logged);
+        install_callback(colors, reinterpret_cast<void*>(&hud_color_sprite),
+                         g_color_sprite_original,
+                         "RUNTIME-HUD: centered 4:3 colored sprites enabled",
+                         color_logged);
+        if (iteration == 10 || iteration == 120) {
+            // No raw addresses or personal data; useful if callbacks never
+            // become available, or become available but never execute.
+            char status[160]{};
+            std::snprintf(status, sizeof(status),
+                          "RUNTIME-HUD: callback installed plain=%d uv=%d colors=%d; invoked plain=%d uv=%d colors=%d",
+                          plain_logged ? 1 : 0, uv_logged ? 1 : 0, color_logged ? 1 : 0,
+                          g_plain_seen.load() ? 1 : 0, g_uv_seen.load() ? 1 : 0,
+                          g_color_seen.load() ? 1 : 0);
+            log_line(status);
+        }
+        Sleep(500);
+    }
+}
+
+void start_hud_monitor() {
+    if (g_hud_scale >= 1.0f ||
+        InterlockedCompareExchange(&g_hud_worker_started, 1, 0) != 0)
+        return;
+    HANDLE thread = CreateThread(nullptr, 0, monitor_hud_callbacks,
+                                 nullptr, 0, nullptr);
+    if (!thread) {
+        InterlockedExchange(&g_hud_worker_started, 0);
+        log_line("RUNTIME-HUD: could not create callback monitor thread");
+        return;
+    }
+    CloseHandle(thread);
+}
 } // namespace
 
 extern "C" __declspec(dllexport) unsigned int __cdecl Rayman2Fix_RuntimeApiVersion() {
     return 2;
 }
 extern "C" __declspec(dllexport) const char* __cdecl Rayman2Fix_RuntimeStatus() {
-    return "Rayman2Fix x86 experimental Hor+ camera runtime";
+    return "Rayman2Fix x86 Hor+ camera, 4:3 HUD and scoped native introduction skips";
 }
 
 // Called on a separate thread after LoadLibrary, NEVER in DllMain.
-// Return 1 on installed hook, 2 for 4:3 (no hook), 3 for an unknown
+// Return 1 on installed hook, 3 for an unknown
 // executable/bytes, 4 for a memory-protection error and 5 for bad settings.
 extern "C" __declspec(dllexport)
 DWORD WINAPI Rayman2Fix_Initialize(void* input) {
@@ -153,9 +760,18 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
                          static_cast<float>(settings->output_height);
     if (!std::isfinite(aspect) || aspect <= 0.1f || aspect > 10.0f) return 5;
     g_aspect = aspect;
+    g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
+                                      settings->output_height);
     g_log = settings->logging != 0;
-    if (aspect <= 1.334f) return 2;
-    return install_camera_hook();
+    // This hook is also used for the targeted intro-skip poll on 4:3.
+    // For narrow monitors camera_hor_plus leaves the FOV unchanged.
+    const DWORD camera_status = install_camera_hook();
+    // Unknown/unsupported game versions never receive additional hooks.
+    if (camera_status == 1) {
+        initialize_native_intro_skip();
+        start_hud_monitor();
+    }
+    return camera_status;
 }
 
 BOOL APIENTRY DllMain(HMODULE, DWORD, LPVOID) {
