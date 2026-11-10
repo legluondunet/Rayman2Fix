@@ -1,5 +1,6 @@
 #include "rayman2fix/intro_skip.hpp"
 #include "rayman2fix/story_lookup.hpp"
+#include "rayman2fix/scene_intro.hpp"
 #include <unordered_map>
 #include <cstdint>
 #include <cassert>
@@ -121,6 +122,72 @@ int main() {
     mem.u8[buffer + 0x120 + 4] = 45;
     mem.u32.erase(actor + 0x0C);
     assert(lookup() == 0);              // inaccessible brain pointer
+
+
+    // A read-only candidate search only accepts a scene actor owning
+    // its own custom bit 28, directing Rayman and a distinct stand-in
+    // toward an unattached valid waypoint.
+    struct Demo {
+        std::unordered_map<std::uintptr_t,std::uint32_t> a;
+        std::unordered_map<std::uintptr_t,std::uint8_t> b;
+        bool read32(std::uintptr_t p,std::uint32_t& v) const {
+            auto it=a.find(p); if(it==a.end()) return false;
+            v=it->second; return true;
+        }
+        bool read8(std::uintptr_t p,std::uint8_t& v) const {
+            auto it=b.find(p); if(it==b.end()) return false;
+            v=it->second; return true;
+        }
+    } demo;
+    constexpr std::uintptr_t scene=0x70000, ray=0x80000, actor=0x90000,
+       standard=0xA0000, brain=0xB0000, mind=0xC0000, memory=0xD0000,
+       ref=0xE0000, decl=0xF0000, infos=0x100000, buffer=0x110000,
+       waypoint=0x120000, standin=0x130000, transform=0x140000;
+    demo.a[scene]=2; demo.a[scene+4]=actor;
+    demo.a[actor+4]=standard; demo.a[standard+0x24]=1u<<27;
+    demo.a[actor+0x0c]=brain; demo.a[brain]=mind; demo.a[mind+0x0c]=memory;
+    demo.a[memory]=ref; demo.a[ref]=decl;
+    demo.a[decl+4]=infos; demo.a[decl+0x0c]=7;
+    demo.a[memory+8]=buffer;
+    for(unsigned i : {1u,2u,3u,4u}) demo.a[infos+i*16]=i*8;
+    demo.a[infos+1*16+4]=8; demo.a[infos+2*16+4]=9;
+    demo.a[infos+3*16+4]=9; demo.a[infos+4*16+4]=9;
+    demo.a[buffer+8]=waypoint; demo.a[buffer+16]=scene;
+    demo.a[buffer+24]=ray; demo.a[buffer+32]=standin;
+    demo.a[waypoint+0x10]=0; demo.a[standin]=2;
+    demo.a[standin+0x24]=transform;
+    auto fbits=[](float x) {
+        std::uint32_t v; std::memcpy(&v,&x,sizeof(v)); return v;
+    };
+    demo.a[waypoint]=fbits(30.0f);
+    demo.a[waypoint+4]=fbits(295.0f);
+    demo.a[waypoint+8]=fbits(-7.0f);
+    demo.a[transform+4]=fbits(55.0f);
+    demo.a[transform+8]=fbits(260.0f);
+    demo.a[transform+12]=fbits(-7.0f);
+    auto detect=[&] {
+        return r2fix::recognize_intro_director(
+            scene,ray,
+            [&](std::uintptr_t p,std::uint32_t& v){return demo.read32(p,v);},
+            [&](std::uintptr_t p,std::uint8_t& v){return demo.read8(p,v);});
+    };
+    const auto candidate=detect();
+    assert(candidate.valid());
+    assert(candidate.standin_transform==transform);
+    assert(candidate.destination[0]==30.0f);
+    demo.a[buffer+24]=scene;
+    assert(!detect().valid());       // never skip scene with incorrect Rayman
+    demo.a[buffer+24]=ray;
+    demo.a[infos+4*16+4]=5;
+    assert(!detect().valid());       // wrong variable kind
+    demo.a[infos+4*16+4]=9;
+    demo.a[waypoint+0x10]=scene;
+    assert(!detect().valid());       // attached waypoint cannot be teleported to
+    demo.a[waypoint+0x10]=0;
+    demo.a[standard+0x24]=0;
+    assert(!detect().valid());       // director isn't armed
+    demo.a[standard+0x24]=1u<<27;
+    assert(detect().valid());
 
     return 0;
 }
