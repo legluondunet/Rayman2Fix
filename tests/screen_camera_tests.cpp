@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 #include <initializer_list>
+#include <cstdint>
 int main() {
     const auto near=[](float a,float b){return std::fabs(a-b)<0.0001f;};
     int overlay=1,world=2;
@@ -28,5 +29,36 @@ int main() {
     assert(near(r2fix::projection_alpha_x(1.0f,
                        std::numeric_limits<float>::quiet_NaN(),
                        16.0f/9.0f,false),1.0f));
+    // Original engine viewport is 1024x768, but the horizontal
+    // output geometry has to match the centered 4:3 HUD canvas.
+    const r2fix::ScreenWorldViewport full{1024,768,0,0};
+    r2fix::ScreenWorldViewport narrow{};
+    assert(r2fix::center_screen_world_viewport(full,0.75f,narrow));
+    assert(narrow.width==768 && narrow.height==768);
+    assert(narrow.left==128 && narrow.top==0);
+    assert(near(narrow.left+240.0f/1024.0f*narrow.width,
+                128.0f+240.0f*0.75f));
+    assert(near(narrow.left+800.0f/1024.0f*narrow.width,
+                128.0f+800.0f*0.75f));
+    const r2fix::ScreenWorldViewport offset{1024,768,50,23};
+    assert(r2fix::center_screen_world_viewport(offset,.75f,narrow));
+    assert(narrow.width==768 && narrow.height==768 &&
+           narrow.left==178 && narrow.top==23);
+    assert(r2fix::center_screen_world_viewport(
+        full,(4.0f/3.0f)/(21.0f/9.0f),narrow));
+    assert(narrow.width>=584 && narrow.width<=586);
+    assert(narrow.left>=219 && narrow.left<=220);
+    assert(!r2fix::center_screen_world_viewport(full,1.0f,narrow));
+    assert(!r2fix::center_screen_world_viewport(full,0.0f,narrow));
+    assert(!r2fix::center_screen_world_viewport(full,
+        std::numeric_limits<float>::quiet_NaN(),narrow));
+    assert(!r2fix::center_screen_world_viewport(full,
+        std::numeric_limits<float>::infinity(),narrow));
+    const r2fix::ScreenWorldViewport invalid{64,768,0,0};
+    assert(!r2fix::center_screen_world_viewport(invalid,.75f,narrow));
+    const r2fix::ScreenWorldViewport giant{30000,768,0,0};
+    assert(!r2fix::center_screen_world_viewport(giant,.75f,narrow));
+    assert(full.width==1024 && full.height==768 &&
+           full.left==0 && full.top==0); // never modify source
     return 0;
 }

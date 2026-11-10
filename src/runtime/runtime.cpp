@@ -68,6 +68,8 @@ CameraAdjust g_original = nullptr;
 std::uintptr_t g_screen_camera_slot = 0;
 std::atomic<bool> g_native_ui_camera_seen{false};
 std::atomic<bool> g_world_camera_seen{false};
+std::atomic<bool> g_ui_viewport_adjusted{false};
+std::atomic<bool> g_ui_viewport_rejected{false};
 using RequestLevel = void (__cdecl*)(const char*, unsigned char);
 std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
@@ -1138,7 +1140,52 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
                 log_line("RUNTIME-FOV: Hor+ enabled for world cameras; UI screen camera excluded");
         }
     }
-    g_original(device, viewport, camera);
+    // Screen-world objects, including dialogue letters and the blue
+    // continuation arrow, are projected through a separate viewport.
+    // The original GLI viewport spans the entire output even when the
+    // special camera itself retains its native FOV. Use the same
+    // centered 4:3 horizontal transform as the 2D HUD renderer.
+    // 0x4228D0 hands 0x422AB0 a 0x70-byte STACK-LOCAL copy of the
+    // native viewport. Modify ONLY an extra local shadow here, and
+    // let the untouched original routine produce the projection.
+    void* projection_viewport=viewport;
+    alignas(4) std::uint8_t ui_projection[0x70]{};
+    if(native_ui && viewport && g_hud_scale<0.9999f) {
+        const auto* source=static_cast<const std::uint8_t*>(viewport);
+        r2fix::ScreenWorldViewport rect{};
+        std::memcpy(&rect.width,source+0x08,sizeof(rect.width));
+        std::memcpy(&rect.height,source+0x0C,sizeof(rect.height));
+        std::memcpy(&rect.left,source+0x58,sizeof(rect.left));
+        std::memcpy(&rect.top,source+0x5C,sizeof(rect.top));
+        r2fix::ScreenWorldViewport centered{};
+        if(r2fix::center_screen_world_viewport(
+              rect,g_hud_scale,centered)) {
+            std::memcpy(ui_projection,viewport,sizeof(ui_projection));
+            std::memcpy(ui_projection+0x08,&centered.width,
+                        sizeof(centered.width));
+            std::memcpy(ui_projection+0x58,&centered.left,
+                        sizeof(centered.left));
+            projection_viewport=ui_projection;
+            if(!g_ui_viewport_adjusted.exchange(
+                    true,std::memory_order_relaxed)) {
+                char message[224]{};
+                std::snprintf(message,sizeof(message),
+                    "RUNTIME-VIEWPORT: screen-world 4:3 centered native_width=%d native_x=%d projected_width=%d projected_x=%d height=%d (stack-only projection)",
+                    int(rect.width),int(rect.left),int(centered.width),
+                    int(centered.left),int(rect.height));
+                log_line(message);
+            }
+        } else if(!g_ui_viewport_rejected.exchange(
+                    true,std::memory_order_relaxed)) {
+            char message[200]{};
+            std::snprintf(message,sizeof(message),
+                "RUNTIME-VIEWPORT: screen-world geometry rejected width=%d height=%d x=%d y=%d (native projection retained)",
+                int(rect.width),int(rect.height),int(rect.left),
+                int(rect.top));
+            log_line(message);
+        }
+    }
+    g_original(device, projection_viewport, camera);
     // Camera adjustment executes on the game's own render/main thread.
     // Use it only as a safe tick to request a *deferred* native transition.
     poll_second_intro_skip();

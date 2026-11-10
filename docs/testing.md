@@ -201,6 +201,37 @@ still use the centered 4:3 canvas. Remove the entire former
 `JFFTXT_vDrawString` interception and all Learn_10-specific font
 heuristics/tests, without touching original dialogue assets/saves.
 
+**Screen-world viewport projection correction (17:37 Wine screenshot):**
+The screen camera was correctly recognized and excluded from Hor+,
+but the projected text and blue arrow still spill outside the already
+centered 4:3 black dialogue box. Investigation of the exact approved
+Rayman2.exe disassembly shows the viewport used by this pass still
+covers 100% of the internal 1024-pixel horizontal image.
+
+The native GLI functions `0x420660` and `0x422AB0` expose
+viewport width/height in the 0x70-byte struct at +0x08/+0x0C and
+origins at +0x58/+0x5C; `0x420A80` copies that structure onto the
+stack for camera projection. The runtime now supplies the original
+projection function with a second temporary copy **only for the
+engine-owned screen-world UI camera**. It scales viewport width by
+`(4/3) / output_aspect`, and offsets its left edge by half of the
+removed width, preserving height, vertical position and native FOV.
+
+For 1920x1080 with 1024x768 internal output, the expected viewport
+projected geometry is width **768**, left **128**, height **768**.
+This matches the same global horizontal 4:3 centering used by the
+existing HUD sprite callbacks. Other cameras, 3D panoramas, text
+assets, save games and the original viewport storage are untouched.
+The correction applies to every level and aspect, never to named
+dialogues, font sizes or individual arrow sprites.
+
+**The next owner log must contain** `RUNTIME-VIEWPORT:
+screen-world 4:3 centered native_width=1024 native_x=0
+projected_width=768 projected_x=128 height=768`. If the engine
+returns different values, the patch logs the actual viewport geometry
+or safely retains the native projection; the visual result must
+still be checked against the Dreamcast screenshot.
+
 **Visual validation required on Windows and Wine:**
 - Verify the log says `RUNTIME-FOV: native 4:3 screen-world camera
   preserved`, ideally alphaX≈1.500 and alphaY≈0.750.
