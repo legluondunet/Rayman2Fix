@@ -73,9 +73,14 @@ cleanup/behaviour-switch region). A scan
 duration is recorded in milliseconds and raw pointer operands remain
 redacted. Output remains bounded by a shared log-line budget.
 During natural state snapshots, only the low byte of integer-typed
-director variables 91 and 47 is observed (with validity/type labels)
-to correlate script conditions with the native handover. Pointer-valued
-variables are never logged. **It does not execute, fast-forward or
+director variables 91, 47, 50 and 110 is observed (with validity/type
+labels). The additional vars 50 and 110 are involved in separate branches
+of the original behaviour-3 rule 2; its switch to behaviour 1 checks
+var110==1. Observed address-validated low bytes of 50 and 110 are
+monitored for changes on the camera callback, limited to sixteen event
+logs across the intro, with timestamps and without changing either
+variable. Pointer-valued variables are never logged. Neither var110 nor
+any other script variable is presently used to bypass the cutscene. **It does not execute, fast-forward or
 modify a script.** We will use the data to identify which native
 cleanup operations a safe future skip must preserve.
 

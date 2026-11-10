@@ -80,6 +80,17 @@ std::uint32_t g_last_ray_custom = 0;
 std::uint8_t g_last_ray_flags = 0;
 unsigned g_learn_change_snapshots = 0;
 constexpr unsigned kMaxLearnChangeSnapshots = 8;
+// Cached read-only byte locations from the *verified* director's integer
+// variables. A failed ReadProcessMemory simply stops sampling.
+struct ObservedDirectorByte {
+    std::uintptr_t location = 0;
+    unsigned type = 0;
+    unsigned previous = 0;
+};
+ObservedDirectorByte g_director_var50{};
+ObservedDirectorByte g_director_var110{};
+unsigned g_director_gate_changes = 0;
+constexpr unsigned kMaxDirectorGateChanges = 16;
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
@@ -443,7 +454,8 @@ void log_compiled_director_model(std::uintptr_t behaviours) {
 // no pointer-valued variables are logged. This is passive observation to
 // understand whether the original exit branch is triggered by a flag.
 bool read_director_integer_low_byte(std::uintptr_t so,unsigned index,
-                                    unsigned& kind,unsigned& low) {
+                                    unsigned& kind,unsigned& low,
+                                    std::uintptr_t* location=nullptr) {
     std::uint32_t actor=0,brain=0,mind=0,memory=0,decl_ref=0;
     std::uint32_t decl=0,infos=0,buffer=0,offset=0,type=0;
     std::uint8_t count=0,value=0;
@@ -464,6 +476,7 @@ bool read_director_integer_low_byte(std::uintptr_t so,unsigned index,
         return false;
     kind=unsigned(type);
     low=unsigned(value);
+    if (location) *location=std::uintptr_t(buffer)+offset;
     return true;
 }
 bool log_natural_intro_snapshot(const char* stage, DWORD t) {
@@ -513,14 +526,29 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     }
     const bool standin_ok=director.standin &&
         read_superobject_position(director.standin,standin);
-    unsigned t91=0,v91=0,t47=0,v47=0;
+    unsigned t91=0,v91=0,t47=0,v47=0,t50=0,v50=0,t110=0,v110=0;
+    std::uintptr_t address50=0,address110=0;
     const bool has91=director.superobject &&
         read_director_integer_low_byte(director.superobject,91u,t91,v91);
     const bool has47=director.superobject &&
         read_director_integer_low_byte(director.superobject,47u,t47,v47);
+    const bool has50=director.superobject &&
+        read_director_integer_low_byte(director.superobject,50u,t50,v50,&address50);
+    const bool has110=director.superobject &&
+        read_director_integer_low_byte(director.superobject,110u,t110,v110,&address110);
+    // Only initialize a watched variable when its exact verified address
+    // changes; do not overwrite the comparison state during snapshots.
+    if (has50 && address50 && g_director_var50.location!=address50)
+        g_director_var50={address50,t50,v50};
+    if (has110 && address110 && g_director_var110.location!=address110)
+        g_director_var110={address110,t110,v110};
     std::snprintf(msg,sizeof(msg),
         "RUNTIME-INTRO: director-vars=%s t=%ums var91_valid=%u var91_type=%u var91_low8=%u var47_valid=%u var47_type=%u var47_low8=%u (read-only)",
         stage,unsigned(t),unsigned(has91),t91,v91,unsigned(has47),t47,v47);
+    log_line(msg);
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-INTRO: director-gates=%s t=%ums var50_valid=%u var50_type=%u var50_low8=%u var110_valid=%u var110_type=%u var110_low8=%u (read-only)",
+        stage,unsigned(t),unsigned(has50),t50,v50,unsigned(has110),t110,v110);
     log_line(msg);
     std::snprintf(msg,sizeof(msg),
         "RUNTIME-INTRO: director=%s t=%ums visited=%u matches=%u identified=%u armed=%u behaviour=%d suspended=%u standin_valid=%u standin=(%.2f,%.2f,%.2f)",
@@ -584,6 +612,31 @@ void trace_natural_intro_changes(DWORD elapsed) {
     }
 }
 
+// Observe script-owned boolean gate transitions, never modify them.
+// The script condition at b3/rule2 nodes 927-939 is var110==1; direct
+// switching to behaviour 1 previously broke graphical state. Tracking
+// both var50 and var110 may show the necessary ordering of native cleanup.
+void trace_native_exit_gates(DWORD elapsed) {
+    if (!g_log || g_director_gate_changes>=kMaxDirectorGateChanges)
+        return;
+    auto sample=[&](const char* name,ObservedDirectorByte& v) {
+        if (!v.location || g_director_gate_changes>=kMaxDirectorGateChanges)
+            return;
+        std::uint8_t now=0;
+        if (!read_u8(v.location,now)) return;
+        if (unsigned(now)==v.previous) return;
+        char message[192]{};
+        std::snprintf(message,sizeof(message),
+            "RUNTIME-INTRO: director-gate-change t=%ums %s type=%u old=%u new=%u (observed, not written)",
+            unsigned(elapsed),name,v.type,v.previous,unsigned(now));
+        v.previous=unsigned(now);
+        ++g_director_gate_changes;
+        log_line(message);
+    };
+    sample("var50",g_director_var50);
+    sample("var110",g_director_var110);
+}
+
 void poll_learn_intro_skip() {
     if (!g_current_level) return;
     if (!r2fix::is_first_playable_level(g_current_level)) {
@@ -603,6 +656,9 @@ void poll_learn_intro_skip() {
         g_last_ray_custom = 0;
         g_last_ray_flags = 0;
         g_learn_change_snapshots = 0;
+        g_director_var50={};
+        g_director_var110={};
+        g_director_gate_changes=0;
         return;
     }
     if (!g_progress_words) {
@@ -633,8 +689,10 @@ void poll_learn_intro_skip() {
     // Sample state changes whenever the callback actually runs; no timer
     // or secondary thread is created. A handover may take 25-40+ seconds.
     const DWORD elapsed=DWORD(GetTickCount()-g_learn_intro_start);
-    if (g_learn_intro_seen && !g_learn_handover && g_log)
+    if (g_learn_intro_seen && !g_learn_handover && g_log) {
         trace_natural_intro_changes(elapsed);
+        trace_native_exit_gates(elapsed);
+    }
 
     // Consume overdue checkpoints in ONE pass. An earlier build replayed
     // every missed deadline at 32s, creating nine near-duplicate snapshots.
