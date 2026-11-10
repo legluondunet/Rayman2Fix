@@ -254,7 +254,7 @@ void poll_learn_intro_skip() {
         g_learn_intro_start = GetTickCount();
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable, skip disabled"
-            : "RUNTIME-INTRO: learn_10 intro active; Enter requests verified native end behaviour");
+            : "RUNTIME-INTRO: learn_10 scripted intro active; Enter requests guarded native exit");
     }
     if (handed_over && g_learn_requested && !g_learn_handover) {
         g_learn_handover = true;
@@ -285,13 +285,18 @@ void poll_learn_intro_skip() {
                   stats.armed_directors, stats.models_with_variables);
     log_line(message);
     std::snprintf(message, sizeof(message),
-                  "RUNTIME-INTRO: native director identified=%u null_waypoint=%u valid_behaviours=%u active_intro=%u other_behaviour=%u",
+                  "RUNTIME-INTRO: director identified=%u null_waypoint=%u table=%u active_index=%d index5=%u other=%u",
                   stats.identified_directors,stats.null_waypoints,
-                  stats.valid_behaviour_tables,stats.in_intro_behaviour,
-                  stats.other_behaviours);
+                  stats.valid_behaviour_tables,stats.current_behaviour_index,
+                  stats.in_intro_behaviour,stats.other_behaviours);
+    log_line(message);
+    std::snprintf(message, sizeof(message),
+                  "RUNTIME-INTRO: director guards foreign_behaviour=%u already_ending=%u rayman_suspended=%u",
+                  stats.outside_table,stats.already_ending,
+                  stats.rayman_suspended);
     log_line(message);
     if (!director.valid()) {
-        log_line("RUNTIME-INTRO: no unique native behaviour-5 director; release Enter and retry while intro active");
+        log_line("RUNTIME-INTRO: no unique verified suspended-Rayman scene director; release Enter to retry");
         return;
     }
     if (!request_native_scene_finish(director)) {
@@ -300,7 +305,7 @@ void poll_learn_intro_skip() {
     }
     g_learn_requested = true;
     g_learn_skip_start = GetTickCount();
-    log_line("RUNTIME-INTRO: native director behaviour 5->1 accepted; awaiting scripted handover");
+    log_line("RUNTIME-INTRO: native director end-behaviour 1 accepted; awaiting scripted handover");
 }
 
 void poll_second_intro_skip() {

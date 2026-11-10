@@ -17,9 +17,11 @@ namespace r2fix {
 // AI_tdstComport = 12 bytes on x86.
 // See original symbols in raytools/ACP_Ray2, AI/AI.h and AI/AI_Scr.h.
 //
-// Behaviour 5 performs the cutscene. Behaviour 1 is the original
-// controller's end script (clear bit 28, retire director). Switching to it
-// through AI_fn_ucChangeComportIntell keeps the game's own script cleanup.
+// Behaviour 1 is the native director's ending script (clear bit 28,
+// retire director). Other behaviours can be active during the opening.
+// Accept only a real normal-behaviour index in the director's own table,
+// never the end index 1, and require Rayman to actually be suspended.
+// Switching via AI_fn_ucChangeComportIntell keeps the native cleanup.
 struct IntroDirectorScanStats {
     unsigned actor_objects = 0;
     unsigned armed_directors = 0;
@@ -29,6 +31,10 @@ struct IntroDirectorScanStats {
     unsigned valid_behaviour_tables = 0;
     unsigned in_intro_behaviour = 0;
     unsigned other_behaviours = 0;
+    unsigned outside_table = 0;
+    unsigned already_ending = 0;
+    unsigned rayman_suspended = 0;
+    int current_behaviour_index = -1;
 };
 
 struct IntroDirector {
@@ -87,9 +93,8 @@ IntroDirector recognize_intro_director(std::uintptr_t so,
         if (!waypoint) ++stats->null_waypoints;
     }
 
-    // Use *actual live engine model* instead of invented addresses or
-    // per-level offsets. Require one of its six+ native behaviours to be
-    // running and exactly the documented intro behaviour (index 5).
+    // Use the live model to validate the normal behaviour list, with
+    // no invented per-level behaviour pointers or gameplay addresses.
     std::uint32_t model=0, script=0, behaviours=0, count=0;
     std::uint32_t intelligence=0,current=0,rule=0,schedule=0;
     if (!read32(mind,model) || !model ||
@@ -103,12 +108,41 @@ IntroDirector recognize_intro_director(std::uintptr_t so,
         (!rule && !schedule)) return result;
     if (stats) ++stats->valid_behaviour_tables;
 
-    const std::uintptr_t intro=std::uintptr_t(behaviours)+5*12;
-    if (current!=intro) {
-        if (stats) ++stats->other_behaviours;
+    // The live pointer is authoritative. Earlier versions expected
+    // behavior 5 on every frame; actual Wine traces show a different
+    // behavior at 1s, 4s, 7s and 22s despite the director still running.
+    // Never permit a foreign pointer or an out-of-range behavior.
+    const auto first=std::uintptr_t(behaviours);
+    const auto active=std::uintptr_t(current);
+    if (active<first || active>=first+std::uintptr_t(count)*12 ||
+        (active-first)%12!=0) {
+        if (stats) ++stats->outside_table;
         return result;
     }
-    if (stats) ++stats->in_intro_behaviour;
+    const auto index=unsigned((active-first)/12);
+    if (stats) {
+        stats->current_behaviour_index=int(index);
+        if (index==5) ++stats->in_intro_behaviour;
+        else ++stats->other_behaviours;
+    }
+    // Behaviour 1 is already the exit. Never re-enter it. Nor should
+    // an unrelated post-intro state (index >5) be forced to exit.
+    if (index==1) {
+        if (stats) ++stats->already_ending;
+        return result;
+    }
+    if (index>5) return result;
+
+    // Scripts hide Rayman and switch off his brain with custom bits
+    // 14 and 17 (one-based). This must be true before invoking the
+    // scene's exit script, even when the story handover flag is clear.
+    std::uint32_t ray_actor=0,ray_standard=0,ray_custom=0;
+    constexpr std::uint32_t suspended=(1u<<13)|(1u<<16);
+    if (!read32(rayman_so+4,ray_actor) || !ray_actor ||
+        !read32(std::uintptr_t(ray_actor)+4,ray_standard) || !ray_standard ||
+        !read32(std::uintptr_t(ray_standard)+0x24,ray_custom) ||
+        (ray_custom & suspended)!=suspended) return result;
+    if (stats) ++stats->rayman_suspended;
     result.superobject=so;
     result.intelligence=intelligence;
     result.ending_behaviour=std::uintptr_t(behaviours)+12;

@@ -34,10 +34,14 @@ intro director's waypoint variable remains NULL throughout the scene.
 On a fresh Enter press while story bit 1091 is clear, the runtime
 recognizes the director through its armed flag 28 and independent
 references (var2=self, var3=Rayman, var4=stand-in). If and only if
-**one** matching director is currently running original normal behaviour
-**5**, it invokes the original x86 engine's
+**one** matching director has an active normal behaviour in its own
+model table (index 0 to 5, excluding the existing exit index 1), **and**
+Rayman has both native suspended-scene custom bits 14 and 17 set,
+it invokes the original x86 engine's
 \`AI_fn_ucChangeComportIntell\` (VA \`0x481080\`) to select that
 model's behaviour **1**, the original ending script.
+The current native behaviour index is recorded in the log; foreign,
+misaligned, late or already-ending behaviour pointers are rejected.
 The model, normal intelligence and behaviour pointers are resolved
 from the live game structures rather than per-level addresses.
 The scene itself remains responsible for clearing its flags and

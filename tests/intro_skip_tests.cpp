@@ -144,6 +144,7 @@ int main() {
     constexpr std::uintptr_t infos=0x100000,buffer=0x110000,standin=0x130000;
     constexpr std::uintptr_t model=0x140000,script=0x150000,behaviours=0x160000;
     constexpr std::uintptr_t normal=0x170000;
+    constexpr std::uintptr_t rayactor=0x1A0000,raystandard=0x1B0000;
     m.a[so]=2;m.a[so+4]=actor;
     m.a[actor+4]=standard;m.a[standard+0x24]=1u<<27;
     m.a[actor+0x0c]=brain;m.a[brain]=mind;
@@ -155,6 +156,9 @@ int main() {
     m.a[buffer+8]=0; // The ACTUAL intro's destination remains null.
     m.a[buffer+16]=so;m.a[buffer+24]=ray;m.a[buffer+32]=standin;
     m.a[standin]=2;
+    m.a[ray+4]=rayactor;
+    m.a[rayactor+4]=raystandard;
+    m.a[raystandard+0x24]=(1u<<13)|(1u<<16);
     m.a[mind]=model;m.a[model]=script;
     m.a[script]=behaviours;m.a[script+4]=7;
     m.a[mind+4]=normal;m.a[normal+8]=behaviours+5*12;
@@ -172,11 +176,27 @@ int main() {
     assert(found.ending_behaviour==behaviours+12);
     assert(stats.identified_directors==1 && stats.null_waypoints==1);
     assert(stats.valid_behaviour_tables==1 && stats.in_intro_behaviour==1);
+    assert(stats.rayman_suspended==1 && stats.current_behaviour_index==5);
+    // Native intro can have other current normal behaviours at the
+    // moment of the press, but only if Rayman is script-controlled.
     m.a[normal+8]=behaviours+2*12;
     r2fix::IntroDirectorScanStats other{};
-    assert(!detect(&other).valid());
-    assert(other.other_behaviours==1);
+    assert(detect(&other).valid());
+    assert(other.other_behaviours==1 && other.current_behaviour_index==2);
+    m.a[normal+8]=behaviours+12;
+    r2fix::IntroDirectorScanStats ending{};
+    assert(!detect(&ending).valid());
+    assert(ending.already_ending==1);
+    m.a[normal+8]=behaviours+5*12+4;
+    r2fix::IntroDirectorScanStats misaligned{};
+    assert(!detect(&misaligned).valid());
+    assert(misaligned.outside_table==1);
     m.a[normal+8]=behaviours+5*12;
+    m.a[raystandard+0x24]=1u<<13;
+    r2fix::IntroDirectorScanStats unsuspended{};
+    assert(!detect(&unsuspended).valid());
+    assert(unsuspended.rayman_suspended==0);
+    m.a[raystandard+0x24]=(1u<<13)|(1u<<16);
     m.a[script+4]=3;
     assert(!detect().valid()); // Need >=6 possible behaviours
     m.a[script+4]=7;
