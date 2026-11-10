@@ -9,6 +9,7 @@
 #include "rayman2fix/fov_math.hpp"
 #include "rayman2fix/hud_math.hpp"
 #include "rayman2fix/intro_skip.hpp"
+#include "rayman2fix/story_lookup.hpp"
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -30,7 +31,7 @@ constexpr uintptr_t kRequestLevelRva = 0x54D0; // VA 0x4054D0
 constexpr char kAfterIntroLevel[] = "learn_10";
 // GOG/retail Rayman 2 engine: Fix actor 6 owns the progress-bit array
 // (designer variable 42). Read dynamically; do NOT assume heap pointers.
-constexpr uintptr_t kFixActor6Rva = 0x0B730C; // VA 0x4B730C
+constexpr uintptr_t kFixActorListRva = 0x0B7300; // VA 0x4B7300: count, then direct actor pointers
 constexpr unsigned kLearnHandoverBit = 1091;
 constexpr unsigned kNoMoviesBit = 1188;
 constexpr DWORD kTemporaryCheatMillis = 2500;
@@ -150,30 +151,10 @@ bool write_story_word(std::uintptr_t address, std::uint32_t value) {
 std::uintptr_t find_story_words() {
     const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     if (!base) return 0;
-    std::uint32_t fix_so = 0, actor = 0, brain = 0, mind = 0, dsg = 0;
-    std::uint32_t decl = 0, infos = 0, buffer = 0, offset = 0, kind = 0;
-    std::uint8_t vars = 0, count = 0;
-    if (!read_u32(base + kFixActor6Rva, fix_so) ||
-        !read_u32(fix_so + 4, actor) ||
-        !read_u32(actor + 0xC, brain) ||
-        !read_u32(brain, mind) ||
-        !read_u32(mind + 0xC, dsg) ||
-        !read_u32(dsg, decl) ||
-        !read_u32(decl + 4, infos) ||
-        !read_u8(decl + 0xC, vars) || vars <= 42 ||
-        !read_u32(dsg + 8, buffer) ||
-        !read_u32(infos + 42 * 16, offset) ||
-        !read_u32(infos + 42 * 16 + 4, kind) ||
-        kind != 21 || offset > 65536)
-        return 0;
-    const std::uintptr_t array = std::uintptr_t(buffer) + offset;
-    if (!read_u8(array + 4, count) || count != 45) return 0;
-    std::uint32_t probe1 = 0, probe2 = 0;
-    const auto words = array + 8;
-    if (!read_u32(words + r2fix::story_word_index(kLearnHandoverBit) * 4, probe1) ||
-        !read_u32(words + r2fix::story_word_index(kNoMoviesBit) * 4, probe2))
-        return 0;
-    return words;
+    return r2fix::locate_story_words(
+        base + kFixActorListRva,
+        [](std::uintptr_t p, std::uint32_t& v) { return read_u32(p, v); },
+        [](std::uintptr_t p, std::uint8_t& v) { return read_u8(p, v); });
 }
 bool game_story_bit(std::uintptr_t words, unsigned bit, bool& value) {
     std::uint32_t word = 0;
@@ -215,7 +196,11 @@ void poll_learn_intro_skip() {
         g_learn_handover = false;
         return;
     }
-    if (!g_progress_words) g_progress_words = find_story_words();
+    if (!g_progress_words) {
+        g_progress_words = find_story_words();
+        if (g_progress_words)
+            log_line("RUNTIME-INTRO: learn_10 progress array located via Fix actor variable 42");
+    }
     if (!g_progress_words) {
         if (!g_learn_logged) {
             g_learn_logged = true;
