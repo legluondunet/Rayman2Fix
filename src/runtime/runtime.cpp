@@ -193,6 +193,7 @@ struct NaturalDirectorSample {
     unsigned matches=0,visited=0;
     r2fix::IntroDirectorScanStats counters{};
     std::uintptr_t standin=0;
+    std::uintptr_t superobject=0;
     std::uintptr_t intelligence=0;
     std::uintptr_t behaviours=0;
 };
@@ -225,6 +226,7 @@ NaturalDirectorSample sample_natural_director(std::uintptr_t ray_so) {
         if (director.valid()) {
             ++sample.matches;
             sample.standin=director.standin_superobject;
+            sample.superobject=director.superobject;
             sample.intelligence=director.intelligence;
             // ending_behaviour is index 1 in the validated model array.
             sample.behaviours=director.ending_behaviour-12;
@@ -232,6 +234,7 @@ NaturalDirectorSample sample_natural_director(std::uintptr_t ray_so) {
     }
     if (sample.matches!=1) {
         sample.standin=0;
+        sample.superobject=0;
         sample.intelligence=0;
         sample.behaviours=0;
     }
@@ -253,7 +256,9 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
         script_slot,
         [](std::uintptr_t a,std::uint32_t& v){return read_u32(a,v);},
         [](std::uintptr_t a,std::uint8_t& v){return read_u8(a,v);},
-        long_rule ? 8192u : 1024u);
+        long_rule ? 8192u : 1024u,
+        long_rule ? 870u : 0u,
+        long_rule ? 1100u : 0u);
     const DWORD probe_ms=DWORD(GetTickCount()-started);
     char message[300]{};
     std::snprintf(message,sizeof(message),
@@ -393,6 +398,9 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
             --line_budget;
         }
     };
+    emit_excerpt("exit-context",p.context.data(),
+                 p.context_selected,p.context_selected,
+                 unsigned(p.context.size()));
     emit_excerpt("last",p.tail.data(),p.total_selected,
                  p.tail_selected,unsigned(p.tail.size()));
     emit_excerpt("procedures",p.critical.data(),p.critical_total,
@@ -431,6 +439,33 @@ void log_compiled_director_model(std::uintptr_t behaviours) {
     }
 }
 
+// Read a single low byte ONLY from known integer-type designer variables;
+// no pointer-valued variables are logged. This is passive observation to
+// understand whether the original exit branch is triggered by a flag.
+bool read_director_integer_low_byte(std::uintptr_t so,unsigned index,
+                                    unsigned& kind,unsigned& low) {
+    std::uint32_t actor=0,brain=0,mind=0,memory=0,decl_ref=0;
+    std::uint32_t decl=0,infos=0,buffer=0,offset=0,type=0;
+    std::uint8_t count=0,value=0;
+    if (!so || index>127 ||
+        !read_u32(so+4,actor) || !actor ||
+        !read_u32(std::uintptr_t(actor)+0x0c,brain) || !brain ||
+        !read_u32(brain,mind) || !mind ||
+        !read_u32(std::uintptr_t(mind)+0x0c,memory) || !memory ||
+        !read_u32(memory,decl_ref) || !decl_ref ||
+        !read_u32(decl_ref,decl) || !decl ||
+        !read_u32(std::uintptr_t(decl)+4,infos) || !infos ||
+        !read_u8(std::uintptr_t(decl)+0x0c,count) || index>=count ||
+        !read_u32(std::uintptr_t(memory)+8,buffer) || !buffer ||
+        !read_u32(std::uintptr_t(infos)+index*16u,offset) ||
+        !read_u32(std::uintptr_t(infos)+index*16u+4,type) ||
+        type>6 || offset>65536 ||
+        !read_u8(std::uintptr_t(buffer)+offset,value))
+        return false;
+    kind=unsigned(type);
+    low=unsigned(value);
+    return true;
+}
 bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     if (!g_log) return false;
     const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
@@ -478,6 +513,15 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     }
     const bool standin_ok=director.standin &&
         read_superobject_position(director.standin,standin);
+    unsigned t91=0,v91=0,t47=0,v47=0;
+    const bool has91=director.superobject &&
+        read_director_integer_low_byte(director.superobject,91u,t91,v91);
+    const bool has47=director.superobject &&
+        read_director_integer_low_byte(director.superobject,47u,t47,v47);
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-INTRO: director-vars=%s t=%ums var91_valid=%u var91_type=%u var91_low8=%u var47_valid=%u var47_type=%u var47_low8=%u (read-only)",
+        stage,unsigned(t),unsigned(has91),t91,v91,unsigned(has47),t47,v47);
+    log_line(msg);
     std::snprintf(msg,sizeof(msg),
         "RUNTIME-INTRO: director=%s t=%ums visited=%u matches=%u identified=%u armed=%u behaviour=%d suspended=%u standin_valid=%u standin=(%.2f,%.2f,%.2f)",
         stage,unsigned(t),director.visited,director.matches,

@@ -27,7 +27,11 @@ struct SceneScriptProbe {
     unsigned tail_selected = 0;
     unsigned critical_total = 0;
     unsigned critical_selected = 0;
+    unsigned context_selected = 0;
     std::array<SceneScriptEvent, 128> events{};
+    // An optional bounded context window around the native exit branch.
+    // No script parameter is dereferenced or returned as a process address.
+    std::array<SceneScriptEvent, 256> context{};
     std::array<SceneScriptEvent, 96> tail{};
     std::array<SceneScriptEvent, 64> critical{};
 };
@@ -44,7 +48,9 @@ inline bool interesting_scene_opcode(std::uint8_t t) {
 template<class Read32, class Read8>
 SceneScriptProbe observe_scene_script(std::uintptr_t script_slot,
                                      Read32 rd32, Read8 rd8,
-                                     unsigned max_nodes=1024) {
+                                     unsigned max_nodes=1024,
+                                     unsigned context_first=0,
+                                     unsigned context_last=0) {
     SceneScriptProbe p{};
     std::uint32_t nodes=0;
     if (!script_slot || !rd32(script_slot,nodes) || nodes<0x10000 ||
@@ -76,6 +82,11 @@ SceneScriptProbe observe_scene_script(std::uintptr_t script_slot,
                 p.events[p.selected++]=event;
             else
                 p.truncated=true;
+            if (context_last>context_first &&
+                i>=context_first && i<=context_last &&
+                p.context_selected<p.context.size()) {
+                p.context[p.context_selected++]=event;
+            }
             p.tail[p.total_selected % p.tail.size()]=event;
             ++p.total_selected;
             if (p.tail_selected<p.tail.size()) ++p.tail_selected;

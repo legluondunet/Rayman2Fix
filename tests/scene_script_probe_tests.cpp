@@ -89,5 +89,27 @@ int main(){
         assert(all.critical[critical_begin].node==1600-64);
         assert(!scan_big(8193).complete);
     }
+    // The optional exit-path window returns the original nesting order
+    // for a specific subset of nodes, without leaking pointer operands.
+    {
+        Mock m2{};
+        m2.words[slot]=nodes;
+        for(unsigned i=0;i<240;++i){
+            m2.words[nodes+std::uintptr_t(i)*8]=
+                (i==120 ? 69u : 174u);
+            m2.bytes[nodes+std::uintptr_t(i)*8+6]=std::uint8_t(1+(i%4));
+            m2.bytes[nodes+std::uintptr_t(i)*8+7]=4;
+        }
+        m2.words[nodes+240u*8]=0;
+        m2.bytes[nodes+240u*8+6]=0;
+        m2.bytes[nodes+240u*8+7]=8;
+        auto p2=r2fix::observe_scene_script(slot,
+            [&](std::uintptr_t a,std::uint32_t& v){return m2.read32(a,v);},
+            [&](std::uintptr_t a,std::uint8_t& v){return m2.read8(a,v);},
+            1024u,100u,159u);
+        assert(p2.complete && p2.context_selected==60u);
+        assert(p2.context[0].node==100u && p2.context[59].node==159u);
+        assert(p2.context[20].param==69u);
+    }
     return 0;
 }

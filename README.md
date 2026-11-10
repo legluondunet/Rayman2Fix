@@ -67,12 +67,17 @@ pointers, asset bytes and executable instructions are never logged.
 The parser checks node types and depths; ordinary scripts are capped at
 1024 nodes. The previously truncated **behaviour 3, rule 2** is read
 once with a higher limit of 8192 nodes, retaining a bounded last-96
-opcode tail and last-64 procedure/meta-action/behaviour sites. A scan
+opcode tail, last-64 procedure/meta-action/behaviour sites, and the
+nested opcode context from nodes 870 through 1100 (the native
+cleanup/behaviour-switch region). A scan
 duration is recorded in milliseconds and raw pointer operands remain
 redacted. Output remains bounded by a shared log-line budget.
-**It does not execute, fast-forward or modify a script.** We will use
-the data to identify which native cleanup operations a safe future
-skip must preserve.
+During natural state snapshots, only the low byte of integer-typed
+director variables 91 and 47 is observed (with validity/type labels)
+to correlate script conditions with the native handover. Pointer-valued
+variables are never logged. **It does not execute, fast-forward or
+modify a script.** We will use the data to identify which native
+cleanup operations a safe future skip must preserve.
 
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,
