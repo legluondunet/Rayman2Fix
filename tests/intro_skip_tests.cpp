@@ -124,6 +124,7 @@ int main() {
     assert(lookup() == 0);              // inaccessible brain pointer
 
 
+    {
     // A read-only candidate search only accepts a scene actor owning
     // its own custom bit 28, directing Rayman and a distinct stand-in
     // toward an unattached valid waypoint.
@@ -188,6 +189,7 @@ int main() {
     assert(!detect().valid());       // director isn't armed
     demo.a[standard+0x24]=1u<<27;
     assert(detect().valid());
+    }
 
     return 0;
 }
