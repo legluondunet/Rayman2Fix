@@ -39,6 +39,7 @@ constexpr char kAfterIntroLevel[] = "learn_10";
 // (designer variable 42). Read dynamically; do NOT assume heap pointers.
 constexpr uintptr_t kFixActorListRva = 0x0B7300; // VA 0x4B7300: count, then direct actor pointers
 constexpr unsigned kLearnHandoverBit = 1091;
+constexpr unsigned kNoMoviesCheatBit = 1188; // Rayman 2's NOMOVIES flag
 // Read-only diagnostics for natural Learn_10 handover.
 constexpr uintptr_t kRaymanSuperObjectRva = 0x100578; // VA 0x500578
 constexpr uintptr_t kFixCameraActorRva = 0x0B7308; // VA 0x4B7308
@@ -269,14 +270,16 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
     if (!line_budget || !g_log) return;
     const bool long_rule=(behaviour==3 && std::strcmp(kind,"rule")==0 &&
                           rule==2);
+    const bool nomovies_rule=(behaviour==3 &&
+                             std::strcmp(kind,"rule")==0 && rule==1);
     const DWORD started=GetTickCount();
     const auto p=r2fix::observe_scene_script(
         script_slot,
         [](std::uintptr_t a,std::uint32_t& v){return read_u32(a,v);},
         [](std::uintptr_t a,std::uint8_t& v){return read_u8(a,v);},
         long_rule ? 8192u : 1024u,
-        long_rule ? 870u : 0u,
-        long_rule ? 1100u : 0u);
+        long_rule ? 870u : (nomovies_rule ? 100u : 0u),
+        long_rule ? 1100u : (nomovies_rule ? 265u : 0u));
     const DWORD probe_ms=DWORD(GetTickCount()-started);
     char message[300]{};
     std::snprintf(message,sizeof(message),
@@ -287,6 +290,18 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
     log_line(message);
     --line_budget;
     if (!p.complete && !long_rule) return;
+    // The cheat lives inside the game's progress array, which may be
+    // saved. Verify the script gate without ever modifying it.
+    if (nomovies_rule && line_budget) {
+        const auto nm=r2fix::inspect_learn10_nomovies_gate(p);
+        std::snprintf(message,sizeof(message),
+            "RUNTIME-INTRO: native-nomovies-gate match=%u ifnot=%u get_bool=%u progress_array=%u bit1188=%u then=%u (read-only)",
+            unsigned(nm.matched()),unsigned(nm.ifnot),
+            unsigned(nm.get_boolean),unsigned(nm.progress_array),
+            unsigned(nm.cheat_bit),unsigned(nm.then_branch));
+        log_line(message);
+        --line_budget;
+    }
     // The signature is a read-only diagnostic, never an enablement gate
     // for a shortcut. The actual engine's cleanup must still run.
     if (long_rule && line_budget) {
@@ -390,7 +405,7 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
     // Only the previously capped long rule needs the extra output.
     // Ring-order chronology is reconstructed using total counters,
     // while pointer-typed operands are replaced by labels.
-    if (!long_rule || !line_budget) return;
+    if ((!long_rule && !nomovies_rule) || !line_budget) return;
     const auto emit_excerpt=[&](const char* label,
                                 const r2fix::SceneScriptEvent* events,
                                 unsigned total,unsigned count,
@@ -437,8 +452,8 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
             const unsigned len=unsigned(std::strlen(token));
             if (used && used+len>=sizeof(payload)-1) {
                 std::snprintf(message,sizeof(message),
-                    "RUNTIME-INTRO: compiled-script b=%u rule=2 %s %s",
-                    behaviour,label,payload);
+                    "RUNTIME-INTRO: compiled-script b=%u rule=%u %s %s",
+                    behaviour,rule,label,payload);
                 log_line(message);
                 --line_budget;
                 used=0;
@@ -452,12 +467,21 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
         }
         if (used && line_budget) {
             std::snprintf(message,sizeof(message),
-                "RUNTIME-INTRO: compiled-script b=%u rule=2 %s %s",
-                behaviour,label,payload);
+                "RUNTIME-INTRO: compiled-script b=%u rule=%u %s %s",
+                behaviour,rule,label,payload);
             log_line(message);
             --line_budget;
         }
     };
+    // The first NOMOVIES rule was previously truncated after the
+    // first 128 selected nodes; report its later instructions read-only.
+    if (nomovies_rule) {
+        if (p.complete && !p.malformed)
+            emit_excerpt("nomovies-rule-tail",p.context.data(),
+                         p.context_selected,p.context_selected,
+                         unsigned(p.context.size()));
+        return;
+    }
     // A second bounded, read-only excerpt is produced ONLY if the
     // script actually contains a condition comparing V96 against 110.
     // It targets the missing middle of the large original rule rather
@@ -916,6 +940,14 @@ void poll_learn_intro_skip() {
     if (!game_story_bit(g_progress_words, kLearnHandoverBit, handed_over))
         return;
     if (!g_learn_logged) {
+        bool nomovies=false;
+        const bool known=game_story_bit(g_progress_words,
+                                        kNoMoviesCheatBit,nomovies);
+        char flag[180]{};
+        std::snprintf(flag,sizeof(flag),
+            "RUNTIME-INTRO: nomovies-flag at-entry known=%u enabled=%u bit=1188 (read-only; never modified)",
+            unsigned(known),unsigned(nomovies));
+        log_line(flag);
         g_learn_logged = true;
         g_learn_intro_seen = !handed_over;
         g_learn_intro_start = GetTickCount();
@@ -964,6 +996,14 @@ void poll_learn_intro_skip() {
         g_learn_handover = true;
         g_learn_handover_start = GetTickCount();
         log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
+        bool nomovies=false;
+        const bool known=game_story_bit(g_progress_words,
+                                       kNoMoviesCheatBit,nomovies);
+        char flag[180]{};
+        std::snprintf(flag,sizeof(flag),
+            "RUNTIME-INTRO: nomovies-flag at-handover known=%u enabled=%u bit=1188 (read-only; never modified)",
+            unsigned(known),unsigned(nomovies));
+        log_line(flag);
         log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
     }
     if (handed_over && g_learn_handover_start &&

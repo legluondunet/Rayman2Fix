@@ -190,6 +190,39 @@ int main(){
         bad=early;bad.malformed=true;
         assert(!r2fix::inspect_learn10_early_exit(bad).matched());
     }
+    // Behaviour 3 rule 1 reads the real NOMOVIES cheat progress
+    // bit 1188. Exact opcode/depth and field semantics must match.
+    {
+        r2fix::SceneScriptProbe script{};
+        script.complete=true;
+        const auto set=[&](unsigned i,unsigned depth,unsigned type,
+                           unsigned param) {
+            script.events[i]={i,param,std::uint8_t(depth),
+                              std::uint8_t(type)};
+        };
+        set(0,1,0,1); set(1,2,3,248); set(2,3,2,12);
+        set(3,4,23,0xBAADF00D); set(4,4,11,42);
+        set(5,3,12,1188); set(6,1,0,8);
+        script.selected=7;
+        assert(r2fix::inspect_learn10_nomovies_gate(script).matched());
+        auto bad=script;
+        bad.events[5].param=1091;
+        assert(!r2fix::inspect_learn10_nomovies_gate(bad).matched());
+        bad=script;bad.events[1].param=158;
+        assert(!r2fix::inspect_learn10_nomovies_gate(bad).matched());
+        bad=script;bad.events[0].param=0;
+        assert(!r2fix::inspect_learn10_nomovies_gate(bad).matched());
+        bad=script;bad.events[4].param=41;
+        assert(!r2fix::inspect_learn10_nomovies_gate(bad).matched());
+        bad=script;bad.events[3].indent=3;
+        assert(!r2fix::inspect_learn10_nomovies_gate(bad).matched());
+        bad=script;bad.events[3].node=7;
+        assert(!r2fix::inspect_learn10_nomovies_gate(bad).matched());
+        bad=script;bad.malformed=true;
+        assert(!r2fix::inspect_learn10_nomovies_gate(bad).matched());
+        bad=script;bad.complete=false;
+        assert(!r2fix::inspect_learn10_nomovies_gate(bad).matched());
+    }
     // The known retail script has distinct If/Then/Else NESTING and a
     // model-relative behaviour-1 reference. Refuse lookalikes that have
     // the same opcodes but wrong nesting, target, or opcode values.

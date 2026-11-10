@@ -128,6 +128,38 @@ SceneScriptProbe observe_scene_script(std::uintptr_t script_slot,
     return p;
 }
 
+// The first rule of director behaviour 3 checks the original NOMOVIES
+// cheat bit: IfNot(GetBooleanInArray(actor.V42, 1188)) Then ...
+// This is a fingerprint of SCRIPT DATA, not a write authorization.
+struct Learn10NoMoviesGateShape {
+    bool ifnot=false, get_boolean=false, progress_array=false;
+    bool cheat_bit=false, then_branch=false;
+    bool matched() const {
+        return ifnot && get_boolean && progress_array &&
+               cheat_bit && then_branch;
+    }
+};
+inline Learn10NoMoviesGateShape inspect_learn10_nomovies_gate(
+    const SceneScriptProbe& p) {
+    Learn10NoMoviesGateShape shape{};
+    if (!p.complete || p.malformed || p.selected<7) return shape;
+    const auto& e=p.events;
+    for(unsigned i=0;i<7;++i)
+        if(e[i].node!=i) return shape;
+    const auto has=[&](unsigned i,unsigned depth,unsigned type,
+                       std::uint32_t v) {
+        return e[i].indent==depth && e[i].type==type && e[i].param==v;
+    };
+    shape.ifnot=has(0,1,0,1);        // IfNot
+    shape.get_boolean=has(1,2,3,248); // GetBooleanInArray
+    shape.progress_array=has(2,3,2,12) &&
+        e[3].indent==4 && e[3].type==23 && // actor pointer not read
+        has(4,4,11,42);             // actor's progression array
+    shape.cheat_bit=has(5,3,12,1188);
+    shape.then_branch=has(6,1,0,8);
+    return shape;
+}
+
 // An early native exit case exists at v96==104, BEFORE the six normal
 // v96==110 progression pulses. This is only a script fingerprint.
 // It does not authorize writing designer variables or invoking AI code.

@@ -224,6 +224,28 @@ checks `var110 == 1` at nodes 926–939 and switches the director
 to behaviour 1, which suggests that the early `104` branch is a
 plausible native completion mechanism.
 
+**Original NOMOVIES gate discovered (10 November 2026):**
+[OpenSpaceToolbox's progress-array flag map](https://github.com/raytools/OpenSpaceToolbox/blob/master/OpenSpaceToolbox/ViewModels/ProgressArrayWindowViewModel.cs)
+labels bit **1188** as `NoMovies cheat`.
+[ACP_Ray2's opcode enumeration](https://github.com/raytools/ACP_Ray2/blob/master/src/AI/AI_Const.h)
+defines K1 as `IfNot` and F248 as `GetBooleanInArray`.
+The actual Learn_10 behaviour-3 rule-1 starts with
+`IfNot(GetBooleanInArray(actor.V42, 1188)) Then ...`.
+
+This establishes a real director branch controlled by the game's
+NOMOVIES bit. A new, *read-only* script shape check verifies these
+first seven nodes and their nesting, reads flag 1188 at the start
+and natural end of the cinematic, and prints bounded rule-1 nodes
+100–265 to inspect the other branch. The existing story-array locator
+already supports bit 1188; there is no new pointer traversal.
+
+**Unresolved:** switching the bit after Learn_10 has initialized
+may be too late to alter native cutscene flow; setting it earlier
+could affect a progress array that is later serialized in save data.
+Therefore this work MUST NOT set the flag, even temporarily,
+until its persistence and native cleanup effects can be tested
+without touching the user's saves.
+
 **Outstanding unknown:** `v96` is normally assigned from the
 director's compiled `F158` function (cross-reference name
 `DisplayText` in ACP_Ray2), which may recompute the signal every
