@@ -148,7 +148,7 @@ int main() {
     demo.a[actor+4]=standard; demo.a[standard+0x24]=1u<<27;
     demo.a[actor+0x0c]=brain; demo.a[brain]=mind; demo.a[mind+0x0c]=memory;
     demo.a[memory]=ref; demo.a[ref]=decl;
-    demo.a[decl+4]=infos; demo.a[decl+0x0c]=7;
+    demo.a[decl+4]=infos; demo.b[decl+0x0c]=7;
     demo.a[memory+8]=buffer;
     for(unsigned i : {1u,2u,3u,4u}) demo.a[infos+i*16]=i*8;
     demo.a[infos+1*16+4]=8; demo.a[infos+2*16+4]=9;
