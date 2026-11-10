@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
+#include <initializer_list>
 
 int main() {
     const auto near=[](float a,float b) {
