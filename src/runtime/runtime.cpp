@@ -246,18 +246,24 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
                                   std::uintptr_t list, unsigned list_count,
                                   unsigned& line_budget) {
     if (!line_budget || !g_log) return;
+    const bool long_rule=(behaviour==3 && std::strcmp(kind,"rule")==0 &&
+                          rule==2);
+    const DWORD started=GetTickCount();
     const auto p=r2fix::observe_scene_script(
         script_slot,
         [](std::uintptr_t a,std::uint32_t& v){return read_u32(a,v);},
-        [](std::uintptr_t a,std::uint8_t& v){return read_u8(a,v);});
+        [](std::uintptr_t a,std::uint8_t& v){return read_u8(a,v);},
+        long_rule ? 8192u : 1024u);
+    const DWORD probe_ms=DWORD(GetTickCount()-started);
     char message[300]{};
     std::snprintf(message,sizeof(message),
-        "RUNTIME-INTRO: compiled-script b=%u %s=%u nodes=%u complete=%u malformed=%u selected=%u truncated=%u (read-only)",
+        "RUNTIME-INTRO: compiled-script b=%u %s=%u nodes=%u complete=%u malformed=%u selected=%u total=%u critical=%u truncated=%u scan_ms=%u (read-only)",
         behaviour,kind,rule,p.visited,unsigned(p.complete),
-        unsigned(p.malformed),p.selected,unsigned(p.truncated));
+        unsigned(p.malformed),p.selected,p.total_selected,p.critical_total,
+        unsigned(p.truncated),unsigned(probe_ms));
     log_line(message);
     --line_budget;
-    if (!p.complete) return;
+    if (!p.complete && !long_rule) return;
 
     char tokens[260]{};
     unsigned used=0;
@@ -316,6 +322,81 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
         log_line(message);
         --line_budget;
     }
+    // Only the previously capped long rule needs the extra output.
+    // Ring-order chronology is reconstructed using total counters,
+    // while pointer-typed operands are replaced by labels.
+    if (!long_rule || !line_budget) return;
+    const auto emit_excerpt=[&](const char* label,
+                                const r2fix::SceneScriptEvent* events,
+                                unsigned total,unsigned count,
+                                unsigned capacity) {
+        if (!count || !line_budget) return;
+        char payload[260]{};
+        unsigned used=0;
+        const unsigned first=(total-count)%capacity;
+        for (unsigned i=0;i<count && line_budget;++i) {
+            const auto& e=events[(first+i)%capacity];
+            const char* opcode="?";
+            bool show_number=true;
+            int val=int(e.param);
+            switch(e.type) {
+                case 0:opcode="K";break;
+                case 1:opcode="C";break;
+                case 2:opcode="O";break;
+                case 3:opcode="F";break;
+                case 4:opcode="P";break;
+                case 5:opcode="A";break;
+                case 9:opcode="H";break;
+                case 11:opcode="V";break;
+                case 12:opcode="I";break;
+                case 17:opcode="M";break;
+                case 23:opcode="actor";show_number=false;break;
+                case 39:opcode="macro";show_number=false;break;
+                case 28:
+                    opcode="B";show_number=false;
+                    if (e.param>=list && e.param<list+list_count*12u &&
+                        (e.param-list)%12u==0u) {
+                        val=int((e.param-list)/12u);
+                        show_number=true;
+                    }
+                    break;
+                default:show_number=false;break;
+            }
+            char token[52]{};
+            if (show_number)
+                std::snprintf(token,sizeof(token),
+                              " %u.%u:%s%d",e.node,e.indent,opcode,val);
+            else
+                std::snprintf(token,sizeof(token),
+                              " %u.%u:%s",e.node,e.indent,opcode);
+            const unsigned len=unsigned(std::strlen(token));
+            if (used && used+len>=sizeof(payload)-1) {
+                std::snprintf(message,sizeof(message),
+                    "RUNTIME-INTRO: compiled-script b=%u rule=2 %s %s",
+                    behaviour,label,payload);
+                log_line(message);
+                --line_budget;
+                used=0;
+                payload[0]=0;
+            }
+            if (!line_budget) break;
+            if (len<sizeof(payload)-used) {
+                std::memcpy(payload+used,token,len+1);
+                used+=len;
+            }
+        }
+        if (used && line_budget) {
+            std::snprintf(message,sizeof(message),
+                "RUNTIME-INTRO: compiled-script b=%u rule=2 %s %s",
+                behaviour,label,payload);
+            log_line(message);
+            --line_budget;
+        }
+    };
+    emit_excerpt("last",p.tail.data(),p.total_selected,
+                 p.tail_selected,unsigned(p.tail.size()));
+    emit_excerpt("procedures",p.critical.data(),p.critical_total,
+                 p.critical_selected,unsigned(p.critical.size()));
 }
 void log_compiled_director_model(std::uintptr_t behaviours) {
     if (!g_log || !behaviours) return;

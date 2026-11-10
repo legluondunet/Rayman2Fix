@@ -20,7 +20,16 @@ struct SceneScriptProbe {
     bool truncated = false;
     unsigned visited = 0;
     unsigned selected = 0;
+    // The first 128 events preserve older diagnostics. For long scripts
+    // keep bounded ring buffers of the final events and all procedure/
+    // meta-action/behaviour-reference sites, without following pointers.
+    unsigned total_selected = 0;
+    unsigned tail_selected = 0;
+    unsigned critical_total = 0;
+    unsigned critical_selected = 0;
     std::array<SceneScriptEvent, 128> events{};
+    std::array<SceneScriptEvent, 96> tail{};
+    std::array<SceneScriptEvent, 64> critical{};
 };
 inline bool interesting_scene_opcode(std::uint8_t t) {
     switch(t) {
@@ -34,12 +43,13 @@ inline bool interesting_scene_opcode(std::uint8_t t) {
 // It reads only the script's own bounds-checked node array.
 template<class Read32, class Read8>
 SceneScriptProbe observe_scene_script(std::uintptr_t script_slot,
-                                     Read32 rd32, Read8 rd8) {
+                                     Read32 rd32, Read8 rd8,
+                                     unsigned max_nodes=1024) {
     SceneScriptProbe p{};
     std::uint32_t nodes=0;
-    if (!script_slot || !rd32(script_slot,nodes) || nodes<0x10000)
+    if (!script_slot || !rd32(script_slot,nodes) || nodes<0x10000 ||
+        max_nodes==0 || max_nodes>8192)
         return p;
-    constexpr unsigned max_nodes=1024;
     if (std::uintptr_t(nodes)>std::uintptr_t(0xFFFFFFFFu)-max_nodes*8u) {
         p.malformed=true;
         return p;
@@ -61,10 +71,20 @@ SceneScriptProbe observe_scene_script(std::uintptr_t script_slot,
             return p;
         }
         if (interesting_scene_opcode(type)) {
+            const SceneScriptEvent event{i,param,indent,type};
             if (p.selected<p.events.size())
-                p.events[p.selected++]={i,param,indent,type};
+                p.events[p.selected++]=event;
             else
                 p.truncated=true;
+            p.tail[p.total_selected % p.tail.size()]=event;
+            ++p.total_selected;
+            if (p.tail_selected<p.tail.size()) ++p.tail_selected;
+            if (type==4 || type==5 || type==28) {
+                p.critical[p.critical_total % p.critical.size()]=event;
+                ++p.critical_total;
+                if (p.critical_selected<p.critical.size())
+                    ++p.critical_selected;
+            }
         }
     }
     p.truncated=true;

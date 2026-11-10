@@ -64,8 +64,12 @@ including their schedules and up to eight rules each. Logs contain
 only node indices, nesting depths and symbolic opcode numbers
 (procedures, conditions, variables and local behaviour indices); game
 pointers, asset bytes and executable instructions are never logged.
-The parser checks node types, depths and a maximum of 1024 nodes per
-script, and truncates output to a limited number of log lines.
+The parser checks node types and depths; ordinary scripts are capped at
+1024 nodes. The previously truncated **behaviour 3, rule 2** is read
+once with a higher limit of 8192 nodes, retaining a bounded last-96
+opcode tail and last-64 procedure/meta-action/behaviour sites. A scan
+duration is recorded in milliseconds and raw pointer operands remain
+redacted. Output remains bounded by a shared log-line budget.
 **It does not execute, fast-forward or modify a script.** We will use
 the data to identify which native cleanup operations a safe future
 skip must preserve.

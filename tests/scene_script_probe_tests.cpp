@@ -55,5 +55,39 @@ int main(){
     m.words[nodes+2*8]=139;
     m.words[slot]=0; p=scan();
     assert(!p.complete && p.visited==0);
+    // The large Learn_10 behaviour-3 rule 2 exceeded the old 1024-node
+    // cap. Confirm that the targeted deeper probe is bounded and keeps
+    // the LAST events and procedures in their original script order.
+    {
+        Mock big{};
+        big.words[slot]=nodes;
+        for (unsigned i=0;i<1600;++i) {
+            big.words[nodes+std::uintptr_t(i)*8]=i&1 ? 174u : 139u;
+            big.bytes[nodes+std::uintptr_t(i)*8+6]=1;
+            big.bytes[nodes+std::uintptr_t(i)*8+7]=4;
+        }
+        big.words[nodes+1600u*8]=0;
+        big.bytes[nodes+1600u*8+6]=0;
+        big.bytes[nodes+1600u*8+7]=8;
+        auto scan_big=[&](unsigned limit){
+            return r2fix::observe_scene_script(
+                slot,
+                [&](std::uintptr_t a,std::uint32_t& v){return big.read32(a,v);},
+                [&](std::uintptr_t a,std::uint8_t& v){return big.read8(a,v);},
+                limit);
+        };
+        auto old=scan_big(1024);
+        assert(!old.complete && old.visited==1024 && old.truncated);
+        auto all=scan_big(4096);
+        assert(all.complete && all.visited==1601 && all.truncated);
+        assert(all.selected==128 && all.total_selected==1600);
+        assert(all.tail_selected==96 && all.critical_selected==64);
+        assert(all.critical_total==1600);
+        const auto tail_begin=(all.total_selected-all.tail_selected)%all.tail.size();
+        assert(all.tail[tail_begin].node==1600-96);
+        const auto critical_begin=(all.critical_total-all.critical_selected)%all.critical.size();
+        assert(all.critical[critical_begin].node==1600-64);
+        assert(!scan_big(8193).complete);
+    }
     return 0;
 }

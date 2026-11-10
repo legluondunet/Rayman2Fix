@@ -35,6 +35,10 @@ class Learn10SafeFallback(unittest.TestCase):
         self.assertIn("observe_scene_script(",source)
         self.assertIn("log_compiled_director_model(",source)
         self.assertIn("g_learn_script_probe_done",source)
+        self.assertIn("long_rule ? 8192u : 1024u",source)
+        self.assertIn('emit_excerpt("last"',source)
+        self.assertIn('emit_excerpt("procedures"',source)
+        self.assertIn("scan_ms=",source)
         self.assertIn("read-only",source)
         self.assertNotIn("AI_fn_ucChangeComportIntell",source)
 
