@@ -99,6 +99,8 @@ bool g_director_gate_history_reported = false;
 bool g_experiment_learn10_enabled = false;
 bool g_experiment_learn10_shape_match = false;
 bool g_experiment_learn10_requested = false;
+DWORD g_experiment_learn10_request_time = 0;
+bool g_experiment_learn10_timeout_reported = false;
 r2fix::LearnIntroGuard g_experiment_learn10_key_guard;
 
 std::uintptr_t g_progress_words = 0;
@@ -753,6 +755,8 @@ void poll_learn_intro_skip() {
         g_director_gate_history_reported=false;
         g_experiment_learn10_shape_match=false;
         g_experiment_learn10_requested=false;
+        g_experiment_learn10_request_time=0;
+        g_experiment_learn10_timeout_reported=false;
         g_experiment_learn10_key_guard={};
         return;
     }
@@ -777,7 +781,9 @@ void poll_learn_intro_skip() {
         g_learn_intro_start = GetTickCount();
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
-            : "RUNTIME-INTRO: learn_10 skip disabled after visual regression; natural scene unchanged");
+            : (g_experiment_learn10_enabled
+                ? "RUNTIME-INTRO: learn_10 normal skip disabled; opt-in counter-to-native-cleanup experiment active"
+                : "RUNTIME-INTRO: learn_10 skip disabled after visual regression; natural scene unchanged"));
         if (g_learn_intro_seen)
             g_learn_first_valid_seen=log_natural_intro_snapshot("opening",0);
     }
@@ -816,10 +822,18 @@ void poll_learn_intro_skip() {
             }
         }
     }
+    if (g_experiment_learn10_requested && !handed_over &&
+        !g_experiment_learn10_timeout_reported &&
+        DWORD(GetTickCount()-g_experiment_learn10_request_time)>20000u) {
+        g_experiment_learn10_timeout_reported=true;
+        log_line("RUNTIME-INTRO: EXPERIMENTAL counter exit did not hand over within 20s; no additional changes made");
+    }
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
         g_learn_handover_start = GetTickCount();
-        log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
+        log_line(g_experiment_learn10_requested
+            ? "RUNTIME-INTRO: EXPERIMENTAL Learn_10 handover observed (story bit 1091); verify restored gameplay visually"
+            : "RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
         log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
     }
     if (handed_over && g_learn_handover_start &&
@@ -942,6 +956,7 @@ void poll_learn10_counter_experiment() {
         return;
     }
     g_experiment_learn10_requested=true;
+    g_experiment_learn10_request_time=GetTickCount();
     g_director_var83.previous=target; // do not mislabel our own write as a native event
     char message[220]{};
     std::snprintf(message,sizeof(message),
