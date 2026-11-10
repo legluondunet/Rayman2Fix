@@ -49,6 +49,18 @@ and early texture/palette uploads. These diagnostics let us distinguish a
 No pixels are changed and there is no user-visible configuration setting.
 This is investigative pending in-game comparison of the loading artwork.
 
+## Original loading artwork: RGB565 colors and centered 4:3
+
+The loading picture is a CPU-written 1024x768 RGB565 frame while Glide
+reports ABGR. On this specific complete-frame upload, Rayman2Fix restores
+the RGB565 red/blue interpretation, preserving all regular 3D/texture
+formats and HUD rendering. The same image is projected to a centered 4:3
+canvas, with native-height scaling and automatic black pillarboxes at
+widescreen resolutions. Other LFB sizes/formats, 3D, FOV, 60 FPS, menus,
+and gameplay remain untouched. `RUNTIME-GLIDE` logs one activation line
+when debugging is enabled. The visual result must still be checked on
+Wine and Windows before the PR is merged.
+
 ## Automatic launcher workflow
 
 Run **`Rayman2Fix.exe` without arguments**. The obsolete `--init` command

@@ -39,6 +39,12 @@ fn line(message: &str) {
         let _ = writeln!(file, "RUNTIME-GLIDE: {message}");
     }
 }
+pub fn loading_corrected() {
+    static ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !ONCE.swap(true, Ordering::Relaxed) {
+        line("1024x768 loading art RGB565/ABGR: colors restored, 4:3 canvas centered");
+    }
+}
 pub fn opened(w: u32, h: u32, fmt: u32, origin: u32) {
     if OPENS.fetch_add(1, Ordering::Relaxed) < 5 {
         line(&format!("screen {w}x{h} format={fmt} origin={origin}"));
