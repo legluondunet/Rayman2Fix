@@ -36,25 +36,32 @@ static_assert(offsetof(JffTextString32,effect)==20, "JFFTXT effect");
 // leaving the panel, face portrait, arrow, glyph content, colors and
 // on-disk assets entirely untouched. Preserve native Y/line placement;
 // the JFFTXT font engine derives its glyph height/line spacing from size.
-// Native JFFTXT sizes 18.0 and 20.0 are directly observed in the
-// owner's Wine trace; the old <=16 predicate excluded legitimate font
-// draws. A 26-unit ceiling retains conservative protection against
-// non-dialogue/abnormally-sized text. This does not prove any *specific*
-// bottom dialogue geometry, which the runtime separately samples.
-// This intentionally only targets the bottom dialogue band in Learn_10,
-// not arbitrary HUD text or other 3D/screen overlays.
+// The user's Wine trace 20261110-165832 identifies a native centered
+// caption family with X=500, size=20 and three repeatedly used origins
+// Y=500/600/700. The previous generic Y>=660 test modified ONLY Y=700,
+// leaving Y=500 and 600 at their original oversized glyph scale. Restrict
+// this compatibility fix to this observed family. Do not apply an
+// unrestricted "lower screen" rule that might change menus or HUD.
+// Values are in the native 1000-unit JFFTXT coordinate system; NOT pixels.
+// Keep the original per-call Y and let the native text engine decide
+// centering/line breaks. The screen-space panel, face icon and arrow are
+// handled by separate original sprite paths.
+inline bool is_learn10_caption_family(const JffTextString32& text) {
+    if (text.text_ptr==0 || !std::isfinite(text.x) ||
+        !std::isfinite(text.y) || !std::isfinite(text.size) ||
+        text.flags!=0 || std::fabs(text.x-500.0f)>1.0f ||
+        std::fabs(text.size-20.0f)>0.5f)
+        return false;
+    return std::fabs(text.y-500.0f)<=1.0f ||
+           std::fabs(text.y-600.0f)<=1.0f ||
+           std::fabs(text.y-700.0f)<=1.0f;
+}
+
 inline bool fit_learn10_dialogue_text(const JffTextString32& original,
                                     float hud_scale,
                                     JffTextString32& adjusted) {
-    if (hud_scale>=0.9999f || hud_scale<0.3f ||
-        !std::isfinite(hud_scale) ||
-        original.text_ptr==0 ||
-        !std::isfinite(original.x) ||
-        !std::isfinite(original.y) ||
-        !std::isfinite(original.size) ||
-        original.x<0.0f || original.x>1000.0f ||
-        original.y<660.0f || original.y>1000.0f ||
-        original.size<3.0f || original.size>26.0f)
+    if (!std::isfinite(hud_scale) || hud_scale>=0.9999f ||
+        hud_scale<0.3f || !is_learn10_caption_family(original))
         return false;
     adjusted=original;
     adjusted.x=500.0f+(original.x-500.0f)*hud_scale;

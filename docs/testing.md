@@ -247,6 +247,29 @@ native text geometry gate, without recording their contents.
 The old black panel, portrait and arrow are not modified.
 The screenshot result remains unverified until a Wine visual test.
 
+**Full Wine log 20261110-165832 (most recent test of commit 611c23a):**
+The native font detour executes, but the selected adjustment was
+**uneven**. The new read-only `lower-band` samples show repeated
+triplets of original centered JFFTXT descriptors
+`x=500,size=20,flags=0` at native `Y=500`, `Y=600`, `Y=700`.
+The old test `Y>=660` rejects the first two (`match=0`) and
+modifies only the third (`match=1`). This is strong evidence that
+the previous geometry filter is incorrect, though a descriptor's
+exact correspondence to a visible screenshot line remains to be
+confirmed. User reports **no visible improvement** with 611c23a.
+
+The follow-up candidate now limits the correction to **the entire
+observed centered-caption family**, requiring x≈500, size≈20,
+flags=0 and one of the three y origins 500/600/700 (±1 original
+unit). The same Hor+ aspect-based native size reduction is used for
+each; no other font sizes, menu/HUD positions, text content or
+game-owned descriptors are changed. A single bounded
+`native centered caption Y=... size=...->...` line is emitted on
+first adjustment of each Y origin to make the next Wine test
+diagnostic. Three accepted rows, unrelated rejected rows and
+unaltered input descriptors are covered by the unit test.
+**Visual correctness is NOT established by the unit tests.**
+
 ## Manual checks
 
 - `Rayman2Fix.exe --help` and `--version`.

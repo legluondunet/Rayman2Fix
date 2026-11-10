@@ -76,6 +76,7 @@ std::atomic<bool> g_dialogue_draw_reached{false};
 std::atomic<unsigned> g_dialogue_total_calls{0};
 std::atomic<unsigned> g_dialogue_learn_calls{0};
 std::atomic<unsigned> g_dialogue_applied_calls{0};
+std::atomic<unsigned> g_dialogue_caption_rows_seen{0};
 std::atomic<unsigned> g_dialogue_lower_band_calls{0};
 std::atomic<unsigned> g_dialogue_lower_band_samples{0};
 bool g_dialogue_counter_reported=false;
@@ -983,6 +984,7 @@ void poll_learn_intro_skip() {
         g_dialogue_posthandover_start=0;
         g_dialogue_learn_calls.store(0,std::memory_order_relaxed);
         g_dialogue_lower_band_calls.store(0,std::memory_order_relaxed);
+        g_dialogue_caption_rows_seen.store(0,std::memory_order_relaxed);
         g_dialogue_lower_band_samples.store(0,std::memory_order_relaxed);
         g_observed_director_intelligence = 0;
         g_observed_director_behaviours = 0;
@@ -1288,6 +1290,19 @@ void __cdecl corrected_dialogue_text(void* context,
     }
     if (eligible) {
         g_dialogue_applied_calls.fetch_add(1,std::memory_order_relaxed);
+        // Log one event for each native Y origin to verify which of
+        // the three originally observed caption paths is transformed.
+        // No text content or game memory addresses are recorded.
+        const unsigned row=unsigned(std::lround(string->y)/100);
+        const unsigned bit=1u<<row;
+        if (!(g_dialogue_caption_rows_seen.fetch_or(bit,
+                            std::memory_order_relaxed)&bit)) {
+            char row_info[192]{};
+            std::snprintf(row_info,sizeof(row_info),
+                "RUNTIME-DIALOGUE: native centered caption Y=%u size=%.2f->%.2f (read-only source, panel unchanged)",
+                row*100u,double(string->size),double(adapted.size));
+            log_line(row_info);
+        }
         if (!g_dialogue_adjustment_logged.exchange(true,
                               std::memory_order_relaxed))
             log_line("RUNTIME-DIALOGUE: native Learn_10 bottom text size/X corrected (no panel/sprite changes)");
