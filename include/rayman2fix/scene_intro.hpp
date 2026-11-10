@@ -26,7 +26,8 @@ IntroDirector recognize_intro_director(std::uintptr_t so,
     if (!so || !rayman_so || so == rayman_so) return answer;
     std::uint32_t kind = 0, actor = 0, standard = 0, flags = 0;
     std::uint32_t brain = 0, mind = 0, memory = 0, decl_ref = 0;
-    std::uint32_t decl = 0, infos = 0, vars = 0, buffer = 0;
+    std::uint32_t decl = 0, infos = 0, buffer = 0;
+    std::uint8_t vars = 0;
     if (!rd32(so, kind) || kind != 2 ||
         !rd32(so + 4, actor) || !actor ||
         !rd32(std::uintptr_t(actor) + 4, standard) || !standard ||
@@ -38,7 +39,7 @@ IntroDirector recognize_intro_director(std::uintptr_t so,
         !rd32(memory, decl_ref) || !decl_ref ||
         !rd32(decl_ref, decl) || !decl ||
         !rd32(std::uintptr_t(decl) + 4, infos) || !infos ||
-        !rd32(std::uintptr_t(decl) + 0x0c, vars) || vars < 7 ||
+        !rd8(std::uintptr_t(decl) + 0x0c, vars) || vars < 7 ||
         !rd32(std::uintptr_t(memory) + 8, buffer) || !buffer)
         return answer;
 
