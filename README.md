@@ -40,11 +40,15 @@ matrices or changes saves to bypass this introduction. All original
 `Learn_10` scripts run normally. Enter is not intercepted by this
 feature.
 
-With `[Debug] Log=1`, the runtime now takes **read-only** samples of
-the natural scene at its start, when story bit 1091 is set, and
-approximately one second after that. Those include Rayman's custom and
-active flags and Rayman/camera positions, but no memory addresses.
-They provide a reference for a future safe implementation.
+With `[Debug] Log=1`, the runtime takes **read-only** samples at
+the start, 0.25, 1, 2.5, 5, 10, 20, 35 and 50 seconds (while the intro
+is still running), at the natural story bit 1091 handover and a second
+after. The first sample may be unavailable until Rayman is loaded.
+The diagnostics capture Rayman's flags/position, camera position,
+director behaviour index and stand-in position, if available.
+A fixed sampling schedule bounds the log size; there are no writes
+to game state or logged process addresses. This provides a timeline
+for a future safe skip.
 
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,

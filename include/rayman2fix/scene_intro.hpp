@@ -41,6 +41,7 @@ struct IntroDirector {
     std::uintptr_t superobject = 0;
     std::uintptr_t intelligence = 0;
     std::uintptr_t ending_behaviour = 0;
+    std::uintptr_t standin_superobject = 0; // observer only
     bool valid() const {
         return superobject != 0 && intelligence != 0 && ending_behaviour != 0;
     }
@@ -146,6 +147,7 @@ IntroDirector recognize_intro_director(std::uintptr_t so,
     result.superobject=so;
     result.intelligence=intelligence;
     result.ending_behaviour=std::uintptr_t(behaviours)+12;
+    result.standin_superobject=standin;
     return result;
 }
 } // namespace r2fix

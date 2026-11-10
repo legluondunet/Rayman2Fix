@@ -22,7 +22,10 @@ class Learn10SafeFallback(unittest.TestCase):
         ):
             self.assertNotIn(dangerous, block)
         self.assertIn("skip disabled after visual regression",block)
-        self.assertIn('log_natural_intro_snapshot("handover")',block)
+        self.assertIn('log_natural_intro_snapshot("handover",',block)
+        self.assertIn('log_natural_intro_snapshot("during",',block)
+        self.assertIn("sample_natural_director(",source)
+        self.assertNotIn("AI_fn_ucChangeComportIntell",source)
 
     def test_retains_jail_20_skip_only(self):
         source=(ROOT/"src/runtime/runtime.cpp").read_text(encoding="utf-8")

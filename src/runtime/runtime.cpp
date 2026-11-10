@@ -10,11 +10,14 @@
 #include "rayman2fix/hud_math.hpp"
 #include "rayman2fix/intro_skip.hpp"
 #include "rayman2fix/story_lookup.hpp"
+#include "rayman2fix/scene_intro.hpp"
 #include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <unordered_set>
+#include <vector>
 
 #if !defined(_M_IX86)
 #error Rayman2Fix camera runtime requires Windows x86
@@ -37,6 +40,7 @@ constexpr unsigned kLearnHandoverBit = 1091;
 constexpr uintptr_t kRaymanSuperObjectRva = 0x100578; // VA 0x500578
 constexpr uintptr_t kFixCameraActorRva = 0x0B7308; // VA 0x4B7308
 constexpr DWORD kNaturalHandoverFollowupMillis = 1000;
+constexpr DWORD kNaturalTraceTimes[] = {250, 1000, 2500, 5000, 10000, 20000, 35000, 50000};
 constexpr std::size_t kHookLength = 7;
 constexpr BYTE kExpected[kHookLength] = {0x83, 0xEC, 0x0C, 0x8B, 0x4C, 0x24, 0x14};
 // Rayman 2's GLI_tdstCamera (owner's approved Win32 executable).
@@ -54,6 +58,9 @@ bool g_learn_logged = false;
 bool g_learn_intro_seen = false;
 bool g_learn_handover = false;
 DWORD g_learn_handover_start = 0;
+DWORD g_learn_intro_start = 0;
+unsigned g_learn_trace_index = 0;
+bool g_learn_first_valid_seen = false;
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
@@ -161,36 +168,92 @@ bool read_superobject_position(std::uintptr_t so, float (&xyz)[3]) {
     }
     return true;
 }
-void log_natural_intro_snapshot(const char* stage) {
-    if (!g_log) return;
-    const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
-    if (!base) return;
-    std::uint32_t ray_so=0, ray_actor=0, ray_standard=0, custom=0;
-    std::uint8_t flags=0;
-    if (!read_u32(base + kRaymanSuperObjectRva, ray_so) || !ray_so ||
-        !read_u32(std::uintptr_t(ray_so) + 4, ray_actor) || !ray_actor ||
-        !read_u32(std::uintptr_t(ray_actor) + 4, ray_standard) || !ray_standard ||
-        !read_u32(std::uintptr_t(ray_standard) + 0x24, custom) ||
-        !read_u8(std::uintptr_t(ray_standard) + 0x29, flags)) {
-        log_line("RUNTIME-INTRO: natural snapshot unavailable (Rayman data)");
-        return;
+// A read-only scan of the actual scene, formerly used to locate the
+// director. It now observes the native animation without changing it.
+struct NaturalDirectorSample {
+    unsigned matches=0,visited=0;
+    r2fix::IntroDirectorScanStats counters{};
+    std::uintptr_t standin=0;
+};
+NaturalDirectorSample sample_natural_director(std::uintptr_t ray_so) {
+    NaturalDirectorSample sample{};
+    if (!ray_so) return sample;
+    std::uintptr_t root=ray_so;
+    std::unordered_set<std::uintptr_t> parents;
+    for (unsigned i=0;i<16;++i) {
+        if (!parents.insert(root).second) return {};
+        std::uint32_t up=0;
+        if (!read_u32(root+0x1c,up) || !up) break;
+        root=up;
     }
-    float xyz[3]{};
-    const bool ray_ok = read_superobject_position(ray_so, xyz);
-    std::uint32_t cam_actor=0, cam_standard=0, cam_so=0;
-    float cam[3]{};
-    const bool cam_ok =
-        read_u32(base + kFixCameraActorRva, cam_actor) && cam_actor &&
-        read_u32(std::uintptr_t(cam_actor) + 4, cam_standard) && cam_standard &&
-        read_u32(std::uintptr_t(cam_standard) + 0x0c, cam_so) && cam_so &&
-        read_superobject_position(cam_so, cam);
-    char message[320]{};
-    std::snprintf(message, sizeof(message),
-        "RUNTIME-INTRO: natural=%s ray_custom=0x%08X ray_flags=0x%02X ray_xyz_valid=%u ray=(%.2f,%.2f,%.2f) camera_xyz_valid=%u camera=(%.2f,%.2f,%.2f)",
-        stage, unsigned(custom), unsigned(flags), unsigned(ray_ok),
+    std::vector<std::uintptr_t> pending{root};
+    std::unordered_set<std::uintptr_t> seen;
+    while (!pending.empty() && seen.size()<4096) {
+        const auto so=pending.back();
+        pending.pop_back();
+        if (!so || !seen.insert(so).second) continue;
+        ++sample.visited;
+        std::uint32_t child=0,next=0;
+        if (read_u32(so+0x08,child) && child) pending.push_back(child);
+        if (read_u32(so+0x14,next) && next) pending.push_back(next);
+        auto director=r2fix::recognize_intro_director(
+            so,ray_so,
+            [](std::uintptr_t p,std::uint32_t& v){return read_u32(p,v);},
+            [](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);},
+            &sample.counters);
+        if (director.valid()) {
+            ++sample.matches;
+            sample.standin=director.standin_superobject;
+        }
+    }
+    if (sample.matches!=1) sample.standin=0;
+    return sample;
+}
+bool log_natural_intro_snapshot(const char* stage, DWORD t) {
+    if (!g_log) return false;
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    if (!base) return false;
+    std::uint32_t ray_so=0,ray_actor=0,standard=0,custom=0;
+    std::uint8_t flags=0;
+    if (!read_u32(base+kRaymanSuperObjectRva,ray_so) || !ray_so ||
+        !read_u32(std::uintptr_t(ray_so)+4,ray_actor) || !ray_actor ||
+        !read_u32(std::uintptr_t(ray_actor)+4,standard) || !standard ||
+        !read_u32(std::uintptr_t(standard)+0x24,custom) ||
+        !read_u8(std::uintptr_t(standard)+0x29,flags)) {
+        char missing[120]{};
+        std::snprintf(missing,sizeof(missing),
+            "RUNTIME-INTRO: natural=%s t=%ums unavailable (Rayman data)",stage,unsigned(t));
+        log_line(missing);
+        return false;
+    }
+    float xyz[3]{},camera[3]{},standin[3]{};
+    const bool ray_ok=read_superobject_position(ray_so,xyz);
+    std::uint32_t cam_actor=0,cam_standard=0,cam_so=0;
+    const bool cam_ok=
+        read_u32(base+kFixCameraActorRva,cam_actor) && cam_actor &&
+        read_u32(std::uintptr_t(cam_actor)+4,cam_standard) && cam_standard &&
+        read_u32(std::uintptr_t(cam_standard)+0x0c,cam_so) && cam_so &&
+        read_superobject_position(cam_so,camera);
+    char msg[320]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-INTRO: natural=%s t=%ums ray_custom=0x%08X ray_flags=0x%02X ray_xyz_valid=%u ray=(%.2f,%.2f,%.2f) camera_xyz_valid=%u camera=(%.2f,%.2f,%.2f)",
+        stage,unsigned(t),unsigned(custom),unsigned(flags),unsigned(ray_ok),
         double(xyz[0]),double(xyz[1]),double(xyz[2]),unsigned(cam_ok),
-        double(cam[0]),double(cam[1]),double(cam[2]));
-    log_line(message);
+        double(camera[0]),double(camera[1]),double(camera[2]));
+    log_line(msg);
+    const auto director=sample_natural_director(ray_so);
+    const bool standin_ok=director.standin &&
+        read_superobject_position(director.standin,standin);
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-INTRO: director=%s t=%ums visited=%u matches=%u identified=%u armed=%u behaviour=%d suspended=%u standin_valid=%u standin=(%.2f,%.2f,%.2f)",
+        stage,unsigned(t),director.visited,director.matches,
+        director.counters.identified_directors,
+        director.counters.armed_directors,
+        director.counters.current_behaviour_index,
+        director.counters.rayman_suspended,
+        unsigned(standin_ok),double(standin[0]),double(standin[1]),double(standin[2]));
+    log_line(msg);
+    return true;
 }
 void poll_learn_intro_skip() {
     if (!g_current_level) return;
@@ -200,6 +263,9 @@ void poll_learn_intro_skip() {
         g_learn_intro_seen = false;
         g_learn_handover = false;
         g_learn_handover_start = 0;
+        g_learn_intro_start = 0;
+        g_learn_trace_index = 0;
+        g_learn_first_valid_seen = false;
         return;
     }
     if (!g_progress_words) {
@@ -220,21 +286,36 @@ void poll_learn_intro_skip() {
     if (!g_learn_logged) {
         g_learn_logged = true;
         g_learn_intro_seen = !handed_over;
+        g_learn_intro_start = GetTickCount();
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
             : "RUNTIME-INTRO: learn_10 skip disabled after visual regression; natural scene unchanged");
-        if (g_learn_intro_seen) log_natural_intro_snapshot("opening");
+        if (g_learn_intro_seen)
+            g_learn_first_valid_seen=log_natural_intro_snapshot("opening",0);
+    }
+    // Fixed-rate snapshots only while the natural introduction is active.
+    if (!handed_over && g_learn_intro_seen && g_log &&
+        g_learn_trace_index<sizeof(kNaturalTraceTimes)/sizeof(kNaturalTraceTimes[0])) {
+        const DWORD elapsed=DWORD(GetTickCount()-g_learn_intro_start);
+        if (elapsed>=kNaturalTraceTimes[g_learn_trace_index]) {
+            ++g_learn_trace_index;
+            if (log_natural_intro_snapshot("during",elapsed) &&
+                !g_learn_first_valid_seen) {
+                g_learn_first_valid_seen=true;
+                log_line("RUNTIME-INTRO: first valid natural state sampled");
+            }
+        }
     }
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
         g_learn_handover_start = GetTickCount();
         log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
-        log_natural_intro_snapshot("handover");
+        log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
     }
     if (handed_over && g_learn_handover_start &&
         DWORD(GetTickCount() - g_learn_handover_start) >= kNaturalHandoverFollowupMillis) {
         g_learn_handover_start = 0;
-        log_natural_intro_snapshot("handover-plus-1s");
+        log_natural_intro_snapshot("handover-plus-1s",DWORD(GetTickCount()-g_learn_intro_start));
     }
 }
 
