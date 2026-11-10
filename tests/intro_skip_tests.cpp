@@ -190,7 +190,19 @@ int main() {
     assert(stats.waypoint_kind==1 && stats.waypoint_value==1);
     assert(stats.self_kind==1 && stats.self_value==1);
     assert(stats.subject_kind==1 && stats.subject_value==1);
-    assert(stats.standin_kind==1);
+    assert(stats.standin_kind==1 && stats.identified_with_null_waypoint==0);
+    // A null waypoint must not suppress checks of the other director links.
+    demo.a[buffer+8]=0;
+    r2fix::IntroDirectorScanStats pending{};
+    assert(!r2fix::recognize_intro_director(
+        scene,ray,
+        [&](std::uintptr_t p,std::uint32_t& v){return demo.read32(p,v);},
+        [&](std::uintptr_t p,std::uint8_t& v){return demo.read8(p,v);},
+        &pending).valid());
+    assert(pending.waypoint_kind==1 && pending.waypoint_value==0);
+    assert(pending.verified_self==1 && pending.verified_rayman==1);
+    assert(pending.verified_standin==1 && pending.identified_with_null_waypoint==1);
+    demo.a[buffer+8]=waypoint;
     demo.a[infos+1*16+4]=9;
     r2fix::IntroDirectorScanStats wrongWaypointType{};
     assert(!r2fix::recognize_intro_director(

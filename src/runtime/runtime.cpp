@@ -55,6 +55,7 @@ r2fix::IntroSkipGuard g_intro_guard;
 bool g_intro_level_logged = false;
 r2fix::LearnIntroGuard g_learn_guard;
 bool g_learn_logged = false;
+DWORD g_learn_intro_start = 0;
 bool g_learn_requested = false;
 bool g_learn_handover = false;
 DWORD g_learn_skip_start = 0;
@@ -222,6 +223,7 @@ void poll_learn_intro_skip() {
         g_learn_guard.update(g_current_level, false, false);
         g_progress_words = 0;
         g_learn_logged = false;
+        g_learn_intro_start = 0;
         g_learn_requested = false;
         g_learn_handover = false;
         g_learn_skip_start = 0;
@@ -244,6 +246,7 @@ void poll_learn_intro_skip() {
         return;
     if (!g_learn_logged) {
         g_learn_logged = true;
+        g_learn_intro_start = GetTickCount();
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable, skip disabled"
             : "RUNTIME-INTRO: learn_10 intro active; each fresh Enter may request native ending");
@@ -271,7 +274,8 @@ void poll_learn_intro_skip() {
     const auto director = find_intro_director(matched, visited, stats);
     char message[240]{};
     std::snprintf(message, sizeof(message),
-                  "RUNTIME-INTRO: Learn_10 scan visited=%u matched=%u actors=%u armed=%u models=%u",
+                  "RUNTIME-INTRO: Learn_10 scan t=%ums visited=%u matched=%u actors=%u armed=%u models=%u",
+                  unsigned(DWORD(GetTickCount() - g_learn_intro_start)),
                   unsigned(visited), unsigned(matched), stats.actor_objects,
                   stats.armed_directors, stats.models_with_variables);
     log_line(message);
@@ -281,6 +285,10 @@ void poll_learn_intro_skip() {
                   stats.self_kind, stats.self_value, stats.verified_self,
                   stats.subject_kind, stats.subject_value, stats.verified_rayman,
                   stats.standin_kind, stats.verified_standin);
+    log_line(message);
+    std::snprintf(message, sizeof(message),
+                  "RUNTIME-INTRO: director verified except null waypoint=%u (no write attempted)",
+                  stats.identified_with_null_waypoint);
     log_line(message);
     if (!director.valid()) {
         log_line("RUNTIME-INTRO: no unique verified scene director; release Enter and retry while intro active");

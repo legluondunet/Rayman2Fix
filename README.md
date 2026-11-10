@@ -36,7 +36,11 @@ stand-in in var4, and gives the stand-in a valid unattached waypoint in
 var1. Only then does it move the temporary stand-in to that waypoint so
 the ORIGINAL Rayman 2 scene script can perform its own handover. It never
 teleports Rayman, changes the saved story bits, removes an actor, or
-restarts the level. If identification is uncertain, it does nothing. A rejected attempt
+restarts the level. If identification is uncertain, it does nothing. A null destination no
+longer prevents the scanner from checking the controller's own identity,
+Rayman and its stand-in: diagnostic-only checks remain independent, while
+any write still requires a valid non-null waypoint. Logs also include
+elapsed time since the intro was entered. A rejected attempt
 does **not** consume the Enter shortcut for the rest of the visit: release
 Enter and press it again while the scripted intro is still active.
 The outcome is still **unverified under Wine/Windows**. The one-file log
