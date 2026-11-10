@@ -209,6 +209,10 @@ if(BUILD_TESTING)
   target_include_directories(intro_skip_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME second-intro-skip-guard COMMAND intro_skip_tests)
 
+  add_executable(scene_script_probe_tests tests/scene_script_probe_tests.cpp)
+  target_include_directories(scene_script_probe_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME learn10-scene-script-readonly-probe COMMAND scene_script_probe_tests)
+
   if(WIN32)
     # Harmless child executable for a Win32 CreateProcessW smoke test. This
     # checks spaces in paths and explicit game working directory, without

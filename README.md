@@ -57,6 +57,19 @@ evidence of what happened inside the game during that gap. No game data
 is written, no process addresses are logged and no new thread is made.
 These observations provide a reference for a future safe skip.
 
+**Compiled script inspection (read-only, bounded):** Once the genuine
+`Learn_10` director enters behaviour 3, the runtime inspects its
+compiled model behaviours 1 (exit), 3 (intro walk) and 5 (handoff),
+including their schedules and up to eight rules each. Logs contain
+only node indices, nesting depths and symbolic opcode numbers
+(procedures, conditions, variables and local behaviour indices); game
+pointers, asset bytes and executable instructions are never logged.
+The parser checks node types, depths and a maximum of 1024 nodes per
+script, and truncates output to a limited number of log lines.
+**It does not execute, fast-forward or modify a script.** We will use
+the data to identify which native cleanup operations a safe future
+skip must preserve.
+
 The separately validated native `Jail_20 -> Learn_10` level change
 remains enabled, as do GameFrame loading-image colours and 4:3 framing,
 Hor+ 3D and the 4:3 HUD. This rollback does not merge the PR.

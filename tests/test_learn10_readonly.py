@@ -32,6 +32,10 @@ class Learn10SafeFallback(unittest.TestCase):
         self.assertIn("kMaxLearnChangeSnapshots = 8",source)
         self.assertNotIn("CreateThread(",block)
         self.assertIn("sample_natural_director(",source)
+        self.assertIn("observe_scene_script(",source)
+        self.assertIn("log_compiled_director_model(",source)
+        self.assertIn("g_learn_script_probe_done",source)
+        self.assertIn("read-only",source)
         self.assertNotIn("AI_fn_ucChangeComportIntell",source)
 
     def test_retains_jail_20_skip_only(self):

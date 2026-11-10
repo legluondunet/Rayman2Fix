@@ -11,6 +11,7 @@
 #include "rayman2fix/intro_skip.hpp"
 #include "rayman2fix/story_lookup.hpp"
 #include "rayman2fix/scene_intro.hpp"
+#include "rayman2fix/scene_script_probe.hpp"
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -68,6 +69,7 @@ DWORD g_learn_handover_start = 0;
 DWORD g_learn_intro_start = 0;
 unsigned g_learn_trace_index = 0;
 bool g_learn_first_valid_seen = false;
+bool g_learn_script_probe_done = false;
 // Cached *read-only* pointers are sampled only during Learn_10 and
 // validated with ReadProcessMemory before every use.
 std::uintptr_t g_observed_director_intelligence = 0;
@@ -235,6 +237,119 @@ NaturalDirectorSample sample_natural_director(std::uintptr_t ray_so) {
     }
     return sample;
 }
+// Observe the compiled director's *own* behaviour scripts. This is not
+// an interpreter and NEVER invokes procedures, changes behaviour or
+// reads any node parameter that points to an actor or game resource.
+// Opcode ID/indent and local-model behaviour index only are logged.
+void log_compiled_director_script(unsigned behaviour, const char* kind,
+                                  unsigned rule, std::uintptr_t script_slot,
+                                  std::uintptr_t list, unsigned list_count,
+                                  unsigned& line_budget) {
+    if (!line_budget || !g_log) return;
+    const auto p=r2fix::observe_scene_script(
+        script_slot,
+        [](std::uintptr_t a,std::uint32_t& v){return read_u32(a,v);},
+        [](std::uintptr_t a,std::uint8_t& v){return read_u8(a,v);});
+    char message[300]{};
+    std::snprintf(message,sizeof(message),
+        "RUNTIME-INTRO: compiled-script b=%u %s=%u nodes=%u complete=%u malformed=%u selected=%u truncated=%u (read-only)",
+        behaviour,kind,rule,p.visited,unsigned(p.complete),
+        unsigned(p.malformed),p.selected,unsigned(p.truncated));
+    log_line(message);
+    --line_budget;
+    if (!p.complete) return;
+
+    char tokens[260]{};
+    unsigned used=0;
+    for (unsigned i=0;i<p.selected && line_budget;++i) {
+        const auto& e=p.events[i];
+        char token[54]{};
+        const char* prefix="?";
+        bool has_number=true;
+        std::int32_t value=std::int32_t(e.param);
+        switch (e.type) {
+            case 0:prefix="K";break; // keyword
+            case 1:prefix="C";break; // condition
+            case 2:prefix="O";break; // operator
+            case 3:prefix="F";break; // function
+            case 4:prefix="P";break; // procedure
+            case 5:prefix="A";break; // frame-spanning meta-action
+            case 9:prefix="H";break; // actor field
+            case 11:prefix="V";break; // designer variable
+            case 12:prefix="I";break; // integer literal
+            case 17:prefix="M";break; // mask
+            case 23:prefix="actor";has_number=false;break;
+            case 39:prefix="macro";has_number=false;break;
+            case 28: // Map pointer only if it targets this exact model.
+                prefix="B";has_number=false;
+                if (e.param>=list && e.param<list+list_count*12u &&
+                    (e.param-list)%12u==0u) {
+                    value=std::int32_t((e.param-list)/12u);
+                    has_number=true;
+                }
+                break;
+        }
+        if (has_number)
+            std::snprintf(token,sizeof(token)," %u.%u:%s%d",e.node,e.indent,prefix,int(value));
+        else
+            std::snprintf(token,sizeof(token)," %u.%u:%s",e.node,e.indent,prefix);
+        const unsigned n=unsigned(std::strlen(token));
+        if (used && used+n>=sizeof(tokens)-1) {
+            std::snprintf(message,sizeof(message),
+                "RUNTIME-INTRO: compiled-script b=%u %s=%u %s",
+                behaviour,kind,rule,tokens);
+            log_line(message);
+            --line_budget;
+            tokens[0]=0;
+            used=0;
+        }
+        if (!line_budget) break;
+        if (n<sizeof(tokens)-used) {
+            std::memcpy(tokens+used,token,n+1);
+            used+=n;
+        }
+    }
+    if (used && line_budget) {
+        std::snprintf(message,sizeof(message),
+            "RUNTIME-INTRO: compiled-script b=%u %s=%u %s",
+            behaviour,kind,rule,tokens);
+        log_line(message);
+        --line_budget;
+    }
+}
+void log_compiled_director_model(std::uintptr_t behaviours) {
+    if (!g_log || !behaviours) return;
+    log_line("RUNTIME-INTRO: compiled-script legend K=keyword C=condition O=operator F=function P=procedure A=meta H=field V=var I=int M=mask B=local-behaviour (pointer types redacted)");
+    unsigned budget=80;
+    for (unsigned behaviour : {1u,3u,5u}) {
+        const auto b=behaviours+behaviour*12u;
+        std::uint32_t rules=0,schedule=0;
+        std::uint8_t count=0;
+        if (!read_u32(b,rules) || !read_u32(b+4,schedule) ||
+            !read_u8(b+8,count)) {
+            log_line("RUNTIME-INTRO: compiled-script behaviour metadata unavailable");
+            continue;
+        }
+        char meta[150]{};
+        std::snprintf(meta,sizeof(meta),
+            "RUNTIME-INTRO: compiled-script behaviour=%u rules=%u schedule=%u",
+            behaviour,unsigned(count),unsigned(schedule!=0));
+        log_line(meta);
+        if (schedule)
+            log_compiled_director_script(behaviour,"schedule",0,
+                                         schedule,behaviours,6,budget);
+        // Rules are an array of four-byte script headers, not an array
+        // of pointers to those headers. Keep the probe size bounded.
+        if (rules && count<=16) {
+            for (unsigned j=0;j<count && j<8 && budget;++j)
+                log_compiled_director_script(behaviour,"rule",j,
+                    std::uintptr_t(rules)+j*4u,behaviours,6,budget);
+        } else if (count) {
+            log_line("RUNTIME-INTRO: compiled-script rules unavailable or count excessive");
+        }
+    }
+}
+
 bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     if (!g_log) return false;
     const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
@@ -272,6 +387,13 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
         g_observed_director_intelligence=director.intelligence;
         g_observed_director_behaviours=director.behaviours;
         g_observed_director_index=director.counters.current_behaviour_index;
+        // Run the one-time script probe only after the normal intro's
+        // behaviour 3 is live; diagnostic is skipped if never observed.
+        if (!g_learn_script_probe_done &&
+            director.counters.current_behaviour_index==3) {
+            g_learn_script_probe_done=true;
+            log_compiled_director_model(director.behaviours);
+        }
     }
     const bool standin_ok=director.standin &&
         read_superobject_position(director.standin,standin);
@@ -348,6 +470,7 @@ void poll_learn_intro_skip() {
         g_learn_intro_start = 0;
         g_learn_trace_index = 0;
         g_learn_first_valid_seen = false;
+        g_learn_script_probe_done = false;
         g_observed_director_intelligence = 0;
         g_observed_director_behaviours = 0;
         g_observed_director_index = -1;
