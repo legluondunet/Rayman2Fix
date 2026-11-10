@@ -76,11 +76,18 @@ During natural state snapshots, only the low byte of integer-typed
 director variables 91, 47, 50 and 110 is observed (with validity/type
 labels). The additional vars 50 and 110 are involved in separate branches
 of the original behaviour-3 rule 2; its switch to behaviour 1 checks
-var110==1. Observed address-validated low bytes of 50 and 110 are
-monitored for changes on the camera callback, limited to sixteen event
-logs across the intro, with timestamps and without changing either
-variable. Pointer-valued variables are never logged. Neither var110 nor
-any other script variable is presently used to bypass the cutscene. **It does not execute, fast-forward or
+var110==1. The first live trace showed var50=0→1→0 and the **low byte**
+of var110=0→2→0 on four occasions, but the initial 16-event budget ran
+out around 20.6s, before the actual ~25.4s exit. The probe now reads
+var50 as its declared 8-bit integer and var110 as its declared 32-bit
+integer, retaining the **last 48** changes in a bounded circular buffer
+throughout the introduction. Only after the natural handover and a
+one-second grace period does it log those events, the number omitted,
+and whether any observed var110 transition entered value 1. Every
+sample and event is passive; neither variable is ever written. Pointer
+variables and process addresses are never logged. An event that occurs
+entirely between camera callbacks may still be missed. Neither var110
+nor any other script variable is used to bypass the cutscene. **It does not execute, fast-forward or
 modify a script.** We will use the data to identify which native
 cleanup operations a safe future skip must preserve.
 

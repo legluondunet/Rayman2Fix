@@ -12,6 +12,7 @@
 #include "rayman2fix/story_lookup.hpp"
 #include "rayman2fix/scene_intro.hpp"
 #include "rayman2fix/scene_script_probe.hpp"
+#include "rayman2fix/intro_gate_timeline.hpp"
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -89,8 +90,8 @@ struct ObservedDirectorByte {
 };
 ObservedDirectorByte g_director_var50{};
 ObservedDirectorByte g_director_var110{};
-unsigned g_director_gate_changes = 0;
-constexpr unsigned kMaxDirectorGateChanges = 16;
+r2fix::IntroGateTimeline<48> g_director_gate_history{};
+bool g_director_gate_history_reported = false;
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
@@ -540,15 +541,23 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     // changes; do not overwrite the comparison state during snapshots.
     if (has50 && address50 && g_director_var50.location!=address50)
         g_director_var50={address50,t50,v50};
-    if (has110 && address110 && g_director_var110.location!=address110)
-        g_director_var110={address110,t110,v110};
+    // Type 5 in Rayman 2 is a *32-bit integer*. The old low-byte
+    // diagnostic saw repeated 0->2 pulses; track the FULL value rather
+    // than assuming the low byte describes its entire state.
+    std::uint32_t full110=0;
+    const bool has_full110=has110 && t110==5 && address110 &&
+        read_u32(address110,full110);
+    if (has110 && has_full110 &&
+        g_director_var110.location!=address110)
+        g_director_var110={address110,t110,unsigned(full110)};
     std::snprintf(msg,sizeof(msg),
         "RUNTIME-INTRO: director-vars=%s t=%ums var91_valid=%u var91_type=%u var91_low8=%u var47_valid=%u var47_type=%u var47_low8=%u (read-only)",
         stage,unsigned(t),unsigned(has91),t91,v91,unsigned(has47),t47,v47);
     log_line(msg);
     std::snprintf(msg,sizeof(msg),
-        "RUNTIME-INTRO: director-gates=%s t=%ums var50_valid=%u var50_type=%u var50_low8=%u var110_valid=%u var110_type=%u var110_low8=%u (read-only)",
-        stage,unsigned(t),unsigned(has50),t50,v50,unsigned(has110),t110,v110);
+        "RUNTIME-INTRO: director-gates=%s t=%ums var50_valid=%u var50_type=%u var50_low8=%u var110_valid=%u var110_type=%u var110_low8=%u var110_u32_valid=%u var110_u32=%u (read-only)",
+        stage,unsigned(t),unsigned(has50),t50,v50,unsigned(has110),t110,v110,
+        unsigned(has_full110),unsigned(full110));
     log_line(msg);
     std::snprintf(msg,sizeof(msg),
         "RUNTIME-INTRO: director=%s t=%ums visited=%u matches=%u identified=%u armed=%u behaviour=%d suspended=%u standin_valid=%u standin=(%.2f,%.2f,%.2f)",
@@ -612,29 +621,55 @@ void trace_natural_intro_changes(DWORD elapsed) {
     }
 }
 
-// Observe script-owned boolean gate transitions, never modify them.
-// The script condition at b3/rule2 nodes 927-939 is var110==1; direct
-// switching to behaviour 1 previously broke graphical state. Tracking
-// both var50 and var110 may show the necessary ordering of native cleanup.
+// Read only two validated integer kinds: director var50 type 0 is an
+// 8-bit integer; var110 type 5 is a signed 32-bit integer. The old
+// diagnostic logged only the low byte of type 5, then stopped after 16
+// events at ~20s, leaving the actual 25s exit unobservable.
 void trace_native_exit_gates(DWORD elapsed) {
-    if (!g_log || g_director_gate_changes>=kMaxDirectorGateChanges)
-        return;
-    auto sample=[&](const char* name,ObservedDirectorByte& v) {
-        if (!v.location || g_director_gate_changes>=kMaxDirectorGateChanges)
-            return;
-        std::uint8_t now=0;
-        if (!read_u8(v.location,now)) return;
-        if (unsigned(now)==v.previous) return;
-        char message[192]{};
-        std::snprintf(message,sizeof(message),
-            "RUNTIME-INTRO: director-gate-change t=%ums %s type=%u old=%u new=%u (observed, not written)",
-            unsigned(elapsed),name,v.type,v.previous,unsigned(now));
-        v.previous=unsigned(now);
-        ++g_director_gate_changes;
-        log_line(message);
+    if (!g_log) return;
+    const auto sample=[&](unsigned index,ObservedDirectorByte& v) {
+        if (!v.location || (index==50 && v.type!=0) ||
+            (index==110 && v.type!=5)) return;
+        std::uint32_t value=0;
+        if (v.type==5) {
+            if (!read_u32(v.location,value)) return;
+        } else {
+            std::uint8_t byte=0;
+            if (!read_u8(v.location,byte)) return;
+            value=byte;
+        }
+        if (value==v.previous) return;
+        g_director_gate_history.record(
+            elapsed,std::uint8_t(index),
+            std::uint32_t(v.previous),value);
+        v.previous=value;
     };
-    sample("var50",g_director_var50);
-    sample("var110",g_director_var110);
+    sample(50,g_director_var50);
+    sample(110,g_director_var110);
+}
+
+// Flush at least one second *after* natural handover: printing dozens
+// of lines while the renderer is handing Rayman control back would itself
+// perturb frame scheduling. No reads from freed director pointers.
+void log_native_gate_history(DWORD elapsed) {
+    if (!g_log || g_director_gate_history_reported) return;
+    g_director_gate_history_reported=true;
+    const auto& trace=g_director_gate_history;
+    char message[240]{};
+    std::snprintf(message,sizeof(message),
+        "RUNTIME-INTRO: director-gate-history t=%ums total=%u retained=%u dropped=%u var110_eq1=%u (read-only, last changes)",
+        unsigned(elapsed),unsigned(trace.total),
+        unsigned(trace.retained()),unsigned(trace.dropped()),
+        unsigned(trace.var110_equal_one));
+    log_line(message);
+    for(std::size_t i=0;i<trace.retained();++i) {
+        const auto& e=trace.chronological(i);
+        std::snprintf(message,sizeof(message),
+            "RUNTIME-INTRO: director-gate-event t=%ums var%u old=%u new=%u (observed, not written)",
+            unsigned(e.elapsed_ms),unsigned(e.variable),
+            unsigned(e.previous),unsigned(e.current));
+        log_line(message);
+    }
 }
 
 void poll_learn_intro_skip() {
@@ -658,7 +693,8 @@ void poll_learn_intro_skip() {
         g_learn_change_snapshots = 0;
         g_director_var50={};
         g_director_var110={};
-        g_director_gate_changes=0;
+        g_director_gate_history={};
+        g_director_gate_history_reported=false;
         return;
     }
     if (!g_progress_words) {
@@ -691,7 +727,10 @@ void poll_learn_intro_skip() {
     const DWORD elapsed=DWORD(GetTickCount()-g_learn_intro_start);
     if (g_learn_intro_seen && !g_learn_handover && g_log) {
         trace_natural_intro_changes(elapsed);
-        trace_native_exit_gates(elapsed);
+        // The native exit can remove the director between frames. Stop
+        // reading its cached bytes at the FIRST observed exit state.
+        if (!handed_over && g_observed_director_index!=1)
+            trace_native_exit_gates(elapsed);
     }
 
     // Consume overdue checkpoints in ONE pass. An earlier build replayed
@@ -728,6 +767,7 @@ void poll_learn_intro_skip() {
         DWORD(GetTickCount() - g_learn_handover_start) >= kNaturalHandoverFollowupMillis) {
         g_learn_handover_start = 0;
         log_natural_intro_snapshot("handover-plus-1s",DWORD(GetTickCount()-g_learn_intro_start));
+        log_native_gate_history(DWORD(GetTickCount()-g_learn_intro_start));
     }
 }
 
