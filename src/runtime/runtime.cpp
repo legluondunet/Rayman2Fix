@@ -8,6 +8,7 @@
 #include <windows.h>
 #include "rayman2fix/fov_math.hpp"
 #include "rayman2fix/hud_math.hpp"
+#include "rayman2fix/dialogue_math.hpp"
 #include "rayman2fix/intro_skip.hpp"
 #include "rayman2fix/story_lookup.hpp"
 #include "rayman2fix/scene_intro.hpp"
@@ -30,6 +31,11 @@ namespace {
 constexpr DWORD kConfigMagic = 0x32584652; // "RFX2" in little endian
 constexpr DWORD kOriginalTimestamp = 0x3807B68B;
 constexpr uintptr_t kCameraRva = 0x22AB0; // verified VA=0x422AB0 for image base 0x400000
+// Verified against owner's SHA256-locked 1.02 EXE (SHA256 9bae484b...):
+// ACP_Ray2 JFFTXT_vDrawString at VA 0x4660B0, seven complete prologue
+// instructions: sub esp,2Ch; push ebx/ebp/esi/edi. No disk EXE edit.
+constexpr uintptr_t kTextDrawRva = 0x660B0;
+constexpr BYTE kExpectedTextDraw[7] = {0x83,0xEC,0x2C,0x53,0x55,0x56,0x57};
 // Original game's native scene names and deferred level-change API.
 // These addresses apply ONLY to the single hash-verified retail executable.
 constexpr uintptr_t kLevelNameRva = 0x100381; // VA 0x500381, char[30]
@@ -60,6 +66,10 @@ constexpr std::size_t kAlphaXOffset = 100;
 constexpr std::size_t kAlphaYOffset = 104;
 using CameraAdjust = void (__cdecl*)(void*, void*, void*);
 CameraAdjust g_original = nullptr;
+using NativeTextDraw = void (__cdecl*)(void*,r2fix::JffTextString32*);
+NativeTextDraw g_original_text_draw = nullptr;
+bool g_text_draw_hook_installed = false;
+std::atomic<bool> g_dialogue_adjustment_logged{false};
 using RequestLevel = void (__cdecl*)(const char*, unsigned char);
 std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
@@ -1165,6 +1175,74 @@ DWORD install_camera_hook() {
 }
 
 
+// Separate native font detour, limited to bottom subtitles in Learn_10.
+// It changes only the *copy* passed to the verified JFFTXT_vDrawString,
+// never the game's JFFTXT record, story bits, camera, assets or box sprites.
+void __cdecl corrected_dialogue_text(void* context,
+                                     r2fix::JffTextString32* string) {
+    const auto original=g_original_text_draw;
+    if (!original) return;
+    r2fix::JffTextString32 adapted{};
+    if (string && g_current_level &&
+        r2fix::is_first_playable_level(g_current_level) &&
+        r2fix::fit_learn10_dialogue_text(*string,g_hud_scale,adapted)) {
+        if (!g_dialogue_adjustment_logged.exchange(true,
+                              std::memory_order_relaxed))
+            log_line("RUNTIME-DIALOGUE: native Learn_10 bottom text size/X corrected (no panel/sprite changes)");
+        original(context,&adapted);
+        return;
+    }
+    original(context,string);
+}
+void install_dialogue_text_hook() {
+    if (g_text_draw_hook_installed || g_hud_scale>=1.0f) return;
+    const auto* base=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if (!base) return;
+    const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic!=IMAGE_DOS_SIGNATURE || dos->e_lfanew<=0 ||
+        dos->e_lfanew>=0x1000) return;
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+        base+dos->e_lfanew);
+    if (pe->Signature!=IMAGE_NT_SIGNATURE ||
+        pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+        pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
+        pe->OptionalHeader.SizeOfImage<kTextDrawRva+64)
+        return;
+    auto* target=const_cast<BYTE*>(base+kTextDrawRva);
+    constexpr std::size_t n=sizeof(kExpectedTextDraw);
+    if (std::memcmp(target,kExpectedTextDraw,n)!=0) {
+        log_line("RUNTIME-DIALOGUE: unsupported JFFTXT prologue; font correction not installed");
+        return;
+    }
+    auto* gateway=static_cast<BYTE*>(
+        VirtualAlloc(nullptr,64,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    if (!gateway) {
+        log_line("RUNTIME-DIALOGUE: could not allocate font detour gateway");
+        return;
+    }
+    std::memcpy(gateway,target,n);
+    write_jump(gateway+n,target+n);
+    DWORD old_gateway=0;
+    if (!VirtualProtect(gateway,64,PAGE_EXECUTE_READ,&old_gateway)) {
+        VirtualFree(gateway,0,MEM_RELEASE);
+        return;
+    }
+    FlushInstructionCache(GetCurrentProcess(),gateway,64);
+    DWORD old_target=0;
+    if (!VirtualProtect(target,n,PAGE_EXECUTE_READWRITE,&old_target)) {
+        VirtualFree(gateway,0,MEM_RELEASE);
+        return;
+    }
+    g_original_text_draw=reinterpret_cast<NativeTextDraw>(gateway);
+    write_jump(target,reinterpret_cast<void*>(&corrected_dialogue_text));
+    target[5]=target[6]=0x90;
+    FlushInstructionCache(GetCurrentProcess(),target,n);
+    DWORD ignored=0;
+    VirtualProtect(target,n,old_target,&ignored);
+    g_text_draw_hook_installed=true;
+    log_line("RUNTIME-DIALOGUE: verified native JFFTXT font draw hook installed (Learn_10 bottom text only)");
+}
+
 void initialize_native_intro_skip() {
     const auto* module = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
     if (!module) return;
@@ -1409,6 +1487,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     // Unknown/unsupported game versions never receive additional hooks.
     if (camera_status == 1) {
         initialize_native_intro_skip();
+        install_dialogue_text_hook();
         start_hud_monitor();
     }
     return camera_status;

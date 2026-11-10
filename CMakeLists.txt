@@ -205,6 +205,10 @@ if(BUILD_TESTING)
   target_include_directories(hud_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME centered-hud-4-by-3-math COMMAND hud_math_tests)
 
+  add_executable(dialogue_math_tests tests/dialogue_math_tests.cpp)
+  target_include_directories(dialogue_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME learn10-native-dialogue-layout COMMAND dialogue_math_tests)
+
   add_executable(intro_skip_tests tests/intro_skip_tests.cpp)
   target_include_directories(intro_skip_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME second-intro-skip-guard COMMAND intro_skip_tests)

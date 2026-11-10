@@ -171,6 +171,43 @@ on disk. Unlike the main launcher, this game runtime has not yet been
 validated by real visual screenshots; in particular **HUD overlays may
 still require their own aspect correction**.
 
+## Learn_10 native dialogue text layout (widescreen)
+
+The owner supplied three reference screenshots (two PC 1920x1080, one
+Dreamcast 4:3). The PC tutorial/dialogue glyphs overflow the already
+properly centered black conversation panel. The panel, narrator icon
+and arrow must NOT be widened, redrawn or repositioned to mask the bug.
+
+On 16:9, Rayman2Fix now hooks the **owner-verified original**
+`JFFTXT_vDrawString` (RVA 0x660B0, seven complete checked x86
+instructions; exact original and patched EXE hash verified during launch).
+For the bottom-of-screen text of `learn_10` only, it passes a
+**temporary copy** of the original game text descriptor to the native
+renderer. It maps X from the 1000-unit screen-space canvas into the
+same centered 4:3 region as the panel and scales the native font size
+by `(4/3) / monitor_aspect`. Native Y, dialogue wording, colors,
+line breaks, texture data and other HUD sprites remain untouched.
+On 4:3 and in all other levels the hook simply passes the
+original descriptor through unchanged. Failure to match exact
+original prologue refuses the hook and logs this safely.
+
+**Required visual check** under Wine and Windows:
+1. At 1920x1080, start a new game, skip `Jail_20` and watch `Learn_10`.
+   Compare `SALUT RAYMAN ! CONTENT ...` and the tutorial
+   `PRESSE Q POUR SAUTER ...` to the Dreamcast reference.
+2. Verify that every line remains inside the original black box with
+   a visible margin; the narrator portrait and continuation arrow
+   must not be distorted. The font must keep the game's native color,
+   outline, accents and punctuation.
+3. Check after leaving the dialogue that all regular HUD sprites,
+   pauses, menus and gameplay remain unchanged. Recheck 4:3 and one
+   alternative wide aspect when possible.
+4. The log should include `RUNTIME-DIALOGUE: verified native JFFTXT...`
+   and, on an actual bottom dialogue, `RUNTIME-DIALOGUE: native Learn_10
+   bottom text size/X corrected`. A successful CI **cannot** prove
+   that the three screenshot compositions now match. Keep PR draft
+   until the owner validates the visual result.
+
 ## Manual checks
 
 - `Rayman2Fix.exe --help` and `--version`.
