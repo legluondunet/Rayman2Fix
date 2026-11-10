@@ -41,9 +41,11 @@ matrices or changes saves to bypass this introduction. All original
 feature.
 
 With `[Debug] Log=1`, the runtime takes **read-only** samples at
-the start, 0.25, 1, 2.5, 5, 10, 20, 35 and 50 seconds (while the intro
-is still running), at the natural story bit 1091 handover and a second
-after. The first sample may be unavailable until Rayman is loaded.
+the start, 0.25, 1, 2.5, 5, 10 and 20 seconds, then more densely
+from 21 to 25.5 seconds (while the intro is still running),
+and at the natural story bit 1091 handover and a second after.
+Additional late checkpoints are kept at 27, 35 and 50 seconds
+if the cinematic runs longer than usual. The first sample may be unavailable until Rayman is loaded.
 The diagnostics capture Rayman's flags/position, camera position,
 director behaviour index and stand-in position, if available.
 A fixed sampling schedule bounds the log size; there are no writes

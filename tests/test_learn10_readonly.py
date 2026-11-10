@@ -24,6 +24,8 @@ class Learn10SafeFallback(unittest.TestCase):
         self.assertIn("skip disabled after visual regression",block)
         self.assertIn('log_natural_intro_snapshot("handover",',block)
         self.assertIn('log_natural_intro_snapshot("during",',block)
+        self.assertIn("24500, 25000, 25500",source)
+        self.assertIn("g_learn_trace_index",block)
         self.assertIn("sample_natural_director(",source)
         self.assertNotIn("AI_fn_ucChangeComportIntell",source)
 
