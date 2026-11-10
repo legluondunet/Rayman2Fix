@@ -76,7 +76,16 @@ During natural state snapshots, only the low byte of integer-typed
 director variables 91, 47, 50 and 110 is observed (with validity/type
 labels). The additional vars 50 and 110 are involved in separate branches
 of the original behaviour-3 rule 2; its switch to behaviour 1 checks
-var110==1. The first live trace showed var50=0→1→0 and the **low byte**
+var110==1. Static analysis now identifies a separate progression
+counter at nodes 956–970: if var83 < (var14 - 1), the native script
+increments var83; otherwise it sets var110=1 and enters its original
+actor/Rayman restoration branch. This is a candidate *internal*
+completion path, not a proven shortcut. The diagnostic now also
+tracks var83 and var14 in read-only mode using their declared integer
+widths (8/16/32-bit, signed as appropriate), and logs their values
+at checkpoints and changes through the existing bounded event ring.
+An automated C++ test guards the type decoding. No script values,
+camera matrices or scene flags are altered. The first live trace showed var50=0→1→0 and the **low byte**
 of var110=0→2→0 on four occasions, but the initial 16-event budget ran
 out around 20.6s, before the actual ~25.4s exit. The probe now reads
 var50 as its declared 8-bit integer and var110 as its declared 32-bit

@@ -13,6 +13,7 @@
 #include "rayman2fix/scene_intro.hpp"
 #include "rayman2fix/scene_script_probe.hpp"
 #include "rayman2fix/intro_gate_timeline.hpp"
+#include "rayman2fix/intro_integer_reader.hpp"
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -90,6 +91,8 @@ struct ObservedDirectorByte {
 };
 ObservedDirectorByte g_director_var50{};
 ObservedDirectorByte g_director_var110{};
+ObservedDirectorByte g_director_var83{};
+ObservedDirectorByte g_director_var14{};
 r2fix::IntroGateTimeline<48> g_director_gate_history{};
 bool g_director_gate_history_reported = false;
 std::uintptr_t g_progress_words = 0;
@@ -528,7 +531,8 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     const bool standin_ok=director.standin &&
         read_superobject_position(director.standin,standin);
     unsigned t91=0,v91=0,t47=0,v47=0,t50=0,v50=0,t110=0,v110=0;
-    std::uintptr_t address50=0,address110=0;
+    unsigned t83=0,v83=0,t14=0,v14=0;
+    std::uintptr_t address50=0,address110=0,address83=0,address14=0;
     const bool has91=director.superobject &&
         read_director_integer_low_byte(director.superobject,91u,t91,v91);
     const bool has47=director.superobject &&
@@ -537,6 +541,10 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
         read_director_integer_low_byte(director.superobject,50u,t50,v50,&address50);
     const bool has110=director.superobject &&
         read_director_integer_low_byte(director.superobject,110u,t110,v110,&address110);
+    const bool has83=director.superobject &&
+        read_director_integer_low_byte(director.superobject,83u,t83,v83,&address83);
+    const bool has14=director.superobject &&
+        read_director_integer_low_byte(director.superobject,14u,t14,v14,&address14);
     // Only initialize a watched variable when its exact verified address
     // changes; do not overwrite the comparison state during snapshots.
     if (has50 && address50 && g_director_var50.location!=address50)
@@ -550,6 +558,24 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     if (has110 && has_full110 &&
         g_director_var110.location!=address110)
         g_director_var110={address110,t110,unsigned(full110)};
+    // The native rule compares var83 against (var14-1) and increments
+    // var83 while it is below that threshold. Observe both full signed
+    // values; never set them or assume a terminal value.
+    std::int32_t full83=0,full14=0;
+    const auto read_integer=[](std::uintptr_t address,unsigned type,
+                               std::int32_t& out) {
+        return r2fix::read_intro_integer(address,type,
+            [](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);},
+            [](std::uintptr_t p,std::uint32_t& v){return read_u32(p,v);},out);
+    };
+    const bool has_full83=has83 && address83 &&
+        read_integer(address83,t83,full83);
+    const bool has_full14=has14 && address14 &&
+        read_integer(address14,t14,full14);
+    if (has_full83 && g_director_var83.location!=address83)
+        g_director_var83={address83,t83,static_cast<unsigned>(full83)};
+    if (has_full14 && g_director_var14.location!=address14)
+        g_director_var14={address14,t14,static_cast<unsigned>(full14)};
     std::snprintf(msg,sizeof(msg),
         "RUNTIME-INTRO: director-vars=%s t=%ums var91_valid=%u var91_type=%u var91_low8=%u var47_valid=%u var47_type=%u var47_low8=%u (read-only)",
         stage,unsigned(t),unsigned(has91),t91,v91,unsigned(has47),t47,v47);
@@ -558,6 +584,11 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
         "RUNTIME-INTRO: director-gates=%s t=%ums var50_valid=%u var50_type=%u var50_low8=%u var110_valid=%u var110_type=%u var110_low8=%u var110_u32_valid=%u var110_u32=%u (read-only)",
         stage,unsigned(t),unsigned(has50),t50,v50,unsigned(has110),t110,v110,
         unsigned(has_full110),unsigned(full110));
+    log_line(msg);
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-INTRO: director-counter=%s t=%ums var83_valid=%u var83_type=%u var83=%d var14_valid=%u var14_type=%u var14=%d (read-only)",
+        stage,unsigned(t),unsigned(has_full83),t83,int(full83),
+        unsigned(has_full14),t14,int(full14));
     log_line(msg);
     std::snprintf(msg,sizeof(msg),
         "RUNTIME-INTRO: director=%s t=%ums visited=%u matches=%u identified=%u armed=%u behaviour=%d suspended=%u standin_valid=%u standin=(%.2f,%.2f,%.2f)",
@@ -621,23 +652,22 @@ void trace_natural_intro_changes(DWORD elapsed) {
     }
 }
 
-// Read only two validated integer kinds: director var50 type 0 is an
-// 8-bit integer; var110 type 5 is a signed 32-bit integer. The old
-// diagnostic logged only the low byte of type 5, then stopped after 16
-// events at ~20s, leaving the actual 25s exit unobservable.
+// Read-only counter/exit signals. Director var50 type 0 is an 8-bit
+// integer, var110 type 5 is a signed 32-bit integer; var83 and var14
+// use their own exact type widths. Watch the counter increments and the
+// natural exit without modifying any script-owned value.
 void trace_native_exit_gates(DWORD elapsed) {
     if (!g_log) return;
     const auto sample=[&](unsigned index,ObservedDirectorByte& v) {
         if (!v.location || (index==50 && v.type!=0) ||
             (index==110 && v.type!=5)) return;
-        std::uint32_t value=0;
-        if (v.type==5) {
-            if (!read_u32(v.location,value)) return;
-        } else {
-            std::uint8_t byte=0;
-            if (!read_u8(v.location,byte)) return;
-            value=byte;
-        }
+        std::int32_t signed_value=0;
+        if (!r2fix::read_intro_integer(v.location,v.type,
+            [](std::uintptr_t p,std::uint8_t& b){return read_u8(p,b);},
+            [](std::uintptr_t p,std::uint32_t& w){return read_u32(p,w);},
+            signed_value))
+            return;
+        const std::uint32_t value=static_cast<std::uint32_t>(signed_value);
         if (value==v.previous) return;
         g_director_gate_history.record(
             elapsed,std::uint8_t(index),
@@ -646,6 +676,8 @@ void trace_native_exit_gates(DWORD elapsed) {
     };
     sample(50,g_director_var50);
     sample(110,g_director_var110);
+    sample(83,g_director_var83);
+    sample(14,g_director_var14);
 }
 
 // Flush at least one second *after* natural handover: printing dozens
@@ -657,10 +689,12 @@ void log_native_gate_history(DWORD elapsed) {
     const auto& trace=g_director_gate_history;
     char message[240]{};
     std::snprintf(message,sizeof(message),
-        "RUNTIME-INTRO: director-gate-history t=%ums total=%u retained=%u dropped=%u var110_eq1=%u (read-only, last changes)",
+        "RUNTIME-INTRO: director-gate-history t=%ums total=%u retained=%u dropped=%u var110_eq1=%u var83_last=%d var14_last=%d (read-only, last changes)",
         unsigned(elapsed),unsigned(trace.total),
         unsigned(trace.retained()),unsigned(trace.dropped()),
-        unsigned(trace.var110_equal_one));
+        unsigned(trace.var110_equal_one),
+        int(static_cast<std::int32_t>(g_director_var83.previous)),
+        int(static_cast<std::int32_t>(g_director_var14.previous)));
     log_line(message);
     for(std::size_t i=0;i<trace.retained();++i) {
         const auto& e=trace.chronological(i);
@@ -693,6 +727,8 @@ void poll_learn_intro_skip() {
         g_learn_change_snapshots = 0;
         g_director_var50={};
         g_director_var110={};
+        g_director_var83={};
+        g_director_var14={};
         g_director_gate_history={};
         g_director_gate_history_reported=false;
         return;

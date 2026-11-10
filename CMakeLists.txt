@@ -217,6 +217,10 @@ if(BUILD_TESTING)
   target_include_directories(intro_gate_timeline_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME learn10-bounded-gate-event-timeline COMMAND intro_gate_timeline_tests)
 
+  add_executable(intro_integer_reader_tests tests/intro_integer_reader_tests.cpp)
+  target_include_directories(intro_integer_reader_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME learn10-typed-integer-reader COMMAND intro_integer_reader_tests)
+
   if(WIN32)
     # Harmless child executable for a Win32 CreateProcessW smoke test. This
     # checks spaces in paths and explicit game working directory, without
