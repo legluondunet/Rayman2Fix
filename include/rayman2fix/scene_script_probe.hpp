@@ -101,4 +101,67 @@ SceneScriptProbe observe_scene_script(std::uintptr_t script_slot,
     p.truncated=true;
     return p;
 }
+
+// A read-only fingerprint of the *observed* Learn_10 director script.
+// These node numbers are from the single approved executable's behaviour 3,
+// rule 2. The fingerprint must never be interpreted as permission to skip:
+// recognising script structure does not execute its cleanup or prove that
+// any early entry into it would be safe.
+struct Learn10NativeExitShape {
+    bool exit_gate = false;        // var110 == 1 -> native behaviour change
+    bool counter_branch = false;   // var83 < (var14 - 1), then var83 += 1
+    bool terminal_signal = false;  // alternative branch sets var110 = 1
+    bool actor_reactivation = false;
+    bool rayman_restoration = false;
+    bool native_retirement = false;
+
+    bool matched() const {
+        return exit_gate && counter_branch && terminal_signal &&
+               actor_reactivation && rayman_restoration && native_retirement;
+    }
+};
+inline Learn10NativeExitShape inspect_learn10_native_exit(
+    const SceneScriptProbe& probe) {
+    Learn10NativeExitShape shape{};
+    if (!probe.complete || probe.malformed || probe.context_selected == 0)
+        return shape;
+    const auto has = [&](std::uint32_t node, std::uint8_t type,
+                         std::uint32_t value) {
+        for (unsigned i = 0; i < probe.context_selected; ++i) {
+            const auto& e = probe.context[i];
+            if (e.node == node && e.type == type && e.param == value)
+                return true;
+        }
+        return false;
+    };
+    const auto has_type = [&](std::uint32_t node, std::uint8_t type) {
+        for (unsigned i = 0; i < probe.context_selected; ++i) {
+            const auto& e = probe.context[i];
+            if (e.node == node && e.type == type) return true;
+        }
+        return false;
+    };
+    // Script node types: 1=condition, 2=operator, 4=procedure,
+    // 11=designer variable, 12=integer literal, 28=local behaviour.
+    // No pointer-valued parameter is dereferenced, copied or logged.
+    shape.exit_gate =
+        has(927, 1, 4) && has(928, 11, 110) && has(929, 12, 1);
+    shape.counter_branch =
+        has(957, 1, 6) && has(958, 11, 83) &&
+        has(959, 2, 1) && has(960, 11, 14) &&
+        has(961, 12, 1) && has(963, 2, 5) &&
+        has(964, 11, 83) && has(965, 12, 1);
+    shape.terminal_signal =
+        has(967, 2, 11) && has(968, 11, 110) && has(969, 12, 1);
+    shape.actor_reactivation =
+        has(1022, 4, 84) && has(1031, 4, 67) && has(1034, 4, 68);
+    shape.rayman_restoration =
+        has(1039, 4, 174) && has(1040, 12, 14) && has(1041, 12, 0) &&
+        has(1044, 4, 174) && has(1045, 12, 17) && has(1046, 12, 0);
+    shape.native_retirement =
+        has(933, 4, 174) && has(934, 12, 30) && has(935, 12, 0) &&
+        has(938, 4, 69) && has_type(939, 28);
+    return shape;
+}
+
 } // namespace r2fix
