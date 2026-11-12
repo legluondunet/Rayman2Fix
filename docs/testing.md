@@ -1,3 +1,17 @@
+## Driver-space geometry trace paired with native 2D inputs
+
+The same read-only diagnostic build also records up to three first
+lower-screen GLI driver quads per native source route, including the
+upstream **original** and **mapped** percent X coordinates and the
+actual downstream sprite **vertex** X/Y coordinates. Native GLI
+calls are synchronous and use a thread-local context that is restored
+after each call; its existing 4:3 transformation and double-scaling
+bypass are unchanged. The new `RUNTIME-HUD-DRIVER` lines help
+determine whether a mismatch comes from the original game descriptor,
+the universal percent mapping or the downstream driver.
+Original source text, texture names, game pointers and save data
+are never logged. No drawn geometry is changed.
+
 ## 12 November 2026: compare actual lower-screen geometry
 
 The latest owner-supplied Wine-staging 11.17 log

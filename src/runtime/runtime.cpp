@@ -154,6 +154,16 @@ struct Bottom2DStats {
     std::atomic<unsigned> examples{0};
 };
 Bottom2DStats g_native_bottom_2d[4];
+// Associate the native percent inputs with the *same call's* GLI
+// driver vertices, without changing the existing thread-local
+// double-correction bypass. Native 2D callbacks are synchronous.
+thread_local unsigned g_current_native_route=3;
+thread_local float g_native_input_left=0.0f;
+thread_local float g_native_input_right=0.0f;
+thread_local float g_native_mapped_left=0.0f;
+thread_local float g_native_mapped_right=0.0f;
+std::atomic<unsigned> g_bottom_driver_samples[4]{};
+
 
 
 std::atomic<bool> g_plain_seen{false};
@@ -1342,9 +1352,24 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     if(!g_native_2d_logged.exchange(true,
                                      std::memory_order_relaxed))
         log_line("RUNTIME-HUD: native 2D percent canvas centered 4:3 (shared font/image/frame entry; downstream double-scaling bypassed)");
+    const unsigned previous_route=g_current_native_route;
+    const float prev_input_l=g_native_input_left;
+    const float prev_input_r=g_native_input_right;
+    const float prev_mapped_l=g_native_mapped_left;
+    const float prev_mapped_r=g_native_mapped_right;
+    g_current_native_route=route;
+    g_native_input_left=xmin;
+    g_native_input_right=xmax;
+    g_native_mapped_left=left;
+    g_native_mapped_right=right;
     ++g_native_2d_call_depth;
     original(viewport,left,ymin,right,ymax,material);
     --g_native_2d_call_depth;
+    g_current_native_route=previous_route;
+    g_native_input_left=prev_input_l;
+    g_native_input_right=prev_input_r;
+    g_native_mapped_left=prev_mapped_l;
+    g_native_mapped_right=prev_mapped_r;
 }
 
 void write_jump(BYTE* at, const void* destination) {
@@ -1510,12 +1535,48 @@ void report_first(std::atomic<bool>& flag, const char* line) {
         log_line(line);
 }
 
+// Diagnostic only. The native GLI entry calls the downstream driver
+// synchronously, so the same render thread holds the percent inputs.
+// Compare original/mapped percent X to the final DRIVER pixel X.
+void probe_native_2d_driver(const r2fix::HudVertex* quad,
+                            const char* driver) {
+    if (!quad || !g_native_2d_call_depth ||
+        g_current_native_route>=4)return;
+    float min_x=quad[0].x,max_x=quad[0].x;
+    float min_y=quad[0].y,max_y=quad[0].y;
+    for(unsigned i=0;i<4;++i) {
+        if(!std::isfinite(quad[i].x) || !std::isfinite(quad[i].y) ||
+           !std::isfinite(quad[i].reciprocal_z) ||
+           std::fabs(quad[i].x)>16384.0f ||
+           std::fabs(quad[i].y)>16384.0f)
+            return;
+        if(quad[i].x<min_x)min_x=quad[i].x;
+        if(quad[i].x>max_x)max_x=quad[i].x;
+        if(quad[i].y<min_y)min_y=quad[i].y;
+        if(quad[i].y>max_y)max_y=quad[i].y;
+    }
+    // Diagnostic Y range only: no effect on rendering policy.
+    if(min_y<550.0f || max_y>850.0f)return;
+    const unsigned sample=g_bottom_driver_samples[
+        g_current_native_route].fetch_add(1,std::memory_order_relaxed);
+    if(sample>=3)return;
+    const char* route[4]={"glyph","screen-image","frame","other"};
+    char line[290]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-HUD-DRIVER: sample=%u route=%s callback=%s original_x=%.2f..%.2f mapped_x=%.2f..%.2f vertex_x=%.1f..%.1f vertex_y=%.1f..%.1f (read-only)",
+        sample+1,route[g_current_native_route],driver,
+        double(g_native_input_left),double(g_native_input_right),
+        double(g_native_mapped_left),double(g_native_mapped_right),
+        double(min_x),double(max_x),double(min_y),double(max_y));
+    log_line(line);
+}
 void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
     const auto original = reinterpret_cast<PlainSpriteFn>(
         g_plain_sprite_original.load(std::memory_order_acquire));
     if (!original) return;
     report_first(g_plain_seen, "RUNTIME-HUD: plain sprite callback reached");
     if (g_native_2d_call_depth!=0) {
+        probe_native_2d_driver(quad,"plain");
         // The shared native percent entry already transformed X.
         // Never apply the same 4:3 affine transform twice.
         g_native_2d_passthrough_plain.fetch_add(1,std::memory_order_relaxed);
@@ -1540,6 +1601,7 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
     if (!original) return;
     report_first(g_uv_seen, "RUNTIME-HUD: UV sprite callback reached");
     if (g_native_2d_call_depth!=0) {
+        probe_native_2d_driver(quad,"uv");
         g_native_2d_passthrough_uv.fetch_add(1,std::memory_order_relaxed);
         original(quad,uv,z,globals);
         return;
@@ -1563,6 +1625,7 @@ void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
     if (!original) return;
     report_first(g_color_seen, "RUNTIME-HUD: colored sprite callback reached");
     if (g_native_2d_call_depth!=0) {
+        probe_native_2d_driver(quad,"colored");
         g_native_2d_passthrough_color.fetch_add(1,std::memory_order_relaxed);
         original(quad,colors,z,globals);
         return;
