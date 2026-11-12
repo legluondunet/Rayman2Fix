@@ -169,6 +169,13 @@ std::atomic<unsigned> g_bottom_driver_samples[4]{};
 std::atomic<unsigned> g_unrouted_sprite_totals[3]{};
 std::atomic<unsigned> g_unrouted_lower_counts[3][3]{};
 std::atomic<unsigned> g_unrouted_lower_examples[3][3]{};
+// UV sprites have not entered the tested lower-screen pixel region.
+// Sample their real geometric ranges on each side of the first native
+// bottom-frame submission, without making any rendering decisions.
+std::atomic<unsigned> g_uv_phase_calls[2]{};
+std::atomic<unsigned> g_uv_phase_valid[2]{};
+std::atomic<unsigned> g_uv_phase_near_canvas[2]{};
+std::atomic<unsigned> g_uv_phase_samples[2]{};
 
 
 
@@ -1587,8 +1594,38 @@ void probe_unrouted_lower_sprite(const r2fix::HudVertex* quad,
         std::memory_order_acquire);
     if (!started || GetTickCount()-started<25000) return;
     r2fix::ScreenQuadGeometry b{};
-    if (!r2fix::inspect_screen_quad_geometry(quad,b) ||
-        !r2fix::is_lower_screen_probe(b)) return;
+    const bool valid=r2fix::inspect_screen_quad_geometry(quad,b);
+    if(kind==1) {
+        // This frame counter is already read-only geometry telemetry.
+        // It is NOT proof that the bottom frame belongs to Murfy.
+        const unsigned phase=g_native_bottom_2d[2].calls.load(
+            std::memory_order_relaxed)>0 ? 1u : 0u;
+        g_uv_phase_calls[phase].fetch_add(1,std::memory_order_relaxed);
+        if(valid) g_uv_phase_valid[phase].fetch_add(
+            1,std::memory_order_relaxed);
+        const bool near_canvas=valid &&
+            b.left>=-256.0f && b.right<=1280.0f &&
+            b.top>=-256.0f && b.bottom<=1024.0f;
+        if(near_canvas) g_uv_phase_near_canvas[phase].fetch_add(
+            1,std::memory_order_relaxed);
+        const unsigned sample=g_uv_phase_samples[phase].fetch_add(
+            1,std::memory_order_relaxed);
+        if(sample<4 && g_log) {
+            char msg[300]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-HUD-UV-GEOMETRY: phase=%s sample=%u valid=%u near_canvas=%u x=%.1f..%.1f y=%.1f..%.1f reciprocal_z=%.4f..%.4f (read-only; sprite identity unknown)",
+                phase ? "after-bottom-frame" : "before-bottom-frame",
+                sample+1,unsigned(valid),unsigned(near_canvas),
+                valid ? double(b.left) : 0.0,
+                valid ? double(b.right) : 0.0,
+                valid ? double(b.top) : 0.0,
+                valid ? double(b.bottom) : 0.0,
+                valid ? double(b.min_reciprocal_z) : 0.0,
+                valid ? double(b.max_reciprocal_z) : 0.0);
+            log_line(msg);
+        }
+    }
+    if(!valid || !r2fix::is_lower_screen_probe(b)) return;
     const unsigned sector=r2fix::screen_quad_probe_sector(
         b,kInternalGlideWidth);
     g_unrouted_lower_counts[kind][sector].fetch_add(
@@ -1802,6 +1839,20 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                         g_unrouted_lower_counts[k][2].load(
                             std::memory_order_relaxed));
                     log_line(extra);
+                }
+                for(unsigned phase=0;phase<2;++phase) {
+                    char uv_status[220]{};
+                    std::snprintf(uv_status,sizeof(uv_status),
+                        "RUNTIME-HUD-UV-GEOMETRY: at=%us phase=%s calls=%u valid=%u near_canvas=%u (read-only)",
+                        unsigned(iteration/2),
+                        phase ? "after-bottom-frame" : "before-bottom-frame",
+                        g_uv_phase_calls[phase].load(
+                            std::memory_order_relaxed),
+                        g_uv_phase_valid[phase].load(
+                            std::memory_order_relaxed),
+                        g_uv_phase_near_canvas[phase].load(
+                            std::memory_order_relaxed));
+                    log_line(uv_status);
                 }
                 const char* routes[3]={"glyph","screen-image","frame"};
                 for(unsigned k=0;k<3;++k) {

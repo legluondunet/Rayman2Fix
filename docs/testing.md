@@ -1,3 +1,29 @@
+## Follow-up: diagnose UV coordinate system without movement (12 Nov 2026)
+
+The owner's Wine trace `Rayman2Fix(20261112-172957).log` ran
+normally for ~64s. At 60s the existing new telemetry counted
+76,887 unrouted plain sprites and 1,032 unrouted UV sprites.
+The UV callback was definitely invoked, but none of the unrouted UV
+quads satisfied our *diagnostic* lower-screen pixel window
+(y=540..850). This is **not** evidence that UV sprites are absent
+from the offending dialogue: they may be in another space,
+outside the viewport, or represent unrelated world geometry.
+
+This strictly read-only follow-up records up to four real UV quad
+bounds (X/Y and reciprocal-Z ranges) before, and up to four after,
+the **first lower-screen native frame** is encountered. At
+40/60s, it counts valid and canvas-near UV quads in each phase.
+This lower-frame marker is not assumed to belong to any particular
+scene or dialogue. Geometry is not filtered before the UV sample,
+other than finite/sanity validation. No texture contents, text,
+process addresses, glyph contents or game state are read.
+
+This probes whether the previous `lower=0` result was simply
+a coordinate-space mismatch. Do not modify UV vertices from these
+measurements alone, and do not infer that a positional match proves
+that a quad is Murfy's text/blue arrow. World 3D and screen-world
+rendering remain untouched; PR #2 stays unmerged.
+
 ## Read-only trace: non-native lower-screen sprites (12 Nov 2026)
 
 The Wine log `Rayman2Fix(20261112-163833).log` pairs incoming
