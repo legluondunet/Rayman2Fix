@@ -1,49 +1,60 @@
-## 12 November 2026: trace missing screen-overlay draw path (read-only)
+## 2026-11-12 native 2D geometry correction at the single shared entry
 
-The owner tested `Rayman2Fix(20261112-101000).log` and supplied a
-Windows 11 screenshot. The corrected native viewport offsets are
-confirmed: **1024x768 -> 853x768 at x=85 in 16:10**. World Hor+ and the
-4:3 sprite callbacks activate, and the game exits with code 0.
+The latest user log `Rayman2Fix(20261112-103304).log` is from
+Windows 11 1920×1200 (16:10), internal rendering 1024×768.
+It proves the 4:3 screen-world viewport correction executes with
+`native_width=1024 projected_width=853 projected_x=85 height=768`.
+The 3D Hor+ camera and all three HUD sprite callbacks are installed.
+The additional `GLI_DRV_vSendSingleTrianglesToClip_` diagnostic
+was installed but saw **zero triangles** over 91 seconds at 5, 40
+and 60 seconds. The first rejected UV quad had `invz=0`; this
+does not identify the actual Murfy text/continuation arrow.
+The user screenshot still shows text overflow on the left and the
+blue continuation arrow outside the right of the properly centered
+black text frame.
 
-**However the Murfy dialogue text still begins left of the black box,
-while the blue continuation arrow is beyond the right edge. This is NOT
-visually fixed.** Altering the UI camera's field of view or shadow
-viewport clearly does not suffice to fix this content/panel mismatch.
+**Independent native-code verification from the exact SHA256-approved
+original Rayman2.exe**:
+- All screen font glyphs call `GLI_vDraw2DSpriteWithPercent`
+  at VA **0x429670** from `JFFTXT_vDrawString` VA **0x4664D4**.
+- `GLI_vDisplayFrame`, the native panel/frame renderer, also calls
+  the same VA from **0x429876**.
+- The screen-image rendering path, used for original UI pictures and
+  potentially the continue arrow, calls the same VA from **0x460653**.
+- The native function multiplies X/Y inputs by the float **0.01**
+  constant at VA **0x49C618**, then by the native viewport dimensions.
+  Its input is **percent space 0..100**, not 1000 text units or
+  projected 1024×768 vertex coordinates.
+- The verified 7-byte prologue at this VA is
+  `83 EC 50 8B 44 24 54` (two complete instructions).
+  Therefore a separate, authenticated x86 detour is possible without
+  modifying game files.
 
-Engine analysis gives a new discriminating avenue:
-[ACP_Ray2 GLI.c](https://github.com/raytools/ACP_Ray2/blob/master/src/GLI/GLI.c)
-defines the sprite callbacks currently hooked AND a separate
-`GLI_DRV_vSendSingleTrianglesToClip_` at VA `0x504828`.
-[GLI_BigGlobals.h](https://github.com/raytools/ACP_Ray2/blob/master/src/GLI/GLI_BigGlobals.h)
-shows the third parameter begins with `p_stVpt`, the viewport pointer.
-[OpenRayman menu reverse engineering](https://github.com/huntyh/OpenRayman/blob/master/docs/formats/menu.md)
-finds that font text and screen images are submitted in per-frame
-screen-space passes, not necessarily via the 3D-screen camera.
-Our past assertion that *all* dialogue glyphs are projected 3D
-actors is not established. Do not continue inventing offsets or
-level-specific text metrics.
+The new code moves the global centered 4:3 transform **upstream to this
+shared native 2D geometry entry**, before fonts, arrows, and frames can
+diverge to separate driver paths. It transforms only horizontal
+percent coordinates as
+`x'=50+(x-50)*((4/3)/output_aspect)`, retaining Y, font size,
+dialogue strings, texture coordinates, driver mode and game logic.
+For 16:10, input X=[0,100] maps to [8.333,91.667]; for 16:9,
+X=[0,100] maps to [12.5,87.5]. The existing GLI driver sprite
+callbacks **must bypass their own 4:3 correction synchronously**
+during a call from the native 2D entry, so each element is transformed
+**exactly once**, never twice. Sprite callbacks reached from other
+engine paths retain the current validated 4:3 behavior.
 
-The next build includes a **read-only** callback for triangle
-submissions (pass-through, original data unchanged) plus one bounded
-geometry sample from lower-screen sprites of each existing class.
-For the triangle callback it logs only a 2D-vertex sample and
-whether the supplied viewport equals the engine's original screen
-viewport VA `0x5004D4`; additionally prints callback counts at
-5, 40 and 60 seconds. No text, pointers or textures are logged.
-These traces discriminate:
-- whether the actual overlay uses the sprite or triangle pipeline;
-- whether elements reaching existing HUD hooks have `xOoZ=1` and
-  therefore actually get corrected;
-- whether screen-region triangles are assigned the UI viewport.
-Use these observations to implement ONE global transform at the
-actual submission point, avoiding duplicate scaling of already
-centered 4:3 sprites.
+Removes the now-proven-unused triangle diagnostic and short-lived
+lower-screen samples; retains only bounded counts of native 2D calls
+and downstream passes at 5, 40 and 60 seconds to confirm execution.
+This architecture does not special-case Learn_10, Murfy, any string,
+position, language, font, resolution, or picture. It also does not
+affect the panoramic gameplay camera.
 
-**This is a diagnostic-only build.** No new geometric changes or
-claims of a corrected screenshot. PR #2 stays draft; NOMOVIES
-research stays paused. The owner should run past the Murfy dialogue
-for at least 40 seconds and supply the `RUNTIME-HUD-PROBE` and
-`RUNTIME-TRIANGLE-PROBE` traces.
+**Status:** new candidate must be compiled and visually tested on
+both Windows/Wine; do NOT conclude the text and blue arrow are fixed
+until a new screenshot confirms them inside the original black
+frame at 16:10 and another monitor aspect. Keep PR #2 draft and
+NOMOVIES research paused.
 
 ## 2026-11-12 GLI viewport field order: corrected after Windows 11 test
 

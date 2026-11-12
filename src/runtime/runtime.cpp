@@ -118,23 +118,22 @@ float g_hud_scale = 1.0f;
 std::atomic<void*> g_plain_sprite_original{nullptr};
 std::atomic<void*> g_uv_sprite_original{nullptr};
 std::atomic<void*> g_color_sprite_original{nullptr};
-// Diagnostic only: independently count the renderer's triangle submission
-// path. The old hooks only see three *sprite* callbacks. Do not infer
-// which one draws Murfy's text or the blue arrow without a trace.
-std::atomic<void*> g_triangle_original{nullptr};
-std::atomic<const void*> g_native_screen_viewport{nullptr};
-std::atomic<unsigned> g_triangle_calls{0};
-std::atomic<unsigned> g_triangle_ui_calls{0};
-std::atomic<unsigned> g_triangle_lower_ui{0};
-std::atomic<unsigned> g_triangle_lower_other{0};
-std::atomic<bool> g_triangle_ui_sampled{false};
-std::atomic<bool> g_triangle_other_sampled{false};
-std::atomic<bool> g_sprite_lower_plain{false};
-std::atomic<bool> g_sprite_lower_uv{false};
-std::atomic<bool> g_sprite_lower_colors{false};
-std::atomic<bool> g_sprite_lower_plain_rejected{false};
-std::atomic<bool> g_sprite_lower_uv_rejected{false};
-std::atomic<bool> g_sprite_lower_colors_rejected{false};
+// Native GLI 2D is the single layer shared by character quads,
+// screen images and frame quads. The source percent coords are
+// corrected here, not in each individual text/arrow/panel branch.
+constexpr uintptr_t kNative2DSpriteRva=0x29670; // VA 0x429670
+constexpr BYTE kNative2DExpected[7]={
+    0x83,0xEC,0x50,0x8B,0x44,0x24,0x54
+};
+using Native2DSprite=void (__cdecl*)(void*,float,float,float,float,void*);
+Native2DSprite g_original_2d_sprite=nullptr;
+thread_local unsigned g_native_2d_call_depth=0;
+std::atomic<unsigned> g_native_2d_calls{0};
+std::atomic<unsigned> g_native_2d_passthrough_plain{0};
+std::atomic<unsigned> g_native_2d_passthrough_uv{0};
+std::atomic<unsigned> g_native_2d_passthrough_color{0};
+std::atomic<bool> g_native_2d_logged{false};
+std::atomic<bool> g_native_2d_invalid_logged{false};
 std::atomic<bool> g_plain_seen{false};
 std::atomic<bool> g_uv_seen{false};
 std::atomic<bool> g_color_seen{false};
@@ -1201,6 +1200,38 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     poll_second_intro_skip();
     poll_learn_intro_skip();
 }
+void __cdecl native_2d_percent_sprite(void* viewport,
+           float xmin,float ymin,float xmax,float ymax,void* material) {
+    // This exact native entry is reached by:
+    // - JFFTXT_vDrawString's per-character quads (VA 0x4664D4),
+    // - the screen-image pass (VA 0x460653), and
+    // - GLI_vDisplayFrame's panel rectangles (VA 0x429876).
+    // The arguments are in PERCENT, 0..100 (multiplied by 0.01
+    // inside GLI), not in the 1000-unit text descriptor system.
+    // Transform X once *before* these routes diverge into different
+    // driver callbacks. No Y/font/text/asset changes and no 3D.
+    const auto original=g_original_2d_sprite;
+    if(!original)return;
+    float left=0.0f,right=0.0f;
+    if(g_hud_scale>=0.9999f ||
+       !r2fix::center_native_2d_percent(
+           xmin,xmax,g_hud_scale,left,right)) {
+        if(g_hud_scale<0.9999f &&
+           !g_native_2d_invalid_logged.exchange(
+               true,std::memory_order_relaxed))
+            log_line("RUNTIME-HUD: native 2D input geometry invalid; original percent coordinates retained");
+        original(viewport,xmin,ymin,xmax,ymax,material);
+        return;
+    }
+    g_native_2d_calls.fetch_add(1,std::memory_order_relaxed);
+    if(!g_native_2d_logged.exchange(true,
+                                     std::memory_order_relaxed))
+        log_line("RUNTIME-HUD: native 2D percent canvas centered 4:3 (shared font/image/frame entry; downstream double-scaling bypassed)");
+    ++g_native_2d_call_depth;
+    original(viewport,left,ymin,right,ymax,material);
+    --g_native_2d_call_depth;
+}
+
 void write_jump(BYTE* at, const void* destination) {
     at[0] = 0xE9;  // JMP rel32
     const uintptr_t after = reinterpret_cast<uintptr_t>(at + 5);
@@ -1261,6 +1292,52 @@ DWORD install_camera_hook() {
 }
 
 
+void install_native_2d_percent_hook() {
+    // Only call after the SHA/PE/byte validated camera hook was
+    // installed for our exact supported, unprotected executable.
+    // Original native 2D function has two complete x86 instructions
+    // covering exactly 7 bytes: sub esp,50h; mov eax,[esp+54h].
+    auto* module=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+    if(!module || g_original_2d_sprite)return;
+    const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    if(dos->e_magic!=IMAGE_DOS_SIGNATURE)return;
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+        module+dos->e_lfanew);
+    if(pe->Signature!=IMAGE_NT_SIGNATURE ||
+       pe->OptionalHeader.SizeOfImage<kNative2DSpriteRva+64)
+        return;
+    auto* target=module+kNative2DSpriteRva;
+    if(std::memcmp(target,kNative2DExpected,sizeof(kNative2DExpected))!=0) {
+        log_line("RUNTIME-HUD: native 2D entry bytes not approved; old sprite callbacks retained");
+        return;
+    }
+    auto* gateway=static_cast<BYTE*>(VirtualAlloc(nullptr,64,
+        MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    if(!gateway)return;
+    std::memcpy(gateway,target,sizeof(kNative2DExpected));
+    write_jump(gateway+sizeof(kNative2DExpected),
+               target+sizeof(kNative2DExpected));
+    DWORD old=0;
+    if(!VirtualProtect(gateway,64,PAGE_EXECUTE_READ,&old)) {
+        VirtualFree(gateway,0,MEM_RELEASE);
+        return;
+    }
+    DWORD previous=0;
+    if(!VirtualProtect(target,sizeof(kNative2DExpected),
+                       PAGE_EXECUTE_READWRITE,&previous)) {
+        VirtualFree(gateway,0,MEM_RELEASE);
+        return;
+    }
+    g_original_2d_sprite=reinterpret_cast<Native2DSprite>(gateway);
+    write_jump(target,reinterpret_cast<void*>(&native_2d_percent_sprite));
+    target[5]=target[6]=0x90;
+    FlushInstructionCache(GetCurrentProcess(),target,
+                          sizeof(kNative2DExpected));
+    DWORD unused=0;
+    VirtualProtect(target,sizeof(kNative2DExpected),previous,&unused);
+    log_line("RUNTIME-HUD: native 2D percent entry hook installed (all levels, shared font/image/frame geometry)");
+}
+
 void initialize_native_intro_skip() {
     const auto* module = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
     if (!module) return;
@@ -1306,104 +1383,28 @@ constexpr uintptr_t kPlainSpriteSlotRva = 0x104530; // VA 0x504530
 constexpr uintptr_t kUvSpriteSlotRva = 0x104524;    // VA 0x504524
 // The colored variant is used by the GLI font/sprite path in Rayman 2.
 constexpr uintptr_t kColorSpriteSlotRva = 0x104838; // VA 0x504838
-// GLI_DRV_vSendSingleTrianglesToClip_: third parameter is a pointer
-// to GLI's big globals, whose first member is p_stVpt (ACP_Ray2).
-// Read-only instrumentation; must NEVER stretch world triangles.
-constexpr uintptr_t kTriangleSlotRva = 0x104828; // VA 0x504828
-constexpr uintptr_t kScreenViewportRva = 0x1004D4; // VA 0x5004D4
 constexpr float kInternalGlideWidth = 1024.0f;
 using PlainSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float, void*);
 using UvSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float*, float, void*);
 using ColorSpriteFn = void (__cdecl*)(r2fix::HudVertex*, void*, float, void*);
-using TriangleFn = void (__cdecl*)(r2fix::HudVertex*, void*, void*);
 
 void report_first(std::atomic<bool>& flag, const char* line) {
     if (!flag.exchange(true, std::memory_order_relaxed))
         log_line(line);
 }
 
-// One geometry-only sample per callback class. This tells us which
-// lower-screen primitives pass the original xOoZ=1 filter. No text,
-// pointers, textures or game files are ever recorded.
-void probe_lower_sprite(const r2fix::HudVertex* v,const char* path,
-                        std::atomic<bool>& accepted,
-                        std::atomic<bool>& rejected) {
-    if(!v) return;
-    float min_x=v[0].x,max_x=v[0].x;
-    bool lower=false;
-    for(unsigned i=0;i<4;++i) {
-        if(!std::isfinite(v[i].x) || !std::isfinite(v[i].y) ||
-           !std::isfinite(v[i].reciprocal_z) ||
-           std::fabs(v[i].x)>4096.f || std::fabs(v[i].y)>4096.f)
-            return;
-        if(v[i].y>=520.f && v[i].y<=1200.f)lower=true;
-        if(v[i].x<min_x)min_x=v[i].x;
-        if(v[i].x>max_x)max_x=v[i].x;
-    }
-    if(!lower)return;
-    const bool eligible=r2fix::is_screen_sprite_quad(v);
-    auto& done=eligible?accepted:rejected;
-    if(done.exchange(true,std::memory_order_relaxed))return;
-    char line[224]{};
-    std::snprintf(line,sizeof(line),
-        "RUNTIME-HUD-PROBE: path=%s bottom_quad=1 4by3_eligible=%u x_min=%.1f x_max=%.1f y0=%.1f invz0=%.4f (geometry only)",
-        path,unsigned(eligible),double(min_x),double(max_x),
-        double(v[0].y),double(v[0].reciprocal_z));
-    log_line(line);
-}
-void __cdecl diagnose_triangles(r2fix::HudVertex* points,
-                                void* uv,void* globals) {
-    const auto original=reinterpret_cast<TriangleFn>(
-        g_triangle_original.load(std::memory_order_acquire));
-    if(!original)return;
-    g_triangle_calls.fetch_add(1,std::memory_order_relaxed);
-    // The global values layout is verified by the public engine
-    // definitions. Read only the first pointer, p_stVpt, for
-    // discrimination. Unrecognized viewport != proof of world.
-    const void* viewport=nullptr;
-    if(globals)std::memcpy(&viewport,globals,sizeof(viewport));
-    const void* screen=g_native_screen_viewport.load(
-        std::memory_order_acquire);
-    const bool ui=viewport && screen && viewport==screen;
-    if(ui)g_triangle_ui_calls.fetch_add(1,std::memory_order_relaxed);
-    if(points) {
-        bool finite=true,lower=false;
-        float min_x=points[0].x,max_x=points[0].x;
-        for(unsigned i=0;i<3;++i) {
-            if(!std::isfinite(points[i].x) ||
-               !std::isfinite(points[i].y) ||
-               !std::isfinite(points[i].reciprocal_z) ||
-               std::fabs(points[i].x)>4096.f ||
-               std::fabs(points[i].y)>4096.f) {
-                finite=false;break;
-            }
-            if(points[i].y>=520.f && points[i].y<=1200.f)lower=true;
-            if(points[i].x<min_x)min_x=points[i].x;
-            if(points[i].x>max_x)max_x=points[i].x;
-        }
-        if(finite && lower) {
-            if(ui)g_triangle_lower_ui.fetch_add(1,std::memory_order_relaxed);
-            else g_triangle_lower_other.fetch_add(1,std::memory_order_relaxed);
-            auto& done=ui?g_triangle_ui_sampled:g_triangle_other_sampled;
-            if(!done.exchange(true,std::memory_order_relaxed)) {
-                char msg[224]{};
-                std::snprintf(msg,sizeof(msg),
-                    "RUNTIME-TRIANGLE-PROBE: screen_viewport=%u x_min=%.1f x_max=%.1f y0=%.1f invz0=%.4f (read-only)",
-                    unsigned(ui),double(min_x),double(max_x),
-                    double(points[0].y),double(points[0].reciprocal_z));
-                log_line(msg);
-            }
-        }
-    }
-    original(points,uv,globals);
-}
 void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
     const auto original = reinterpret_cast<PlainSpriteFn>(
         g_plain_sprite_original.load(std::memory_order_acquire));
     if (!original) return;
     report_first(g_plain_seen, "RUNTIME-HUD: plain sprite callback reached");
-    probe_lower_sprite(quad,"plain",
-       g_sprite_lower_plain,g_sprite_lower_plain_rejected);
+    if (g_native_2d_call_depth!=0) {
+        // The shared native percent entry already transformed X.
+        // Never apply the same 4:3 affine transform twice.
+        g_native_2d_passthrough_plain.fetch_add(1,std::memory_order_relaxed);
+        original(quad,z,globals);
+        return;
+    }
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, z, globals);
         return;
@@ -1421,8 +1422,11 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
         g_uv_sprite_original.load(std::memory_order_acquire));
     if (!original) return;
     report_first(g_uv_seen, "RUNTIME-HUD: UV sprite callback reached");
-    probe_lower_sprite(quad,"uv",
-       g_sprite_lower_uv,g_sprite_lower_uv_rejected);
+    if (g_native_2d_call_depth!=0) {
+        g_native_2d_passthrough_uv.fetch_add(1,std::memory_order_relaxed);
+        original(quad,uv,z,globals);
+        return;
+    }
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, uv, z, globals);
         return;
@@ -1441,8 +1445,11 @@ void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
         g_color_sprite_original.load(std::memory_order_acquire));
     if (!original) return;
     report_first(g_color_seen, "RUNTIME-HUD: colored sprite callback reached");
-    probe_lower_sprite(quad,"colored",
-       g_sprite_lower_colors,g_sprite_lower_colors_rejected);
+    if (g_native_2d_call_depth!=0) {
+        g_native_2d_passthrough_color.fetch_add(1,std::memory_order_relaxed);
+        original(quad,colors,z,globals);
+        return;
+    }
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, colors, z, globals);
         return;
@@ -1513,14 +1520,9 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
         const_cast<BYTE*>(module + kUvSpriteSlotRva));
     auto* colors = reinterpret_cast<void* volatile*>(
         const_cast<BYTE*>(module + kColorSpriteSlotRva));
-    auto* triangles=reinterpret_cast<void* volatile*>(
-        const_cast<BYTE*>(module+kTriangleSlotRva));
-    g_native_screen_viewport.store(module+kScreenViewportRva,
-                                   std::memory_order_release);
     bool plain_logged = false;
     bool uv_logged = false;
     bool color_logged = false;
-    bool triangle_logged=false;
     log_line("RUNTIME-HUD: 4:3 sprite callback monitor started");
     for (unsigned iteration = 0;; ++iteration) {
         install_callback(plain, reinterpret_cast<void*>(&hud_plain_sprite),
@@ -1535,11 +1537,6 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                          g_color_sprite_original,
                          "RUNTIME-HUD: centered 4:3 colored sprites enabled",
                          color_logged);
-        install_callback(triangles,
-                          reinterpret_cast<void*>(&diagnose_triangles),
-                          g_triangle_original,
-                          "RUNTIME-TRIANGLE-PROBE: read-only native triangle callback installed",
-                          triangle_logged);
         if (iteration == 10 || iteration == 80 || iteration == 120) {
             // No raw addresses or personal data; useful if callbacks never
             // become available, or become available but never execute.
@@ -1550,15 +1547,15 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                           g_plain_seen.load() ? 1 : 0, g_uv_seen.load() ? 1 : 0,
                           g_color_seen.load() ? 1 : 0);
             log_line(status);
-            char triangle_status[240]{};
-            std::snprintf(triangle_status,sizeof(triangle_status),
-                 "RUNTIME-TRIANGLE-PROBE: elapsed_s=%u installed=%u total=%u screen_viewport=%u lower_ui=%u lower_other=%u",
-                 iteration/2,unsigned(triangle_logged),
-                 g_triangle_calls.load(std::memory_order_relaxed),
-                 g_triangle_ui_calls.load(std::memory_order_relaxed),
-                 g_triangle_lower_ui.load(std::memory_order_relaxed),
-                 g_triangle_lower_other.load(std::memory_order_relaxed));
-            log_line(triangle_status);
+            char native_2d_status[236]{};
+            std::snprintf(native_2d_status,sizeof(native_2d_status),
+                "RUNTIME-HUD: native2d at=%us total=%u downstream_plain=%u downstream_uv=%u downstream_colored=%u",
+                unsigned(iteration/2),
+                g_native_2d_calls.load(std::memory_order_relaxed),
+                g_native_2d_passthrough_plain.load(std::memory_order_relaxed),
+                g_native_2d_passthrough_uv.load(std::memory_order_relaxed),
+                g_native_2d_passthrough_color.load(std::memory_order_relaxed));
+            log_line(native_2d_status);
         }
         Sleep(500);
     }
@@ -1610,6 +1607,10 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     const DWORD camera_status = install_camera_hook();
     // Unknown/unsupported game versions never receive additional hooks.
     if (camera_status == 1) {
+        // Hook the common native 2D entry before the game draws any
+        // UI; the downstream driver callback monitor still handles
+        // screen sprites submitted through other engine paths.
+        if(g_hud_scale<0.9999f)install_native_2d_percent_hook();
         initialize_native_intro_skip();
         start_hud_monitor();
     }

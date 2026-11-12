@@ -29,6 +29,27 @@ inline float centered_hud_x(float x, float source_width, float scale) {
     return (source_width * 0.5f) + (x - source_width * 0.5f) * scale;
 }
 
+// GLI_vDraw2DSpriteWithPercent (approved EXE VA 0x429670) takes
+// horizontal coordinates in PERCENT, not pixels or 1000-unit text
+// descriptor space. Its binary multiplies those coordinates by
+// 0x49C618 = 0.01 and the native viewport width. The same centered
+// affine correction, applied ONCE at the common 2D input boundary,
+// therefore works for native fonts, image objects, and frame quads.
+inline bool center_native_2d_percent(float x_min,float x_max,
+                                     float scale,float& out_min,
+                                     float& out_max) {
+    if (!std::isfinite(x_min) || !std::isfinite(x_max) ||
+        !std::isfinite(scale) || scale<=0.25f || scale>=1.0f ||
+        std::fabs(x_min)>100000.0f || std::fabs(x_max)>100000.0f)
+        return false;
+    const float a=centered_hud_x(x_min,100.0f,scale);
+    const float b=centered_hud_x(x_max,100.0f,scale);
+    if (!std::isfinite(a) || !std::isfinite(b)) return false;
+    out_min=a;
+    out_max=b;
+    return true;
+}
+
 // Original 2D sprite submission initializes all four xOoZ coordinates to 1.
 // Do not modify world sprites and ordinary geometry with real perspective
 // depths; do not make assumptions from menu names or level identifiers.

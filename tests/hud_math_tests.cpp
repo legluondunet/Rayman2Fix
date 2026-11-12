@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <limits>
 
 int main() {
     constexpr float source_width = 1024.0f;
@@ -22,6 +23,31 @@ int main() {
     assert(near(r2fix::hud_4_3_scale(1920, 1200), 5.0f / 6.0f));
     assert(near(r2fix::hud_4_3_scale(2560, 1080), 0.5625f));
     assert(near(r2fix::hud_4_3_scale(0, 1080), 1.0f));
+
+    // The native GLI entry point consumes percent (0..100), with a
+    // different coordinate system from the 1024-pixel driver vertices.
+    // This protects against accidentally scaling by 1000 or twice.
+    float xmin=0.0f,xmax=0.0f;
+    assert(r2fix::center_native_2d_percent(0.0f,100.0f,wide,xmin,xmax));
+    assert(near(xmin,12.5f) && near(xmax,87.5f));
+    assert(r2fix::center_native_2d_percent(10.0f,90.0f,wide,xmin,xmax));
+    assert(near(xmin,20.0f) && near(xmax,80.0f));
+    const float ratio1610=r2fix::hud_4_3_scale(1920,1200);
+    assert(r2fix::center_native_2d_percent(0.0f,100.0f,
+                                           ratio1610,xmin,xmax));
+    assert(near(xmin,100.0f/12.0f) &&
+           near(xmax,100.0f-100.0f/12.0f));
+    assert(r2fix::center_native_2d_percent(-20.0f,120.0f,
+                                           ratio1610,xmin,xmax));
+    assert(near(xmin,50.0f-70.0f*ratio1610));
+    assert(near(xmax,50.0f+70.0f*ratio1610));
+    assert(!r2fix::center_native_2d_percent(0.0f,100.0f,
+                                             1.0f,xmin,xmax));
+    assert(!r2fix::center_native_2d_percent(
+        std::numeric_limits<float>::quiet_NaN(),100.0f,
+        wide,xmin,xmax));
+    assert(!r2fix::center_native_2d_percent(0.0f,
+        std::numeric_limits<float>::infinity(),wide,xmin,xmax));
 
     r2fix::HudVertex quad[4] = {
         {0.0f,   0.0f,   1.0f, 0x11223344},
