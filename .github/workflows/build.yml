@@ -234,7 +234,8 @@ jobs:
           & ./package-smoke/Rayman2Fix.exe
           if ($LASTEXITCODE -ne 1 -or
               (Get-Content -Raw $backup) -ne 'second-legacy-glide' -or
-              @(Get-ChildItem 'package-smoke/Rayman2Fix' -File -Filter 'glide2x.dll.bak.*').Count -ne 1) {
+              @(1..30 | Where-Object { Test-Path "$glideDest.bak.$_" }).Count -ne 0 -or
+              (Test-Path "$glideDest.bak.previous")) {
             throw 'Unchanged pinned Glide must not produce numbered backups'
           }
           # Recover from old installations that have only numbered backups.
