@@ -1,3 +1,21 @@
+## 2026-11-12 GLI viewport field order: corrected after Windows 11 test
+
+The Windows 11 1920x1200 screenshot and log `Rayman2Fix(20261112-095637).log`
+showed an incorrect `native_width=768 height=1024`. At VA 0x4206BC
+the *real* original Rayman 2 binary stores viewport width at offset
++0x0C; at 0x4206BF it stores height at +0x08. The initial patch
+incorrectly reversed these fields, so it compressed 768 vertical pixels
+instead of 1024 horizontal pixels. The original source viewport is
+not modified; only a temporary 0x70-byte viewport copy is changed
+before the original projection routine. The corrected code has named
+native offsets and byte-level tests guaranteeing only native WIDTH
+(+0x0C) and horizontal origin (+0x58) change.
+
+At 1920x1200 (16:10), expect native_width=1024 height=768,
+projected_width=853 projected_x=85; at 1920x1080 (16:9), expect
+projected_width=768 projected_x=128. No level-specific text, arrow,
+font or HUD box changes were added. Visual verification is still needed.
+
 # Bootstrap validation
 
 Build the x86 Windows `Rayman2Fix.exe`, which **embeds** the project's

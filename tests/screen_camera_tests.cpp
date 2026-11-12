@@ -4,6 +4,8 @@
 #include <limits>
 #include <initializer_list>
 #include <cstdint>
+#include <array>
+#include <cstring>
 int main() {
     const auto near=[](float a,float b){return std::fabs(a-b)<0.0001f;};
     int overlay=1,world=2;
@@ -60,5 +62,34 @@ int main() {
     assert(!r2fix::center_screen_world_viewport(giant,.75f,narrow));
     assert(full.width==1024 && full.height==768 &&
            full.left==0 && full.top==0); // never modify source
+    // Regression test using the actual raw 0x70-byte GLI struct.
+    // At 1920x1200 the earlier (wrong) offsets logged 768x1024;
+    // the true engine internal viewport is width=1024,height=768.
+    std::array<std::uint8_t,r2fix::kGLIViewportBytes> original{};
+    original.fill(0xA6);
+    const std::int32_t W=1024,H=768,X=0,Y=23;
+    std::memcpy(original.data()+0x08,&H,sizeof(H));
+    std::memcpy(original.data()+0x0C,&W,sizeof(W));
+    std::memcpy(original.data()+0x58,&X,sizeof(X));
+    std::memcpy(original.data()+0x5C,&Y,sizeof(Y));
+    const auto r=r2fix::read_native_screen_viewport(original.data());
+    assert(r.width==1024 && r.height==768 && r.left==0 && r.top==23);
+    auto shadow=original;
+    r2fix::ScreenWorldViewport adjusted{};
+    assert(r2fix::center_screen_world_viewport(r,0.75f,adjusted));
+    r2fix::write_centered_native_viewport(shadow.data(),adjusted);
+    const auto parsed=r2fix::read_native_screen_viewport(shadow.data());
+    assert(parsed.width==768 && parsed.left==128);
+    assert(parsed.height==768 && parsed.top==23);
+    for(std::size_t i=0;i<original.size();++i) {
+        const bool width_field=(i>=0x0C && i<0x10);
+        const bool x_field=(i>=0x58 && i<0x5C);
+        if(!width_field && !x_field)assert(original[i]==shadow[i]);
+    }
+    assert(r2fix::read_native_screen_viewport(original.data()).width==1024);
+    assert(r2fix::center_screen_world_viewport(
+        r,(4.0f/3.0f)/(16.0f/10.0f),adjusted));
+    assert(adjusted.width==853 && adjusted.left==85);
+    assert(adjusted.height==768 && adjusted.top==23);
     return 0;
 }

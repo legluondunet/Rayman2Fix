@@ -3,6 +3,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <cstring>
+#include <cstddef>
 namespace r2fix {
 // The game owns one dedicated camera for projected UI objects, including
 // 3D glyphs. Read its identity from the validated, native global slot;
@@ -30,6 +32,33 @@ struct ScreenWorldViewport {
     std::int32_t left=0;
     std::int32_t top=0;
 };
+// Verified in owner's retail x86 EXE disassembly:
+// 0x4206BC writes width at +0x0C; 0x4206BF writes height at +0x08.
+// 0x422B13 uses horizontal origin +0x58; 0x422B26 uses Y +0x5C.
+// Native width/height were INVERTED in the first viewport patch.
+constexpr std::size_t kGLIViewportBytes=0x70;
+constexpr std::size_t kGLIViewportHeightOffset=0x08;
+constexpr std::size_t kGLIViewportWidthOffset=0x0C;
+constexpr std::size_t kGLIViewportLeftOffset=0x58;
+constexpr std::size_t kGLIViewportTopOffset=0x5C;
+static_assert(kGLIViewportTopOffset+sizeof(std::int32_t)<=kGLIViewportBytes,
+              "Invalid native GLI viewport offsets");
+
+inline ScreenWorldViewport read_native_screen_viewport(const void* raw) {
+    const auto* data=static_cast<const std::uint8_t*>(raw);
+    ScreenWorldViewport rect{};
+    std::memcpy(&rect.height,data+kGLIViewportHeightOffset,sizeof(rect.height));
+    std::memcpy(&rect.width,data+kGLIViewportWidthOffset,sizeof(rect.width));
+    std::memcpy(&rect.left,data+kGLIViewportLeftOffset,sizeof(rect.left));
+    std::memcpy(&rect.top,data+kGLIViewportTopOffset,sizeof(rect.top));
+    return rect;
+}
+inline void write_centered_native_viewport(void* raw,
+                                          const ScreenWorldViewport& rect) {
+    auto* data=static_cast<std::uint8_t*>(raw);
+    std::memcpy(data+kGLIViewportWidthOffset,&rect.width,sizeof(rect.width));
+    std::memcpy(data+kGLIViewportLeftOffset,&rect.left,sizeof(rect.left));
+}
 inline bool center_screen_world_viewport(
         const ScreenWorldViewport& current,float scale,
         ScreenWorldViewport& result) {

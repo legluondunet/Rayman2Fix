@@ -1148,23 +1148,16 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // 0x4228D0 hands 0x422AB0 a 0x70-byte STACK-LOCAL copy of the
     // native viewport. Modify ONLY an extra local shadow here, and
     // let the untouched original routine produce the projection.
+    // Native offsets: height +0x08, width +0x0C, X +0x58, Y +0x5C.
     void* projection_viewport=viewport;
     alignas(4) std::uint8_t ui_projection[0x70]{};
     if(native_ui && viewport && g_hud_scale<0.9999f) {
-        const auto* source=static_cast<const std::uint8_t*>(viewport);
-        r2fix::ScreenWorldViewport rect{};
-        std::memcpy(&rect.width,source+0x08,sizeof(rect.width));
-        std::memcpy(&rect.height,source+0x0C,sizeof(rect.height));
-        std::memcpy(&rect.left,source+0x58,sizeof(rect.left));
-        std::memcpy(&rect.top,source+0x5C,sizeof(rect.top));
+        const auto rect=r2fix::read_native_screen_viewport(viewport);
         r2fix::ScreenWorldViewport centered{};
         if(r2fix::center_screen_world_viewport(
               rect,g_hud_scale,centered)) {
             std::memcpy(ui_projection,viewport,sizeof(ui_projection));
-            std::memcpy(ui_projection+0x08,&centered.width,
-                        sizeof(centered.width));
-            std::memcpy(ui_projection+0x58,&centered.left,
-                        sizeof(centered.left));
+            r2fix::write_centered_native_viewport(ui_projection,centered);
             projection_viewport=ui_projection;
             if(!g_ui_viewport_adjusted.exchange(
                     true,std::memory_order_relaxed)) {
