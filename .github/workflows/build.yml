@@ -215,10 +215,12 @@ jobs:
           1..30 | ForEach-Object {
             [IO.File]::WriteAllText("$glideDest.bak.$_", "old-version-$_", [Text.Encoding]::ASCII)
           }
-          # Do not touch unrelated names with the same beginning.
+          # The .bak.notes sentinel is deliberately not a managed resource.
+          # It also makes the no-media fixture fail closed in automatic
+          # installation (exit 1), AFTER renderer deployment/cleanup.
           [IO.File]::WriteAllText("$glideDest.bak.notes", 'keep-me', [Text.Encoding]::ASCII)
           & ./package-smoke/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 2 -or
+          if ($LASTEXITCODE -ne 1 -or
               (Get-Content -Raw $backup) -ne 'second-legacy-glide' -or
               @(Get-ChildItem 'package-smoke/Rayman2Fix' -File -Filter 'glide2x.dll.bak*').Count -ne 2 -or
               !(Test-Path "$glideDest.bak.notes")) {
@@ -230,7 +232,7 @@ jobs:
 
           # No-op launches preserve the latest .bak and never create numbers.
           & ./package-smoke/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 2 -or
+          if ($LASTEXITCODE -ne 1 -or
               (Get-Content -Raw $backup) -ne 'second-legacy-glide' -or
               @(Get-ChildItem 'package-smoke/Rayman2Fix' -File -Filter 'glide2x.dll.bak.*').Count -ne 1) {
             throw 'Unchanged pinned Glide must not produce numbered backups'
@@ -240,7 +242,7 @@ jobs:
           [IO.File]::WriteAllText("$glideDest.bak.1", 'legacy-one', [Text.Encoding]::ASCII)
           [IO.File]::WriteAllText("$glideDest.bak.30", 'legacy-thirty', [Text.Encoding]::ASCII)
           & ./package-smoke/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 2 -or
+          if ($LASTEXITCODE -ne 1 -or
               (Get-Content -Raw $backup) -ne 'legacy-thirty' -or
               (Test-Path "$glideDest.bak.1") -or
               (Test-Path "$glideDest.bak.30") -or
