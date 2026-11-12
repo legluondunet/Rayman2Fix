@@ -98,5 +98,23 @@ int main() {
     assert(!r2fix::inspect_screen_quad_geometry(unknown_uv,g));
     assert(!r2fix::inspect_screen_quad_geometry(nullptr,g));
     assert(r2fix::screen_quad_probe_sector(g,0.0f)==1);
+    std::uint32_t rva=0;
+    assert(r2fix::executable_callsite_rva(
+        0x501234u,0x400000u,0x200000u,rva) && rva==0x101234u);
+    assert(!r2fix::executable_callsite_rva(
+        0x3fffffu,0x400000u,0x200000u,rva));
+    assert(!r2fix::executable_callsite_rva(
+        0x600000u,0x400000u,0x200000u,rva));
+    assert(!r2fix::executable_callsite_rva(
+        0x501234u,0,0x200000u,rva));
+    assert(!r2fix::executable_callsite_rva(
+        0x501234u,0x400000u,0,rva));
+    assert(r2fix::native_glyph_y_band(10.0f,15.0f)==0u);
+    assert(r2fix::native_glyph_y_band(45.0f,55.0f)==1u);
+    assert(r2fix::native_glyph_y_band(65.0f,70.0f)==2u);
+    assert(r2fix::native_glyph_y_band(80.0f,85.0f)==3u);
+    assert(r2fix::native_glyph_y_band(90.0f,80.0f)==4u);
+    assert(r2fix::native_glyph_y_band(
+        std::numeric_limits<float>::quiet_NaN(),50.0f)==4u);
     return 0;
 }

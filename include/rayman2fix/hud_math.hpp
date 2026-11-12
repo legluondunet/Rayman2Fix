@@ -111,6 +111,31 @@ inline bool is_lower_screen_probe(const ScreenQuadGeometry& b) {
     return b.top>=540.0f && b.bottom<=850.0f;
 }
 // Spatial bins for OBSERVATION only, not a special-case UI correction.
+// Identify a return address only by its module-relative CODE offset.
+// Never log absolute process addresses or assume the image loads at 0x400000.
+inline bool executable_callsite_rva(std::uintptr_t return_address,
+                                    std::uintptr_t image_base,
+                                    std::uint32_t image_size,
+                                    std::uint32_t& rva) {
+    if(!image_base || !image_size || return_address<image_base)
+        return false;
+    const auto offset=return_address-image_base;
+    if(offset>=image_size) return false;
+    rva=static_cast<std::uint32_t>(offset);
+    return true;
+}
+// Diagnostic bands by center of a native font glyph's percentage Y.
+// These never select which vertices are scaled.
+inline unsigned native_glyph_y_band(float ymin,float ymax) {
+    if(!std::isfinite(ymin) || !std::isfinite(ymax) ||
+       ymin>ymax || ymin< -100.0f || ymax>200.0f)
+        return 4u;
+    const float center=(ymin+ymax)*0.5f;
+    if(center<30.0f) return 0u;
+    if(center<60.0f) return 1u;
+    if(center<72.0f) return 2u;
+    return 3u;
+}
 inline unsigned screen_quad_probe_sector(const ScreenQuadGeometry& b,
                                         float source_width) {
     if (!std::isfinite(source_width) || source_width<=0.0f)

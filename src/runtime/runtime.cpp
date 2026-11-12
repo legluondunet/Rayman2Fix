@@ -184,6 +184,23 @@ std::atomic<unsigned> g_camera_adjust_calls[3]{};
 std::atomic<unsigned> g_postframe_plain_by_camera[3]{};
 std::atomic<unsigned> g_postframe_lower_by_camera[3][3]{};
 std::atomic<unsigned> g_postframe_lower_camera_examples[3][3]{};
+// Native font glyphs can be drawn outside the narrow bottom-screen
+// sample window; distinguish that from taking another geometry path.
+std::atomic<unsigned> g_postframe_glyph_y_counts[4]{};
+std::atomic<unsigned> g_postframe_glyph_y_examples[4]{};
+// Record bounded engine code callsites for unnested plain sprites, not
+// the last adjusted camera. Fingerprints are return RVAs (no pointers).
+std::atomic<std::uintptr_t> g_approved_exe_base{0};
+std::atomic<std::uint32_t> g_approved_exe_size{0};
+struct PlainCallerStats {
+    std::atomic<std::uint32_t> code_key{0}; // RVA+1; zero=empty
+    std::atomic<unsigned> count{0};
+    std::atomic<unsigned> lower{0};
+    std::atomic<unsigned> samples{0};
+};
+PlainCallerStats g_postframe_plain_callers[8]{};
+std::atomic<unsigned> g_postframe_plain_external{0};
+std::atomic<unsigned> g_postframe_plain_overflow{0};
 
 
 
@@ -1317,6 +1334,25 @@ void record_bottom_2d_geometry(unsigned route,
         log_line(log);
     }
 }
+void probe_native_glyph_after_frame(float xmin,float ymin,
+                                    float xmax,float ymax) {
+    if(g_native_bottom_2d[2].calls.load(
+           std::memory_order_relaxed)==0) return;
+    const unsigned band=r2fix::native_glyph_y_band(ymin,ymax);
+    if(band>=4) return;
+    g_postframe_glyph_y_counts[band].fetch_add(
+        1,std::memory_order_relaxed);
+    const unsigned sample=g_postframe_glyph_y_examples[band]
+        .fetch_add(1,std::memory_order_relaxed);
+    if(sample>=2 || !g_log) return;
+    char message[220]{};
+    std::snprintf(message,sizeof(message),
+        "RUNTIME-HUD-GLYPH-BANDS: sample=%u y_band=%u original_x=%.2f..%.2f original_y=%.2f..%.2f (native percent; after first bottom frame; read-only)",
+        sample+1,band,double(xmin),double(xmax),
+        double(ymin),double(ymax));
+    log_line(message);
+}
+
 void __cdecl native_2d_percent_sprite(void* viewport,
            float xmin,float ymin,float xmax,float ymax,void* material) {
     // This exact native entry is reached by:
@@ -1339,6 +1375,8 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     g_native_2d_producers[route].fetch_add(
         1,std::memory_order_relaxed);
     record_bottom_2d_geometry(route,xmin,ymin,xmax,ymax);
+    if(route==0u)
+        probe_native_glyph_after_frame(xmin,ymin,xmax,ymax);
     const DWORD started=g_native_2d_probe_start_ms.load(
         std::memory_order_acquire);
     const DWORD elapsed=started ? GetTickCount()-started : 0;
@@ -1600,7 +1638,7 @@ void probe_native_2d_driver(const r2fix::HudVertex* quad,
 // The native 2D font/panel quads are already verified at driver level.
 // The unknown UV path may have reciprocal-Z=0; do NOT auto-scale it.
 void probe_unrouted_lower_sprite(const r2fix::HudVertex* quad,
-                                 unsigned kind) {
+                                 unsigned kind,const void* caller) {
     if (!quad || kind>=3) return;
     g_unrouted_sprite_totals[kind].fetch_add(1,std::memory_order_relaxed);
     const DWORD started=g_native_2d_probe_start_ms.load(
@@ -1636,6 +1674,49 @@ void probe_unrouted_lower_sprite(const r2fix::HudVertex* quad,
                 valid ? double(b.min_reciprocal_z) : 0.0,
                 valid ? double(b.max_reciprocal_z) : 0.0);
             log_line(msg);
+        }
+    }
+    if(kind==0 &&
+       g_native_bottom_2d[2].calls.load(std::memory_order_relaxed)>0) {
+        std::uint32_t rva=0;
+        const auto base=g_approved_exe_base.load(std::memory_order_acquire);
+        const auto size=g_approved_exe_size.load(std::memory_order_acquire);
+        if(!r2fix::executable_callsite_rva(
+              reinterpret_cast<std::uintptr_t>(caller),base,size,rva) ||
+           rva==UINT32_MAX) {
+            g_postframe_plain_external.fetch_add(
+                1,std::memory_order_relaxed);
+        } else {
+            const auto key=rva+1u;
+            bool found=false;
+            for(auto& slot:g_postframe_plain_callers) {
+                auto current=slot.code_key.load(std::memory_order_acquire);
+                if(!current) {
+                    slot.code_key.compare_exchange_strong(
+                        current,key,std::memory_order_acq_rel);
+                    current=slot.code_key.load(std::memory_order_acquire);
+                }
+                if(current!=key)continue;
+                found=true;
+                slot.count.fetch_add(1,std::memory_order_relaxed);
+                if(valid && r2fix::is_lower_screen_probe(b)) {
+                    slot.lower.fetch_add(1,std::memory_order_relaxed);
+                    const unsigned n=slot.samples.fetch_add(
+                        1,std::memory_order_relaxed);
+                    if(n<2 && g_log) {
+                        char message[240]{};
+                        std::snprintf(message,sizeof(message),
+                            "RUNTIME-HUD-PLAIN-CALLSITE: rva=0x%08X sample=%u x=%.1f..%.1f y=%.1f..%.1f (native game code, read-only; sprite identity unknown)",
+                            unsigned(rva),n+1,
+                            double(b.left),double(b.right),
+                            double(b.top),double(b.bottom));
+                        log_line(message);
+                    }
+                }
+                break;
+            }
+            if(!found)g_postframe_plain_overflow.fetch_add(
+                1,std::memory_order_relaxed);
         }
     }
     if(kind==0 && valid &&
@@ -1698,7 +1779,7 @@ void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
         original(quad,z,globals);
         return;
     }
-    probe_unrouted_lower_sprite(quad,0);
+    probe_unrouted_lower_sprite(quad,0,_ReturnAddress());
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, z, globals);
         return;
@@ -1722,7 +1803,7 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
         original(quad,uv,z,globals);
         return;
     }
-    probe_unrouted_lower_sprite(quad,1);
+    probe_unrouted_lower_sprite(quad,1,_ReturnAddress());
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, uv, z, globals);
         return;
@@ -1747,7 +1828,7 @@ void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
         original(quad,colors,z,globals);
         return;
     }
-    probe_unrouted_lower_sprite(quad,2);
+    probe_unrouted_lower_sprite(quad,2,_ReturnAddress());
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, colors, z, globals);
         return;
@@ -1810,6 +1891,13 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
         log_line("RUNTIME-HUD: callback slots outside approved executable image");
         return 0;
     }
+    // Diagnostic callback return RVAs use the PE bounds validated above.
+    // No absolute process address is written to the log.
+    g_approved_exe_base.store(
+        reinterpret_cast<std::uintptr_t>(module),
+        std::memory_order_release);
+    g_approved_exe_size.store(
+        pe->OptionalHeader.SizeOfImage,std::memory_order_release);
     // The renderer initializes these callbacks after the early DLL injection.
     // Keep them patched if the game later recreates its Glide driver.
     auto* plain = reinterpret_cast<void* volatile*>(
@@ -1914,6 +2002,37 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                             std::memory_order_relaxed));
                     log_line(diagnostic);
                 }
+                const char* bands[4]={
+                    "y<30","30<=y<60","60<=y<72","y>=72"
+                };
+                for(unsigned k=0;k<4;++k) {
+                    char glyphs[210]{};
+                    std::snprintf(glyphs,sizeof(glyphs),
+                        "RUNTIME-HUD-GLYPH-BANDS: at=%us after_first_bottom_frame band=%s glyphs=%u (read-only; no font ownership implied)",
+                        unsigned(iteration/2),bands[k],
+                        g_postframe_glyph_y_counts[k].load(
+                            std::memory_order_relaxed));
+                    log_line(glyphs);
+                }
+                for(const auto& slot:g_postframe_plain_callers) {
+                    const auto key=slot.code_key.load(
+                        std::memory_order_acquire);
+                    if(!key)continue;
+                    char caller[210]{};
+                    std::snprintf(caller,sizeof(caller),
+                        "RUNTIME-HUD-PLAIN-CALLSITE: at=%us rva=0x%08X count=%u lower=%u (approved game return RVA, read-only)",
+                        unsigned(iteration/2),unsigned(key-1),
+                        slot.count.load(std::memory_order_relaxed),
+                        slot.lower.load(std::memory_order_relaxed));
+                    log_line(caller);
+                }
+                char others[220]{};
+                std::snprintf(others,sizeof(others),
+                    "RUNTIME-HUD-PLAIN-CALLSITE: at=%us external=%u distinct_rva_overflow=%u (read-only)",
+                    unsigned(iteration/2),
+                    g_postframe_plain_external.load(std::memory_order_relaxed),
+                    g_postframe_plain_overflow.load(std::memory_order_relaxed));
+                log_line(others);
                 const char* routes[3]={"glyph","screen-image","frame"};
                 for(unsigned k=0;k<3;++k) {
                     const auto& stats=g_native_bottom_2d[k];

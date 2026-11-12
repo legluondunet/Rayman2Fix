@@ -1,3 +1,43 @@
+## 12 Nov 2026: inspect *actual* sprite callsites and font vertical bands
+
+The owner Wine log `Rayman2Fix(20261112-180313).log` is stable
+(65.9s, exit 0, 1920x1080 under Wine-staging 11.17).
+At the 60s checkpoint, the native lower glyph counter is 1477,
+unchanged since 40s, even though lower frame/image counts grow from
+0/0 to 482/694. The overall glyph count grows from 15711 to
+19403. That establishes only that **no new glyph in the narrowly
+defined lower Y>=72% range** was observed, not that all dialogue
+text bypasses GLI native fonts: the text might use another Y range.
+
+The last-adjusted-camera probe is **not reliable sprite ownership**.
+At 60s it records 3513 `world` camera adjustments and just
+10 `screen-world` adjustments; 28988 post-frame plain sprite
+draws happen with last-adjusted role `world`, none with
+`screen-world`. This can be a stale render-thread camera hint,
+not proof that the sprite is 3D world geometry. Do not scale
+world sprites or conclude that the dialogue is on the world camera.
+
+This follow-up is **read-only** and replaces inference with better
+measurements:
+1. Count native glyphs after the FIRST lower 2D frame in four
+   vertical percent bands (y center <30, 30..60, 60..72, >=72).
+   Bound samples to two geometry-only entries per band (eight lines).
+   First frame is an imperfect proxy for the later dialogue,
+   not a privileged scene identifier.
+2. For non-native `plain` Glide submissions after that frame,
+   fingerprint the return address in the approved game PE by
+   image-relative CODE RVA (eight unique caller slots); count
+   submissions and lower-screen geometry per caller, plus
+   external-module/overflow totals. Sample at most two lower
+   quads per RVA. ASLR is handled; raw process addresses,
+   text, textures, memory and game variables are never logged.
+
+These are only hypotheses about rendering topology, not automatic
+classification of text/arrow. They never move or hide geometry and
+retain one Windows/Wine source path and current Hor+ world camera.
+CI tests check bounds and vertical buckets; visual verification is
+still required. Keep PR #2 draft, no `Learn_10` skip.
+
 ## Read-only camera correlation, not a sprite-specific fix
 
 Owner Wine log `Rayman2Fix(20261112-174120).log` (test binary
