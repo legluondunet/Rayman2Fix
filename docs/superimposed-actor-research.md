@@ -30,6 +30,16 @@ the existing experimental patch. These diagnostics will determine
 whether the source-stage hook is used at all in the test and at
 what phase, without assuming what object it belongs to.
 
+The follow-up also classifies the caller return RVAs for all four
+independently verified CD entry callsites: 0x711FB procedure 409,
+0x718A0 independent actor, 0x75C58 native text A, and 0x75C93
+native text B, plus an unknown bucket. The additional
+`RUNTIME-OVERLAY-SOURCE-ROUTES` line reports calls per origin before
+and after the first lower frame, independent of the glyph geometry.
+Return RVAs are code addresses, not personally identifying data.
+These diagnostics let one Wine run distinguish text vs actor
+conversion while retaining the same runtime behavior.
+
 The actual visual problem remains unverified. Do not merge PR #2
 on a clean exit alone.
 

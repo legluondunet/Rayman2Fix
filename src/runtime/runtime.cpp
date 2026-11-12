@@ -69,6 +69,11 @@ std::atomic<unsigned> g_overlay_source_after_frame{0};
 std::atomic<unsigned> g_overlay_source_after_glyph{0};
 std::atomic<unsigned> g_overlay_source_samples_before{0};
 std::atomic<unsigned> g_overlay_source_samples_after{0};
+// Four verified approved-CD call RETURN RVAs to 0x422940, plus other.
+// This classifies source conversion origins without inspecting text,
+// game actors or level-specific data.
+std::atomic<unsigned> g_overlay_source_routes[5]{};
+std::atomic<unsigned> g_overlay_source_routes_after_frame[5]{};
 const void* g_approved_overlay_viewport=nullptr;
 // The original PE stores coefficients at VA 0x49CC58 / 0x49CCA4
 // (1/640) and 0x49CCA8 (1/480). Redirect only FOUR verified
@@ -1634,9 +1639,29 @@ void __cdecl centered_native_screen_to_vertex(
             x=centered;
             g_overlay_source_corrected_calls.fetch_add(
                 1u,std::memory_order_relaxed);
+            const std::uintptr_t original_base=
+                reinterpret_cast<std::uintptr_t>(
+                    g_approved_overlay_viewport)-kNativeUiViewportRva;
+            const std::uintptr_t ret=
+                reinterpret_cast<std::uintptr_t>(_ReturnAddress());
+            const std::uint32_t return_rva=ret>=original_base &&
+                ret-original_base<=0xFFFFFFFFu ?
+                static_cast<std::uint32_t>(ret-original_base) : 0u;
+            unsigned route=4u;
+            switch(return_rva) {
+                case 0x711FBu: route=0u;break; // procedure 409
+                case 0x718A0u: route=1u;break; // independent actor
+                case 0x75C58u: route=2u;break; // text path A
+                case 0x75C93u: route=3u;break; // text path B
+                default:break;
+            }
+            g_overlay_source_routes[route].fetch_add(
+                1u,std::memory_order_relaxed);
             const bool after_frame=g_first_lower_frame_tick.load(
                 std::memory_order_acquire)!=0;
             if(after_frame) {
+                g_overlay_source_routes_after_frame[route].fetch_add(
+                    1u,std::memory_order_relaxed);
                 g_overlay_source_after_frame.fetch_add(
                     1u,std::memory_order_relaxed);
                 if(g_first_frame_overlap_glyph_tick.load(
@@ -1652,9 +1677,14 @@ void __cdecl centered_native_screen_to_vertex(
             if(g_log && samples.fetch_add(
                          1u,std::memory_order_relaxed)<2u) {
                 char msg[248]{};
+                const char* owners[]={
+                    "script409","other-actor","native-text-a",
+                    "native-text-b","unknown"
+                };
                 std::snprintf(msg,sizeof(msg),
-                    "RUNTIME-OVERLAY-SOURCE: sample phase=%s x_original=%.5f x_centered=%.5f y=%.5f depth=%.5f (approved viewport, no actor identity)",
+                    "RUNTIME-OVERLAY-SOURCE: sample phase=%s route=%s caller_rva=0x%06X x_original=%.5f x_centered=%.5f y=%.5f depth=%.5f (approved UI viewport, no object identity)",
                     after_frame?"after-panel":"before-panel",
+                    owners[route],unsigned(return_rva),
                     double(before),double(centered),
                     double(y),double(depth));
                 log_line(msg);
@@ -2454,6 +2484,21 @@ void report_overlay_source_counts(const char* when) {
         g_overlay_source_after_frame.load(std::memory_order_relaxed),
         g_overlay_source_after_glyph.load(std::memory_order_relaxed));
     log_line(status);
+    char callers[306]{};
+    std::snprintf(callers,sizeof(callers),
+        "RUNTIME-OVERLAY-SOURCE-ROUTES: checkpoint=%s actor409=%u actor_other=%u text_a=%u text_b=%u other=%u after_frame_actor409=%u actor_other=%u text_a=%u text_b=%u other=%u (approved CD return RVAs)",
+        when,
+        g_overlay_source_routes[0].load(std::memory_order_relaxed),
+        g_overlay_source_routes[1].load(std::memory_order_relaxed),
+        g_overlay_source_routes[2].load(std::memory_order_relaxed),
+        g_overlay_source_routes[3].load(std::memory_order_relaxed),
+        g_overlay_source_routes[4].load(std::memory_order_relaxed),
+        g_overlay_source_routes_after_frame[0].load(std::memory_order_relaxed),
+        g_overlay_source_routes_after_frame[1].load(std::memory_order_relaxed),
+        g_overlay_source_routes_after_frame[2].load(std::memory_order_relaxed),
+        g_overlay_source_routes_after_frame[3].load(std::memory_order_relaxed),
+        g_overlay_source_routes_after_frame[4].load(std::memory_order_relaxed));
+    log_line(callers);
 }
 
 void report_superimposed_counts_after_frame(const char* when,
