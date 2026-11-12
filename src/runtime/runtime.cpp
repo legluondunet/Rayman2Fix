@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <climits>
 #include <cstdio>
 #include <unordered_set>
 #include <vector>
@@ -143,6 +144,17 @@ enum class Native2DProducer : unsigned { Glyph=0, ScreenImage=1, Frame=2, Other=
 std::atomic<unsigned> g_native_2d_producers[4]{};
 std::atomic<unsigned> g_native_2d_geometry_samples_mask{0};
 std::atomic<DWORD> g_native_2d_probe_start_ms{0};
+// Bounded, render-only measurements of NATIVE (before any 4:3 map)
+// bottom-of-screen 2D geometry, independently per source route.
+// This does not modify a single rendered vertex or font.
+struct Bottom2DStats {
+    std::atomic<unsigned> calls{0};
+    std::atomic<int> left_min{INT_MAX};
+    std::atomic<int> right_max{INT_MIN};
+    std::atomic<unsigned> examples{0};
+};
+Bottom2DStats g_native_bottom_2d[4];
+
 
 std::atomic<bool> g_plain_seen{false};
 std::atomic<bool> g_uv_seen{false};
@@ -1235,6 +1247,40 @@ Native2DProducer classify_native_2d_producer(const void* retaddr) {
     return Native2DProducer::Other;
 }
 
+void record_bottom_2d_geometry(unsigned route,
+                                float xmin,float ymin,
+                                float xmax,float ymax) {
+    // We need actual caption/continue-arrow inputs, not the first
+    // unrelated top-of-screen HUD glyph or image. Geometry only.
+    // These diagnostic screen bands NEVER control rendering behavior.
+    if(route>=4 || !std::isfinite(xmin) || !std::isfinite(xmax) ||
+       !std::isfinite(ymin) || !std::isfinite(ymax) ||
+       xmin < -100.0f || xmax > 200.0f ||
+       ymin < 72.0f || ymax > 105.0f ||
+       ymin > ymax || xmin > xmax)
+        return;
+    auto& stats=g_native_bottom_2d[route];
+    stats.calls.fetch_add(1,std::memory_order_relaxed);
+    const int left=static_cast<int>(std::lround(xmin*100.0f));
+    const int right=static_cast<int>(std::lround(xmax*100.0f));
+    int low=stats.left_min.load(std::memory_order_relaxed);
+    while(left<low && !stats.left_min.compare_exchange_weak(
+                     low,left,std::memory_order_relaxed)) {}
+    int high=stats.right_max.load(std::memory_order_relaxed);
+    while(right>high && !stats.right_max.compare_exchange_weak(
+                     high,right,std::memory_order_relaxed)) {}
+    const unsigned example=stats.examples.fetch_add(
+        1,std::memory_order_relaxed);
+    if(example<4) {
+        const char* source[4]={"glyph","screen-image","frame","other"};
+        char log[240]{};
+        std::snprintf(log,sizeof(log),
+            "RUNTIME-HUD-BOTTOM: sample=%u source=%s x=%.2f..%.2f y=%.2f..%.2f (original percent geometry, read-only)",
+            example+1,source[route],double(xmin),double(xmax),
+            double(ymin),double(ymax));
+        log_line(log);
+    }
+}
 void __cdecl native_2d_percent_sprite(void* viewport,
            float xmin,float ymin,float xmax,float ymax,void* material) {
     // This exact native entry is reached by:
@@ -1256,6 +1302,7 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     const unsigned route=static_cast<unsigned>(producer);
     g_native_2d_producers[route].fetch_add(
         1,std::memory_order_relaxed);
+    record_bottom_2d_geometry(route,xmin,ymin,xmax,ymax);
     const DWORD started=g_native_2d_probe_start_ms.load(
         std::memory_order_acquire);
     const DWORD elapsed=started ? GetTickCount()-started : 0;
@@ -1635,6 +1682,25 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                 g_native_2d_producers[2].load(std::memory_order_relaxed),
                 g_native_2d_producers[3].load(std::memory_order_relaxed));
             log_line(source_counts);
+            if (iteration>=80) {
+                const char* routes[3]={"glyph","screen-image","frame"};
+                for(unsigned k=0;k<3;++k) {
+                    const auto& stats=g_native_bottom_2d[k];
+                    const unsigned n=stats.calls.load(
+                        std::memory_order_relaxed);
+                    const int low=stats.left_min.load(
+                        std::memory_order_relaxed);
+                    const int high=stats.right_max.load(
+                        std::memory_order_relaxed);
+                    char geo[240]{};
+                    std::snprintf(geo,sizeof(geo),
+                        "RUNTIME-HUD-BOTTOM: at=%us source=%s count=%u raw_min_x=%.2f raw_max_x=%.2f (native percent, before 4:3)",
+                        unsigned(iteration/2),routes[k],n,
+                        n?double(low)/100.0:0.0,
+                        n?double(high)/100.0:0.0);
+                    log_line(geo);
+                }
+            }
         }
         Sleep(500);
     }

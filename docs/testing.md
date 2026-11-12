@@ -1,3 +1,41 @@
+## 12 November 2026: compare actual lower-screen geometry
+
+The latest owner-supplied Wine-staging 11.17 log
+`Rayman2Fix(20261112-161949).log` shows a successful 1920x1080
+session, natural Learn_10 intro exit, and no crash. The three
+verified callsite categories use **the SAME 1024x768 native
+viewport**, and the common 2D percentage hook is definitely active.
+
+At t60 seconds, original native source counts are:
+- `glyph=38263` (JFFTXT font quads),
+- `image=2277` (normal and clipped screen images),
+- `frame=783` (GLI_vDisplayFrame rectangles).
+The frame belonging to the original dialogue appears at native
+`x=14.00..94.00, y=80.60..92.40`.
+However the first sampled glyph/image entries after t25s were
+at `y=7.0..11.5` and `y=8.5..11.5`, i.e. TOP-SCREEN HUD, **not
+the dialogue or blue continuation arrow**. These samples cannot
+tell us why the dialogue content still overflows the frame.
+
+**Next bounded, read-only test:** sample up to four lower-screen
+(`y_min>=72, y_max<=105`) original native rects per producer,
+and at 40/60-second checkpoints aggregate their ORIGINAL X
+extrema independently for font glyphs, images and panels.
+The first items belong to general bottom-screen UI and are not
+automatically identified as Murfy or arrow. No strings, fonts,
+textures, pointers, personal data or save state are logged.
+Most importantly, **this patch does not change any projection,
+sprite/triangle geometry or runtime game state**. The owner already
+confirmed no visual improvement in the last build and need not
+send a duplicate screenshot. By comparing bottom text/image
+positions against the actual native panel before scaling, we can
+determine whether the layout discrepancy is present in original
+input coordinates or is introduced downstream.
+
+Only then choose a universal 4:3 UI architecture; do not
+prematurely shrink all fonts or apply a special-case Learn_10
+offset. Keep PR #2 draft/unmerged. NOMOVIES work stays paused.
+
 ## Additional screen-image branches verified in native disassembly
 
 The original screen-image pass also calls the same GLI 2D percent
