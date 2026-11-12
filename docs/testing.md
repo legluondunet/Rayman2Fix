@@ -1,3 +1,33 @@
+## Read-only trace: non-native lower-screen sprites (12 Nov 2026)
+
+The Wine log `Rayman2Fix(20261112-163833).log` pairs incoming
+native percent coordinates with actual downstream Glide vertices:
+glyphs (35.30..39.50% -> 399.1..431.4 px), the bottom image
+(4..14% -> 158.7..235.5 px), and the dialogue frame
+(14..94% -> 235.5..849.9 px). The corrected glyph and frame
+use the same 1024x768 viewport and a shared 4:3 horizontal
+transform. Consequently, these tracked native 2D quads alone do
+not explain the user's visually unchanged text and blue arrow.
+Do not keep modifying font width, offsets, or the panel on this basis.
+
+This build measures the *other* Glide sprite callbacks,
+outside the verified native 2D entry. At 40/60 seconds,
+`RUNTIME-HUD-UNROUTED` reports plain/UV/colored submission counts
+and lower-screen geometry grouped by horizontal third. Up to
+two sanitized samples per kind/region (18 total) show downstream
+quad X/Y, reciprocal-Z range and whether the established 2D-quad
+heuristic would accept it. Samples start only after 25s when the
+intro normally hands over. Source text, raw pointers, texture names,
+and scene variables are not logged. An unknown UV quad with
+reciprocal-Z=0 was seen in an earlier probe, but its membership in
+the dialogue/arrow is *not* established.
+
+**No geometry or renderer change.** The unknown submissions could
+be world sprites; neither screen position nor reciprocal-Z alone
+permits us to rescale them. Wait for a Wine trace establishing the
+route and geometry of the misplaced content before making a
+universal correction. Keep PR #2 draft and Learn_10 skip disabled.
+
 ## Driver-space geometry trace paired with native 2D inputs
 
 The same read-only diagnostic build also records up to three first

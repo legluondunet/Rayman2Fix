@@ -70,5 +70,33 @@ int main() {
     assert(!r2fix::is_screen_sprite_quad(world));
     assert(!r2fix::is_screen_sprite_quad(nullptr));
 
+    // A 0-reciprocal-Z UV quad was observed on the real renderer,
+    // but is not sufficient evidence of HUD ownership. The probe
+    // must measure it without treating it as a 2D correction target.
+    r2fix::HudVertex unknown_uv[4] = {
+        {900,610,0.0f,0}, {940,610,0.0f,0},
+        {940,660,0.0f,0}, {900,660,0.0f,0}
+    };
+    r2fix::ScreenQuadGeometry g{};
+    assert(r2fix::inspect_screen_quad_geometry(unknown_uv,g));
+    assert(near(g.left,900.0f) && near(g.right,940.0f));
+    assert(near(g.top,610.0f) && near(g.bottom,660.0f));
+    assert(near(g.min_reciprocal_z,0.0f) &&
+           near(g.max_reciprocal_z,0.0f));
+    assert(r2fix::is_lower_screen_probe(g));
+    assert(r2fix::screen_quad_probe_sector(g,1024.0f)==2);
+    assert(!r2fix::is_screen_sprite_quad(unknown_uv));
+    unknown_uv[0].x=50.0f;
+    assert(r2fix::inspect_screen_quad_geometry(unknown_uv,g));
+    assert(r2fix::screen_quad_probe_sector(g,1024.0f)==1);
+    unknown_uv[0].x=900.0f;
+    unknown_uv[0].y=50.0f;
+    assert(r2fix::inspect_screen_quad_geometry(unknown_uv,g));
+    assert(!r2fix::is_lower_screen_probe(g));
+    unknown_uv[0].y=610.0f;
+    unknown_uv[0].x=std::numeric_limits<float>::quiet_NaN();
+    assert(!r2fix::inspect_screen_quad_geometry(unknown_uv,g));
+    assert(!r2fix::inspect_screen_quad_geometry(nullptr,g));
+    assert(r2fix::screen_quad_probe_sector(g,0.0f)==1);
     return 0;
 }

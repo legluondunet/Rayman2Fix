@@ -71,4 +71,53 @@ inline void center_screen_sprite_quad(HudVertex* quad,
     for (unsigned i = 0; i < 4; ++i)
         quad[i].x = centered_hud_x(quad[i].x, source_width, scale);
 }
+// Read-only classification of lower-screen quads not submitted by the
+// verified native 2D percent path. Never use these predicates to move
+// game vertices: arbitrary 3D world sprites may share screen coordinates.
+struct ScreenQuadGeometry {
+    float left=0.0f, right=0.0f, top=0.0f, bottom=0.0f;
+    float min_reciprocal_z=0.0f, max_reciprocal_z=0.0f;
+};
+inline bool inspect_screen_quad_geometry(const HudVertex* quad,
+                                        ScreenQuadGeometry& out) {
+    if (!quad) return false;
+    ScreenQuadGeometry bounds{};
+    for (unsigned i=0; i<4; ++i) {
+        const auto& p=quad[i];
+        if (!std::isfinite(p.x) || !std::isfinite(p.y) ||
+            !std::isfinite(p.reciprocal_z) ||
+            std::fabs(p.x)>32768.0f || std::fabs(p.y)>32768.0f ||
+            std::fabs(p.reciprocal_z)>32768.0f)
+            return false;
+        if(i==0) {
+            bounds.left=bounds.right=p.x;
+            bounds.top=bounds.bottom=p.y;
+            bounds.min_reciprocal_z=bounds.max_reciprocal_z=p.reciprocal_z;
+        } else {
+            if (p.x<bounds.left) bounds.left=p.x;
+            if (p.x>bounds.right) bounds.right=p.x;
+            if (p.y<bounds.top) bounds.top=p.y;
+            if (p.y>bounds.bottom) bounds.bottom=p.y;
+            if (p.reciprocal_z<bounds.min_reciprocal_z)
+                bounds.min_reciprocal_z=p.reciprocal_z;
+            if (p.reciprocal_z>bounds.max_reciprocal_z)
+                bounds.max_reciprocal_z=p.reciprocal_z;
+        }
+    }
+    out=bounds;
+    return true;
+}
+inline bool is_lower_screen_probe(const ScreenQuadGeometry& b) {
+    return b.top>=540.0f && b.bottom<=850.0f;
+}
+// Spatial bins for OBSERVATION only, not a special-case UI correction.
+inline unsigned screen_quad_probe_sector(const ScreenQuadGeometry& b,
+                                        float source_width) {
+    if (!std::isfinite(source_width) || source_width<=0.0f)
+        return 1;
+    const float center=(b.left+b.right)*0.5f;
+    return center<source_width/3.0f ? 0u :
+           center>source_width*2.0f/3.0f ? 2u : 1u;
+}
+
 } // namespace r2fix

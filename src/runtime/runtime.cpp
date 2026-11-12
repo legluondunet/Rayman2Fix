@@ -163,6 +163,12 @@ thread_local float g_native_input_right=0.0f;
 thread_local float g_native_mapped_left=0.0f;
 thread_local float g_native_mapped_right=0.0f;
 std::atomic<unsigned> g_bottom_driver_samples[4]{};
+// Unrouted sprite submissions may include screen-world dialogue actors
+// and the blue arrow. Probe only, NEVER use screen bounds or reciprocal-Z
+// to decide whether to scale world geometry.
+std::atomic<unsigned> g_unrouted_sprite_totals[3]{};
+std::atomic<unsigned> g_unrouted_lower_counts[3][3]{};
+std::atomic<unsigned> g_unrouted_lower_examples[3][3]{};
 
 
 
@@ -1570,6 +1576,38 @@ void probe_native_2d_driver(const r2fix::HudVertex* quad,
         double(min_x),double(max_x),double(min_y),double(max_y));
     log_line(line);
 }
+// Read-only: sample sprites which bypass GLI_vDraw2DSpriteWithPercent.
+// The native 2D font/panel quads are already verified at driver level.
+// The unknown UV path may have reciprocal-Z=0; do NOT auto-scale it.
+void probe_unrouted_lower_sprite(const r2fix::HudVertex* quad,
+                                 unsigned kind) {
+    if (!quad || kind>=3) return;
+    g_unrouted_sprite_totals[kind].fetch_add(1,std::memory_order_relaxed);
+    const DWORD started=g_native_2d_probe_start_ms.load(
+        std::memory_order_acquire);
+    if (!started || GetTickCount()-started<25000) return;
+    r2fix::ScreenQuadGeometry b{};
+    if (!r2fix::inspect_screen_quad_geometry(quad,b) ||
+        !r2fix::is_lower_screen_probe(b)) return;
+    const unsigned sector=r2fix::screen_quad_probe_sector(
+        b,kInternalGlideWidth);
+    g_unrouted_lower_counts[kind][sector].fetch_add(
+        1,std::memory_order_relaxed);
+    const unsigned index=g_unrouted_lower_examples[kind][sector]
+        .fetch_add(1,std::memory_order_relaxed);
+    if(index>=2 || !g_log) return;
+    const char* types[3]={"plain","uv","colored"};
+    const char* regions[3]={"left","center","right"};
+    char message[300]{};
+    std::snprintf(message,sizeof(message),
+        "RUNTIME-HUD-UNROUTED: callback=%s region=%s sample=%u x=%.1f..%.1f y=%.1f..%.1f reciprocal_z=%.4f..%.4f native_2d_screen_quad=%u (read-only; may be world sprite)",
+        types[kind],regions[sector],index+1,
+        double(b.left),double(b.right),double(b.top),double(b.bottom),
+        double(b.min_reciprocal_z),double(b.max_reciprocal_z),
+        unsigned(r2fix::is_screen_sprite_quad(quad)));
+    log_line(message);
+}
+
 void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
     const auto original = reinterpret_cast<PlainSpriteFn>(
         g_plain_sprite_original.load(std::memory_order_acquire));
@@ -1583,6 +1621,7 @@ void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
         original(quad,z,globals);
         return;
     }
+    probe_unrouted_lower_sprite(quad,0);
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, z, globals);
         return;
@@ -1606,6 +1645,7 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
         original(quad,uv,z,globals);
         return;
     }
+    probe_unrouted_lower_sprite(quad,1);
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, uv, z, globals);
         return;
@@ -1630,6 +1670,7 @@ void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
         original(quad,colors,z,globals);
         return;
     }
+    probe_unrouted_lower_sprite(quad,2);
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, colors, z, globals);
         return;
@@ -1746,6 +1787,22 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                 g_native_2d_producers[3].load(std::memory_order_relaxed));
             log_line(source_counts);
             if (iteration>=80) {
+                const char* callback[3]={"plain","uv","colored"};
+                for(unsigned k=0;k<3;++k) {
+                    char extra[235]{};
+                    std::snprintf(extra,sizeof(extra),
+                        "RUNTIME-HUD-UNROUTED: at=%us callback=%s total=%u lower_left=%u lower_center=%u lower_right=%u (read-only)",
+                        unsigned(iteration/2),callback[k],
+                        g_unrouted_sprite_totals[k].load(
+                            std::memory_order_relaxed),
+                        g_unrouted_lower_counts[k][0].load(
+                            std::memory_order_relaxed),
+                        g_unrouted_lower_counts[k][1].load(
+                            std::memory_order_relaxed),
+                        g_unrouted_lower_counts[k][2].load(
+                            std::memory_order_relaxed));
+                    log_line(extra);
+                }
                 const char* routes[3]={"glyph","screen-image","frame"};
                 for(unsigned k=0;k<3;++k) {
                     const auto& stats=g_native_bottom_2d[k];
