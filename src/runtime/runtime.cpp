@@ -1598,7 +1598,9 @@ void probe_superimposed_cd_candidates(const BYTE* image,
     constexpr Candidate candidates[]={
         {"gog-superimposed-procedure",0x710C0u,96u},
         {"gog-screen-position",0x75C7Fu,32u},
-        {"gog-actor-size",0x75C96u,32u}
+        {"gog-actor-size",0x75C96u,32u},
+        // 5 absolute VA branch destinations for case IDs 409..413.
+        {"cd-superimposed-jump-table",0x7135Cu,20u}
     };
     const auto* sections=IMAGE_FIRST_SECTION(pe);
     const std::uint32_t image_bytes=pe->OptionalHeader.SizeOfImage;
@@ -1658,6 +1660,53 @@ void probe_superimposed_cd_candidates(const BYTE* image,
             "RUNTIME-OVERLAY-CODE: candidate=%s rva=0x%08X bytes=%u hex=%s (GOG reference, CD code read-only; not validated for hooking)",
             c.role,unsigned(c.rva),c.bytes,hex);
         log_line(msg);
+        if(c.rva==0x7135Cu) {
+            // Decode each CD-native dispatcher branch, but never call
+            // it or patch it. The PE must be loaded at its verified
+            // preferred image base (all table entries are absolute VAs).
+            const std::uintptr_t preferred=
+                static_cast<std::uintptr_t>(pe->OptionalHeader.ImageBase);
+            for(unsigned i=0;i<5u;++i) {
+                std::uint32_t target_va=0;
+                std::memcpy(&target_va,sample+4u*i,sizeof(target_va));
+                const std::uintptr_t va=target_va;
+                if(va<preferred || va-preferred>image_bytes ||
+                   image_bytes-(va-preferred)<64u) continue;
+                const auto branch_rva=static_cast<std::uint32_t>(
+                    va-preferred);
+                bool branch_executable=false;
+                for(unsigned j=0;j<pe->FileHeader.NumberOfSections;++j) {
+                    const auto& sec=sections[j];
+                    const std::uint64_t start=sec.VirtualAddress;
+                    const std::uint64_t size=sec.Misc.VirtualSize>
+                        sec.SizeOfRawData ? sec.Misc.VirtualSize :
+                                          sec.SizeOfRawData;
+                    if((sec.Characteristics&IMAGE_SCN_MEM_EXECUTE) &&
+                       branch_rva>=start &&
+                       std::uint64_t(branch_rva)+64u<=start+size) {
+                        branch_executable=true;
+                        break;
+                    }
+                }
+                if(!branch_executable) continue;
+                BYTE opcodes[64]{};
+                SIZE_T read_branch=0;
+                if(!ReadProcessMemory(GetCurrentProcess(),
+                                      image+branch_rva,opcodes,
+                                      sizeof(opcodes),&read_branch) ||
+                   read_branch!=sizeof(opcodes)) continue;
+                char branch_hex[129]{};
+                for(unsigned j=0;j<sizeof(opcodes);++j) {
+                    branch_hex[j*2u]=digits[opcodes[j]>>4];
+                    branch_hex[j*2u+1u]=digits[opcodes[j]&15u];
+                }
+                char branch_line[265]{};
+                std::snprintf(branch_line,sizeof(branch_line),
+                    "RUNTIME-OVERLAY-BRANCH: procedure=%u rva=0x%08X bytes=64 hex=%s (approved CD executable; read-only)",
+                    409u+i,branch_rva,branch_hex);
+                log_line(branch_line);
+            }
+        }
     }
 }
 
@@ -2183,6 +2232,33 @@ void install_callback(void* volatile* slot, void* replacement,
     }
 }
 
+void report_superimposed_counts_after_frame(const char* when,
+                                          DWORD elapsed_ms) {
+    const unsigned counts[6]={
+        g_superimposed_proc_calls[0].load(std::memory_order_relaxed),
+        g_superimposed_proc_calls[1].load(std::memory_order_relaxed),
+        g_superimposed_proc_calls[2].load(std::memory_order_relaxed),
+        g_superimposed_proc_calls[3].load(std::memory_order_relaxed),
+        g_superimposed_proc_calls[4].load(std::memory_order_relaxed),
+        g_superimposed_proc_calls[5].load(std::memory_order_relaxed)
+    };
+    const unsigned after[6]={
+        g_superimposed_proc_after_frame[0].load(std::memory_order_relaxed),
+        g_superimposed_proc_after_frame[1].load(std::memory_order_relaxed),
+        g_superimposed_proc_after_frame[2].load(std::memory_order_relaxed),
+        g_superimposed_proc_after_frame[3].load(std::memory_order_relaxed),
+        g_superimposed_proc_after_frame[4].load(std::memory_order_relaxed),
+        g_superimposed_proc_after_frame[5].load(std::memory_order_relaxed)
+    };
+    char line[330]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-OVERLAY-ACTOR: checkpoint=%s after_first_frame_ms=%lu total_409..413=%u,%u,%u,%u,%u other=%u after_frame_409..413=%u,%u,%u,%u,%u other=%u (read-only, not actor identity)",
+        when,static_cast<unsigned long>(elapsed_ms),
+        counts[0],counts[1],counts[2],counts[3],counts[4],counts[5],
+        after[0],after[1],after[2],after[3],after[4],after[5]);
+    log_line(line);
+}
+
 void report_panel_glyph_geometry(const char* when,
                                  DWORD elapsed_ms) {
     const unsigned glyphs=g_frame_overlap_glyphs.load(
@@ -2233,15 +2309,17 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
     log_line("RUNTIME-HUD: 4:3 sprite callback monitor started");
     unsigned frame_relative_reports=0;
     unsigned glyph_relative_reports=0;
-    constexpr DWORD kAfterFrameProbeMs[]={2000,5000,10000};
+    constexpr DWORD kAfterFrameProbeMs[]={2000,5000,10000,20000};
     for (unsigned iteration = 0;; ++iteration) {
         const DWORD first=g_first_lower_frame_tick.load(
             std::memory_order_acquire);
-        if(first && frame_relative_reports<3) {
+        if(first && frame_relative_reports<4) {
             const DWORD elapsed=GetTickCount()-first;
             if(elapsed>=kAfterFrameProbeMs[frame_relative_reports]) {
-                const char* labels[]={"plus2s","plus5s","plus10s"};
+                const char* labels[]={"plus2s","plus5s","plus10s","plus20s"};
                 report_panel_glyph_geometry(
+                    labels[frame_relative_reports],elapsed);
+                report_superimposed_counts_after_frame(
                     labels[frame_relative_reports],elapsed);
                 ++frame_relative_reports;
             }

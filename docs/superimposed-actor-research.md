@@ -1,3 +1,38 @@
+## Wine log 2026-11-12 21:29:29: phase-specific counts
+
+`Rayman2Fix(20261112-203205).log` confirms the approved CD
+dispatcher observer installed and the game exited normally with
+code 0 after 137.217 s on Wine-staging 11.17. At 40,60,75,85,90s
+the script counts were unchanged: procedure 409=217, 410=0,
+411=1, 412=0, 413=0 (and no other IDs), all before the
+first lower frame. The frame finally appeared **AFTER** the
+fixed 90s checkpoint. A single sample reports procedure 413 after
+the frame; the test did not have a panel-relative actor count
+checkpoint. Causation/visual identity of that actor is unknown.
+
+The 2D overlap probe again recorded x_min=19.3, x_max=80.7
+with **zero** native font quad submissions outside first lower
+frame x=14..94 (milestone 4,096); do not squeeze 2D again.
+
+The next strictly diagnostic CD build adds:
+- A read-only 20-byte snapshot of the exact 409..413 jump table
+  at CD VA `0x47135C`, plus at most 64 original code bytes from
+  each of its five executable, in-image branch destinations.
+  The original function already verifies its script selector as
+  `procedure-409 <= 4`; logged targets are independently
+  checked against PE executable sections. No branch is invoked
+  outside game normal flow.
+- Separate **2/5/10/20s checkpoints relative to the first lower
+  frame**, covering both 2D glyph extents and each procedure's
+  total / after-frame count. No absolute 90s cutoff.
+- No actor geometry, font, screen camera, FOV, viewport, scene
+  script or language-specific modifications.
+
+A procedure 413 call appearing after the lower frame is *temporal
+correlation*, not evidence that it draws the blue arrow.
+Never enable the GOG actor position formula on top of our already
+centered 4:3 viewport. PR remains draft.
+
 # Rayman 2: superimposed actor placement — research, not an active fix
 
 ## Approved-CD byte evidence (2026-11-12)
