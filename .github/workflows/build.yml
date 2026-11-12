@@ -228,12 +228,26 @@ jobs:
             throw 'Glide rotation failed to reinstall the verified GameFrame renderer'
           }
 
-          # On unchanged active DLL, retain the single preceding .bak.
+          # No-op launches preserve the latest .bak and never create numbers.
           & ./package-smoke/Rayman2Fix.exe
           if ($LASTEXITCODE -ne 2 -or
               (Get-Content -Raw $backup) -ne 'second-legacy-glide' -or
-              @(Get-ChildItem 'package-smoke/Rayman2Fix' -File -Filter 'glide2x.dll.bak.*' |
-                Where-Object { $_.Name -match '^glide2x\\.dll\\.bak\\.[0-9]+
+              @(Get-ChildItem 'package-smoke/Rayman2Fix' -File -Filter 'glide2x.dll.bak.*').Count -ne 1) {
+            throw 'Unchanged pinned Glide must not produce numbered backups'
+          }
+          # Recover from old installations that have only numbered backups.
+          Remove-Item $backup
+          [IO.File]::WriteAllText("$glideDest.bak.1", 'legacy-one', [Text.Encoding]::ASCII)
+          [IO.File]::WriteAllText("$glideDest.bak.30", 'legacy-thirty', [Text.Encoding]::ASCII)
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or
+              (Get-Content -Raw $backup) -ne 'legacy-thirty' -or
+              (Test-Path "$glideDest.bak.1") -or
+              (Test-Path "$glideDest.bak.30") -or
+              !(Test-Path "$glideDest.bak.notes")) {
+            throw 'Legacy numbered Glide backups must collapse to newest .bak'
+          }
+          Write-Host 'Single glide2x.dll.bak rotation and legacy cleanup: PASS'
           Remove-Item package-smoke -Recurse -Force
           if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix.dll,glide2x.dll) {
             throw 'One-file build must never include generated INI, logs or DLL sidecars'
