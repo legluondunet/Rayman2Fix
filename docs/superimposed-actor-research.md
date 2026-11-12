@@ -1,3 +1,63 @@
+# 2026-11-12 — classify the exact script IDs and the latest Wine trace
+
+The owner's `Rayman2Fix(20261112-204416).log` (Wine-staging 11.17,
+1920×1080, clean exit `0x00000000` after **235.233 s**) confirms
+the executable's native overlay dispatcher jump table and all five
+case branches. The public MIT-licensed
+[ACP_Ray2 `AI_Const.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/AI/AI_Const.h)
+names these sequential *native script procedure IDs*:
+
+| ID | Defined procedure name | Meaning from symbol |
+| --- | --- | --- |
+| 409 | `AI_E_proc_SpoSetSuperimposed` | set an actor superimposed |
+| 410 | `AI_E_proc_SpoSetSuperimposed2` | alternate set |
+| 411 | `AI_E_proc_SpoReleaseSuperimposed` | release |
+| 412 | `AI_E_proc_SpoSetCoordinates` | set coordinates |
+| 413 | `AI_E_proc_SpoSwitchSuperimposedTab` | switch superimposed tab |
+
+The independent `AI_E_proc_TextSuperImposed` is procedure **443**.
+It is **not** covered by the existing 409–413 dispatcher observer.
+Its name is useful engine terminology, *not evidence* that it owns
+Murfy's visible letters or the blue continuation arrow.
+
+At +2,+5,+10,+20 seconds **after the first lower frame**,
+`RUNTIME-OVERLAY-ACTOR` reported **260,0,1,0,0** lifetime calls,
+and **0** calls of every ID after that frame. A single **413**
+call appeared *later* (after +20 seconds), just before the font
+submissions started in the trace. Its independently captured
+case body at CD VA `0x47131E` delegates to `0x480B90` and
+`0x45BA60` before returning; it contains no *direct* matrix
+column writes. Combined with the exact symbol
+`SpoSwitchSuperimposedTab`, the timing is **not evidence of
+text/arrow geometry modification**. Do not target 413 for resizing.
+
+Procedure 409 was used **260 times before the lower frame**,
+suggesting initial actor placement; 410 and 412 were unused during
+this test. The two known independent native superimposed-position
+and extent code sites `0x475C7F` / `0x475C96` remain much more
+relevant than procedure 413, but are not yet positively linked to
+the observed off-frame content.
+
+Read-only native 2D geometry confirms again:
+first frame X **14–94%** (downstream driver X **235.5–849.9px**
+at internal 1024×768); over **4,096** vertically overlapping
+font quads have original X **19.3–80.7%**, outside count **zero**.
+These are GLI draw *submissions*, not unique letters or a
+proven identification of every observed text object.
+**Do not apply further general 2D font contraction.**
+
+**Next engineering step:** identify the owning renderer/camera and
+matrix/position stage for the visually misplaced overlays. Compare
+actor-level 409/410 normalization with the existing centered
+screen-world viewport; enable one consistent stage only, not both.
+A dedicated 443 *script* procedure may be worth a separate source
+review, but the symbol alone does not justify an active hook.
+No new gameplay regression test is requested merely to reconfirm
+these already-settled call counts. The visual problem remains open,
+PR #2 remains draft.
+
+---
+
 ## Wine log 2026-11-12 21:29:29: phase-specific counts
 
 `Rayman2Fix(20261112-203205).log` confirms the approved CD
@@ -117,11 +177,18 @@ would alter UI placement and possibly introduce new regressions.
 The actor's matrix extent is also a distinct variable, not
 necessarily fixed by changing the viewport.
 
-Ray2Fix targets a **different GOG executable**. Its procedure IDs
-(409,410) and hook locations (game VA `0x4710C0`, `0x475C7F`,
-`0x475C96`) are research leads, **not verified entry points or
-bytes** for our owner's SHA-locked CD game executable
-(`SHA256=7927a106...`). Do not reuse them as CD RVA values.
+Ray2Fix originally targeted a **different GOG executable**.
+Subsequent Wine byte fingerprints of our approved CD executable
+(`SHA256=7927a106...`) **independently verified** the native
+code entry at game VA `0x4710C0` (RVA `0x710C0`) and
+the code bytes at VA `0x475C7F`, `0x475C96`. The 409–413
+native jump table at VA `0x47135C` was also read and followed
+to the five executable code branches. These verified locations
+establish the subsystem's presence in our edition but **do not**
+establish the ownership of the visibly misplaced arrow/text.
+Do not activate a write patch based on proximity or on foreign
+versions' entry points without verifying the exact instructions
+and avoiding double application with our narrowed viewport.
 
 The new header `superimposed_math.hpp` and unit tests exercise
 the candidate equations and the equivalence of actor-level origin
@@ -138,11 +205,10 @@ original camera patch byte pattern has matched). The log prefix is
 patch those candidate locations. A readable byte range **does not**
 establish equivalence of the game versions; disassemble and verify
 actual CD instructions/calling conventions before using any detour.
-The next Wine trial only needs startup and a normal exit; no repeated
-long dialogue sequence is necessary for these fingerprints.
+The startup-only fingerprints were obtained successfully in the
+2026-11-12 Wine logs; no further startup-only test is necessary.
 
-Next: map the approved CD executable's superimposed actor procedure
-and its byte signatures, identify which call actually draws the
+Next: identify which call actually draws the
 blue continuation arrow or other out-of-frame projected text, and
 select **one** horizontal placement stage. Keep a single Windows/Wine
 implementation, retain world camera Hor+, and do not touch game
