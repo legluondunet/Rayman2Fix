@@ -122,7 +122,7 @@ std::atomic<void*> g_color_sprite_original{nullptr};
 // path. The old hooks only see three *sprite* callbacks. Do not infer
 // which one draws Murfy's text or the blue arrow without a trace.
 std::atomic<void*> g_triangle_original{nullptr};
-const void* g_native_screen_viewport=nullptr;
+std::atomic<const void*> g_native_screen_viewport{nullptr};
 std::atomic<unsigned> g_triangle_calls{0};
 std::atomic<unsigned> g_triangle_ui_calls{0};
 std::atomic<unsigned> g_triangle_lower_ui{0};
@@ -1362,8 +1362,9 @@ void __cdecl diagnose_triangles(r2fix::HudVertex* points,
     // discrimination. Unrecognized viewport != proof of world.
     const void* viewport=nullptr;
     if(globals)std::memcpy(&viewport,globals,sizeof(viewport));
-    const bool ui=viewport && g_native_screen_viewport &&
-                  viewport==g_native_screen_viewport;
+    const void* screen=g_native_screen_viewport.load(
+        std::memory_order_acquire);
+    const bool ui=viewport && screen && viewport==screen;
     if(ui)g_triangle_ui_calls.fetch_add(1,std::memory_order_relaxed);
     if(points) {
         bool finite=true,lower=false;
@@ -1514,7 +1515,8 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
         const_cast<BYTE*>(module + kColorSpriteSlotRva));
     auto* triangles=reinterpret_cast<void* volatile*>(
         const_cast<BYTE*>(module+kTriangleSlotRva));
-    g_native_screen_viewport=module+kScreenViewportRva;
+    g_native_screen_viewport.store(module+kScreenViewportRva,
+                                   std::memory_order_release);
     bool plain_logged = false;
     bool uv_logged = false;
     bool color_logged = false;
