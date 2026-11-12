@@ -13,6 +13,11 @@ int main() {
     assert(!r2fix::is_native_screen_camera(&world,&overlay));
     assert(!r2fix::is_native_screen_camera(nullptr,&overlay));
     assert(!r2fix::is_native_screen_camera(&overlay,nullptr));
+    using Role=r2fix::RenderCameraRole;
+    assert(r2fix::classify_render_camera(&overlay,&overlay)==Role::ScreenWorld);
+    assert(r2fix::classify_render_camera(&world,&overlay)==Role::World);
+    assert(r2fix::classify_render_camera(&world,nullptr)==Role::Unknown);
+    assert(r2fix::classify_render_camera(nullptr,&overlay)==Role::Unknown);
     // Native screen camera created at VA 0x4052C0 with X=1.5,Y=0.75.
     // Global Hor+ used to overwrite X with 1.259 on 16:9 screens.
     constexpr float native_x=1.5f,native_y=.75f;

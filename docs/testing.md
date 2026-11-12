@@ -1,3 +1,37 @@
+## Read-only camera correlation, not a sprite-specific fix
+
+Owner Wine log `Rayman2Fix(20261112-174120).log` (test binary
+`53ca8686`, GitHub's PR test merge of `3f737849`) confirms the
+UV quads remain large screen rectangles: before the first bottom frame,
+`x=0..1024,y=34..618` and afterwards
+`x=0..1024,y=0..768`, reciprocal-Z=0. All 1,301 UV
+submissions in the trace are finite and near the internal canvas;
+**none** falls into the lower-screen `y_min>=540,y_max<=850`
+heuristic. This does not prove whether the arrow uses UV.
+
+A stronger clue is that the native lower 2D glyph counter is
+**6020 at both 40s and 60s** even as the first dialogue-frame
+and screen-image submissions begin and each reaches >1,000.
+The text drawn during that later period may therefore use a different
+rendering route, such as screen-world or world-projected geometry.
+The total glyph counter continues to grow from 20,797 to 21,331,
+so native font rendering overall is active; only the bottom-screen
+subset is unchanged. Correlation is not positive identification of
+dialogue text.
+
+Next test is strictly read-only: classify calls to the SHA-locked
+native camera adjust hook as world/screen-world/unknown by comparing
+the engine's already validated original screen-camera pointer.
+Remember the **last adjusted camera on the same render thread** and
+correlate it with subsequent *unrouted plain* Glide quads, only
+after a lower native frame is first observed. Report bounded
+after-frame lower-screen samples and 40/60s counts for each role.
+Camera-adjust callback time/last-on-thread is a diagnostic hint,
+NOT guaranteed sprite ownership: renderer passes may be deferred,
+and callbacks may run on other threads. Do not scale a vertex based
+on this hint. No user-visible drawing, story logic, save state,
+font geometry, UV content or pointer data changes.
+
 ## Follow-up: diagnose UV coordinate system without movement (12 Nov 2026)
 
 The owner's Wine trace `Rayman2Fix(20261112-172957).log` ran

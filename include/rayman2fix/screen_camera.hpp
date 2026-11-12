@@ -14,6 +14,18 @@ inline bool is_native_screen_camera(const void* candidate,
     return candidate!=nullptr && ui_camera!=nullptr &&
            candidate==ui_camera;
 }
+// Observation only: the last adjusted camera on this render thread
+// may correlate with subsequent Glide sprite submissions. It is not
+// proof that an individual sprite belongs to the camera's scene.
+enum class RenderCameraRole : unsigned {
+    Unknown=0, World=1, ScreenWorld=2
+};
+inline RenderCameraRole classify_render_camera(const void* candidate,
+                                              const void* ui_camera) {
+    if(!candidate || !ui_camera) return RenderCameraRole::Unknown;
+    return candidate==ui_camera ? RenderCameraRole::ScreenWorld
+                                : RenderCameraRole::World;
+}
 inline float projection_alpha_x(float original_x,float alpha_y,
                                 float aspect,bool native_ui) {
     if(native_ui || !std::isfinite(original_x) || aspect<=1.334f)

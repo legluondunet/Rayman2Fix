@@ -176,6 +176,14 @@ std::atomic<unsigned> g_uv_phase_calls[2]{};
 std::atomic<unsigned> g_uv_phase_valid[2]{};
 std::atomic<unsigned> g_uv_phase_near_canvas[2]{};
 std::atomic<unsigned> g_uv_phase_samples[2]{};
+// Render-thread hint only: remembers the last camera passed to the
+// game's own camera-adjust hook. Cannot identify sprite ownership alone.
+thread_local r2fix::RenderCameraRole g_last_adjusted_camera_role=
+    r2fix::RenderCameraRole::Unknown;
+std::atomic<unsigned> g_camera_adjust_calls[3]{};
+std::atomic<unsigned> g_postframe_plain_by_camera[3]{};
+std::atomic<unsigned> g_postframe_lower_by_camera[3][3]{};
+std::atomic<unsigned> g_postframe_lower_camera_examples[3][3]{};
 
 
 
@@ -1172,8 +1180,13 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
         std::memcpy(&screen_camera,
             reinterpret_cast<const void*>(g_screen_camera_slot),
             sizeof(screen_camera));
-    const bool native_ui=r2fix::is_native_screen_camera(
+    const auto observed_role=r2fix::classify_render_camera(
         camera,screen_camera);
+    g_last_adjusted_camera_role=observed_role;
+    g_camera_adjust_calls[static_cast<unsigned>(observed_role)]
+        .fetch_add(1,std::memory_order_relaxed);
+    const bool native_ui=observed_role==
+        r2fix::RenderCameraRole::ScreenWorld;
     if (camera && native_ui) {
         if (!g_native_ui_camera_seen.exchange(true,
                                   std::memory_order_relaxed)) {
@@ -1625,6 +1638,33 @@ void probe_unrouted_lower_sprite(const r2fix::HudVertex* quad,
             log_line(msg);
         }
     }
+    if(kind==0 && valid &&
+       g_native_bottom_2d[2].calls.load(std::memory_order_relaxed)>0) {
+        const unsigned role=static_cast<unsigned>(g_last_adjusted_camera_role);
+        g_postframe_plain_by_camera[role].fetch_add(
+            1,std::memory_order_relaxed);
+        if(r2fix::is_lower_screen_probe(b)) {
+            const unsigned region=r2fix::screen_quad_probe_sector(
+                b,kInternalGlideWidth);
+            g_postframe_lower_by_camera[role][region].fetch_add(
+                1,std::memory_order_relaxed);
+            const unsigned sample=g_postframe_lower_camera_examples[role][region]
+                .fetch_add(1,std::memory_order_relaxed);
+            if(sample<2 && g_log) {
+                const char* labels[3]={"unknown","world","screen-world"};
+                const char* regions[3]={"left","center","right"};
+                char line[290]{};
+                std::snprintf(line,sizeof(line),
+                    "RUNTIME-HUD-CAMERA-CORRELATION: last_adjusted=%s region=%s sample=%u x=%.1f..%.1f y=%.1f..%.1f reciprocal_z=%.3f..%.3f (read-only; last-camera hint, not sprite identity)",
+                    labels[role],regions[region],sample+1,
+                    double(b.left),double(b.right),
+                    double(b.top),double(b.bottom),
+                    double(b.min_reciprocal_z),
+                    double(b.max_reciprocal_z));
+                log_line(line);
+            }
+        }
+    }
     if(!valid || !r2fix::is_lower_screen_probe(b)) return;
     const unsigned sector=r2fix::screen_quad_probe_sector(
         b,kInternalGlideWidth);
@@ -1853,6 +1893,26 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                         g_uv_phase_near_canvas[phase].load(
                             std::memory_order_relaxed));
                     log_line(uv_status);
+                }
+                const char* camera_names[3]={
+                    "unknown","world","screen-world"
+                };
+                for(unsigned role=0;role<3;++role) {
+                    char diagnostic[290]{};
+                    std::snprintf(diagnostic,sizeof(diagnostic),
+                        "RUNTIME-HUD-CAMERA-CORRELATION: at=%us last_adjusted=%s camera_adjust_calls=%u plain_after_frame=%u lower_left=%u lower_center=%u lower_right=%u (read-only; thread-local hint)",
+                        unsigned(iteration/2),camera_names[role],
+                        g_camera_adjust_calls[role].load(
+                            std::memory_order_relaxed),
+                        g_postframe_plain_by_camera[role].load(
+                            std::memory_order_relaxed),
+                        g_postframe_lower_by_camera[role][0].load(
+                            std::memory_order_relaxed),
+                        g_postframe_lower_by_camera[role][1].load(
+                            std::memory_order_relaxed),
+                        g_postframe_lower_by_camera[role][2].load(
+                            std::memory_order_relaxed));
+                    log_line(diagnostic);
                 }
                 const char* routes[3]={"glyph","screen-image","frame"};
                 for(unsigned k=0;k<3;++k) {
