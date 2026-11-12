@@ -10,6 +10,7 @@
 #include "rayman2fix/fov_math.hpp"
 #include "rayman2fix/hud_math.hpp"
 #include "rayman2fix/screen_camera.hpp"
+#include "rayman2fix/superimposed_math.hpp"
 #include "rayman2fix/intro_skip.hpp"
 #include "rayman2fix/story_lookup.hpp"
 #include "rayman2fix/scene_intro.hpp"
@@ -46,6 +47,27 @@ std::atomic<unsigned> g_superimposed_proc_calls[6]{};
 std::atomic<unsigned> g_superimposed_proc_after_frame[6]{};
 std::atomic<unsigned> g_superimposed_proc_samples[6]{};
 
+// Exact image-base-0x400000 retail CD instructions verified directly
+// against the original executable SHA-256 7927a106...d5e3.
+// All four native screen-position caller sites pass 0x5004D4;
+// the source-to-3D conversion must be corrected at its common entry.
+constexpr uintptr_t kNativeScreenToVertexRva=0x22940; // VA 0x422940
+constexpr uintptr_t kNativeUiViewportRva=0x1004D4;   // VA 0x5004D4
+constexpr BYTE kNativeScreenToVertexExpected[6]={
+    0x81,0xEC,0xD4,0x00,0x00,0x00
+};
+using NativeScreenToVertex=void (__cdecl*)(
+    void*,void*,float,float,float);
+NativeScreenToVertex g_original_screen_to_vertex=nullptr;
+std::atomic<bool> g_overlay_source_patch_enabled{false};
+std::atomic<unsigned> g_overlay_source_corrected_calls{0};
+const void* g_approved_overlay_viewport=nullptr;
+// The original PE stores coefficients at VA 0x49CC58 / 0x49CCA4
+// (1/640) and 0x49CCA8 (1/480). Redirect only FOUR verified
+// fmul operands to DLL-owned values; never overwrite shared constants.
+float g_superimposed_actor_extent_coefficient=1.0f/640.0f;
+float g_superimposed_text_x_coefficient=1.0f/640.0f;
+float g_superimposed_text_z_coefficient=1.0f/480.0f;
 constexpr uintptr_t kCameraRva = 0x22AB0; // verified VA=0x422AB0 for image base 0x400000
 // Shared screen-world UI camera pointer owned by the original engine.
 // Constructed by 0x4052C0 with FOV (1.5,0.75), displayed through
@@ -1274,7 +1296,13 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // Native offsets: height +0x08, width +0x0C, X +0x58, Y +0x5C.
     void* projection_viewport=viewport;
     alignas(4) std::uint8_t ui_projection[0x70]{};
-    if(native_ui && viewport && g_hud_scale<0.9999f) {
+    // When the four original source conversions and the native actor
+    // extents are corrected at their OWNER, keeping the screen-world
+    // viewport native avoids an inverse-projection double transform.
+    // Preserve the previous viewport path as a fallback if the guarded
+    // source patch is unavailable for any reason.
+    if(native_ui && viewport && g_hud_scale<0.9999f &&
+       !g_overlay_source_patch_enabled.load(std::memory_order_acquire)) {
         const auto rect=r2fix::read_native_screen_viewport(viewport);
         r2fix::ScreenWorldViewport centered{};
         if(r2fix::center_screen_world_viewport(
@@ -1577,6 +1605,152 @@ void write_jump(BYTE* at, const void* destination) {
     const uintptr_t dest = reinterpret_cast<uintptr_t>(destination);
     const std::uint32_t relative = static_cast<std::uint32_t>(dest - after);
     std::memcpy(at + 1, &relative, sizeof(relative));
+}
+// Common, edition-verified native inverse 2D->3D screen-position
+// conversion. All four original CD xrefs pass the secondary viewport:
+// 0x4711F6 (script 409), 0x47189B (other actor setup),
+// 0x475C53 and 0x475C8E (TextSuperImposed-native text).
+// This changes only normalized screen X, not world 3D geometry.
+void __cdecl centered_native_screen_to_vertex(
+        void* viewport,void* out_vertex,float x,float y,float depth) {
+    const auto original=g_original_screen_to_vertex;
+    if(!original)return;
+    if(g_overlay_source_patch_enabled.load(std::memory_order_acquire) &&
+       viewport==g_approved_overlay_viewport) {
+        float centered=0.0f;
+        if(r2fix::center_normalized_superimposed_x(
+                    x,g_hud_scale,centered)) {
+            x=centered;
+            g_overlay_source_corrected_calls.fetch_add(
+                1u,std::memory_order_relaxed);
+        }
+    }
+    original(viewport,out_vertex,x,y,depth);
+}
+
+// A startup-only alternative to the earlier viewport adjustment.
+// Preflight EVERY original instruction and establish writable pages
+// before modifying ANY original engine bytes. The 4 coefficient
+// patches relocate only the float operand of a six-byte FLD/FMUL;
+// no native code is transplanted and no global original constant
+// is changed. The function entry trampoline replays one whole
+// six-byte x86 instruction before returning to the original.
+void install_approved_overlay_source_patch() {
+    if(g_overlay_source_patch_enabled.load(std::memory_order_acquire) ||
+       g_hud_scale>=0.9999f)return;
+    auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+    if(!base)return;
+    const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if(dos->e_magic!=IMAGE_DOS_SIGNATURE || dos->e_lfanew<=0 ||
+       dos->e_lfanew>=0x1000)return;
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+        base+dos->e_lfanew);
+    if(pe->Signature!=IMAGE_NT_SIGNATURE ||
+       pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       pe->OptionalHeader.Magic!=IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
+       pe->FileHeader.TimeDateStamp!=kOriginalTimestamp)return;
+    if(pe->OptionalHeader.SizeOfImage<kNativeUiViewportRva+0x70u)
+        return;
+    struct FactorSite {
+        std::uint32_t rva;
+        BYTE expected[6];
+        const float* value;
+    };
+    const FactorSite factors[]={
+        // proc 409 sets actor X and Z uniform matrix extent.
+        {0x7122Au,{0xD8,0x0D,0x58,0xCC,0x49,0x00},
+            &g_superimposed_actor_extent_coefficient},
+        // Independent native superimposed object setup.
+        {0x718CFu,{0xD8,0x0D,0x58,0xCC,0x49,0x00},
+            &g_superimposed_actor_extent_coefficient},
+        // Native text X/Z matrix extents; different input bases.
+        {0x75BEFu,{0xD8,0x0D,0xA4,0xCC,0x49,0x00},
+            &g_superimposed_text_x_coefficient},
+        {0x75BF7u,{0xD8,0x0D,0xA8,0xCC,0x49,0x00},
+            &g_superimposed_text_z_coefficient},
+    };
+    constexpr unsigned kFactorCount=sizeof(factors)/sizeof(factors[0]);
+    auto* target=base+kNativeScreenToVertexRva;
+    if(pe->OptionalHeader.SizeOfImage<kNativeScreenToVertexRva+
+            sizeof(kNativeScreenToVertexExpected) ||
+       std::memcmp(target,kNativeScreenToVertexExpected,
+                   sizeof(kNativeScreenToVertexExpected))!=0) {
+        log_line("RUNTIME-OVERLAY-SOURCE: native GLI screen-position entry unrecognized; original viewport retained");
+        return;
+    }
+    for(const auto& site:factors) {
+        if(pe->OptionalHeader.SizeOfImage<site.rva+sizeof(site.expected) ||
+           std::memcmp(base+site.rva,site.expected,
+                       sizeof(site.expected))!=0) {
+            log_line("RUNTIME-OVERLAY-SOURCE: native actor/text extent signature mismatch; original viewport retained");
+            return;
+        }
+    }
+    g_superimposed_actor_extent_coefficient=(1.0f/640.0f)*g_hud_scale;
+    g_superimposed_text_x_coefficient=(1.0f/640.0f)*g_hud_scale;
+    g_superimposed_text_z_coefficient=(1.0f/480.0f)*g_hud_scale;
+    if(!std::isfinite(g_superimposed_text_z_coefficient) ||
+       g_superimposed_text_z_coefficient<=0.0f)return;
+
+    constexpr std::size_t kEntryBytes=
+        sizeof(kNativeScreenToVertexExpected);
+    auto* gateway=static_cast<BYTE*>(VirtualAlloc(nullptr,64,
+        MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    if(!gateway)return;
+    std::memcpy(gateway,target,kEntryBytes);
+    write_jump(gateway+kEntryBytes,target+kEntryBytes);
+    DWORD ignored=0;
+    if(!VirtualProtect(gateway,64,PAGE_EXECUTE_READ,&ignored)) {
+        VirtualFree(gateway,0,MEM_RELEASE);
+        return;
+    }
+
+    // Acquire write access to all five sites before the first edit.
+    BYTE* sites[kFactorCount+1]{};
+    DWORD old_protection[kFactorCount+1]{};
+    for(unsigned i=0;i<kFactorCount;++i)
+        sites[i]=base+factors[i].rva;
+    sites[kFactorCount]=target;
+    unsigned writable=0;
+    for(;writable<kFactorCount+1;++writable) {
+        if(!VirtualProtect(sites[writable],6,
+              PAGE_EXECUTE_READWRITE,&old_protection[writable]))break;
+    }
+    if(writable<kFactorCount+1) {
+        while(writable>0) {
+            --writable;
+            VirtualProtect(sites[writable],6,
+                old_protection[writable],&ignored);
+        }
+        VirtualFree(gateway,0,MEM_RELEASE);
+        log_line("RUNTIME-OVERLAY-SOURCE: cannot prepare all native code sites; fallback viewport retained");
+        return;
+    }
+    for(unsigned i=0;i<kFactorCount;++i) {
+        const std::uint32_t operand=static_cast<std::uint32_t>(
+            reinterpret_cast<std::uintptr_t>(factors[i].value));
+        // x86 FMUL m32real absolute: opcode D8 0D + disp32
+        std::memcpy(sites[i]+2,&operand,sizeof(operand));
+        FlushInstructionCache(GetCurrentProcess(),sites[i],6);
+    }
+    g_original_screen_to_vertex=
+        reinterpret_cast<NativeScreenToVertex>(gateway);
+    g_approved_overlay_viewport=base+kNativeUiViewportRva;
+    write_jump(target,
+        reinterpret_cast<const void*>(&centered_native_screen_to_vertex));
+    target[5]=0x90;
+    FlushInstructionCache(GetCurrentProcess(),target,6);
+    // Reprotect in reverse order, including overlapping code pages.
+    for(unsigned i=kFactorCount+1;i>0;--i) {
+        const unsigned idx=i-1;
+        VirtualProtect(sites[idx],6,old_protection[idx],&ignored);
+    }
+    g_overlay_source_patch_enabled.store(true,std::memory_order_release);
+    char line[242]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-OVERLAY-SOURCE: CD native source conversion and four actor/text extents centered 4:3 at scale=%.6f; screen-world viewport left native (experimental, no per-level hacks)",
+        double(g_hud_scale));
+    log_line(line);
 }
 // The public GOG Ray2Fix source suggests three superimposed-actor
 // code locations. They are NOT approved offsets for this CD executable.
@@ -2552,6 +2726,10 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     const DWORD camera_status = install_camera_hook();
     // Unknown/unsupported game versions never receive additional hooks.
     if (camera_status == 1) {
+        // The source transform covers all four native inverse-projection
+        // callers and four independent extent operations as a single
+        // guarded stage; only then bypass the older viewport squeeze.
+        if(g_hud_scale<0.9999f)install_approved_overlay_source_patch();
         // Hook the common native 2D entry before the game draws any
         // UI; the downstream driver callback monitor still handles
         // screen sprites submitted through other engine paths.

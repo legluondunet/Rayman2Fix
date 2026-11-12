@@ -1,3 +1,70 @@
+# 12 November 2026 — offline SHA-locked original CD executable analysis
+
+The **complete user-supplied retail unprotected CD EXE** (SHA-256
+`7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`)
+was recovered from the user's previously shared files and analysed
+OFFLINE, without relying on a different GOG build or requesting
+another user test. Original PE image base is `0x400000`.
+
+The 8-byte native script-procedure dispatch records identify
+**443 -> VA 0x470270**, `AI_E_proc_TextSuperImposed`.
+That function evaluates its script parameter and writes a mode byte
+at VA `0x4A40B4`. The original text superposition routine at
+`0x475BB9` reads that mode byte to select the native 3D text
+conversion path. This establishes a **direct implementation link**
+between procedure 443 and native projected text, but not the
+identity of the visible blue arrow.
+
+All FOUR original call sites to
+`GLI_vGet3DVertexFromScreenPos` at VA **0x422940** were enumerated:
+- `0x4711F6`: procedure 409 actor placement.
+- `0x47189B`: independent native superimposed actor setup.
+- `0x475C53` and `0x475C8E`: both native text superposition
+  conversion branches.
+All pass the *original* dedicated UI viewport at VA `0x5004D4`.
+The routine performs an inverse projection using viewport dimensions
+and the screen camera: narrowing only the camera viewport can be
+compensated by this conversion, leaving source objects misplaced.
+
+The same approved EXE contains four native actor/text matrix extent
+operations, all independently byte-verified:
+- `0x47122A`, `0x4718CF`: `fmul [0x49CC58]` (1/640),
+  actor X/Z extents.
+- `0x475BEF`: `fmul [0x49CCA4]` (1/640), projected text X extent.
+- `0x475BF7`: `fmul [0x49CCA8]` (1/480), projected text Z extent.
+
+The original constants (1/640, 1/480) were read directly from the
+PE .rdata section and are **not** globally overwritten.
+
+## One guarded, experimental universal source-stage correction
+
+New runtime prototype, in this draft PR:
+1. Match the original CD's exact six-byte source-function prologue
+   and ALL four original `fmul` instruction signatures, after
+   the already-approved camera hook verified the PE.
+2. Install a single source-entry trampoline for native
+   `GLI_vGet3DVertexFromScreenPos` and map normalized
+   `X -> 0.5 + (X-0.5) * hud_scale` exactly once, **only**
+   for viewport VA `0x5004D4`. Keep Y/Z unchanged.
+3. Redirect each individual 32-bit floating-point operand of
+   the four matrix-size operations to a private, scaled constant,
+   without changing game-shared .rdata constants.
+4. ONLY after this whole-stage patch succeeds, leave the native
+   screen-world viewport unchanged in the camera hook. If preflight
+   fails, retain the previous viewport path.
+5. Native 2D percent fonts/frames stay at their existing common
+   4:3 transform; world-camera Hor+ stays active and unaffected.
+
+This is a **candidate fix**, not a visual validation. It is
+deliberately not tied to Murfy, Learn_10, languages or individual
+textures. Procedure 410 is an independent 3D-world actor placement
+path without a native inverse-screen conversion in its observed case;
+its complete matrix semantics remain to be audited. A user Wine
+visual trial is necessary before declaring the dialogue and arrow
+resolved. PR #2 stays DRAFT and must NOT be merged based on CI alone.
+
+---
+
 # 2026-11-12 — classify the exact script IDs and the latest Wine trace
 
 The owner's `Rayman2Fix(20261112-204416).log` (Wine-staging 11.17,

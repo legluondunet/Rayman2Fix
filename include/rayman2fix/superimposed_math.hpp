@@ -12,6 +12,22 @@ namespace r2fix {
 // screen-world viewport: doing both would shrink X twice.
 constexpr float kSuperimposedReferenceHeight = 480.0f;
 
+// Native GLI_vGet3DVertexFromScreenPos accepts normalized screen X.
+// The projection round trip may cancel a viewport-only change; apply
+// the centered 4:3 mapping exactly ONCE to X before the inverse
+// 2D-to-3D conversion, leaving Y and Z untouched.
+inline bool center_normalized_superimposed_x(float original_x,
+                                            float squeeze,
+                                            float& result) {
+    if(!std::isfinite(original_x) || std::fabs(original_x)>100.0f ||
+       !std::isfinite(squeeze) || squeeze<=0.25f || squeeze>1.0f)
+        return false;
+    const float centered=0.5f+(original_x-0.5f)*squeeze;
+    if(!std::isfinite(centered))return false;
+    result=centered;
+    return true;
+}
+
 // Proc-style screen placement: the original actor procedure passes
 // coordinates as thousandths of the screen, not as GLI 2D percent.
 inline bool remap_superimposed_screen_x(std::int32_t x_1000,
