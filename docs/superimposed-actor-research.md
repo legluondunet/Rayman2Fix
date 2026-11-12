@@ -53,6 +53,19 @@ the candidate equations and the equivalence of actor-level origin
 mapping with viewport-level origin mapping at 4:3,16:9,21:9.
 **No runtime drawing hook or binary patch is introduced.**
 
+To avoid requiring another copy of the retail EXE, a startup-only,
+**read-only** probe now reports bounded hex fingerprints at three
+public-GOG-reference RVAs, but ONLY when inside an executable section
+of the already timestamp-verified CD PE image (and only after the
+original camera patch byte pattern has matched). The log prefix is
+`RUNTIME-OVERLAY-CODE`. It reads at most 96+32+32 bytes with
+`ReadProcessMemory`, does not log process pointers, and does not
+patch those candidate locations. A readable byte range **does not**
+establish equivalence of the game versions; disassemble and verify
+actual CD instructions/calling conventions before using any detour.
+The next Wine trial only needs startup and a normal exit; no repeated
+long dialogue sequence is necessary for these fingerprints.
+
 Next: map the approved CD executable's superimposed actor procedure
 and its byte signatures, identify which call actually draws the
 blue continuation arrow or other out-of-frame projected text, and

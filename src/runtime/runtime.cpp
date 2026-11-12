@@ -1564,6 +1564,89 @@ void write_jump(BYTE* at, const void* destination) {
     const std::uint32_t relative = static_cast<std::uint32_t>(dest - after);
     std::memcpy(at + 1, &relative, sizeof(relative));
 }
+// The public GOG Ray2Fix source suggests three superimposed-actor
+// code locations. They are NOT approved offsets for this CD executable.
+// Inspect only a few bytes from executable PE sections; never hook,
+// overwrite or call any candidate. The launcher has already approved
+// the exact CD hashes; this runtime verifies its own PE timestamp.
+void probe_superimposed_cd_candidates(const BYTE* image,
+                                      const IMAGE_NT_HEADERS32* pe) {
+    if(!image || !pe || pe->Signature!=IMAGE_NT_SIGNATURE ||
+       pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
+       pe->FileHeader.NumberOfSections==0 ||
+       pe->FileHeader.NumberOfSections>32) return;
+    struct Candidate {
+        const char* role;
+        std::uint32_t rva;
+        unsigned bytes;
+    };
+    constexpr Candidate candidates[]={
+        {"gog-superimposed-procedure",0x710C0u,96u},
+        {"gog-screen-position",0x75C7Fu,32u},
+        {"gog-actor-size",0x75C96u,32u}
+    };
+    const auto* sections=IMAGE_FIRST_SECTION(pe);
+    const std::uint32_t image_bytes=pe->OptionalHeader.SizeOfImage;
+    const auto headers_bytes=pe->OptionalHeader.SizeOfHeaders;
+    const auto section_offset=reinterpret_cast<std::uintptr_t>(sections)-
+        reinterpret_cast<std::uintptr_t>(image);
+    const std::uint64_t section_end=
+        std::uint64_t(section_offset)+
+        std::uint64_t(pe->FileHeader.NumberOfSections)*
+        sizeof(IMAGE_SECTION_HEADER);
+    if(section_end>headers_bytes || section_end>image_bytes) return;
+    for(const auto& c:candidates) {
+        bool executable=false;
+        if(c.bytes<=96u && c.rva<=image_bytes &&
+           c.bytes<=image_bytes-c.rva) {
+            for(unsigned i=0;i<pe->FileHeader.NumberOfSections;++i) {
+                const auto& sec=sections[i];
+                const std::uint64_t start=sec.VirtualAddress;
+                const std::uint64_t size=sec.Misc.VirtualSize>
+                    sec.SizeOfRawData ? sec.Misc.VirtualSize :
+                                       sec.SizeOfRawData;
+                const std::uint64_t end=start+size;
+                if((sec.Characteristics&IMAGE_SCN_MEM_EXECUTE) &&
+                   c.rva>=start && std::uint64_t(c.rva)+c.bytes<=end) {
+                    executable=true;
+                    break;
+                }
+            }
+        }
+        if(!executable) {
+            char msg[200]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-OVERLAY-CODE: candidate=%s rva=0x%08X status=not-in-executable-section (GOG reference only; no hook)",
+                c.role,unsigned(c.rva));
+            log_line(msg);
+            continue;
+        }
+        BYTE sample[96]{};
+        SIZE_T read=0;
+        if(!ReadProcessMemory(GetCurrentProcess(),image+c.rva,
+                              sample,c.bytes,&read) || read!=c.bytes) {
+            char msg[180]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-OVERLAY-CODE: candidate=%s rva=0x%08X status=unreadable (no hook)",
+                c.role,unsigned(c.rva));
+            log_line(msg);
+            continue;
+        }
+        char hex[96u*2u+1u]{};
+        constexpr char digits[]="0123456789ABCDEF";
+        for(unsigned i=0;i<c.bytes;++i) {
+            hex[i*2u]=digits[sample[i]>>4];
+            hex[i*2u+1u]=digits[sample[i]&15u];
+        }
+        char msg[380]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-OVERLAY-CODE: candidate=%s rva=0x%08X bytes=%u hex=%s (GOG reference, CD code read-only; not validated for hooking)",
+            c.role,unsigned(c.rva),c.bytes,hex);
+        log_line(msg);
+    }
+}
+
 DWORD install_camera_hook() {
     if (g_installed) return 1;
     const auto* module = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
@@ -1584,6 +1667,10 @@ DWORD install_camera_hook() {
 
     auto* target = const_cast<BYTE*>(module + kCameraRva);
     if (std::memcmp(target, kExpected, kHookLength) != 0) return 3;
+
+    // Approved PE and camera bytes: collect only code-location evidence
+    // for the separate superimposed-actor path. No actor changes.
+    probe_superimposed_cd_candidates(module,pe);
 
     auto* gateway = static_cast<BYTE*>(
         VirtualAlloc(nullptr, 64, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
