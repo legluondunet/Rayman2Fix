@@ -3,6 +3,18 @@
 Rayman2Fix is a **new, clean-room** project for the original PC CD-ROM editions
 of **Rayman 2: The Great Escape**. It has no source-code dependency on Ray2Fix.
 
+## Investigating the projected screen-world overlay
+
+The initial native 2D glyph/frame observations prove that the tested
+font quads themselves stay within the first lower frame. A separate,
+public Ray2Fix implementation identifies **superimposed 3D actor**
+placement and extent as an independent widescreen correction path.
+See [superimposed actor research](superimposed-actor-research.md).
+The candidate equations are covered by independent math tests but
+are deliberately **not hooked** in the unverified CD engine code.
+Never enable both actor-level X squeeze and the existing narrowed
+screen-world viewport X squeeze at once.
+
 ## Permanent layout
 
 ```text

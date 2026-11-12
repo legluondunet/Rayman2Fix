@@ -209,6 +209,10 @@ if(BUILD_TESTING)
   target_include_directories(screen_camera_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME native-4-by-3-screen-world-camera COMMAND screen_camera_tests)
 
+  add_executable(superimposed_math_tests tests/superimposed_math_tests.cpp)
+  target_include_directories(superimposed_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME screen-world-superimposed-actor-math COMMAND superimposed_math_tests)
+
   add_executable(intro_skip_tests tests/intro_skip_tests.cpp)
   target_include_directories(intro_skip_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME second-intro-skip-guard COMMAND intro_skip_tests)
