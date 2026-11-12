@@ -1,3 +1,12 @@
+## Additional screen-image branches verified in native disassembly
+
+The original screen-image pass also calls the same GLI 2D percent
+entry on three clipped-image paths (call VAs 0x4606DF, 0x460743,
+0x46076D). The initial classifier counted only the direct
+0x460653 path and mislabeled these as "other". All three additional
+callsite return addresses are now included in the image counter.
+No renderer or artwork changes.
+
 ## 2026-11-12: render-path diagnostics after user confirms unchanged image
 
 Owner explicitly confirms **no visual improvement** under Wine
@@ -23,7 +32,10 @@ confirms it reads the first argument's native viewport HEIGHT at
 percent coordinates. The same exact function has three **known,
 independent** calling routes, identified by fixed call-return RVA:
 - `0x664D9` from `JFFTXT_vDrawString` (font glyphs)
-- `0x60658` from the screen-image renderer (UI pictures)
+- `0x60658` from the screen-image renderer's direct path
+- `0x606E4`, `0x60748`, `0x60772` from its three clipped-fragment
+  drawing paths (the same native screen-image function); all four
+  are classified as UI pictures
 - `0x2987B` from `GLI_vDisplayFrame` (black/background frames)
 Other native entry callers remain classified as "other".
 

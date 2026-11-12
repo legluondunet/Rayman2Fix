@@ -1212,7 +1212,9 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
 Native2DProducer classify_native_2d_producer(const void* retaddr) {
     // Literal *return* addresses after the verified game callsites:
     // 0x4664D4: JFFTXT_vDrawString -> 0x4664D9 (font glyphs);
-    // 0x460653: screen-image renderer -> 0x460658 (images);
+    // 0x460653: primary image renderer -> 0x460658.
+    // 0x4606DF/0x460743/0x46076D: CLIPPED screen-image fragments
+    // -> 0x4606E4/0x460748/0x460772. All belong to UI images.
     // 0x429876: GLI_vDisplayFrame -> 0x42987B (frames).
     const auto* module=static_cast<const BYTE*>(GetModuleHandleW(nullptr));
     const auto addr=reinterpret_cast<std::uintptr_t>(retaddr);
@@ -1220,7 +1222,11 @@ Native2DProducer classify_native_2d_producer(const void* retaddr) {
     if (module && addr>=base) {
         switch (addr-base) {
             case 0x664D9: return Native2DProducer::Glyph;
-            case 0x60658: return Native2DProducer::ScreenImage;
+            case 0x60658:
+            case 0x606E4:
+            case 0x60748:
+            case 0x60772:
+                return Native2DProducer::ScreenImage;
             case 0x2987B: return Native2DProducer::Frame;
             default: break;
         }
