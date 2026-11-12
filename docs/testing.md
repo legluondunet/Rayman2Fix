@@ -1,3 +1,35 @@
+## 12 Nov 2026: text starts AFTER the 90-second diagnostics
+
+The owner's Wine log `Rayman2Fix(20261112-182646).log`
+(`807edc27` PR test merge containing `baff1f8b`)
+ends normally after 116.692 seconds. The first lower native frame
+appears at ~38.7s, x=14..94%, y=80.6..92.4%, but through
+the 90s checkpoint there are **zero** native glyph submissions
+after that frame (all four Y bands remain zero). The fixed +2/+5/+10
+seconds after frame are thus also too early to observe the text.
+**After 90 seconds**, native font quads finally appear. Four
+font quads vertically overlapping the frame are
+x=19.3..32.1%, y=82.5..86.3%; all four are horizontally
+inside the frame. Additional font quads at y=70..75%
+are ABOVE the measured frame and must not be conflated
+with its text. None of this yet establishes the full
+line's right edge or ownership by any specific dialogue.
+
+A valid future observation needs the *entire* rendered text run,
+not just the first four letters. This strictly read-only
+follow-up anchors new +2/+5/+10 second checkpoints to the
+FIRST glyph that actually overlaps the first lower frame.
+It additionally reports x-min/x-max and outside count at
+overlap sample milestones 16,64,256,1024,4096,
+and geometry-only details for the first four glyphs that
+extend horizontally past the original frame bounds.
+It does not alter fonts, glyph quads, 3D/Hor+,
+frame positions, dialog content or state.
+All code paths are shared on Windows and Wine, with no
+scene/level/string-specific correction. The first lower frame
+is an observational reference, NOT positively identified
+as Murfy's text box. PR #2 remains draft.
+
 ## Frame-relative caption glyph diagnosis (12 November 2026)
 
 The owner's `Rayman2Fix(20261112-181504).log` test lasts

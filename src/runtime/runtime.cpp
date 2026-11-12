@@ -202,6 +202,10 @@ std::atomic<unsigned> g_frame_overlap_outside_x{0};
 std::atomic<int> g_frame_overlap_min_x100{INT_MAX};
 std::atomic<int> g_frame_overlap_max_x100{INT_MIN};
 std::atomic<unsigned> g_frame_overlap_examples{0};
+// The first *overlapping glyph* can appear much later than the first
+// lower frame. Start a separate read-only clock at that actual event.
+std::atomic<DWORD> g_first_frame_overlap_glyph_tick{0};
+std::atomic<unsigned> g_frame_overlap_outside_examples{0};
 // Record bounded engine code callsites for unnested plain sprites, not
 // the last adjusted camera. Fingerprints are return RVAs (no pointers).
 std::atomic<std::uintptr_t> g_approved_exe_base{0};
@@ -1390,12 +1394,33 @@ void probe_native_glyph_after_frame(float xmin,float ymin,
             std::memory_order_relaxed))/100.0f;
         if(r2fix::native_glyph_overlaps_frame_y(
              ymin,ymax,fy0,fy1)) {
-            g_frame_overlap_glyphs.fetch_add(
-                1,std::memory_order_relaxed);
+            const unsigned overlap_index=g_frame_overlap_glyphs
+                .fetch_add(1,std::memory_order_relaxed);
+            if(overlap_index==0) {
+                g_first_frame_overlap_glyph_tick.store(
+                    GetTickCount()|1u,std::memory_order_release);
+                log_line("RUNTIME-HUD-PANEL-LINK: first overlapping native glyph reached; monitor restarts glyph-relative clock (read-only)");
+            }
             const bool outside=r2fix::native_glyph_outside_frame_x(
                 xmin,xmax,fx0,fx1);
-            if(outside)g_frame_overlap_outside_x.fetch_add(
-                1,std::memory_order_relaxed);
+            if(outside) {
+                g_frame_overlap_outside_x.fetch_add(
+                    1,std::memory_order_relaxed);
+                const unsigned outside_sample=
+                    g_frame_overlap_outside_examples.fetch_add(
+                    1,std::memory_order_relaxed);
+                if(outside_sample<4 && g_log) {
+                    char geometry[255]{};
+                    std::snprintf(geometry,sizeof(geometry),
+                        "RUNTIME-HUD-PANEL-LINK: outside_frame sample=%u side=%s glyph_x=%.2f..%.2f frame_x=%.2f..%.2f glyph_y=%.2f..%.2f (original percent; read-only)",
+                        outside_sample+1,
+                        xmin<fx0 && xmax>fx1 ? "both" :
+                        xmin<fx0 ? "left" : "right",
+                        double(xmin),double(xmax),double(fx0),
+                        double(fx1),double(ymin),double(ymax));
+                    log_line(geometry);
+                }
+            }
             const int left=int(std::lround(xmin*100.0f));
             const int right=int(std::lround(xmax*100.0f));
             int old=g_frame_overlap_min_x100.load(
@@ -1407,6 +1432,25 @@ void probe_native_glyph_after_frame(float xmin,float ymin,
                   old,right,std::memory_order_relaxed)) {}
             const unsigned sample=g_frame_overlap_examples.fetch_add(
                 1,std::memory_order_relaxed);
+            // Capture whole text runs even when the user quits before
+            // a wall-clock checkpoint. These are cumulative call counts,
+            // not characters, strings, words, or identified dialogue.
+            const unsigned nth=sample+1;
+            if(g_log && (nth==16 || nth==64 || nth==256 ||
+                         nth==1024 || nth==4096)) {
+                char progress[248]{};
+                std::snprintf(progress,sizeof(progress),
+                    "RUNTIME-HUD-PANEL-LINK: glyph_milestone=%u x_min=%.2f x_max=%.2f frame_x=%.2f..%.2f outside_count=%u (native percent; read-only)",
+                    nth,
+                    double(g_frame_overlap_min_x100.load(
+                        std::memory_order_relaxed))/100.0,
+                    double(g_frame_overlap_max_x100.load(
+                        std::memory_order_relaxed))/100.0,
+                    double(fx0),double(fx1),
+                    g_frame_overlap_outside_x.load(
+                        std::memory_order_relaxed));
+                log_line(progress);
+            }
             if(sample<4 && g_log) {
                 char line[220]{};
                 std::snprintf(line,sizeof(line),
@@ -2006,6 +2050,7 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
     bool color_logged = false;
     log_line("RUNTIME-HUD: 4:3 sprite callback monitor started");
     unsigned frame_relative_reports=0;
+    unsigned glyph_relative_reports=0;
     constexpr DWORD kAfterFrameProbeMs[]={2000,5000,10000};
     for (unsigned iteration = 0;; ++iteration) {
         const DWORD first=g_first_lower_frame_tick.load(
@@ -2017,6 +2062,25 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                 report_panel_glyph_geometry(
                     labels[frame_relative_reports],elapsed);
                 ++frame_relative_reports;
+            }
+        }
+        // Independent checkpoint schedule anchored to the first glyph
+        // actually overlapping the frame, not to frame creation.
+        const DWORD first_glyph=g_first_frame_overlap_glyph_tick.load(
+            std::memory_order_acquire);
+        if(first_glyph && glyph_relative_reports<3) {
+            const DWORD elapsed=GetTickCount()-first_glyph;
+            if(elapsed>=kAfterFrameProbeMs[glyph_relative_reports]) {
+                const DWORD frame_tick=g_first_lower_frame_tick.load(
+                    std::memory_order_acquire);
+                const char* labels[]={
+                    "after-glyph-plus2s","after-glyph-plus5s",
+                    "after-glyph-plus10s"
+                };
+                report_panel_glyph_geometry(
+                    labels[glyph_relative_reports],
+                    frame_tick ? GetTickCount()-frame_tick : elapsed);
+                ++glyph_relative_reports;
             }
         }
         install_callback(plain, reinterpret_cast<void*>(&hud_plain_sprite),
