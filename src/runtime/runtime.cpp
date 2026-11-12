@@ -6,6 +6,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <intrin.h>
 #include "rayman2fix/fov_math.hpp"
 #include "rayman2fix/hud_math.hpp"
 #include "rayman2fix/screen_camera.hpp"
@@ -1216,7 +1217,7 @@ Native2DProducer classify_native_2d_producer(const void* retaddr) {
     // 0x4606DF/0x460743/0x46076D: CLIPPED screen-image fragments
     // -> 0x4606E4/0x460748/0x460772. All belong to UI images.
     // 0x429876: GLI_vDisplayFrame -> 0x42987B (frames).
-    const auto* module=static_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
     const auto addr=reinterpret_cast<std::uintptr_t>(retaddr);
     const auto base=reinterpret_cast<std::uintptr_t>(module);
     if (module && addr>=base) {
@@ -1251,7 +1252,7 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // detour, and its ORIGINAL screen-space percent/viewport values.
     // Do not ever log glyph text, texture names or raw memory pointers.
     const auto producer=classify_native_2d_producer(
-            __builtin_return_address(0));
+            _ReturnAddress());
     const unsigned route=static_cast<unsigned>(producer);
     g_native_2d_producers[route].fetch_add(
         1,std::memory_order_relaxed);
