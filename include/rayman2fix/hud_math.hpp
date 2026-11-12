@@ -126,6 +126,27 @@ inline bool executable_callsite_rva(std::uintptr_t return_address,
 }
 // Diagnostic bands by center of a native font glyph's percentage Y.
 // These never select which vertices are scaled.
+// Diagnostic only: compare a font quad with the ORIGINAL first lower
+// frame's vertical band. Relative x overflow can then be evaluated in
+// percent space, before BOTH quads receive the same affine transform.
+inline bool native_glyph_overlaps_frame_y(float glyph_min_y,
+                                          float glyph_max_y,
+                                          float frame_min_y,
+                                          float frame_max_y) {
+    return std::isfinite(glyph_min_y) && std::isfinite(glyph_max_y) &&
+           std::isfinite(frame_min_y) && std::isfinite(frame_max_y) &&
+           glyph_min_y<=glyph_max_y && frame_min_y<=frame_max_y &&
+           glyph_max_y>frame_min_y && glyph_min_y<frame_max_y;
+}
+inline bool native_glyph_outside_frame_x(float glyph_min_x,
+                                         float glyph_max_x,
+                                         float frame_min_x,
+                                         float frame_max_x) {
+    return std::isfinite(glyph_min_x) && std::isfinite(glyph_max_x) &&
+           std::isfinite(frame_min_x) && std::isfinite(frame_max_x) &&
+           glyph_min_x<=glyph_max_x && frame_min_x<=frame_max_x &&
+           (glyph_min_x<frame_min_x || glyph_max_x>frame_max_x);
+}
 inline unsigned native_glyph_y_band(float ymin,float ymax) {
     if(!std::isfinite(ymin) || !std::isfinite(ymax) ||
        ymin>ymax || ymin< -100.0f || ymax>200.0f)

@@ -1,3 +1,41 @@
+## Frame-relative caption glyph diagnosis (12 November 2026)
+
+The owner's `Rayman2Fix(20261112-181504).log` test lasts
+93.98 seconds and exits normally. **Crucial correction:** at the
+40s and 60s checkpoints the lower-frame count is ZERO; the
+lower dialogue frame is first observed later, after the fixed
+checkpoints. All earlier conclusions drawn from static 40/60s
+counters saying no dialogue glyphs render are unsound.
+
+After the first lower frame, the native `JFFTXT` hook does
+in fact report fresh font quads in all four Y bands, including
+`y=70..75` and `y=80..85` in previous baseline tests. The
+frame itself is `x=14..94 %, y=80.6..92.4 %`, and the first
+post-frame `x=14.7..18.9 %, y=70..75 %` glyph is **ABOVE** the
+frame, not proof that it belongs to the dialogue. The font's
+actual ownership is unresolved. The established native 2D transform
+corrects both frame and glyph X with the same affine map; that
+cannot change their relative spacing.
+
+New strictly read-only measurements use the first lower frame's
+native original percent geometry as a reference (a DIAGNOSTIC,
+not a claim it is always a Murfy frame). The code counts and
+bounds glyph quads whose original percent Y actually overlaps
+the frame, and counts those originally outside the frame's
+horizontal span. Four bounded samples and frame-relative
+checkpoints at +2s/+5s/+10s are logged, even if the game
+exits before the previous 60s or planned 75/90s checkpoints.
+Additional 75,85,90s wall-clock checkpoints cover longer
+initial cinematic paths. This works under the same Windows/Wine
+code path without changing any rendered vertices, FOV,
+font sizes, UI art, game state, input, or saves.
+
+If original glyph X extends beyond the frame after the same
+transform is applied, a simple 4:3 viewport squeeze CANNOT
+by itself solve the relative overflow. Only after establishing
+the original engine text-layout path should the code be changed
+universally, not by a fixed Murfy-specific offset.
+
 ## 12 Nov 2026: inspect *actual* sprite callsites and font vertical bands
 
 The owner Wine log `Rayman2Fix(20261112-180313).log` is stable

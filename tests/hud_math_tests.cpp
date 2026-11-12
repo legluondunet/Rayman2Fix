@@ -109,6 +109,18 @@ int main() {
         0x501234u,0,0x200000u,rva));
     assert(!r2fix::executable_callsite_rva(
         0x501234u,0x400000u,0,rva));
+    assert(!r2fix::native_glyph_overlaps_frame_y(
+        70.0f,75.0f,80.6f,92.4f));
+    assert(r2fix::native_glyph_overlaps_frame_y(
+        80.0f,85.0f,80.6f,92.4f));
+    assert(!r2fix::native_glyph_overlaps_frame_y(
+        90.0f,95.0f,60.0f,80.0f));
+    assert(r2fix::native_glyph_outside_frame_x(
+        90.0f,98.0f,14.0f,94.0f));
+    assert(!r2fix::native_glyph_outside_frame_x(
+        14.7f,18.9f,14.0f,94.0f));
+    assert(!r2fix::native_glyph_overlaps_frame_y(
+        std::numeric_limits<float>::quiet_NaN(),85.0f,80.6f,92.4f));
     assert(r2fix::native_glyph_y_band(10.0f,15.0f)==0u);
     assert(r2fix::native_glyph_y_band(45.0f,55.0f)==1u);
     assert(r2fix::native_glyph_y_band(65.0f,70.0f)==2u);

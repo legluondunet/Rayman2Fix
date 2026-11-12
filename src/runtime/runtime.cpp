@@ -188,6 +188,20 @@ std::atomic<unsigned> g_postframe_lower_camera_examples[3][3]{};
 // sample window; distinguish that from taking another geometry path.
 std::atomic<unsigned> g_postframe_glyph_y_counts[4]{};
 std::atomic<unsigned> g_postframe_glyph_y_examples[4]{};
+// The owner's 94s Wine trace first draws its lower frame AFTER the
+// hardcoded 40/60s snapshots. Start a frame-relative clock and measure
+// glyphs whose original percent-Y actually overlaps that frame.
+// This is diagnostic, not a dialogue/level identifier.
+std::atomic<DWORD> g_first_lower_frame_tick{0};
+std::atomic<int> g_first_lower_frame_xmin100{0};
+std::atomic<int> g_first_lower_frame_xmax100{0};
+std::atomic<int> g_first_lower_frame_ymin100{0};
+std::atomic<int> g_first_lower_frame_ymax100{0};
+std::atomic<unsigned> g_frame_overlap_glyphs{0};
+std::atomic<unsigned> g_frame_overlap_outside_x{0};
+std::atomic<int> g_frame_overlap_min_x100{INT_MAX};
+std::atomic<int> g_frame_overlap_max_x100{INT_MIN};
+std::atomic<unsigned> g_frame_overlap_examples{0};
 // Record bounded engine code callsites for unnested plain sprites, not
 // the last adjusted camera. Fingerprints are return RVAs (no pointers).
 std::atomic<std::uintptr_t> g_approved_exe_base{0};
@@ -1312,6 +1326,26 @@ void record_bottom_2d_geometry(unsigned route,
        ymin < 72.0f || ymax > 105.0f ||
        ymin > ymax || xmin > xmax)
         return;
+    if(route==2 &&
+       !g_first_lower_frame_tick.load(std::memory_order_acquire)) {
+        // Single synchronous render producer; publish all geometry
+        // BEFORE the release-stored frame timestamp.
+        g_first_lower_frame_xmin100.store(
+            int(std::lround(xmin*100.0f)),std::memory_order_relaxed);
+        g_first_lower_frame_xmax100.store(
+            int(std::lround(xmax*100.0f)),std::memory_order_relaxed);
+        g_first_lower_frame_ymin100.store(
+            int(std::lround(ymin*100.0f)),std::memory_order_relaxed);
+        g_first_lower_frame_ymax100.store(
+            int(std::lround(ymax*100.0f)),std::memory_order_relaxed);
+        g_first_lower_frame_tick.store(
+            GetTickCount()|1u,std::memory_order_release);
+        char event[220]{};
+        std::snprintf(event,sizeof(event),
+            "RUNTIME-HUD-PANEL-LINK: first_lower_frame x=%.2f..%.2f y=%.2f..%.2f (original native percent; read-only, not verified dialogue identity)",
+            double(xmin),double(xmax),double(ymin),double(ymax));
+        log_line(event);
+    }
     auto& stats=g_native_bottom_2d[route];
     stats.calls.fetch_add(1,std::memory_order_relaxed);
     const int left=static_cast<int>(std::lround(xmin*100.0f));
@@ -1340,6 +1374,49 @@ void probe_native_glyph_after_frame(float xmin,float ymin,
            std::memory_order_relaxed)==0) return;
     const unsigned band=r2fix::native_glyph_y_band(ymin,ymax);
     if(band>=4) return;
+    // Compare to the FIRST native lower frame. The shared 4:3 map
+    // preserves inclusion relations; if a glyph is already outside
+    // in original percent space, shrinking both will not fix it.
+    const DWORD first=g_first_lower_frame_tick.load(
+        std::memory_order_acquire);
+    if(first) {
+        const float fx0=float(g_first_lower_frame_xmin100.load(
+            std::memory_order_relaxed))/100.0f;
+        const float fx1=float(g_first_lower_frame_xmax100.load(
+            std::memory_order_relaxed))/100.0f;
+        const float fy0=float(g_first_lower_frame_ymin100.load(
+            std::memory_order_relaxed))/100.0f;
+        const float fy1=float(g_first_lower_frame_ymax100.load(
+            std::memory_order_relaxed))/100.0f;
+        if(r2fix::native_glyph_overlaps_frame_y(
+             ymin,ymax,fy0,fy1)) {
+            g_frame_overlap_glyphs.fetch_add(
+                1,std::memory_order_relaxed);
+            const bool outside=r2fix::native_glyph_outside_frame_x(
+                xmin,xmax,fx0,fx1);
+            if(outside)g_frame_overlap_outside_x.fetch_add(
+                1,std::memory_order_relaxed);
+            const int left=int(std::lround(xmin*100.0f));
+            const int right=int(std::lround(xmax*100.0f));
+            int old=g_frame_overlap_min_x100.load(
+                std::memory_order_relaxed);
+            while(left<old && !g_frame_overlap_min_x100.compare_exchange_weak(
+                  old,left,std::memory_order_relaxed)) {}
+            old=g_frame_overlap_max_x100.load(std::memory_order_relaxed);
+            while(right>old && !g_frame_overlap_max_x100.compare_exchange_weak(
+                  old,right,std::memory_order_relaxed)) {}
+            const unsigned sample=g_frame_overlap_examples.fetch_add(
+                1,std::memory_order_relaxed);
+            if(sample<4 && g_log) {
+                char line[220]{};
+                std::snprintf(line,sizeof(line),
+                    "RUNTIME-HUD-PANEL-LINK: overlapping_glyph sample=%u original_x=%.2f..%.2f original_y=%.2f..%.2f outside_frame_x=%u (read-only)",
+                    sample+1,double(xmin),double(xmax),
+                    double(ymin),double(ymax),unsigned(outside));
+                log_line(line);
+            }
+        }
+    }
     g_postframe_glyph_y_counts[band].fetch_add(
         1,std::memory_order_relaxed);
     const unsigned sample=g_postframe_glyph_y_examples[band]
@@ -1880,6 +1957,24 @@ void install_callback(void* volatile* slot, void* replacement,
     }
 }
 
+void report_panel_glyph_geometry(const char* when,
+                                 DWORD elapsed_ms) {
+    const unsigned glyphs=g_frame_overlap_glyphs.load(
+        std::memory_order_relaxed);
+    const int min_x=g_frame_overlap_min_x100.load(
+        std::memory_order_relaxed);
+    const int max_x=g_frame_overlap_max_x100.load(
+        std::memory_order_relaxed);
+    char event[290]{};
+    std::snprintf(event,sizeof(event),
+        "RUNTIME-HUD-PANEL-LINK: checkpoint=%s after_first_frame_ms=%lu glyphs_overlap_y=%u glyphs_outside_x=%u glyph_x_min=%.2f glyph_x_max=%.2f (original percent; first lower frame as reference, identity unverified)",
+        when,static_cast<unsigned long>(elapsed_ms),glyphs,
+        g_frame_overlap_outside_x.load(std::memory_order_relaxed),
+        glyphs ? double(min_x)/100.0 : 0.0,
+        glyphs ? double(max_x)/100.0 : 0.0);
+    log_line(event);
+}
+
 DWORD WINAPI monitor_hud_callbacks(void*) {
     auto* module = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
     if (!module) return 0;
@@ -1910,7 +2005,20 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
     bool uv_logged = false;
     bool color_logged = false;
     log_line("RUNTIME-HUD: 4:3 sprite callback monitor started");
+    unsigned frame_relative_reports=0;
+    constexpr DWORD kAfterFrameProbeMs[]={2000,5000,10000};
     for (unsigned iteration = 0;; ++iteration) {
+        const DWORD first=g_first_lower_frame_tick.load(
+            std::memory_order_acquire);
+        if(first && frame_relative_reports<3) {
+            const DWORD elapsed=GetTickCount()-first;
+            if(elapsed>=kAfterFrameProbeMs[frame_relative_reports]) {
+                const char* labels[]={"plus2s","plus5s","plus10s"};
+                report_panel_glyph_geometry(
+                    labels[frame_relative_reports],elapsed);
+                ++frame_relative_reports;
+            }
+        }
         install_callback(plain, reinterpret_cast<void*>(&hud_plain_sprite),
                          g_plain_sprite_original,
                          "RUNTIME-HUD: centered 4:3 screen-space sprites enabled",
@@ -1923,7 +2031,8 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                          g_color_sprite_original,
                          "RUNTIME-HUD: centered 4:3 colored sprites enabled",
                          color_logged);
-        if (iteration == 10 || iteration == 80 || iteration == 120) {
+        if (iteration == 10 || iteration == 80 || iteration == 120 ||
+            iteration == 150 || iteration == 170 || iteration == 180) {
             // No raw addresses or personal data; useful if callbacks never
             // become available, or become available but never execute.
             char status[160]{};
@@ -1952,6 +2061,10 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                 g_native_2d_producers[3].load(std::memory_order_relaxed));
             log_line(source_counts);
             if (iteration>=80) {
+                const DWORD first=g_first_lower_frame_tick.load(
+                    std::memory_order_acquire);
+                if(first)report_panel_glyph_geometry(
+                    "wall-time",GetTickCount()-first);
                 const char* callback[3]={"plain","uv","colored"};
                 for(unsigned k=0;k<3;++k) {
                     char extra[235]{};
