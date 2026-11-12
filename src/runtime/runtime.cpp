@@ -134,6 +134,15 @@ std::atomic<unsigned> g_native_2d_passthrough_uv{0};
 std::atomic<unsigned> g_native_2d_passthrough_color{0};
 std::atomic<bool> g_native_2d_logged{false};
 std::atomic<bool> g_native_2d_invalid_logged{false};
+// From the exact SHA-locked retail EXE, the 2D function is called by
+// three distinct engine producers. Compare ONLY call-site *identity*
+// to understand their viewport and coordinate spaces; not for scaling
+// or scene-specific logic. Counter values are bounded and read-only.
+enum class Native2DProducer : unsigned { Glyph=0, ScreenImage=1, Frame=2, Other=3 };
+std::atomic<unsigned> g_native_2d_producers[4]{};
+std::atomic<unsigned> g_native_2d_geometry_samples_mask{0};
+std::atomic<DWORD> g_native_2d_probe_start_ms{0};
+
 std::atomic<bool> g_plain_seen{false};
 std::atomic<bool> g_uv_seen{false};
 std::atomic<bool> g_color_seen{false};
@@ -1200,6 +1209,25 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     poll_second_intro_skip();
     poll_learn_intro_skip();
 }
+Native2DProducer classify_native_2d_producer(const void* retaddr) {
+    // Literal *return* addresses after the verified game callsites:
+    // 0x4664D4: JFFTXT_vDrawString -> 0x4664D9 (font glyphs);
+    // 0x460653: screen-image renderer -> 0x460658 (images);
+    // 0x429876: GLI_vDisplayFrame -> 0x42987B (frames).
+    const auto* module=static_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    const auto addr=reinterpret_cast<std::uintptr_t>(retaddr);
+    const auto base=reinterpret_cast<std::uintptr_t>(module);
+    if (module && addr>=base) {
+        switch (addr-base) {
+            case 0x664D9: return Native2DProducer::Glyph;
+            case 0x60658: return Native2DProducer::ScreenImage;
+            case 0x2987B: return Native2DProducer::Frame;
+            default: break;
+        }
+    }
+    return Native2DProducer::Other;
+}
+
 void __cdecl native_2d_percent_sprite(void* viewport,
            float xmin,float ymin,float xmax,float ymax,void* material) {
     // This exact native entry is reached by:
@@ -1212,6 +1240,39 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // driver callbacks. No Y/font/text/asset changes and no 3D.
     const auto original=g_original_2d_sprite;
     if(!original)return;
+    // The original six-argument x86 ABI was checked with objdump.
+    // Record separately which native producer actually reaches this
+    // detour, and its ORIGINAL screen-space percent/viewport values.
+    // Do not ever log glyph text, texture names or raw memory pointers.
+    const auto producer=classify_native_2d_producer(
+            __builtin_return_address(0));
+    const unsigned route=static_cast<unsigned>(producer);
+    g_native_2d_producers[route].fetch_add(
+        1,std::memory_order_relaxed);
+    const DWORD started=g_native_2d_probe_start_ms.load(
+        std::memory_order_acquire);
+    const DWORD elapsed=started ? GetTickCount()-started : 0;
+    // Record the first call of each source early and after the 25s
+    // Learn_10 natural cinematic. At most eight geometry-only lines.
+    const unsigned sample_bit=1u<<(route+(elapsed>=25000 ? 4u:0u));
+    if(!(g_native_2d_geometry_samples_mask.fetch_or(
+                sample_bit,std::memory_order_relaxed)&sample_bit) &&
+       viewport) {
+        const char* names[4]={"glyph","screen-image","frame","other"};
+        // The original GLI_vDraw2DSpriteWithPercent reads the native
+        // viewport width at +0x0C and height at +0x08 itself.
+        std::int32_t width=0,height=0;
+        const auto* bytes=static_cast<const BYTE*>(viewport);
+        std::memcpy(&height,bytes+0x08,sizeof(height));
+        std::memcpy(&width,bytes+0x0C,sizeof(width));
+        char sample[286]{};
+        std::snprintf(sample,sizeof(sample),
+            "RUNTIME-HUD-ROUTE: source=%s period=%s viewport_width=%d viewport_height=%d x_min=%.2f x_max=%.2f y_min=%.2f y_max=%.2f (input percents; no memory addresses)",
+            names[route],elapsed>=25000 ? "after25s":"early",
+            int(width),int(height),double(xmin),double(xmax),
+            double(ymin),double(ymax));
+        log_line(sample);
+    }
     float left=0.0f,right=0.0f;
     if(g_hud_scale>=0.9999f ||
        !r2fix::center_native_2d_percent(
@@ -1329,6 +1390,8 @@ void install_native_2d_percent_hook() {
         return;
     }
     g_original_2d_sprite=reinterpret_cast<Native2DSprite>(gateway);
+    g_native_2d_probe_start_ms.store(
+        GetTickCount(),std::memory_order_release);
     write_jump(target,reinterpret_cast<void*>(&native_2d_percent_sprite));
     target[5]=target[6]=0x90;
     FlushInstructionCache(GetCurrentProcess(),target,
@@ -1556,6 +1619,15 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                 g_native_2d_passthrough_uv.load(std::memory_order_relaxed),
                 g_native_2d_passthrough_color.load(std::memory_order_relaxed));
             log_line(native_2d_status);
+            char source_counts[235]{};
+            std::snprintf(source_counts,sizeof(source_counts),
+                "RUNTIME-HUD-ROUTE: at=%us glyph=%u image=%u frame=%u other=%u (native input producers)",
+                unsigned(iteration/2),
+                g_native_2d_producers[0].load(std::memory_order_relaxed),
+                g_native_2d_producers[1].load(std::memory_order_relaxed),
+                g_native_2d_producers[2].load(std::memory_order_relaxed),
+                g_native_2d_producers[3].load(std::memory_order_relaxed));
+            log_line(source_counts);
         }
         Sleep(500);
     }

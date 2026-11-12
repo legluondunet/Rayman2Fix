@@ -1,3 +1,48 @@
+## 2026-11-12: render-path diagnostics after user confirms unchanged image
+
+Owner explicitly confirms **no visual improvement** under Wine
+11.17 at 1920×1080 with the upstream native 2D transform (`02cc2e1`).
+Do not ask for a second identical screenshot or claim visual success.
+The latest Wine trace verifies the common hook is active and that
+all 45,682 intercepted calls at the 60-second checkpoint invoke a
+downstream colored (42,212) or plain (3,470) callback and bypass
+double-scaling correctly. This *only* proves hook activity.
+
+**Critical conceptual limitation:** the upstream entry is shared
+by both native font glyphs and background panels. A shared affine
+transform leaves any existing *relative* displacement between the
+glyphs and panel invariant. It does not, by itself, prove a correct
+layout. In addition, the same input coordinate percentages may map
+to different native viewports. This must be measured, not guessed.
+
+Direct original-binary disassembly (approved original SHA256
+`7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`)
+at `GLI_vDraw2DSpriteWithPercent` (VA 0x429670)
+confirms it reads the first argument's native viewport HEIGHT at
+`+0x08` and WIDTH at `+0x0C`, and receives x/y arguments in
+percent coordinates. The same exact function has three **known,
+independent** calling routes, identified by fixed call-return RVA:
+- `0x664D9` from `JFFTXT_vDrawString` (font glyphs)
+- `0x60658` from the screen-image renderer (UI pictures)
+- `0x2987B` from `GLI_vDisplayFrame` (black/background frames)
+Other native entry callers remain classified as "other".
+
+A **read-only diagnostic follow-up** classifies at most these
+return-address categories, counts their calls at the existing 5/40/60s
+checkpoints and prints one bounded geometry-only sample per category
+before and after t25s (eight samples total). Each sample includes
+native viewport WIDTH/HEIGHT and the original incoming x/y percent
+coordinates. No text, pointers, strings, textures, input or save
+data are logged. Nothing is scaled differently in this follow-up.
+The new trace should tell whether the SAME input viewport and space
+are used for fonts, background frames and images; this is the crucial
+missing evidence for an **engine-level universal** fix, not a special
+case for one dialogue.
+
+The former native 2D transform remains as before (visual failure is
+known), but this diagnostic adds no further rendering changes.
+PR #2 remains draft/unmerged; NOMOVIES exploration remains paused.
+
 ## 2026-11-12 native 2D geometry correction at the single shared entry
 
 The latest user log `Rayman2Fix(20261112-103304).log` is from
