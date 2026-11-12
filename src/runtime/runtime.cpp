@@ -118,6 +118,23 @@ float g_hud_scale = 1.0f;
 std::atomic<void*> g_plain_sprite_original{nullptr};
 std::atomic<void*> g_uv_sprite_original{nullptr};
 std::atomic<void*> g_color_sprite_original{nullptr};
+// Diagnostic only: independently count the renderer's triangle submission
+// path. The old hooks only see three *sprite* callbacks. Do not infer
+// which one draws Murfy's text or the blue arrow without a trace.
+std::atomic<void*> g_triangle_original{nullptr};
+const void* g_native_screen_viewport=nullptr;
+std::atomic<unsigned> g_triangle_calls{0};
+std::atomic<unsigned> g_triangle_ui_calls{0};
+std::atomic<unsigned> g_triangle_lower_ui{0};
+std::atomic<unsigned> g_triangle_lower_other{0};
+std::atomic<bool> g_triangle_ui_sampled{false};
+std::atomic<bool> g_triangle_other_sampled{false};
+std::atomic<bool> g_sprite_lower_plain{false};
+std::atomic<bool> g_sprite_lower_uv{false};
+std::atomic<bool> g_sprite_lower_colors{false};
+std::atomic<bool> g_sprite_lower_plain_rejected{false};
+std::atomic<bool> g_sprite_lower_uv_rejected{false};
+std::atomic<bool> g_sprite_lower_colors_rejected{false};
 std::atomic<bool> g_plain_seen{false};
 std::atomic<bool> g_uv_seen{false};
 std::atomic<bool> g_color_seen{false};
@@ -1289,21 +1306,103 @@ constexpr uintptr_t kPlainSpriteSlotRva = 0x104530; // VA 0x504530
 constexpr uintptr_t kUvSpriteSlotRva = 0x104524;    // VA 0x504524
 // The colored variant is used by the GLI font/sprite path in Rayman 2.
 constexpr uintptr_t kColorSpriteSlotRva = 0x104838; // VA 0x504838
+// GLI_DRV_vSendSingleTrianglesToClip_: third parameter is a pointer
+// to GLI's big globals, whose first member is p_stVpt (ACP_Ray2).
+// Read-only instrumentation; must NEVER stretch world triangles.
+constexpr uintptr_t kTriangleSlotRva = 0x104828; // VA 0x504828
+constexpr uintptr_t kScreenViewportRva = 0x1004D4; // VA 0x5004D4
 constexpr float kInternalGlideWidth = 1024.0f;
 using PlainSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float, void*);
 using UvSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float*, float, void*);
 using ColorSpriteFn = void (__cdecl*)(r2fix::HudVertex*, void*, float, void*);
+using TriangleFn = void (__cdecl*)(r2fix::HudVertex*, void*, void*);
 
 void report_first(std::atomic<bool>& flag, const char* line) {
     if (!flag.exchange(true, std::memory_order_relaxed))
         log_line(line);
 }
 
+// One geometry-only sample per callback class. This tells us which
+// lower-screen primitives pass the original xOoZ=1 filter. No text,
+// pointers, textures or game files are ever recorded.
+void probe_lower_sprite(const r2fix::HudVertex* v,const char* path,
+                        std::atomic<bool>& accepted,
+                        std::atomic<bool>& rejected) {
+    if(!v) return;
+    float min_x=v[0].x,max_x=v[0].x;
+    bool lower=false;
+    for(unsigned i=0;i<4;++i) {
+        if(!std::isfinite(v[i].x) || !std::isfinite(v[i].y) ||
+           !std::isfinite(v[i].reciprocal_z) ||
+           std::fabs(v[i].x)>4096.f || std::fabs(v[i].y)>4096.f)
+            return;
+        if(v[i].y>=520.f && v[i].y<=1200.f)lower=true;
+        if(v[i].x<min_x)min_x=v[i].x;
+        if(v[i].x>max_x)max_x=v[i].x;
+    }
+    if(!lower)return;
+    const bool eligible=r2fix::is_screen_sprite_quad(v);
+    auto& done=eligible?accepted:rejected;
+    if(done.exchange(true,std::memory_order_relaxed))return;
+    char line[224]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-HUD-PROBE: path=%s bottom_quad=1 4by3_eligible=%u x_min=%.1f x_max=%.1f y0=%.1f invz0=%.4f (geometry only)",
+        path,unsigned(eligible),double(min_x),double(max_x),
+        double(v[0].y),double(v[0].reciprocal_z));
+    log_line(line);
+}
+void __cdecl diagnose_triangles(r2fix::HudVertex* points,
+                                void* uv,void* globals) {
+    const auto original=reinterpret_cast<TriangleFn>(
+        g_triangle_original.load(std::memory_order_acquire));
+    if(!original)return;
+    g_triangle_calls.fetch_add(1,std::memory_order_relaxed);
+    // The global values layout is verified by the public engine
+    // definitions. Read only the first pointer, p_stVpt, for
+    // discrimination. Unrecognized viewport != proof of world.
+    const void* viewport=nullptr;
+    if(globals)std::memcpy(&viewport,globals,sizeof(viewport));
+    const bool ui=viewport && g_native_screen_viewport &&
+                  viewport==g_native_screen_viewport;
+    if(ui)g_triangle_ui_calls.fetch_add(1,std::memory_order_relaxed);
+    if(points) {
+        bool finite=true,lower=false;
+        float min_x=points[0].x,max_x=points[0].x;
+        for(unsigned i=0;i<3;++i) {
+            if(!std::isfinite(points[i].x) ||
+               !std::isfinite(points[i].y) ||
+               !std::isfinite(points[i].reciprocal_z) ||
+               std::fabs(points[i].x)>4096.f ||
+               std::fabs(points[i].y)>4096.f) {
+                finite=false;break;
+            }
+            if(points[i].y>=520.f && points[i].y<=1200.f)lower=true;
+            if(points[i].x<min_x)min_x=points[i].x;
+            if(points[i].x>max_x)max_x=points[i].x;
+        }
+        if(finite && lower) {
+            if(ui)g_triangle_lower_ui.fetch_add(1,std::memory_order_relaxed);
+            else g_triangle_lower_other.fetch_add(1,std::memory_order_relaxed);
+            auto& done=ui?g_triangle_ui_sampled:g_triangle_other_sampled;
+            if(!done.exchange(true,std::memory_order_relaxed)) {
+                char msg[224]{};
+                std::snprintf(msg,sizeof(msg),
+                    "RUNTIME-TRIANGLE-PROBE: screen_viewport=%u x_min=%.1f x_max=%.1f y0=%.1f invz0=%.4f (read-only)",
+                    unsigned(ui),double(min_x),double(max_x),
+                    double(points[0].y),double(points[0].reciprocal_z));
+                log_line(msg);
+            }
+        }
+    }
+    original(points,uv,globals);
+}
 void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
     const auto original = reinterpret_cast<PlainSpriteFn>(
         g_plain_sprite_original.load(std::memory_order_acquire));
     if (!original) return;
     report_first(g_plain_seen, "RUNTIME-HUD: plain sprite callback reached");
+    probe_lower_sprite(quad,"plain",
+       g_sprite_lower_plain,g_sprite_lower_plain_rejected);
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, z, globals);
         return;
@@ -1321,6 +1420,8 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
         g_uv_sprite_original.load(std::memory_order_acquire));
     if (!original) return;
     report_first(g_uv_seen, "RUNTIME-HUD: UV sprite callback reached");
+    probe_lower_sprite(quad,"uv",
+       g_sprite_lower_uv,g_sprite_lower_uv_rejected);
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, uv, z, globals);
         return;
@@ -1339,6 +1440,8 @@ void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
         g_color_sprite_original.load(std::memory_order_acquire));
     if (!original) return;
     report_first(g_color_seen, "RUNTIME-HUD: colored sprite callback reached");
+    probe_lower_sprite(quad,"colored",
+       g_sprite_lower_colors,g_sprite_lower_colors_rejected);
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, colors, z, globals);
         return;
@@ -1409,9 +1512,13 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
         const_cast<BYTE*>(module + kUvSpriteSlotRva));
     auto* colors = reinterpret_cast<void* volatile*>(
         const_cast<BYTE*>(module + kColorSpriteSlotRva));
+    auto* triangles=reinterpret_cast<void* volatile*>(
+        const_cast<BYTE*>(module+kTriangleSlotRva));
+    g_native_screen_viewport=module+kScreenViewportRva;
     bool plain_logged = false;
     bool uv_logged = false;
     bool color_logged = false;
+    bool triangle_logged=false;
     log_line("RUNTIME-HUD: 4:3 sprite callback monitor started");
     for (unsigned iteration = 0;; ++iteration) {
         install_callback(plain, reinterpret_cast<void*>(&hud_plain_sprite),
@@ -1426,7 +1533,12 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                          g_color_sprite_original,
                          "RUNTIME-HUD: centered 4:3 colored sprites enabled",
                          color_logged);
-        if (iteration == 10 || iteration == 120) {
+        install_callback(triangles,
+                          reinterpret_cast<void*>(&diagnose_triangles),
+                          g_triangle_original,
+                          "RUNTIME-TRIANGLE-PROBE: read-only native triangle callback installed",
+                          triangle_logged);
+        if (iteration == 10 || iteration == 80 || iteration == 120) {
             // No raw addresses or personal data; useful if callbacks never
             // become available, or become available but never execute.
             char status[160]{};
@@ -1436,6 +1548,15 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                           g_plain_seen.load() ? 1 : 0, g_uv_seen.load() ? 1 : 0,
                           g_color_seen.load() ? 1 : 0);
             log_line(status);
+            char triangle_status[240]{};
+            std::snprintf(triangle_status,sizeof(triangle_status),
+                 "RUNTIME-TRIANGLE-PROBE: elapsed_s=%u installed=%u total=%u screen_viewport=%u lower_ui=%u lower_other=%u",
+                 iteration/2,unsigned(triangle_logged),
+                 g_triangle_calls.load(std::memory_order_relaxed),
+                 g_triangle_ui_calls.load(std::memory_order_relaxed),
+                 g_triangle_lower_ui.load(std::memory_order_relaxed),
+                 g_triangle_lower_other.load(std::memory_order_relaxed));
+            log_line(triangle_status);
         }
         Sleep(500);
     }

@@ -1,3 +1,50 @@
+## 12 November 2026: trace missing screen-overlay draw path (read-only)
+
+The owner tested `Rayman2Fix(20261112-101000).log` and supplied a
+Windows 11 screenshot. The corrected native viewport offsets are
+confirmed: **1024x768 -> 853x768 at x=85 in 16:10**. World Hor+ and the
+4:3 sprite callbacks activate, and the game exits with code 0.
+
+**However the Murfy dialogue text still begins left of the black box,
+while the blue continuation arrow is beyond the right edge. This is NOT
+visually fixed.** Altering the UI camera's field of view or shadow
+viewport clearly does not suffice to fix this content/panel mismatch.
+
+Engine analysis gives a new discriminating avenue:
+[ACP_Ray2 GLI.c](https://github.com/raytools/ACP_Ray2/blob/master/src/GLI/GLI.c)
+defines the sprite callbacks currently hooked AND a separate
+`GLI_DRV_vSendSingleTrianglesToClip_` at VA `0x504828`.
+[GLI_BigGlobals.h](https://github.com/raytools/ACP_Ray2/blob/master/src/GLI/GLI_BigGlobals.h)
+shows the third parameter begins with `p_stVpt`, the viewport pointer.
+[OpenRayman menu reverse engineering](https://github.com/huntyh/OpenRayman/blob/master/docs/formats/menu.md)
+finds that font text and screen images are submitted in per-frame
+screen-space passes, not necessarily via the 3D-screen camera.
+Our past assertion that *all* dialogue glyphs are projected 3D
+actors is not established. Do not continue inventing offsets or
+level-specific text metrics.
+
+The next build includes a **read-only** callback for triangle
+submissions (pass-through, original data unchanged) plus one bounded
+geometry sample from lower-screen sprites of each existing class.
+For the triangle callback it logs only a 2D-vertex sample and
+whether the supplied viewport equals the engine's original screen
+viewport VA `0x5004D4`; additionally prints callback counts at
+5, 40 and 60 seconds. No text, pointers or textures are logged.
+These traces discriminate:
+- whether the actual overlay uses the sprite or triangle pipeline;
+- whether elements reaching existing HUD hooks have `xOoZ=1` and
+  therefore actually get corrected;
+- whether screen-region triangles are assigned the UI viewport.
+Use these observations to implement ONE global transform at the
+actual submission point, avoiding duplicate scaling of already
+centered 4:3 sprites.
+
+**This is a diagnostic-only build.** No new geometric changes or
+claims of a corrected screenshot. PR #2 stays draft; NOMOVIES
+research stays paused. The owner should run past the Murfy dialogue
+for at least 40 seconds and supply the `RUNTIME-HUD-PROBE` and
+`RUNTIME-TRIANGLE-PROBE` traces.
+
 ## 2026-11-12 GLI viewport field order: corrected after Windows 11 test
 
 The Windows 11 1920x1200 screenshot and log `Rayman2Fix(20261112-095637).log`
