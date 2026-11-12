@@ -1,3 +1,40 @@
+# 12 Nov 2026 22:41 — experimental source-stage Wine verification
+
+Owner log `Rayman2Fix(20261112-214316).log` (launcher
+`9717bcc9`, original approved CD SHA-256
+`7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`,
+Wine-staging 11.17, 1920×1080) shows:
+
+- `RUNTIME-OVERLAY-SOURCE` installation succeeded at scale **0.75**;
+  the four actor/text extent instructions were redirected and the
+  native `0x422940` entry detour was installed.
+- The previous `RUNTIME-VIEWPORT` narrowing does **not** appear,
+  as designed when the new source-stage fix succeeds; world Hor+ still
+  runs.
+- The lower 2D frame original X=14..94%, Y=80.6..92.4% is
+  reached; native glyph x range=19.3..80.7% for 4,096 submissions,
+  outside count=0.
+- The game exits cleanly after **104.579s**, code `0`.
+- **Crucial limitation:** the prior prototype incremented
+  `g_overlay_source_corrected_calls` but did NOT print it.
+  An installed native detour does not prove it has ever been
+  invoked or affected the dialogue / blue continuation arrow.
+  The user did not provide a visual success/failure verdict.
+
+A follow-up **logging-only** change adds bounded first-two
+native input/centered X pairs before/after the panel, plus counters
+for source entry, matching UI viewport, actual corrections,
+post-panel and post-glyph conversions at existing checkpoints.
+It does not alter calculations or rendered coordinates beyond
+the existing experimental patch. These diagnostics will determine
+whether the source-stage hook is used at all in the test and at
+what phase, without assuming what object it belongs to.
+
+The actual visual problem remains unverified. Do not merge PR #2
+on a clean exit alone.
+
+---
+
 # 12 November 2026 — offline SHA-locked original CD executable analysis
 
 The **complete user-supplied retail unprotected CD EXE** (SHA-256

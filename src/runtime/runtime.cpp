@@ -61,6 +61,14 @@ using NativeScreenToVertex=void (__cdecl*)(
 NativeScreenToVertex g_original_screen_to_vertex=nullptr;
 std::atomic<bool> g_overlay_source_patch_enabled{false};
 std::atomic<unsigned> g_overlay_source_corrected_calls{0};
+// Runtime evidence for the source-stage fix. Installation success alone
+// does not tell us whether game text/actors reach this entry point.
+std::atomic<unsigned> g_overlay_source_entry_calls{0};
+std::atomic<unsigned> g_overlay_source_ui_calls{0};
+std::atomic<unsigned> g_overlay_source_after_frame{0};
+std::atomic<unsigned> g_overlay_source_after_glyph{0};
+std::atomic<unsigned> g_overlay_source_samples_before{0};
+std::atomic<unsigned> g_overlay_source_samples_after{0};
 const void* g_approved_overlay_viewport=nullptr;
 // The original PE stores coefficients at VA 0x49CC58 / 0x49CCA4
 // (1/640) and 0x49CCA8 (1/480). Redirect only FOUR verified
@@ -1615,14 +1623,42 @@ void __cdecl centered_native_screen_to_vertex(
         void* viewport,void* out_vertex,float x,float y,float depth) {
     const auto original=g_original_screen_to_vertex;
     if(!original)return;
+    g_overlay_source_entry_calls.fetch_add(1u,std::memory_order_relaxed);
     if(g_overlay_source_patch_enabled.load(std::memory_order_acquire) &&
        viewport==g_approved_overlay_viewport) {
+        g_overlay_source_ui_calls.fetch_add(1u,std::memory_order_relaxed);
         float centered=0.0f;
         if(r2fix::center_normalized_superimposed_x(
                     x,g_hud_scale,centered)) {
+            const float before=x;
             x=centered;
             g_overlay_source_corrected_calls.fetch_add(
                 1u,std::memory_order_relaxed);
+            const bool after_frame=g_first_lower_frame_tick.load(
+                std::memory_order_acquire)!=0;
+            if(after_frame) {
+                g_overlay_source_after_frame.fetch_add(
+                    1u,std::memory_order_relaxed);
+                if(g_first_frame_overlap_glyph_tick.load(
+                        std::memory_order_acquire)!=0) {
+                    g_overlay_source_after_glyph.fetch_add(
+                        1u,std::memory_order_relaxed);
+                }
+            }
+            // One or two first examples per phase, not per frame or actor.
+            // Only normalized numbers, never raw pointers or game text.
+            auto& samples=after_frame ? g_overlay_source_samples_after :
+                                        g_overlay_source_samples_before;
+            if(g_log && samples.fetch_add(
+                         1u,std::memory_order_relaxed)<2u) {
+                char msg[248]{};
+                std::snprintf(msg,sizeof(msg),
+                    "RUNTIME-OVERLAY-SOURCE: sample phase=%s x_original=%.5f x_centered=%.5f y=%.5f depth=%.5f (approved viewport, no actor identity)",
+                    after_frame?"after-panel":"before-panel",
+                    double(before),double(centered),
+                    double(y),double(depth));
+                log_line(msg);
+            }
         }
     }
     original(viewport,out_vertex,x,y,depth);
@@ -2406,6 +2442,20 @@ void install_callback(void* volatile* slot, void* replacement,
     }
 }
 
+void report_overlay_source_counts(const char* when) {
+    char status[278]{};
+    std::snprintf(status,sizeof(status),
+        "RUNTIME-OVERLAY-SOURCE: checkpoint=%s installed=%u total_invocations=%u ui_viewport_invocations=%u corrected=%u after_first_frame=%u after_first_glyph=%u (native source-stage, read-only counters)",
+        when,unsigned(g_overlay_source_patch_enabled.load(
+                           std::memory_order_acquire)),
+        g_overlay_source_entry_calls.load(std::memory_order_relaxed),
+        g_overlay_source_ui_calls.load(std::memory_order_relaxed),
+        g_overlay_source_corrected_calls.load(std::memory_order_relaxed),
+        g_overlay_source_after_frame.load(std::memory_order_relaxed),
+        g_overlay_source_after_glyph.load(std::memory_order_relaxed));
+    log_line(status);
+}
+
 void report_superimposed_counts_after_frame(const char* when,
                                           DWORD elapsed_ms) {
     const unsigned counts[6]={
@@ -2495,6 +2545,8 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                     labels[frame_relative_reports],elapsed);
                 report_superimposed_counts_after_frame(
                     labels[frame_relative_reports],elapsed);
+                report_overlay_source_counts(
+                    labels[frame_relative_reports]);
                 ++frame_relative_reports;
             }
         }
@@ -2514,6 +2566,8 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                 report_panel_glyph_geometry(
                     labels[glyph_relative_reports],
                     frame_tick ? GetTickCount()-frame_tick : elapsed);
+                report_overlay_source_counts(
+                    labels[glyph_relative_reports]);
                 ++glyph_relative_reports;
             }
         }
@@ -2549,6 +2603,14 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                 g_native_2d_passthrough_uv.load(std::memory_order_relaxed),
                 g_native_2d_passthrough_color.load(std::memory_order_relaxed));
             log_line(native_2d_status);
+            const char* overlay_time_labels[]={
+                "at5s","at40s","at60s","at75s","at85s","at90s"
+            };
+            const unsigned overlay_index=
+                iteration==10 ? 0u : iteration==80 ? 1u :
+                iteration==120 ? 2u : iteration==150 ? 3u :
+                iteration==170 ? 4u : 5u;
+            report_overlay_source_counts(overlay_time_labels[overlay_index]);
             char source_counts[235]{};
             std::snprintf(source_counts,sizeof(source_counts),
                 "RUNTIME-HUD-ROUTE: at=%us glyph=%u image=%u frame=%u other=%u (native input producers)",
