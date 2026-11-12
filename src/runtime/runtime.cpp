@@ -32,6 +32,20 @@
 namespace {
 constexpr DWORD kConfigMagic = 0x32584652; // "RFX2" in little endian
 constexpr DWORD kOriginalTimestamp = 0x3807B68B;
+// Verified by the owner's CD runtime byte fingerprint (12 November 2026):
+// 0x4710C0 starts with two complete x86 instructions (3+4 bytes);
+// its jump table checks (procedureId-0x199) <= 4 (409..413).
+// This optional hook only COUNTS native script procedure calls.
+constexpr uintptr_t kSuperimposedProcRva=0x710C0;
+constexpr BYTE kSuperimposedProcExpected[7]={
+    0x83,0xEC,0x28,0x8D,0x44,0x24,0x30
+};
+using SuperimposedProc = void* (__cdecl*)(void*,void*);
+SuperimposedProc g_original_superimposed_proc=nullptr;
+std::atomic<unsigned> g_superimposed_proc_calls[6]{};
+std::atomic<unsigned> g_superimposed_proc_after_frame[6]{};
+std::atomic<unsigned> g_superimposed_proc_samples[6]{};
+
 constexpr uintptr_t kCameraRva = 0x22AB0; // verified VA=0x422AB0 for image base 0x400000
 // Shared screen-world UI camera pointer owned by the original engine.
 // Constructed by 0x4052C0 with FOV (1.5,0.75), displayed through
@@ -1647,6 +1661,87 @@ void probe_superimposed_cd_candidates(const BYTE* image,
     }
 }
 
+// Runtime-only evidence: the original engine reads procedure id from
+// p_stTree[-1].uParam.ulValue, verified by CD disassembly at 0x4710D3
+// (mov edi,[ebx-8]). No user-level identifiers or raw pointers logged.
+// This captures whether the actor procedure is invoked when the lower
+// dialogue panel is visible, without touching scene structures.
+void* __cdecl observe_superimposed_proc(void* superobject,void* tree) {
+    const auto original=g_original_superimposed_proc;
+    if(!original)return nullptr;
+    const std::uintptr_t address=reinterpret_cast<std::uintptr_t>(tree);
+    std::uint32_t procedure=0;
+    if(address>=0x10008u && read_u32(address-8u,procedure)) {
+        const unsigned bucket=(procedure>=409u && procedure<=413u) ?
+                              procedure-409u : 5u;
+        const unsigned seen=g_superimposed_proc_calls[bucket].fetch_add(
+                              1,std::memory_order_relaxed);
+        const bool after_panel=g_first_lower_frame_tick.load(
+                                  std::memory_order_acquire)!=0;
+        if(after_panel)g_superimposed_proc_after_frame[bucket].fetch_add(
+                           1,std::memory_order_relaxed);
+        if(seen<2u && g_log) {
+            const unsigned sample=g_superimposed_proc_samples[bucket]
+                .fetch_add(1,std::memory_order_relaxed);
+            if(sample<2u) {
+                char message[230]{};
+                std::snprintf(message,sizeof(message),
+                    "RUNTIME-OVERLAY-ACTOR: sample=%u procedure=%u bucket=%u after_first_lower_frame=%u (script dispatch; read-only, not arrow identity)",
+                    sample+1u,unsigned(procedure),bucket,
+                    unsigned(after_panel));
+                log_line(message);
+            }
+        }
+    }
+    return original(superobject,tree);
+}
+void install_superimposed_proc_probe() {
+    // Called only after validated approved EXE camera detour. The two
+    // intercepted instructions are position independent: sub esp,28h;
+    // lea eax,[esp+30h]. The trampoline keeps the original ABI.
+    auto* module=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+    if(!module || g_original_superimposed_proc)return;
+    const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    if(dos->e_magic!=IMAGE_DOS_SIGNATURE || dos->e_lfanew<=0 ||
+       dos->e_lfanew>=0x1000)return;
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+        module+dos->e_lfanew);
+    if(pe->Signature!=IMAGE_NT_SIGNATURE ||
+       pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
+       pe->OptionalHeader.SizeOfImage<kSuperimposedProcRva+64)
+        return;
+    auto* target=module+kSuperimposedProcRva;
+    if(std::memcmp(target,kSuperimposedProcExpected,
+                   sizeof(kSuperimposedProcExpected))!=0) {
+        log_line("RUNTIME-OVERLAY-ACTOR: CD procedure entry pattern unrecognized; probe disabled");
+        return;
+    }
+    auto* gateway=static_cast<BYTE*>(VirtualAlloc(nullptr,64,
+        MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    if(!gateway)return;
+    std::memcpy(gateway,target,sizeof(kSuperimposedProcExpected));
+    write_jump(gateway+sizeof(kSuperimposedProcExpected),
+               target+sizeof(kSuperimposedProcExpected));
+    DWORD old=0;
+    if(!VirtualProtect(gateway,64,PAGE_EXECUTE_READ,&old)) {
+        VirtualFree(gateway,0,MEM_RELEASE);return;
+    }
+    DWORD previous=0;
+    if(!VirtualProtect(target,sizeof(kSuperimposedProcExpected),
+                       PAGE_EXECUTE_READWRITE,&previous)) {
+        VirtualFree(gateway,0,MEM_RELEASE);return;
+    }
+    g_original_superimposed_proc=
+        reinterpret_cast<SuperimposedProc>(gateway);
+    write_jump(target,reinterpret_cast<void*>(&observe_superimposed_proc));
+    target[5]=target[6]=0x90;
+    FlushInstructionCache(GetCurrentProcess(),target,
+                          sizeof(kSuperimposedProcExpected));
+    DWORD unused=0;
+    VirtualProtect(target,sizeof(kSuperimposedProcExpected),previous,&unused);
+    log_line("RUNTIME-OVERLAY-ACTOR: approved CD superimposed script dispatcher monitored (procedures 409..413; read-only, no actor or geometry changes)");
+}
 DWORD install_camera_hook() {
     if (g_installed) return 1;
     const auto* module = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
@@ -2212,6 +2307,19 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                 g_native_2d_producers[3].load(std::memory_order_relaxed));
             log_line(source_counts);
             if (iteration>=80) {
+                char actor_msg[252]{};
+                std::snprintf(actor_msg,sizeof(actor_msg),
+                    "RUNTIME-OVERLAY-ACTOR: at=%us proc409=%u proc410=%u proc411=%u proc412=%u proc413=%u others=%u after_frame409=%u after_frame410=%u (read-only)",
+                    unsigned(iteration/2),
+                    g_superimposed_proc_calls[0].load(std::memory_order_relaxed),
+                    g_superimposed_proc_calls[1].load(std::memory_order_relaxed),
+                    g_superimposed_proc_calls[2].load(std::memory_order_relaxed),
+                    g_superimposed_proc_calls[3].load(std::memory_order_relaxed),
+                    g_superimposed_proc_calls[4].load(std::memory_order_relaxed),
+                    g_superimposed_proc_calls[5].load(std::memory_order_relaxed),
+                    g_superimposed_proc_after_frame[0].load(std::memory_order_relaxed),
+                    g_superimposed_proc_after_frame[1].load(std::memory_order_relaxed));
+                log_line(actor_msg);
                 const DWORD first=g_first_lower_frame_tick.load(
                     std::memory_order_acquire);
                 if(first)report_panel_glyph_geometry(
@@ -2370,6 +2478,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         // UI; the downstream driver callback monitor still handles
         // screen sprites submitted through other engine paths.
         if(g_hud_scale<0.9999f)install_native_2d_percent_hook();
+        if(g_hud_scale<0.9999f)install_superimposed_proc_probe();
         initialize_native_intro_skip();
         start_hud_monitor();
     }

@@ -1,5 +1,45 @@
 # Rayman 2: superimposed actor placement — research, not an active fix
 
+## Approved-CD byte evidence (2026-11-12)
+
+The owner's `Rayman2Fix(20261112-191814).log`, Wine-staging 11.17,
+verified CD game, exits normally after 37.563 s. The passive executable
+probe fetched these actual approved-CD machine bytes:
+
+- CD VA `0x4710C0` begins `83 EC 28 8D 44 24 30` (two whole x86
+  instructions; function prologue) and at `0x4710E7` branches on
+  `EDI - 0x199`, unsigned bounded by 4: script procedures **409–413**.
+  The caller's instruction `mov edi,[ebx-8]` supports the procedure
+  integer convention described in the Ray2Fix source.
+- CD VA `0x475C7F`: `fmul dword ptr [0x49CCAC]`; at `0x475C88`
+  the code passes viewport `0x5004D4` to original `0x422940`
+  (screen-position translation). The original 0.001 scaling is the
+  candidate; the pointer data are NOT yet verified here.
+- CD VA `0x475C96`: `mov eax,[esp+18h]`,
+  `mov ecx,[esp+4Ch]`; downstream original instructions write
+  `[edi+34h]` and `[edi+54h]`, consistent with projected-object
+  X/Z matrix columns. The exact semantic contents of those stack
+  values require further testing.
+
+These code locations are now **confirmed within this CD executable**,
+not merely addresses copied from GOG. Their overall screen-role and
+actual connection to the visible arrow remain to be demonstrated.
+
+A new **observation-only** 7-byte trampoline is available at the
+approved procedure function entry `0x4710C0`, with exact initial
+instruction signature, PE guards and original cdecl/return ABI.
+It records a few first procedure IDs and bounded wall-clock counters
+(`RUNTIME-OVERLAY-ACTOR`) including procedure 409/410 occurrences
+following the first lower frame. It does not modify actor positions,
+matrices, viewport, FOV, game logic or save data. Its only installed
+binary redirection returns to the original engine unchanged.
+
+The user can reach the Murfy overlay to show which procedures execute
+concurrently with the dialogue, but call counts are correlations,
+not a positive identification of the arrow's object identity.
+
+
+
 ## What the owner's CD build demonstrates
 
 The owner's Wine trace `Rayman2Fix(20261112-183520).log` reaches
