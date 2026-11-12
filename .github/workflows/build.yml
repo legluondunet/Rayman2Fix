@@ -96,11 +96,14 @@ jobs:
           $initial = (Get-Content $ini | Where-Object {
             $_.Trim() -and !$_.Trim().StartsWith(';')
           })
-          if ($initial.Count -ne 5 -or $initial[0] -ne '[Debug]' -or
+          if ($initial.Count -ne 8 -or $initial[0] -ne '[Debug]' -or
               $initial[1] -ne 'Log=1' -or $initial[2] -ne '[Graphics]' -or
               $initial[3] -ne 'Resolution=Desktop' -or
-              $initial[4] -ne 'FPSLimit=60') {
-            throw "Bootstrap INI must contain Debug.Log, Graphics.Resolution and Graphics.FPSLimit"
+              $initial[4] -ne 'FPSLimit=60' -or
+              $initial[5] -ne 'Force4x3=0' -or
+              $initial[6] -ne '[Features]' -or
+              $initial[7] -ne 'SkipCinematics=0') {
+            throw "Bootstrap INI must contain disabled optional 4:3 and cinematic skip"
           }
           # Exercise Win32 CRLF and UTF-8 BOM parsing, plus log opt-out.
           [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=0`r`n", [Text.UTF8Encoding]::new($true))
@@ -244,7 +247,7 @@ jobs:
           test -f build/Rayman2Fix/Rayman2Fix.ini
           test -f build/Rayman2Fix.log
           grep -q 'SYS-INFO: END' build/Rayman2Fix.log
-          test "$(grep -v '^;' build/Rayman2Fix/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nResolution=Desktop\nFPSLimit=60')" || exit 1
+          test "$(grep -v '^;' build/Rayman2Fix/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nResolution=Desktop\nFPSLimit=60\nForce4x3=0\n[Features]\nSkipCinematics=0')" || exit 1
           printf '[Debug]\r\nLog=0\r\n' > build/Rayman2Fix/Rayman2Fix.ini
           result=0
           ./build/rayman2fix_cli || result=$?

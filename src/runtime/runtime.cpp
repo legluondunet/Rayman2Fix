@@ -166,6 +166,7 @@ float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
 bool g_log = false;
 float g_hud_scale = 1.0f;
+bool g_skip_cinematics = false;
 std::atomic<void*> g_plain_sprite_original{nullptr};
 std::atomic<void*> g_uv_sprite_original{nullptr};
 std::atomic<void*> g_color_sprite_original{nullptr};
@@ -285,6 +286,7 @@ struct RuntimeOptions {
     DWORD output_width;
     DWORD output_height;
     DWORD logging;
+    DWORD skip_cinematics;
 };
 
 bool valid_angle(float v) {
@@ -1229,6 +1231,7 @@ void poll_learn_intro_skip() {
 }
 
 void poll_second_intro_skip() {
+    if(!g_skip_cinematics)return;
     const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
     if (!native_change || !g_current_level) return;
     const bool in_intro = r2fix::is_second_intro(g_current_level);
@@ -2137,6 +2140,10 @@ void install_native_2d_percent_hook() {
 }
 
 void initialize_native_intro_skip() {
+    if(!g_skip_cinematics) {
+        log_line("RUNTIME-INTRO: jail_20 skip disabled by Features.SkipCinematics=0; Learn_10 remains unskippable");
+        return;
+    }
     const auto* module = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
     if (!module) return;
     const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
@@ -2828,6 +2835,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
+    if(settings->skip_cinematics>1u)return 5;
+    g_skip_cinematics=settings->skip_cinematics!=0;
     // This hook is also used for the targeted intro-skip poll on 4:3.
     // For narrow monitors camera_hor_plus leaves the FOV unchanged.
     const DWORD camera_status = install_camera_hook();

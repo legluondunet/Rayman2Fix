@@ -1,5 +1,6 @@
 #include "rayman2fix/startup.hpp"
 #include "rayman2fix/gameframe.hpp"
+#include "rayman2fix/game_config.hpp"
 
 #include <chrono>
 #include <algorithm>
@@ -218,9 +219,19 @@ void Startup::initialize() {
                "[Graphics]\n"
                "Resolution=Desktop\n"
                "; FPSLimit=0 disables the cap; accepted range: 15..240\n"
-               "FPSLimit=60\n";
+               "FPSLimit=60\n"
+               "; 1 = centered 4:3 picture (black sidebars)\n"
+               "Force4x3=0\n"
+               "\n"
+               "[Features]\n"
+               "; 1 = allow Space/Enter/Esc to skip jail_20 only\n"
+               "; Learn_10 skip remains disabled (unsafe)\n"
+               "SkipCinematics=0\n";
         if (!ini) throw std::runtime_error("failed writing Rayman2Fix.ini");
     }
+
+    // Preserve user values; add new opt-in options to older config files.
+    ensure_rayman2fix_ini_options(ini_path_);
 
     // Parse the only supported option before opening a log file.
     // Log=0 is an opt-out; never create a diagnostic log in that mode.
@@ -293,6 +304,10 @@ void Startup::initialize() {
     const auto fps = option("Graphics", "FPSLimit");
     log("CONFIG: Graphics.FPSLimit=" +
         (fps.empty() ? "60 (default)" : fps));
+    log(std::string("CONFIG: Graphics.Force4x3=") +
+        (configured_force_4_3(ini_path_) ? "1" : "0"));
+    log(std::string("CONFIG: Features.SkipCinematics=") +
+        (configured_skip_cinematics(ini_path_) ? "1" : "0"));
 
     log("RUNTIME: Rayman2Fix.dll=" +
         std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));

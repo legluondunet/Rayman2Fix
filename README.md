@@ -12,10 +12,14 @@ Ray2Fix and does not contain code copied from that project.
 > Windows/Wine/Proton is still being tested; no broad game compatibility
 > is claimed.
 
-## Second introduction skip (experimental)
+## Second introduction skip (opt-in, experimental)
 
-On the known, approved retail game executable, press **Space**, **Enter** or
-**Escape** during the **second** opening cinematic (`jail_20`) to request
+Set `[Features] SkipCinematics=1` in `Rayman2Fix.ini` to enable the
+existing second-introduction skip. It is disabled by default.
+
+When enabled, on the approved retail game executable press **Space**,
+**Enter** or **Escape** during the **second** opening cinematic
+(`jail_20`) to request
 the native transition to `learn_10`. The first cinematic (`jail_10`),
 the menu and later cutscenes are not affected. Holding Enter while entering
 the cutscene will not trigger a skip until the key is released and pressed again.
@@ -425,6 +429,13 @@ Log=1
 Resolution=Desktop
 ; FPSLimit=0 disables the cap; accepted range: 15..240
 FPSLimit=60
+; 1 = centered 4:3 picture with black sidebars
+Force4x3=0
+
+[Features]
+; 1 = allow Space/Enter/Esc to skip jail_20 only
+; Learn_10 skip remains disabled (unsafe)
+SkipCinematics=0
 ```
 
 `Resolution=Desktop` automatically uses the primary desktop resolution on
@@ -434,6 +445,24 @@ The format is validated and invalid values are refused, not silently ignored.
 `FPSLimit=60` caps the **game's rendered frame rate** by pacing its
 `grBufferSwap` calls; set `FPSLimit=30`, `120`, or another rate
 between 15 and 240 if required. `FPSLimit=0` disables the cap.
+`Force4x3=1` in `[Graphics]` selects a centered, exact 4:3 output
+image with black sidebars, while `Force4x3=0` (default) retains
+widescreen Hor+ 3D and centered 4:3 HUD. At 1920×1080 the game
+renders at 1440×1080 within the unchanged borderless 1920×1080
+monitor window. The pinned GameFrame wrapper already centers the
+picture and clears unused sides black in its presentation path:
+no additional rectangles, exclusive fullscreen, monitor mode change,
+or per-level rules are required. Original 4:3 FOV is used in 4:3 mode,
+and the native UI is not squeezed.
+
+`SkipCinematics=1` in `[Features]` enables the existing
+**deliberate keypress** skip of second introduction `jail_20` only.
+It does **not** skip the first cinematic `jail_10`, the unsafe
+`learn_10` sequence, or later game cutscenes. With the default
+`SkipCinematics=0`, even the second intro behaves normally.
+Existing INIs receive only the missing disabled options, preserving
+their custom values, unrelated settings and comments.
+
 These are maximum frame rates, not guaranteed measured FPS: actual performance
 may be lower. Very high limits may affect classic-game timing and require
 in-game testing; 60 is the default setting to validate on real hardware.
