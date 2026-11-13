@@ -201,7 +201,7 @@ class AudioStaticInspectorTests(unittest.TestCase):
         src = SCRIPT.read_text(encoding="utf-8")
         self.assertIn('result["theme_controller_lifecycle"]', src)
         self.assertIn("initializes_active_zero", src)
-        self.assertIn("nested_slot_minus_one_guard", src)
+        self.assertIn("nested_record_pointer_minus_one_guard", src)
         self.assertIn("sets_active_one_after_success", src)
         self.assertIn("stops_clear_active_zero", src)
         self.assertIn("pause_requires_active_nonzero", src)
@@ -231,6 +231,20 @@ class AudioStaticInspectorTests(unittest.TestCase):
         self.assertIn("pe.at(0x45387F,5)",src)
         self.assertIn("pe.at(0x45392E,3)",src)
         self.assertIn('"reference_only_not_verified_on_original_cd": True',src)
+
+    def test_theme_plus30_is_native_sound_record_pointer(self):
+        # Native 0x4574E0 returns a record ADDRESS, not a 0..63 slot.
+        src=SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("CONTROLLER_INNER_RECORD_PTR = CONTROLLER_BASE + 0x30",src)
+        self.assertIn('"writes_nested_record_ptr"',src)
+        self.assertIn('"record_allocator_returns_address"',src)
+        self.assertIn('pe.at(0x45752C, 6)',src)
+        self.assertIn('"record_allocator_stride": 32',src)
+        self.assertIn('"record_allocator_capacity": 64',src)
+        self.assertIn('"theme_pause_passes_record_address"',src)
+        self.assertIn('"theme_resume_passes_record_address"',src)
+        self.assertNotIn('"inner_record_slot"',src)
+        self.assertNotIn('"writes_nested_slot"',src)
 
     def test_unknown_binary_never_invents_structural_matches(self):
         with tempfile.TemporaryDirectory() as d:
