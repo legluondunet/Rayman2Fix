@@ -105,6 +105,28 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("case 3:return \"windows-activation-pause\"",self.runtime)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
+    def test_call_time_menu_flags_are_only_read_before_native_forward(self):
+        section=self.runtime.split(
+            "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1]
+        section=section.split("void __stdcall audio_pause_sxd(",1)[0]
+        self.assertIn("ui_in_game_menu_at_call=%d",section)
+        self.assertIn("ui_engine_paused_at_call=%d",section)
+        self.assertIn("in_game_menu_at_call=-1,engine_paused_at_call=-1",section)
+        self.assertIn("game_module+0xB9BC8",section)
+        self.assertIn("game_module+0x100640",section)
+        self.assertIn("menu_read==sizeof(menu_byte)",section)
+        self.assertIn("pause_read==sizeof(paused_byte)",section)
+        self.assertIn("menu_byte<=1u",section)
+        self.assertIn("paused_byte<=1u",section)
+        self.assertIn("if(sampled) {",section)
+        self.assertLess(section.index("game_module+0xB9BC8"),
+                        section.index("if(original) original(arg);"))
+        self.assertLess(section.index("game_module+0x100640"),
+                        section.index("if(original) original(arg);"))
+        self.assertNotIn("WriteProcessMemory(",section)
+        self.assertNotIn("VK_F1",section)
+        self.assertNotIn("MusicInPauseMenu",self.config)
+
     def test_native_sequence_slot_is_only_read_in_audio_research_build(self):
         # The original single-stream controller's sound-table index is
         # observed, not treated as an independently proven music identity.
