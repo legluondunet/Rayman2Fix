@@ -146,6 +146,30 @@ MENU_RENDER_BRANCH_BYTES = bytes.fromhex(
 )
 
 
+MENU_BG_HANDLE_VA = 0x4A7250
+MENU_BG_LITERAL_XREFS = (0x404071, 0x4245D0)
+
+
+def inspect_menu_background_handle(pe: "PE32") -> dict:
+    """Validate render-resource handle references, not UI/menu presence."""
+    initializer = pe.at(0x40406A, 11) == bytes.fromhex(
+        "8B 48 14 8B 11 89 15 50 72 4A 00")
+    renderer = pe.at(0x4245C8, 20) == bytes.fromhex(
+        "8B 0D AC 36 50 00 8B 15 50 72 4A 00 "
+        "51 52 FF 15 54 48 50 00")
+    literal_xrefs = tuple(absolute_dword_xrefs(pe, MENU_BG_HANDLE_VA))
+    return {
+        "matched": initializer and renderer
+                   and literal_xrefs == MENU_BG_LITERAL_XREFS,
+        "handle_va": "0x004A7250",
+        "only_two_direct_literal_xrefs": literal_xrefs == MENU_BG_LITERAL_XREFS,
+        "initialization_is_not_menu_open": True,
+        "render_use_is_not_proof_of_ESC": True,
+        "render_use_is_not_proof_of_F1": True,
+        "does_not_justify_audio_interception": True,
+    }
+
+
 def verify_native_menu_viewport_branch(pe: "PE32") -> bool:
     return (
         pe.at(0x40B003, len(MENU_RENDER_BRANCH_BYTES))
@@ -447,6 +471,13 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
     menu_render_verified = bool(check_anchors and
         verify_native_menu_viewport_branch(cd) and
         verify_native_menu_viewport_branch(ref))
+    menu_background = {
+        "cd": inspect_menu_background_handle(cd),
+        "reference": inspect_menu_background_handle(ref),
+    } if check_anchors else {}
+    menu_background_verified = bool(check_anchors and
+        all(x["matched"] for x in menu_background.values()))
+
 
     rdata_identical = cd.section(".rdata") == ref.section(".rdata")
     verified_windows = all(w["identical"] for w in windows)
@@ -456,6 +487,7 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
         and all(x["confirmed_bytewise_both"] for x in direct_call_candidates)
         and transaction_xrefs_verified and callback_registration_verified
         and script_opcode_verified and menu_render_verified
+        and menu_background_verified
     ) if check_anchors else False
     # A caller may disable native anchors for synthetic PE parser tests only.
     # That MUST NOT accidentally yield a full original-CD audio-path proof.
@@ -469,6 +501,12 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             "regions": windows, "call_sites": call_sites, "opcode_anchors": byte_anchors,
             "original_cd_render_menu_viewport_branch_verified":
                 pinned and menu_render_verified,
+            "native_menu_background_handle": {
+                "verified_both": menu_background_verified,
+                "cd": menu_background.get("cd", {}),
+                "reference": menu_background.get("reference", {}),
+                "does_not_prove_menu_open": True,
+            },
             "native_menu_render_branch": {
                 "verified_both": menu_render_verified,
                 "flag_va": "0x004B9BC8",
