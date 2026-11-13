@@ -162,6 +162,33 @@ def inspect(executable: Path) -> dict:
         # The actual event descriptor's nested resource IDs are
         # resolved through a two-stage loaded-group registry. This map
         # verifies instruction bytes, not a soundtrack identifier.
+        # 0x458530 has its OWN dispatch table, distinct from
+        # both 0x457E60 event creation and transport type 1/2.
+        # This handles the nested type-11 event's child descriptor.
+        conversion_tags = list(pe.at(0x4585A0, 11))
+        conversion_targets = [pe.dword(0x45858C + 4 * i)
+                              for i in range(5)]
+        result["sound_event_conversion"] = {
+            "function": "0x00458530",
+            "event_classes_1_to_11": conversion_tags,
+            "dispatch_targets": [f"0x{x:08X}" for x in conversion_targets],
+            "type11_is_passthrough": (
+                conversion_tags[10] == 3 and
+                conversion_targets[3] == 0x458589
+            ),
+            "type8_nested_conversion": (
+                conversion_tags[7] == 1 and
+                conversion_targets[1] == 0x458564 and
+                pe.call_target(0x45856F) == 0x45AA00
+            ),
+            "type10_nested_conversion": (
+                conversion_tags[9] == 2 and
+                conversion_targets[2] == 0x458550 and
+                pe.call_target(0x45855B) == 0x45A4A0
+            ),
+            "transport_type_is_separate":
+                pe.at(0x458236, 3) == bytes.fromhex("8b4604"),
+        }
         result["resource_handle_resolver"] = {
             "function": "0x00453F90",
             "group_high16": pe.at(0x453F9C, 3)
