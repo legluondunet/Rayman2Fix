@@ -484,7 +484,7 @@ int verify_installation(Startup& startup) {
     return 0;
 }
 
-int run_automatic(Startup& startup) {
+int run_automatic(Startup& startup, bool install_only) {
     try {
         const fs::path root = startup.game_dir();
         if (has_game_executable(root)) {
@@ -493,6 +493,11 @@ int run_automatic(Startup& startup) {
             synchronize_rayman2_ubi_ini(root, startup);
             patch_executable_if_supported(root, startup);
             if (verify_installation(startup) != 0) return 2;
+            if (install_only) {
+                startup.log("INSTALL-ONLY: existing installation checked, game not launched");
+                std::cout << "Installation verified. Game not launched (--install-only).\n";
+                return 0;
+            }
             return report_runtime_status(root, startup);
         }
 
@@ -566,7 +571,7 @@ int run_automatic(Startup& startup) {
             throw;
         }
         startup.log("AUTO-INSTALL: CD files staged and committed to Rayman2Fix/ "
-                    "with snd_cpa.ini and local SHA256 receipt; game startup test follows");
+                    "with snd_cpa.ini and local SHA256 receipt");
         console.step(8, 8, "Verifying installed files and executable hashes...");
         if (verify_installation(startup) != 0) return 2;
         console.summary(info, extraction, root);
@@ -579,7 +584,13 @@ int run_automatic(Startup& startup) {
                       "not applied (no supported embedded/local delta)") << '\n'
                   << "  GameFrame: "
                   << (gameframe_glide_ready(root) ? "verified" : "not verified")
-                  << "\n  Game startup: attempting supported EXE (first real-world test)\n";
+                  << (install_only
+                      ? "\n  Game startup: skipped (--install-only)\n"
+                      : "\n  Game startup: attempting supported EXE (first real-world test)\n");
+        if (install_only) {
+            startup.log("INSTALL-ONLY: new CD installation verified; game not launched");
+            return 0;
+        }
         return report_runtime_status(root, startup);
     } catch (const std::exception& error) {
         startup.log(std::string("AUTO-ERROR: ") + error.what());
