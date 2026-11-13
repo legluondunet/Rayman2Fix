@@ -4,7 +4,7 @@
 Layout candidates: Rayman2Lib BNMFile.cs, ACP_Ray2 SND_Resource.h and
 the 0x453990/0x453F90 code from the provided non-approved Rayman2 EXE.
 No original retail-CD BNM has yet been verified against this parser.
-Does not read/extract/decode/export any media payload.
+Does not extract/decode/export or modify any media payload.
 """
 from __future__ import annotations
 
@@ -27,37 +27,57 @@ def word(raw: bytes, at: int, signed: bool = False) -> int:
         raise BNMError("truncated metadata")
     return struct.unpack_from("<i" if signed else "<I", raw, at)[0]
 
+def table_bounds(raw: bytes, offset: int, count: int, stride: int,
+                 label: str) -> tuple[int, int]:
+    """Reject wrap/overrun and header overlap. Offsets are bank-relative."""
+    if count == 0:
+        return (0, 0)
+    if offset < HEADER_BYTES or offset > len(raw):
+        raise BNMError(f"{label} offset outside metadata area")
+    if count > MAX_COUNT or count > (len(raw) - offset) // stride:
+        raise BNMError(f"{label} truncated or count too large")
+    return (offset, offset + count * stride)
+
+
 def inspect_bytes(raw: bytes) -> dict:
     """Return candidate Theme metadata, never verified music/song identity."""
     if len(raw) < HEADER_BYTES:
         raise BNMError("BNM shorter than candidate 44-byte bank header")
-    version, _, event_count, _, resource_count, *other = (
-        struct.unpack_from("<11I", raw))
+    # ACP_Ray2 SND_tdstSndBankHead has independent list offsets:
+    # stEventList.hFirstElementOpt at +4 and stResList at +12.
+    # Native 0x453BB8/0x453BC3 relocate each original on-disk offset
+    # from the bank-header base. Do not assume contiguous tables!
+    (version, event_offset, event_count, resource_offset, resource_count,
+     mpeg_offset, midi_offset, sample_offset, adpcm_offset, stream_offset,
+     declared_total) = struct.unpack_from("<11I", raw)
     if event_count > MAX_COUNT or resource_count > MAX_COUNT:
         raise BNMError("implausible event/resource count")
-    first_audio_offset = other[0]
-    declared_total = other[-1]
-    start = HEADER_BYTES + EVENT_BYTES * event_count
-    end = start + RESOURCE_BYTES * resource_count
-    if end > len(raw):
-        raise BNMError("truncated candidate event/resource metadata")
-
+    ev_begin, ev_end = table_bounds(
+        raw, event_offset, event_count, EVENT_BYTES, "event table")
+    res_begin, res_end = table_bounds(
+        raw, resource_offset, resource_count, RESOURCE_BYTES, "resource table")
+    if event_count and resource_count and max(ev_begin,res_begin)<min(ev_end,res_end):
+        raise BNMError("event and resource metadata tables overlap")
+    declared_media={
+        "MPEG":mpeg_offset, "MIDI":midi_offset, "Sample":sample_offset,
+        "ADPCM":adpcm_offset, "Streaming":stream_offset,
+    }
     warnings = []
-    if first_audio_offset and first_audio_offset < end:
-        warnings.append("first audio offset overlaps candidate records")
-    if first_audio_offset > len(raw):
-        warnings.append("first audio offset beyond physical file")
     if declared_total and declared_total != len(raw):
         warnings.append("declared total differs from physical file size")
+    if any(value > len(raw) for value in declared_media.values()):
+        warnings.append("one or more declared media offsets beyond file; origin unverified")
 
     types = {}
+    by_id={}
     themes = []
     for i in range(resource_count):
-        p = start + i * RESOURCE_BYTES
+        p = res_begin + i * RESOURCE_BYTES
         ident = word(raw, p)
         kind = word(raw, p + 4)
         storage = word(raw, p + 8)
         types[str(kind)] = types.get(str(kind), 0) + 1
+        by_id.setdefault(ident,[]).append((i,kind))
         if kind == 11:  # SND_E_TR_Theme, not SND_tdeTypeEvent
             themes.append({
                 "table_index": i,
@@ -65,11 +85,54 @@ def inspect_bytes(raw: bytes) -> dict:
                 "bank_group_from_id": ident >> 16,
                 "record_index_from_id": ident & 0xFFFF,
                 "storage_kind": storage,
+                # SND_tdstBlockResourceDisk has declared length & offset.
+                # These are metadata, never verified stream lengths.
+                "disk_data_size_declared_unverified":word(raw,p+12),
+                "disk_data_offset_declared_unverified":word(raw,p+16),
                 "volume_byte_candidate": raw[p + 20],
                 "number_of_parts_candidate": word(raw, p + 36),
                 "outro_offset_candidate": word(raw, p + 40, signed=True),
                 "layout_not_confirmed_on_retail_cd": True,
             })
+    # ACP_Ray2 SND_tdstBlockEvent: Id +0, eType +4;
+    # SND_EVT_Son_Play=1 has uParams.stPlay.uResource.Id at +8.
+    # Native 0x453DC9/0x453DD6 resolves that exact field.
+    event_types={}
+    play_events=[]
+    local_theme_refs=[]
+    for i in range(event_count):
+        p=ev_begin+i*EVENT_BYTES
+        event_id=word(raw,p)
+        event_kind=word(raw,p+4)
+        event_types[str(event_kind)]=event_types.get(str(event_kind),0)+1
+        if event_kind!=1:
+            continue
+        ref=word(raw,p+8)
+        if ref==0xFFFFFFFF:
+            status="null-resource-reference"
+            target_index=None
+        else:
+            matches=by_id.get(ref,[])
+            if len(matches)==1:
+                target_index,target_kind=matches[0]
+                status="local-theme" if target_kind==11 else "local-non-theme"
+            elif len(matches)>1:
+                status="ambiguous-duplicate-local-id"
+                target_index=None
+            else:
+                status="not-in-this-bank"
+                target_index=None
+        event={
+            "event_table_index":i,
+            "event_id_hex":f"0x{event_id:08X}",
+            "resource_id_hex":f"0x{ref:08X}",
+            "candidate_resolution":status,
+            "local_resource_table_index":target_index,
+        }
+        play_events.append(event)
+        if status=="local-theme":
+            local_theme_refs.append(event)
+
     return {
         "candidate_format": "CPA Rayman 2 BNM metadata",
         "physical_size": len(raw),
@@ -77,11 +140,18 @@ def inspect_bytes(raw: bytes) -> dict:
         "events_declared": event_count,
         "resources_declared": resource_count,
         "record_sizes": {"header": 44, "event": 32, "resource": 92},
-        "candidate_metadata_end": end,
-        "declared_audio_start_unverified": first_audio_offset,
+        "table_ranges_file_relative":{
+            "events":[ev_begin,ev_end],
+            "resources":[res_begin,res_end],
+        },
+        "candidate_metadata_end": max(HEADER_BYTES,ev_end,res_end),
+        "media_offsets_unverified":declared_media,
         "declared_total_unverified": declared_total,
         "resource_type_counts": types,
+        "event_type_counts":event_types,
         "theme_resources_candidate": themes,
+        "play_event_references_candidate":play_events,
+        "local_play_events_referring_to_themes_candidate":local_theme_refs,
         "warnings": warnings,
         "verified_against_actual_retail_cd_bnm": False,
         "audio_extracted": False,
