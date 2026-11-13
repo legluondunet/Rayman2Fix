@@ -72,6 +72,15 @@ The three consecutive eight-byte dispatch entries share one opcode decoder; `0x4
 The exact VM opcode decoder instructions, three table entries, branch call targets and both pinned binary fingerprints are now verified in [`tools/check_rayman2_cd_audio_parity.py`](../tools/check_rayman2_cd_audio_parity.py). Synthetic [`tests/test_audio_cd_parity.py`](../tests/test_audio_cd_parity.py) deliberately asserts that generic script origin does **not** constitute menu evidence. **No actual game audio behavior has been modified.**
 
 
+### Rejected ESC-menu detector candidate: `ISPAUSEDEVT`
+
+A possible-looking original-CD string, **`ISPAUSEDEVT`** at **`0x49F020`**, is **not** evidence of an in-game menu/UI boolean. Its only observed static literal references occur at `0x40129B` and `0x401480` (in both files), respectively in two Win32 event-handle setup paths:
+
+- At `0x40129B`, the caller supplies the `ISPAUSEDEVT` name to imported **`OpenEventA`** through IAT `0x49C0E4` (`EVENT_ALL_ACCESS=0x1F0003`, inherit flag 1). The return value is stored as a handle, not a menu state.
+- At `0x401480`, the caller supplies the same name to imported **`CreateEventA`** through IAT `0x49C01C` (loaded into ESI at `0x401432`), with standard security/manual-reset/initial-state parameters. The return value is also stored as a handle.
+
+This identifies a **named Windows kernel synchronization event**, not whether the ESC menu is currently visible. The spelling alone would have been a dangerous false-positive basis for an audio feature. No safe native ESC-menu visibility field was established from this string. A separate UI-lifetime proof remains necessary; the desktop window title `Rayman2 - pause` is similarly not sufficient without proof of which application states set it.
+
 ## Reproducible offline audit of the owner's corrected schema-2 Wine trace
 
 A new read-only [`tools/analyze_rayman2_audio_trace.py`](../tools/analyze_rayman2_audio_trace.py) summarizes sampled driver events, attaches the corrected `RUNTIME-AUDIO-THEME-OWNER` lines to their matching **(channel, sample)** trace lines, and emits only aggregate evidence (no source filename, raw driver handle, stack address, full log lines or game assets). It is exercised in Linux CI by [`tests/test_audio_trace_evidence.py`](../tests/test_audio_trace_evidence.py) using wholly synthetic records. For a locally owned log:
