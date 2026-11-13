@@ -68,6 +68,45 @@ ANCHOR_BYTES = (
     ("bank_filename_literal", 0x4A252C, b"bnk_%d.BNM\x00"),
 )
 
+# Controller-wide dynamic guard during Theme creation/replacement and stop.
+# This is a game-internal reentrancy/transition inhibit flag, NOT a mutex.
+THEME_TRANSACTION_FLAG_VA = 0x4B9618
+THEME_TRANSACTION_OPS = (
+    ("init_clears_flag", 0x459694, bytes.fromhex("89 15 18 96 4B 00")),
+    ("part_advance_reads_flag", 0x4596E0, bytes.fromhex("A1 18 96 4B 00 56 85 C0 75 67")),
+    ("begin_theme_start", 0x45999D, bytes.fromhex("C7 05 18 96 4B 00 01 00 00 00")),
+    ("end_theme_start", 0x459B2C, bytes.fromhex("C7 05 18 96 4B 00 00 00 00 00")),
+    ("begin_theme_stop", 0x459BE5, bytes.fromhex("C7 05 18 96 4B 00 01 00 00 00")),
+    ("end_theme_stop", 0x459C23, bytes.fromhex("C7 05 18 96 4B 00 00 00 00 00")),
+)
+# Addresses of the four-byte operand in each original-CD instruction.
+THEME_FLAG_OPERAND_VAS = (0x459696, 0x4596E1, 0x45999F,
+                          0x459B2E, 0x459BE7, 0x459C25)
+
+
+def absolute_dword_xrefs(pe, target: int, section: str = ".text") -> list[int]:
+    """Return VA of every literal 32-bit little-endian operand in one PE section.
+
+    This is a deliberately syntax-agnostic byte scan; each hit must ALSO have
+    a verified instruction around it before being interpreted as a code xref.
+    """
+    if not (0 <= target <= 0xFFFFFFFF):
+        raise ValueError("Absolute target is not a 32-bit VA")
+    if section not in pe.sections:
+        raise ValueError("Section not present")
+    base, raw_pos, raw_size, _ = pe.sections[section]
+    data = pe.data[raw_pos:raw_pos + raw_size]
+    pattern = struct.pack("<I", target)
+    out = []
+    start = 0
+    while True:
+        idx = data.find(pattern, start)
+        if idx == -1:
+            return out
+        out.append(base + idx)
+        start = idx + 1
+
+
 # Type 11 native resource dispatcher has a 24-byte stride per kind;
 # pause entry is at base+8 and resume at base+12 (indexed by 11).
 DISPATCH_POINTERS = (
@@ -185,9 +224,28 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
                     ref.call_target(0x453948) == 0x453870 and
                     cd.at(0x453945, 3) == ref.at(0x453945, 3) == bytes.fromhex("89 46 04") and
                     cd.at(0x4A252C, 11) == ref.at(0x4A252C, 11) == b"bnk_%d.BNM\x00") if check_anchors else False
+    transaction_ops = [
+        {"name": name, "verified_both":
+            cd.at(addr, len(expected)) == expected and
+            ref.at(addr, len(expected)) == expected}
+        for name, addr, expected in THEME_TRANSACTION_OPS
+    ] if check_anchors else []
+    cd_flag_xrefs = absolute_dword_xrefs(cd, THEME_TRANSACTION_FLAG_VA)
+    ref_flag_xrefs = absolute_dword_xrefs(ref, THEME_TRANSACTION_FLAG_VA)
+    transaction_xrefs_verified = (
+        tuple(cd_flag_xrefs) == THEME_FLAG_OPERAND_VAS
+        and tuple(ref_flag_xrefs) == THEME_FLAG_OPERAND_VAS)
+    callback_registration_verified = (
+        cd.at(0x459AE5, 5) == ref.at(0x459AE5, 5) ==
+            bytes.fromhex("68 E0 96 45 00")
+        and cd.call_target(0x459AEC) == 0x458220
+        and ref.call_target(0x459AEC) == 0x458220
+    ) if check_anchors else False
     rdata_identical = cd.section(".rdata") == ref.section(".rdata")
     all_checks = (all(w["identical"] for w in windows) and
-                  all(x["verified_both"] for x in call_sites+byte_anchors+dispatcher_pointers))
+                  all(x["verified_both"] for x in call_sites+byte_anchors+dispatcher_pointers+
+                      transaction_ops) and transaction_xrefs_verified and
+                  callback_registration_verified)
     return {"cd_sha256": cd_digest, "reference_sha256": ref_digest,
             "exact_pinned_pair": pinned, "selected_audio_code_equal": all_checks,
             "original_cd_audio_path_confirmed": pinned and all_checks,
@@ -196,6 +254,17 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             "rdata_raw_bytes": len(cd.section(".rdata")),
             "regions": windows, "call_sites": call_sites, "opcode_anchors": byte_anchors,
             "resource_dispatcher_pointers": dispatcher_pointers,
+            "theme_transaction_inhibit": {
+                "verified_both": transaction_xrefs_verified and
+                    callback_registration_verified and
+                    all(x["verified_both"] for x in transaction_ops),
+                "flag_va": f"0x{THEME_TRANSACTION_FLAG_VA:08X}",
+                "all_six_operand_xrefs_match": transaction_xrefs_verified,
+                "registered_part_advance_callback": callback_registration_verified,
+                "operations": transaction_ops,
+                "does_not_prove_thread_synchronization": True,
+                "does_not_authorize_audio_interception": True,
+            },
             "theme_inner_and_outer_pause_paths_byte_verified": pinned and all(
                 x["verified_both"] for x in call_sites + dispatcher_pointers),
             "not_whole_executable_equivalence": True,
