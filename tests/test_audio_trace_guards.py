@@ -137,6 +137,22 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("got==sizeof(words)", self.runtime)
         self.assertNotIn("MusicInPauseMenu", self.config)
 
+    def test_descriptor_head_and_volume_research_is_bounded(self):
+        # A difference in DWORD3 does not imply that its low volume
+        # byte changed, and a differing DWORD0 may encode a pointer.
+        self.assertIn("desc_volume=%u", self.runtime)
+        self.assertIn("play_volume=%u", self.runtime)
+        self.assertIn("desc_head_pair_readable=%u", self.runtime)
+        self.assertIn("desc_head_contents_match=%u", self.runtime)
+        self.assertIn("current_words[3]&0xFFu", self.runtime)
+        self.assertIn("g_last_transition_desc_words[3].load(", self.runtime)
+        self.assertIn("BYTE old_bytes[16]{},new_bytes[16]{}", self.runtime)
+        self.assertIn("safe_read(reinterpret_cast<const void*>(", self.runtime)
+        self.assertIn("std::memcmp(old_bytes,new_bytes,sizeof(old_bytes))==0", self.runtime)
+        self.assertIn("if(out.transition!=0u && old_head>=0x10000u", self.runtime)
+        self.assertIn("out.match_count!=1u", self.runtime)
+        self.assertNotIn("MusicInPauseMenu", self.config)
+
     def test_exact_owner_cd_slots_are_named_and_bounded(self):
         expected={
             "PauseSxd":"0xB8664", "ResumeSxd":"0xB8668",
