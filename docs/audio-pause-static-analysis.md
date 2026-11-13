@@ -44,6 +44,76 @@ Critical distinctions:
 - In the reference binary, `0x4597E0` explicitly clears the controller's active state and is called during native audio initialization from `0x457E2D`. Other lifecycle paths use indirect entry points and pointer writes, so *initialization is not proof of all later state transitions*.
 - Direct `call` instructions to `0x457E60` occur at `0x452E63`, `0x4579E2`, `0x45A26D`, `0x45A6BE`, `0x45A7D6`, `0x45ADD8`, `0x45AFD2`. These seven upstream sites are the next useful static provenance targets; their event arguments need to be linked to an actual resource category.
 
+## Offline resource-ID tracing — nested type-11 events
+
+The type-11 controller does not merely store an opaque driver handle. Its
+source data has a variable number of nested entries and a reference-fixup
+stage. This is a promising **resource provenance** path that can be mapped
+without launching Wine, provided the actual resource databases are present.
+
+### Packed source identifiers: `0x453F90`
+
+The original x86 instructions at `0x453F90–0x453FC9` resolve a **DWORD
+resource identifier**, with a guard for `0xFFFFFFFF`:
+
+```text
+packed_id (DWORD)
+  upper 16 bits -> runtime resource-group key
+  lower 16 bits -> record index in the loaded group
+
+0x4538C0: registry lookup in linked list at 0x514D50
+           group key = [node+4], next node = [node+0x3C]
+0x453F90: group_base = [[node+0x24]+0x0C]
+           record_count = [[node+0x24]+0x10]
+           if index >= record_count: return NULL
+           record_ptr = group_base + 92 * index
+```
+
+The **92-byte record stride** is obtained from real instructions,
+`lea ecx,[esi+esi*2]`, `shl ecx,3`, `sub ecx,esi`,
+`lea eax,[edx+ecx*4]`: `4 × (24 - 1) = 92`. The group ID is a key
+in a **runtime registry**, **not** automatically a disc index, archive number,
+CD track or music ID. No concrete packed ID has yet been recovered from an
+actual level's resources.
+
+### Type-11 resource fixups: `0x459840`
+
+`0x459840` translates an event descriptor into controller-owned memory.
+It walks a **24-byte-stride** collection of nested records, invoking
+`0x453F90` on the first DWORD of each element (`call` at `0x459869`).
+An optional secondary pointer from descriptor `+0x28` is independently
+resolved by `0x453F90` at `0x459890`. The resulting pointers become
+input to event playback and must not be assumed to identify a particular
+`.apm` file.
+
+This is a genuine path from the controller to **loaded resource records**,
+but it still does not label a record as music versus sound effect. The
+next required provenance link is the group's archive registration/loading,
+which likely requires corresponding game resource files for confirmation.
+
+### A third, distinct dispatcher: `0x458530`
+
+Do not conflate event class, event descriptor conversion, and native driver
+transport. The 11-byte conversion table at `0x4585A0` maps event
+classes 1..11 to categories:
+
+```text
+event class :  1  2  3  4  5  6  7  8  9  10 11
+category    :  0  0  0  0  4  4  4  1  4   2  3
+```
+
+Category **3** used by type **11** returns the input descriptor at
+`0x458589` unchanged. Type **8** selects `0x458564 → 0x45AA00`,
+and type **10** selects `0x458550 → 0x45A4A0`. These conversion functions
+can resolve nested descriptors within an already selected type-11 event.
+Transport class **1=SXD / 2=MIDI** is a *separate* selector inside
+`0x458220`, unrelated to an event class number.
+
+All static checks above have been added to the read-only JSON inspector
+`tools/inspect_rayman2_audio.py` and its synthetic-only tests. A future
+comparison with the approved retail-CD binary is needed before using the
+addresses as patch locations.
+
 ## Native pause/resume dispatch — verified indirection
 
 `0x4580B0` is the game's global **pause** loop over 64 sound-table records. It increments nested depth at `0x4A3CC8`. `0x458110` is the inverse **resume** loop. Records whose `+0x10` transition flag is nonzero are dispatched through `0x4584A0` / `0x458470`, where SXD uses `0x4553A0` / `0x4553C0` and their dynamic slots `0x4B8708` / `0x4B870C`.
