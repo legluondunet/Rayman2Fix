@@ -69,7 +69,7 @@ def inspect_bytes(raw: bytes) -> dict:
         warnings.append("one or more declared media offsets beyond file; origin unverified")
 
     types = {}
-    by_id={}
+    resource_ids=[]
     themes = []
     for i in range(resource_count):
         p = res_begin + i * RESOURCE_BYTES
@@ -77,7 +77,7 @@ def inspect_bytes(raw: bytes) -> dict:
         kind = word(raw, p + 4)
         storage = word(raw, p + 8)
         types[str(kind)] = types.get(str(kind), 0) + 1
-        by_id.setdefault(ident,[]).append((i,kind))
+        resource_ids.append((ident,kind))
         if kind == 11:  # SND_E_TR_Theme, not SND_tdeTypeEvent
             themes.append({
                 "table_index": i,
@@ -112,16 +112,21 @@ def inspect_bytes(raw: bytes) -> dict:
             status="null-resource-reference"
             target_index=None
         else:
-            matches=by_id.get(ref,[])
-            if len(matches)==1:
-                target_index,target_kind=matches[0]
-                status="local-theme" if target_kind==11 else "local-non-theme"
-            elif len(matches)>1:
-                status="ambiguous-duplicate-local-id"
-                target_index=None
-            else:
+            # Native 0x453F90: upper16 looks up the bank, lower16
+            # DIRECTLY indexes its 92-byte resource table. Do not
+            # search resource.Id fields by value: duplicate or
+            # out-of-order records could yield a false Theme match.
+            index=ref & 0xFFFF
+            if index>=len(resource_ids):
                 status="not-in-this-bank"
                 target_index=None
+            elif resource_ids[index][0]!=ref:
+                status="bank-id-or-record-index-mismatch"
+                target_index=None
+            else:
+                target_index=index
+                status=("local-theme" if resource_ids[index][1]==11
+                        else "local-non-theme")
         event={
             "event_table_index":i,
             "event_id_hex":f"0x{event_id:08X}",
