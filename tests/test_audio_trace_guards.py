@@ -106,6 +106,39 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("active!=1u ||", self.runtime)
         self.assertNotIn("MusicInPauseMenu", self.config)
 
+    def test_theme_resource_and_nested_sxd_owner_is_bounded_and_read_only(self):
+        # SND_E_TR_Theme controller handle comes from 0x459B3A and the
+        # inner sound-table index from 0x459AF4. Never equate an SXD
+        # handle with music unless the unique outer/inner link is proven.
+        section=self.runtime.split(
+            "AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {",1)[1]
+        section=section.split("struct AudioSoundContext {",1)[0]
+        self.assertIn("kControllerRva=0xB95B8",section)
+        self.assertIn("kNestedSlotRva=0xB95E8",section)
+        self.assertIn("kSoundTableRva=0xB8C98",section)
+        self.assertIn("Record table[64]{}",section)
+        self.assertIn("ReadProcessMemory(",section)
+        self.assertIn("header[1]!=11u",section)
+        self.assertIn("inner_header[1]!=1u",section)
+        self.assertIn("out.outer_candidates!=1u",section)
+        self.assertIn("out.inner_driver_matches==1u",section)
+        self.assertIn("argument==inner_handle",section)
+        self.assertIn("active==0u || slot>=64u",section)
+        self.assertIn("table[i].words[5]==0u",section)
+        self.assertIn("theme_owned_driver",section)
+        self.assertNotIn("WriteProcessMemory(",section)
+        self.assertNotIn("VirtualProtect(",section)
+        self.assertNotIn("original(",section)
+        trace=self.runtime.split("void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1]
+        trace=trace.split("void __stdcall audio_pause_sxd(",1)[0]
+        self.assertIn("theme=inspect_audio_theme_owner(arg)",trace)
+        self.assertIn("RUNTIME-AUDIO-THEME-OWNER:",trace)
+        self.assertIn("(read-only; no music bypass)",trace)
+        self.assertLess(trace.index("theme=inspect_audio_theme_owner(arg)"),
+                        trace.index("if(original) original(arg);"))
+        self.assertIn("if(original) original(arg);",trace)
+        self.assertNotIn("MusicInPauseMenu",self.config)
+
     def test_transition_play_to_pause_correlation_is_research_only(self):
         # _SND_fn_lPlayTransitionExSxd@20 has FIVE stdcall arguments.
         # Its driver handle may or may not be music: never suppress it.
