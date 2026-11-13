@@ -180,6 +180,93 @@ class TraceEvidenceTests(unittest.TestCase):
         self.assertEqual(result["native_loaded_bank_provenance"],[])
         self.assertTrue(result["record_Id_halves_are_not_authenticated_BNM_provenance"])
 
+    def test_real_log_pattern_menu_flag_bracketing_without_ESC_claim(self):
+        # Synthetic reduction of the owner's Nov 13 timing: scripted
+        # driver pause precedes positive VM menu flag; native stop at
+        # depth 2 observes flag already zero before next UI poll.
+        observations = [
+            {"session": 1, "ms": 1332, "value": 0,
+             "source": "periodic-ui-poll-change"},
+            {"session": 1, "ms": 38779, "value": 0,
+             "source": "before-sampled-audio-driver-call"},
+            {"session": 1, "ms": 38780, "value": 0,
+             "source": "before-sampled-audio-driver-call"},
+            {"session": 1, "ms": 39162, "value": 1,
+             "source": "periodic-ui-poll-change"},
+            {"session": 1, "ms": 50497, "value": 0,
+             "source": "before-sampled-audio-driver-call"},
+            {"session": 1, "ms": 50864, "value": 0,
+             "source": "periodic-ui-poll-change"},
+        ]
+        windows, invalid = M.bracket_observed_menu_flag_changes(observations)
+        self.assertEqual(invalid, 0)
+        self.assertEqual(len(windows), 2)
+        opened, closed = windows
+        self.assertEqual(opened["observed_change"], "0-to-1")
+        self.assertEqual((opened["earliest_bound_ms"], opened["latest_bound_ms"]),
+                         (38780, 39162))
+        self.assertEqual(opened["bounds_width_ms"], 382)
+        self.assertEqual(closed["observed_change"], "1-to-0")
+        self.assertEqual((closed["earliest_bound_ms"], closed["latest_bound_ms"]),
+                         (39162, 50497))
+        self.assertEqual(closed["new_sample_source"],
+                         "before-sampled-audio-driver-call")
+        self.assertTrue(all(w["not_proof_of_ESC_or_F1_menu"] for w in windows))
+        self.assertTrue(all(w["intermediate_state_changes_cannot_be_excluded"]
+                            for w in windows))
+        self.assertTrue(all(w["exact_change_time_not_observed"] for w in windows))
+
+    def test_menu_flag_bounds_ignore_unknown_and_never_bridge_sessions(self):
+        observations = [
+            {"session": 1, "ms": 5, "value": 0, "source": "poll"},
+            {"session": 1, "ms": 6, "value": -1, "source": "call"},
+            {"session": 2, "ms": 5, "value": 1, "source": "poll"},
+            {"session": 1, "ms": 7, "value": 1, "source": "call"},
+        ]
+        windows, skipped=M.bracket_observed_menu_flag_changes(observations)
+        self.assertEqual(skipped,0)
+        self.assertEqual(len(windows),1)
+        self.assertEqual(windows[0]["session"],1)
+        self.assertEqual((windows[0]["earliest_bound_ms"],
+                          windows[0]["latest_bound_ms"]), (5,7))
+        self.assertTrue(windows[0]["not_proof_of_ESC_or_F1_menu"])
+
+    def test_timestamp_reset_does_not_create_false_menu_flag_interval(self):
+        observations = [
+            {"session": 1, "ms": 200, "value": 1, "source": "poll"},
+            {"session": 1, "ms": 12, "value": 0, "source": "call"},
+            {"session": 1, "ms": 13, "value": 1, "source": "poll"},
+        ]
+        windows, nonmonotonic = M.bracket_observed_menu_flag_changes(
+            observations)
+        self.assertEqual(nonmonotonic, 1)
+        self.assertEqual(len(windows), 1)
+        self.assertEqual((windows[0]["earliest_bound_ms"],
+                          windows[0]["latest_bound_ms"]), (12,13))
+
+    def test_parser_combines_audio_call_and_poll_snapshots_in_file_order(self):
+        lines = [
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=100 in_game_menu=0 "
+            "engine_paused=0 foreground=1",
+            trace("PauseTransitionSxd",1,1000) +
+            " ui_in_game_menu_at_call=0 ui_engine_paused_at_call=0",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=1382 in_game_menu=1 "
+            "engine_paused=0 foreground=1",
+            trace("StopTransitionSxd",1,2000,depth=2,origin="unknown") +
+            " ui_in_game_menu_at_call=0 ui_engine_paused_at_call=0",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=2382 in_game_menu=0 "
+            "engine_paused=0 foreground=1",
+        ]
+        summary=M.summarize("\n".join(lines))
+        windows=summary["observed_native_menu_flag_change_windows"]
+        self.assertEqual([x["observed_change"] for x in windows],
+                         ["0-to-1","1-to-0"])
+        self.assertEqual([(x["earliest_bound_ms"],x["latest_bound_ms"])
+                          for x in windows],[(1000,1382),(1382,2000)])
+        self.assertTrue(summary[
+            "menu_windows_are_not_confirmed_ESC_UI_lifetimes"])
+
     def test_appended_runs_cannot_pair_identical_ids_from_different_sessions(self):
         data = "\n".join((
             "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
