@@ -124,6 +124,19 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("0x4582A4",self.runtime)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
+    def test_transition_descriptor_content_comparison_is_read_only(self):
+        # Snapshot four words at play time and emit equality bits only.
+        # A matching transport or volume is not itself a music identity.
+        self.assertIn("g_last_transition_desc_words[4]", self.runtime)
+        self.assertIn("g_last_transition_desc_readable", self.runtime)
+        self.assertIn("desc_words_readable=%u", self.runtime)
+        self.assertIn("desc_words_equal_mask=%u", self.runtime)
+        self.assertIn("current_words[k]==g_last_transition_desc_words[k].load(", self.runtime)
+        self.assertIn("out.match_count!=1u", self.runtime)
+        self.assertIn("safe_read(reinterpret_cast<const void*>(desc_addr)", self.runtime)
+        self.assertIn("got==sizeof(words)", self.runtime)
+        self.assertNotIn("MusicInPauseMenu", self.config)
+
     def test_exact_owner_cd_slots_are_named_and_bounded(self):
         expected={
             "PauseSxd":"0xB8664", "ResumeSxd":"0xB8668",
