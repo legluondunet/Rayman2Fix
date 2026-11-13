@@ -417,6 +417,9 @@ struct AudioSequenceContext {
     int table_index=-1;
     unsigned active=0;
     unsigned same_handle=0;
+    // 0=unreadable, 1=zero, 2=one, 3=other nonzero.
+    // The native type-11 callback at 0x459C40 accepts any nonzero state.
+    unsigned state_class=0;
 };
 AudioSequenceContext inspect_audio_sequence_context(DWORD argument) {
     AudioSequenceContext out{};
@@ -432,8 +435,9 @@ AudioSequenceContext inspect_audio_sequence_context(DWORD argument) {
     constexpr std::uintptr_t kSequenceSlotRva=0xB95E8;   // 0x4B95E8
     constexpr std::uintptr_t kSoundTableRva=0xB8C98;    // 0x4B8C98
     DWORD active=0,slot=0,handle=0;
-    if(!read_word(kSequenceActiveRva,&active) || active!=1u ||
-       !read_word(kSequenceSlotRva,&slot) || slot>=64u ||
+    if(!read_word(kSequenceActiveRva,&active))return out;
+    out.state_class=active==0u ? 1u : (active==1u ? 2u : 3u);
+    if(active==0u || !read_word(kSequenceSlotRva,&slot) || slot>=64u ||
        !read_word(kSoundTableRva+std::uintptr_t(slot)*32u,&handle) ||
        !handle || handle==0xFFFFFFFFu)return out;
     out.table_index=static_cast<int>(slot);
@@ -751,12 +755,12 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
     char line[900]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_same_handle=%u transition_last_play_match=%u transition_desc_match=%u desc_words_readable=%u desc_words_equal_mask=%u desc_volume=%u play_volume=%u desc_head_pair_readable=%u desc_head_contents_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_state_class=%u sequence_same_handle=%u transition_last_play_match=%u transition_desc_match=%u desc_words_readable=%u desc_words_equal_mask=%u desc_volume=%u play_volume=%u desc_head_pair_readable=%u desc_head_contents_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
         unsigned(arg==0),source.table_index,source.match_count,source.transport,
         source.transition,source.active,sequence.table_index,
-        sequence.active,sequence.same_handle,last_play_match,
+        sequence.active,sequence.state_class,sequence.same_handle,last_play_match,
         source.descriptor_matches_play,source.descriptor_words_readable,
         source.descriptor_words_equal_mask,source.descriptor_volume_byte,
         source.play_volume_byte,source.descriptor_head_pair_readable,
