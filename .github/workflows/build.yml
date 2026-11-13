@@ -120,14 +120,20 @@ jobs:
           $help = (& $exe --help | Out-String)
           if ($LASTEXITCODE -ne 0 -or !$help.Contains('--install-only') -or
               !$help.Contains('--launch-no-verify') -or
-              !$help.Contains('--verbose') -or $help.Contains('--inspect') -or
-              $help.Contains('--extract')) {
+              !$help.Contains('--verbose') -or !$help.Contains('--inspect') -or
+              !$help.Contains('-h') -or $help.Contains('--extract')) {
             throw 'Help must show only supported installer commands'
           }
           & $exe --version
           if ($LASTEXITCODE -ne 0) { throw '--version failed' }
           & $exe --inspect test.iso
-          if ($LASTEXITCODE -ne 2) { throw 'Legacy --inspect must be refused' }
+          if ($LASTEXITCODE -ne 2) { throw 'Missing/unsupported ISO must fail with a log' }
+          if (!(Test-Path build/Release/Rayman2Fix_inspect.log) -or
+              !(Select-String -Path build/Release/Rayman2Fix_inspect.log -Pattern 'INSPECT_RESULT=FAILED')) {
+            throw 'Inspect must create a separate failure report'
+          }
+          & $exe -h
+          if ($LASTEXITCODE -ne 0) { throw '-h must show help' }
           & $exe --extract test.iso
           if ($LASTEXITCODE -ne 2) { throw 'Legacy --extract must be refused' }
           & $exe --install-only --verbose
