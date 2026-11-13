@@ -13,7 +13,17 @@ On the one SHA-256-approved original CD executable, and only when
 `[Debug] Log=1`, this tracer observes up to 16 calls per native
 audio channel (14 independently bounded channels), including Sxd
 pause/resume/stop, Sxd transitions, sound volume, MIDI,
-MIDI transitions and CD audio. The verified original driver function is always called with
+MIDI transitions and CD audio.
+The 1999 PC CD assembly additionally confirms a 64-record global
+sound table and one global audio pause-depth counter. Research-only
+log lines now include the matching `sound_slot` number (0–63, when
+available), native `sound_transport` (SXD=1 / MIDI=2 when readable),
+transition and active flags, and `global_pause_depth`. These are
+read-only observations, **not proof of a music stream**, and no
+raw memory address, sound resource filename or pointer is logged.
+The global audio pause routine is invoked both by the window
+activation handler and by a native game script, so suppressing its
+calls based on a key or focus alone would be unsafe. The verified original driver function is always called with
 the same argument; no sound is silenced, played, skipped, replaced,
 or looped. Installation of those diagnostic-only hooks fails closed
 when driver functions or game-memory protections are unexpected.

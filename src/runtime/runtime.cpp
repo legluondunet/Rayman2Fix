@@ -387,6 +387,57 @@ bool writable_audio_slot(const void* addr) {
         default:return false;
     }
 }
+// Owner's exact CD executable, source RVA=0x4580B0: the *global*
+// pause/resume dispatcher walks 64 sound records, 0x20 bytes each,
+// starting at 0x4B8C98. This maps an opaque driver argument back to a
+// SOUND TABLE INDEX, not a song ID. The same dispatcher is called by
+// Win32 activation code at 0x401C9C and by native script dispatcher
+// at 0x471E70; a key press alone cannot distinguish those sources.
+struct AudioSoundContext {
+    int table_index=-1;
+    unsigned transport=0;
+    unsigned transition=0;
+    unsigned active=0;
+    int pause_depth=-1;
+};
+AudioSoundContext inspect_audio_sound_context(DWORD argument) {
+    AudioSoundContext out{};
+    auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!module)return out;
+    // No dereference into a dynamic driver and no raw pointer logging.
+    const HANDLE process=GetCurrentProcess();
+    const auto safe_read=[&](const void* address,void* bytes,SIZE_T size) {
+        SIZE_T got=0;
+        return ReadProcessMemory(process,address,bytes,size,&got)!=0 && got==size;
+    };
+    constexpr std::uintptr_t kPauseDepthRva=0xA3CC8; // 0x4A3CC8
+    DWORD depth=0;
+    if(safe_read(module+kPauseDepthRva,&depth,sizeof(depth)) && depth<=16u)
+        out.pause_depth=static_cast<int>(depth);
+    constexpr std::uintptr_t kSoundTableRva=0xB8C98; // 0x4B8C98
+    constexpr unsigned kSoundTableSlots=64u;
+    struct SoundTableRecord { DWORD words[8]; };
+    SoundTableRecord entries[kSoundTableSlots]{};
+    if(!argument || !safe_read(module+kSoundTableRva,
+       entries,sizeof(entries)))return out;
+    for(unsigned i=0;i<kSoundTableSlots;++i) {
+        if(entries[i].words[0]!=argument)continue;
+        out.table_index=static_cast<int>(i);
+        // These fields are read-only observations of the game's own sound
+        // table. Their interpretation is not used to change playback.
+        out.transition=unsigned(entries[i].words[4]!=0);
+        out.active=unsigned(entries[i].words[5]!=0);
+        DWORD type=0;
+        const std::uintptr_t desc=std::uintptr_t(entries[i].words[1]);
+        if(desc>=0x10000u && safe_read(
+            reinterpret_cast<const void*>(desc+4u),&type,sizeof(type)) &&
+            type>=1u && type<=2u)
+            out.transport=type;
+        break;
+    }
+    return out;
+}
+
 void audio_trace_forward(unsigned slot,DWORD arg) {
     const auto original=reinterpret_cast<AudioPauseFn>(
         g_audio_original[slot].load(std::memory_order_acquire));
@@ -398,12 +449,15 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         1u,std::memory_order_relaxed);
     if(!g_log || event>=16u)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
-    char line[232]{};
+    const AudioSoundContext source=inspect_audio_sound_context(arg);
+    char line[330]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u foreground=%u esc_down=%u f1_down=%u (forwarded unchanged; no sound modifications)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_transport=%u sound_transition=%u sound_active=%u global_pause_depth=%d foreground=%u esc_down=%u f1_down=%u (forwarded unchanged)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
-        unsigned(arg==0),unsigned(game_window_is_foreground()),
+        unsigned(arg==0),source.table_index,source.transport,
+        source.transition,source.active,source.pause_depth,
+        unsigned(game_window_is_foreground()),
         unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0),
         unsigned((GetAsyncKeyState(VK_F1)&0x8000)!=0));
     log_line(line);

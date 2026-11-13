@@ -35,6 +35,13 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("if(original) original(arg);",section)
         self.assertIn("event>=16u",section)
         self.assertIn("arg_zero=",section)
+        self.assertIn("sound_slot=",section)
+        self.assertIn("global_pause_depth=",section)
+        self.assertIn("inspect_audio_sound_context(arg)",section)
+        self.assertIn("ReadProcessMemory(process,address,bytes,size,&got)",self.runtime)
+        self.assertIn("kSoundTableSlots=64u",self.runtime)
+        self.assertIn("kSoundTableRva=0xB8C98",self.runtime)
+        self.assertIn("kPauseDepthRva=0xA3CC8",self.runtime)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
     def test_exact_owner_cd_slots_are_named_and_bounded(self):
