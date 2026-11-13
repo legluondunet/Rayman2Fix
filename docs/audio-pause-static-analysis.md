@@ -244,6 +244,42 @@ A new [eight-case research-only synthetic dual-dispatch model](../tests/test_aud
 **Implementation guard:** a future opt-in feature must reconcile the **two original participating records** (both of their native marks, logical Theme lifetime, and independent ESC/focus reasons), never just intercept one `PauseTransitionSxd` by driver handle. Even a post-dispatch `resume` is insufficient unless a subsequent focus loss can force an actual driver pause despite the game's already-set marks and focus gain cannot resume it inadvertently. Preserve `StopTransitionSxd` and level transitions unchanged; no F1 changes, INI key, DLL hook, or default behavior changes.
 
 
+
+### Retail-CD Theme callback transaction guard and direct caller inventory
+
+A new independent disassembly of the **approved CD** `Rayman2(3).exe` checks the mutable global `0x4B9618` (located in the zero-filled virtual data range, **not** file-backed at this VA). Exactly **six literal DWORD operands in the CD `.text`** reference it; the modified reference has the **same six operands at the same VAs**:
+
+| Native VA | Operation | Source-backed interpretation |
+| --- | --- | --- |
+| `0x459694` | `mov [0x4B9618], edx` with `edx=0` from `0x459678` | Clear during initial controller data initialization for the no-parts branch |
+| `0x4596E0` | `mov eax,[0x4B9618]; test eax,eax; jne 0x459751` | While the flag is nonzero, return before the callback's part-advance work |
+| `0x45999D` | `mov dword [0x4B9618],1` | Mark beginning of a Theme start/replacement operation |
+| `0x459B2C` | `mov dword [0x4B9618],0` | Clear at the end of that start operation |
+| `0x459BE5` | `mov dword [0x4B9618],1` | Mark beginning of the Theme stop path |
+| `0x459C23` | `mov dword [0x4B9618],0` | Clear after the stop has run and the controller first DWORD has been set to zero |
+
+The address of the guarded callback `0x4596E0` is passed to `0x458220` at **`0x459AE5`**, whose creation path calls the SXD transition player. This strongly supports **a native callback-inhibition mechanism during Theme creation/stop**, not an arbitrary unused field. Importantly, **it is NOT a thread-safe lock, a guarantee of audio silence, or a reliable direct proxy for pause-menu state**. It may be accessed indirectly by code paths not found by literal operand scanning; the scan does not establish all possible callers or threads. The process's live value has not been observed.
+
+Further, scanning every `E8 rel32` byte pattern in the CD `.text` and independently in the research reference returns precisely the following *direct-call candidates* for these six specific target functions:
+
+| Target | Exact E8 site VAs in both images |
+| --- | --- |
+| Shared pause wrapper `0x4536D0` | `0x401C9C` (Win32), `0x471E70` (script) |
+| Shared resume wrapper `0x453700` | `0x401CE9` (Win32), `0x471E67` (script) |
+| Global pause loop `0x4580B0` | `0x4536ED` |
+| Global resume loop `0x458110` | `0x45371D` |
+| Native inner SXD transition pause `0x4584A0` | `0x4580E1` (inner) and `0x459C4D` (Theme delegated) |
+| Native inner SXD transition resume `0x458470` | `0x458151` (inner) and `0x459C6D` (Theme delegated) |
+
+These are **literal five-byte E8 call candidates**, cross-checked against disassembly at each known site. They are **not** a complete interprocedural call graph, and they **cannot exclude indirect calls** or custom return sites. They do establish that the two independently verified upstream callers to the shared wrapper are the script and Win32 origins, without relying on `GetAsyncKeyState(VK_ESCAPE)` as a menu detector.
+
+The original CD's `.data` explicitly initializes native global pause depth `[0x4A3CC8]` to **1**, equal to the reference. That matches the runtime values at owner ESC events but is not sufficient to classify arbitrary pauses.
+
+The original owner trace also shows the **same outer Theme ID (73:48) with different inner resources (73:50 → 73:51)**. An implementation that treats every inner sample change as a *new* soundtrack would incorrectly lose the logical Theme identity; an implementation that caches only the recycled SXD handle could accidentally resume a successor after stop. A future generation token must therefore distinguish *outer Theme creation/stop* from *inner part replacement*, and never compensate/forward a stale driver handle across either kind of lifecycle change.
+
+The SHA-pinned [retail-CD audio parity tool](../tools/check_rayman2_cd_audio_parity.py) now has explicit checks for all six flag sites, callback registration, and the six sets of known E8 caller sites. Pure synthetic tests cover E8 scan, VA mapping, flag operands, and the important distinction between **selected-region equality** and **complete native-audio proof**. The first new synthetic CI run failed due to incorrectly requiring genuine CD transaction anchors even with `check_anchors=False`; this test-harness bug has been corrected without weakening real pinned-CD checks, and CI rerun. No actual game patch, audio hook, INI option or soundtrack file is introduced.
+
+
 ## Native pause/resume dispatch — verified indirection
 
 `0x4580B0` is the game's global **pause** loop over 64 sound-table records. It increments nested depth at `0x4A3CC8`. `0x458110` is the inverse **resume** loop. Records whose `+0x10` transition flag is nonzero are dispatched through `0x4584A0` / `0x458470`, where SXD uses `0x4553A0` / `0x4553C0` and their dynamic slots `0x4B8708` / `0x4B870C`.
