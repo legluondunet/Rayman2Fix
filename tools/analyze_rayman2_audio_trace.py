@@ -39,7 +39,7 @@ def summarize(text: str) -> dict:
         if "RUNTIME-AUDIO-TRACE: enabled=1 schema=2" in line:
             schema2 = True
         if TRACE in line:
-            data = fields(line.split(TRACE, 1)[1])
+            data = fields(line.split("RUNTIME-AUDIO-TRACE:", 1)[1])
             event = data.get("event")
             sample = number(data, "sample")
             if not event or sample < 0:
@@ -56,7 +56,7 @@ def summarize(text: str) -> dict:
             events.append(obj)
             by_event_sample[(event, sample)] = obj
         elif OWNER in line:
-            data = fields(line.split(OWNER, 1)[1])
+            data = fields(line.split("RUNTIME-AUDIO-THEME-OWNER:", 1)[1])
             key = (data.get("channel", ""), number(data, "sample"))
             event = by_event_sample.get(key)
             if event is None or event["owner"] is not None:
