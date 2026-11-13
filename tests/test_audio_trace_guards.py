@@ -96,6 +96,16 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("argument==handle",section)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
+    def test_sequence_state_follows_native_nonzero_guard(self):
+        # The game's type-11 pause callback checks state != 0,
+        # not state == 1. Earlier 'inactive' traces were ambiguous.
+        self.assertIn("0x459C40 accepts any nonzero state", self.runtime)
+        self.assertIn("sequence_state_class=%u", self.runtime)
+        self.assertIn("out.state_class=active==0u ? 1u : (active==1u ? 2u : 3u)", self.runtime)
+        self.assertIn("if(active==0u || !read_word(", self.runtime)
+        self.assertNotIn("active!=1u ||", self.runtime)
+        self.assertNotIn("MusicInPauseMenu", self.config)
+
     def test_transition_play_to_pause_correlation_is_research_only(self):
         # _SND_fn_lPlayTransitionExSxd@20 has FIVE stdcall arguments.
         # Its driver handle may or may not be music: never suppress it.
