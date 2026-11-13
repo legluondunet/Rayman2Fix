@@ -154,7 +154,7 @@ The open-source [ACP_Ray2 sound module](https://github.com/raytools/ACP_Ray2/tre
 | `+0x24` | `p_stData` | `0x453FB2` loads bank head |
 | `+0x3C` | `hNextBrotherDyn` | `0x4538D2` advances linked list |
 
-The loaded bank head `SND_tdstSndBankHead` contains its optimized **resource list first pointer at `+0x0C`** and **resource count at `+0x10`**. Native `0x453F90` reads those exact fields and selects one **92-byte** `SND_tdstBlockResourceMem` record. This resolves the previously unnamed “resource groups”: they are **sound banks**. The packed upper16 value is a bank **ID**, not necessarily the numeric suffix of a `BNK_N.BNM` filename.
+The loaded bank head `SND_tdstSndBankHead` contains its optimized **resource list first pointer at `+0x0C`** and **resource count at `+0x10`**. Native `0x453F90` reads those exact fields and selects one **92-byte** `SND_tdstBlockResourceMem` record. This resolves the previously unnamed “resource groups”: they are **sound banks**. The packed upper16 value is the loaded bank **ID**. In this **non-approved reference EXE**, the native filename formatter maps it to `bnk_<decimal bank ID>.BNM` (verified below); this correspondence is not independently verified against the original retail CD.
 
 **Loaded resource record** `SND_tdstBlockResourceMem` (92 bytes):
 
@@ -332,6 +332,20 @@ python3 tools/inspect_rayman2_bnm.py /path/to/DATA/WORLD/SOUND/BNK_0.BNM
 ```
 
 The output includes `table_ranges_file_relative`, `play_event_references_candidate`, and `local_play_events_referring_to_themes_candidate`. These describe **candidate static structure**, not which song is heard in game, nor whether the file is an original retail bank. `verified_against_actual_retail_cd_bnm=false` and `audio_extracted=false` are mandatory. Media offsets, claimed data lengths and bank filename suffixes are **not authoritative** for CD installation or integrity. The [synthetic-only tests](../tests/test_audio_bnm_inspector.py) exercise contiguous, gapped, **reversed** lists, truncated records, overlapping or invalid offsets, null/other-bank event references, and deliberate resource-ID/index mismatch. No commercial bank/media assets are added to CI.
+
+### Filename mapping proven in the supplied reference EXE
+
+A previously open gap is now closed **for this exact reference executable**. The native `SND_tdstSndBankDescriptorElement` allocator `0x4538E0` stores the numeric `lId` argument at **descriptor+4** (`0x453945`) and passes that **same argument** to `0x453870` at **`0x453948`**. The formatter pushes a literal format string from VA `0x4A252C`, whose bytes decode exactly to:
+
+```text
+bnk_%d.BNM
+```
+
+Its output is copied into descriptor `szFileName[13]` starting at **+0x0C** (`0x45392E`). Therefore for the supplied reference EXE, **bank ID 23 deterministically formats to `bnk_23.BNM`** (for a valid short numeric name). This is not inferred from the unrelated `.extra2` filename inventory; it is a direct functional mapping visible in the sound-bank loader.
+
+The revised BNM inspector additionally reports `candidate_reference_bnm_filename` **only** if all on-disk resource IDs have the same upper16 bank ID and each low16 component equals its actual resource table index, precisely as `0x453F90` resolves references. Inconsistent indices, mixed bank IDs or empty resource lists yield no candidate filename. This still **does not** identify a particular audible song: a real BNM is required for the Theme resource identity, and independent retail-CD equivalence remains pending.
+
+The standalone PE inspector verifies the exact format-string bytes, the `lId` assignment and the formatter call. No game binary, audio payload or game runtime is changed.
 
 ### Proposed independent-cause pause policy — specification only
 
