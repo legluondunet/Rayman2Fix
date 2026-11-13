@@ -246,6 +246,22 @@ class AudioStaticInspectorTests(unittest.TestCase):
         self.assertNotIn('"inner_record_slot"',src)
         self.assertNotIn('"writes_nested_slot"',src)
 
+    def test_native_sound_record_pointer_decoding_is_strict(self):
+        # Native 0x4574E0 returns an ADDRESS into the 64x32-byte array;
+        # old instrumentation compared that address directly to 64.
+        base=0x4B8C98
+        for index in (0,1,8,63):
+            self.assertEqual(
+                M.decode_native_sound_record_pointer(base+32*index,base),
+                index)
+        for pointer in (0,0xFFFFFFFF,base-32,base+1,base+31,
+                        base+64*32,base+64*32+1,0x1_0000_0000):
+            with self.subTest(pointer=pointer):
+                self.assertIsNone(
+                    M.decode_native_sound_record_pointer(pointer,base))
+        self.assertIsNone(M.decode_native_sound_record_pointer(base,base,0))
+        self.assertIsNone(M.decode_native_sound_record_pointer(base,base,64,0))
+
     def test_unknown_binary_never_invents_structural_matches(self):
         with tempfile.TemporaryDirectory() as d:
             fn = Path(d) / "synthetic.exe"
