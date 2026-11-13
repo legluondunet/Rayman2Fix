@@ -134,6 +134,26 @@ WINDOW_PAUSE_TITLE_XREFS = (0x401767, 0x401A19)
 AI_MENU_VM_OPCODE_ID = 0x1F8
 AI_MENU_VM_HANDLER_VA = 0x4730A0
 AI_MENU_VM_ENTRY_VA = 0x4A43E0 + 8 * AI_MENU_VM_OPCODE_ID
+# Menu flag switches the game's own camera/viewport path in the display
+# pipeline; verified against both owner-provided executables. Neither
+# branch identifies ESC vs F1 or an actually visible menu.
+MENU_RENDER_BRANCH_BYTES = bytes.fromhex(
+    "A0 C8 9B 4B 00 83 C4 18 84 C0 74 13"
+    " 68 D4 04 50 00 E8 27 94 01 00"
+    " 83 C4 04 5F 5E 83 C4 14 C3"
+    " 68 58 04 50 00 56 57 E8 42 EF 01 00"
+    " 83 C4 0C 5F"
+)
+
+
+def verify_native_menu_viewport_branch(pe: "PE32") -> bool:
+    return (
+        pe.at(0x40B003, len(MENU_RENDER_BRANCH_BYTES))
+        == MENU_RENDER_BRANCH_BYTES
+        and pe.call_target(0x40B014) == 0x424440
+        and pe.call_target(0x40B029) == 0x429F70
+    )
+
 INGAME_MENU_CODE_ANCHORS = (
     ("initialise_false", 0x40376A, bytes.fromhex("C6 05 C8 9B 4B 00 00")),
     ("load_VM_opcode_and_compare_1F8", 0x4730A0,
@@ -424,6 +444,10 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
     menu_indicators_verified = bool(check_anchors and
         all(x["native_relationships_verified"]
             for x in menu_indicators.values()))
+    menu_render_verified = bool(check_anchors and
+        verify_native_menu_viewport_branch(cd) and
+        verify_native_menu_viewport_branch(ref))
+
     rdata_identical = cd.section(".rdata") == ref.section(".rdata")
     verified_windows = all(w["identical"] for w in windows)
     verified_native_anchors = (
@@ -431,7 +455,7 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             call_sites + byte_anchors + dispatcher_pointers + transaction_ops)
         and all(x["confirmed_bytewise_both"] for x in direct_call_candidates)
         and transaction_xrefs_verified and callback_registration_verified
-        and script_opcode_verified
+        and script_opcode_verified and menu_render_verified
     ) if check_anchors else False
     # A caller may disable native anchors for synthetic PE parser tests only.
     # That MUST NOT accidentally yield a full original-CD audio-path proof.
@@ -443,6 +467,16 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             "rdata_raw_identical": rdata_identical,
             "rdata_raw_bytes": len(cd.section(".rdata")),
             "regions": windows, "call_sites": call_sites, "opcode_anchors": byte_anchors,
+            "original_cd_render_menu_viewport_branch_verified":
+                pinned and menu_render_verified,
+            "native_menu_render_branch": {
+                "verified_both": menu_render_verified,
+                "flag_va": "0x004B9BC8",
+                "when_menu_flag_nonzero_viewport_va": "0x005004D4",
+                "when_menu_flag_zero_viewport_va": "0x00500458",
+                "proves_ESC_only": False,
+                "proves_menu_visible_at_audio_call": False,
+            },
             "original_cd_menu_state_relationships_verified":
                 pinned and menu_indicators_verified,
             "native_menu_indicator_audit": {
