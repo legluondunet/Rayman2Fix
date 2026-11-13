@@ -40,8 +40,15 @@ class EscThemePolicy:
         self.playing = target
         return "resume" if target else "pause"
 
-    def start(self, resource_id: int, generation: int, *, owner_is_theme: bool) -> str:
-        if not owner_is_theme or not (0 <= resource_id <= 0xFFFFFFFF):
+    def start(
+        self, resource_id: int, generation: int, *,
+        owner_is_theme: bool, music_identity_confirmed: bool = False,
+    ) -> str:
+        # A Theme controller and its unique loaded BNM index identify a
+        # resource, NOT necessarily an audible soundtrack. Never relax
+        # the policy merely because a driver handle is Theme-owned.
+        if (not owner_is_theme or not music_identity_confirmed
+                or not (0 <= resource_id <= 0xFFFFFFFF)):
             return "none"
         self.owner_resource_id = resource_id
         self.generation = generation
@@ -56,6 +63,10 @@ class EscThemePolicy:
         self.native_play_requested = False
         self.playing = False
         self.generation = 0
+        # A new stream generation must receive independent menu identity
+        # evidence. Reusing an earlier "verified" ESC state across a
+        # legitimate native Stop/level transition is unsafe.
+        self.esc_menu_verified = False
         return "forget"  # Native StopTransition must pass through unchanged.
 
     def set_focus(self, *, known: bool, foreground: bool) -> str:
