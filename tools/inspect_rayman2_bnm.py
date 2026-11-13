@@ -138,6 +138,18 @@ def inspect_bytes(raw: bytes) -> dict:
         if status=="local-theme":
             local_theme_refs.append(event)
 
+    # The reference EXE formats a bank filename as "bnk_%d.BNM" from
+    # SND_tdstSndBankDescriptorElement.lId (0x453945/0x453948).
+    # Derive a *candidate* bank ID from resource records only if all
+    # packed high16 values agree AND low16 equals the native table
+    # index, as the 0x453F90 resolver requires.
+    groups={ident>>16 for ident,_kind in resource_ids}
+    index_consistent=all(
+        (ident&0xFFFF)==i for i,(ident,_kind) in enumerate(resource_ids))
+    bank_group=(
+        next(iter(groups)) if len(groups)==1 and index_consistent
+        else None
+    )
     return {
         "candidate_format": "CPA Rayman 2 BNM metadata",
         "physical_size": len(raw),
@@ -152,6 +164,12 @@ def inspect_bytes(raw: bytes) -> dict:
         "candidate_metadata_end": max(HEADER_BYTES,ev_end,res_end),
         "media_offsets_unverified":declared_media,
         "declared_total_unverified": declared_total,
+        "resource_table_indices_match_packed_ids":index_consistent,
+        "candidate_bank_id_when_consistent":bank_group,
+        "candidate_reference_bnm_filename":(
+            f"bnk_{bank_group}.BNM" if bank_group is not None else None
+        ),
+        "filename_mapping_not_verified_on_original_cd": True,
         "resource_type_counts": types,
         "event_type_counts":event_types,
         "theme_resources_candidate": themes,
