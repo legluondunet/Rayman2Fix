@@ -363,6 +363,20 @@ This is a deliberately narrow **fail-closed state specification**, not a simple 
 
 **Remaining integration work:** determine the actual Theme bank/resource ownership of the audible soundtrack and verify a way to reconcile this desired state with original `0x4580B0`/`0x458110` markers and driver calls. A model passing synthetic tests is **not** evidence the feature works or is safe under Wine/Windows; original-CD parity and one consolidated end-to-end test are still mandatory before release.
 
+## Current next step: prove Theme ownership from one native pause event
+
+The goal remains **level music audible during the in-game ESC pause**, while SFX obey their normal pause, the original Theme stop/change operations remain effective, and all audio pauses on loss of window focus. No F1 handling is in scope.
+
+We now have a **concrete structural source-ID test**, independent of a guessed fixed sound-table slot:
+
+1. The 64-entry native sound table `0x4B8C98` stores the **outer** Theme handle returned by `0x459950`/`0x459B3A`, which is the address of the Theme singleton `0x4B95B8`; its resource descriptor must have `SND_E_TR_Theme=11` at `+4`.
+2. The same singleton's `+0x30` field at `0x4B95E8` contains the **inner** sound-table index. The inner record must be active, transition-enabled, carry a native SXD resource type `1`, and own a **unique** driver handle.
+3. Only if the paused driver handle is exactly this unique inner handle is `theme_owned_driver=1`. The outer Theme resource's packed ID identifies its **BNM bank** (upper16) and resource table index (lower16). The inner resource ID is logged separately. Any absent, inactive, shared or ambiguous record yields **no confirmed owner**.
+
+This is implemented as a **read-only, bounded** `inspect_audio_theme_owner()` probe in the optional `RAYMAN2FIX_AUDIO_TRACE` build only. It reports a separate `RUNTIME-AUDIO-THEME-OWNER` line for the first eight native `PauseTransitionSxd`, `ResumeTransitionSxd` and `StopTransitionSxd` events, with `outer_candidates`, `outer_slot`, `theme_bank`, `theme_resource`, `inner_slot`, `inner_bank`, `inner_resource`, `inner_active`, `inner_transition`, `inner_handle_matches`, and `theme_owned_driver`. No raw pointers or resource-file contents are logged; no driver argument, call order or return value is changed. The ordinary release build compiles the probe out entirely.
+
+The previous `Rayman2Fix(20261113-091415).log` did **not** measure these outer/inner relationships. Although a driver handle matched one native transition record at ESC, **there is no proof yet that it was owned by the Theme controller**. Once that is established, the next safety gate remains reconciling native per-record pause marks and nested script/focus pause depths; naively suppressing one driver call is unsafe. Do **not** enable an experimental INI setting before that gate is resolved. A single consolidated Wine/Windows test of the research-only build (ESC open/close, Alt-Tab while ESC is open, real level transition) can later check the remaining runtime assumptions.
+
 ## Safety requirements before a functional `MusicInPauseMenu` option
 
 - Prove a **music resource identity** independently of driver pointer, table index, SXD transport, default volume or descriptor equality.
