@@ -27,7 +27,7 @@ def fake_bnm(event_count=2, resource_count=3, *, gap=0, reverse=False):
                      end,0,0,0,0,len(raw))
     for i in range(resource_count):
         p=resource_offset+i*92
-        struct.pack_into("<III",raw,p,(23<<16)|(i+2),1,0)
+        struct.pack_into("<III",raw,p,(23<<16)|i,1,0)
     if resource_count>=2:
         p=resource_offset+92
         struct.pack_into("<I",raw,p+4,11)
@@ -38,7 +38,7 @@ def fake_bnm(event_count=2, resource_count=3, *, gap=0, reverse=False):
         p=event_offset+i*32
         # A Play event may refer to a Theme resource by packed Id.
         struct.pack_into("<III",raw,p,(23<<16)|(100+i),1,
-                         (23<<16)|(3 if i==0 else 900))
+                         (23<<16)|(1 if i==0 else 900))
     return bytes(raw)
 
 class BnmMetadataTests(unittest.TestCase):
@@ -57,8 +57,8 @@ class BnmMetadataTests(unittest.TestCase):
             x["play_event_references_candidate"][1]["candidate_resolution"],
             "not-in-this-bank")
         t=x["theme_resources_candidate"][0]
-        self.assertEqual(t["packed_id_hex"], "0x00170003")
-        self.assertEqual((t["bank_group_from_id"],t["record_index_from_id"]), (23,3))
+        self.assertEqual(t["packed_id_hex"], "0x00170001")
+        self.assertEqual((t["bank_group_from_id"],t["record_index_from_id"]), (23,1))
         self.assertEqual((t["number_of_parts_candidate"],t["outro_offset_candidate"]), (3,-1))
         self.assertEqual(t["volume_byte_candidate"], 127)
         self.assertFalse(x["audio_extracted"])
@@ -89,20 +89,30 @@ class BnmMetadataTests(unittest.TestCase):
                 with self.assertRaises(M.BNMError):
                     M.inspect_bytes(bytes(raw))
 
-    def test_play_event_null_or_ambiguous_id_fails_closed(self):
+    def test_play_event_null_or_wrong_native_index_fails_closed(self):
         raw=bytearray(fake_bnm())
         struct.pack_into("<I",raw,44+8,0xFFFFFFFF)
         x=M.inspect_bytes(bytes(raw))
         self.assertEqual(
             x["play_event_references_candidate"][0]["candidate_resolution"],
             "null-resource-reference")
+        # Event references index 1; modifying record 1's packed Id
+        # must fail closed, NOT search another record by matching Id.
         raw=bytearray(fake_bnm())
-        struct.pack_into("<I",raw,108,(23<<16)|3)
+        struct.pack_into("<I",raw,108+92,(23<<16)|5)
         x=M.inspect_bytes(bytes(raw))
         self.assertEqual(
             x["play_event_references_candidate"][0]["candidate_resolution"],
-            "ambiguous-duplicate-local-id")
+            "bank-id-or-record-index-mismatch")
         self.assertEqual(x["local_play_events_referring_to_themes_candidate"],[])
+        # Event references index 2: this points to a non-Theme record,
+        # regardless of any other record's Id field.
+        raw=bytearray(fake_bnm())
+        struct.pack_into("<I",raw,44+8,(23<<16)|2)
+        x=M.inspect_bytes(bytes(raw))
+        self.assertEqual(
+            x["play_event_references_candidate"][0]["candidate_resolution"],
+            "local-non-theme")
 
     def test_declared_sizes_are_untrusted(self):
         raw=bytearray(fake_bnm())
