@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -39,8 +40,10 @@ def table_bounds(raw: bytes, offset: int, count: int, stride: int,
     return (offset, offset + count * stride)
 
 
-def inspect_bytes(raw: bytes) -> dict:
-    """Return candidate Theme metadata, never verified music/song identity."""
+def inspect_bytes(raw: bytes, *, bank_id_hint: int | None = None) -> dict:
+    """Read Theme metadata; optional bank ID is a filename hint, not provenance."""
+    if bank_id_hint is not None and not (0 <= bank_id_hint <= 0xFFFF):
+        raise BNMError("bank ID hint is not a 16-bit number")
     if len(raw) < HEADER_BYTES:
         raise BNMError("BNM shorter than candidate 44-byte bank header")
     # ACP_Ray2 SND_tdstSndBankHead has independent list offsets:
@@ -69,7 +72,7 @@ def inspect_bytes(raw: bytes) -> dict:
         warnings.append("one or more declared media offsets beyond file; origin unverified")
 
     types = {}
-    resource_ids=[]
+    resource_records=[]
     themes = []
     for i in range(resource_count):
         p = res_begin + i * RESOURCE_BYTES
@@ -77,13 +80,12 @@ def inspect_bytes(raw: bytes) -> dict:
         kind = word(raw, p + 4)
         storage = word(raw, p + 8)
         types[str(kind)] = types.get(str(kind), 0) + 1
-        resource_ids.append((ident,kind))
+        resource_records.append((ident,kind))
         if kind == 11:  # SND_E_TR_Theme, not SND_tdeTypeEvent
             themes.append({
                 "table_index": i,
-                "packed_id_hex": f"0x{ident:08X}",
-                "bank_group_from_id": ident >> 16,
-                "record_index_from_id": ident & 0xFFFF,
+                "record_id_field_hex": f"0x{ident:08X}",
+                "record_id_field_is_not_a_native_lookup_key": True,
                 "storage_kind": storage,
                 # SND_tdstBlockResourceDisk has declared length & offset.
                 # These are metadata, never verified stream lengths.
@@ -111,25 +113,30 @@ def inspect_bytes(raw: bytes) -> dict:
         if ref==0xFFFFFFFF:
             status="null-resource-reference"
             target_index=None
+        elif bank_id_hint is None:
+            # The bank file header does NOT store an authenticated bank
+            # number. The record's +0 Id field is not compared by native
+            # 0x453F90, so it cannot establish the bank's identity.
+            status="unresolved-bank-provenance"
+            target_index=None
+        elif (ref >> 16)!=bank_id_hint:
+            status="different-bank"
+            target_index=None
         else:
-            # Native 0x453F90: upper16 looks up the bank, lower16
-            # DIRECTLY indexes its 92-byte resource table. Do not
-            # search resource.Id fields by value: duplicate or
-            # out-of-order records could yield a false Theme match.
+            # Native 0x453F90 selects resource table[ref & 0xFFFF].
+            # It performs bounds checks, but no comparison to the
+            # on-disk record +0 identifier. Never reject based on it.
             index=ref & 0xFFFF
-            if index>=len(resource_ids):
+            if index>=len(resource_records):
                 status="not-in-this-bank"
-                target_index=None
-            elif resource_ids[index][0]!=ref:
-                status="bank-id-or-record-index-mismatch"
                 target_index=None
             else:
                 target_index=index
-                status=("local-theme" if resource_ids[index][1]==11
+                status=("local-theme" if resource_records[index][1]==11
                         else "local-non-theme")
         event={
             "event_table_index":i,
-            "event_id_hex":f"0x{event_id:08X}",
+            "event_record_id_field_hex":f"0x{event_id:08X}",
             "resource_id_hex":f"0x{ref:08X}",
             "candidate_resolution":status,
             "local_resource_table_index":target_index,
@@ -138,18 +145,10 @@ def inspect_bytes(raw: bytes) -> dict:
         if status=="local-theme":
             local_theme_refs.append(event)
 
-    # The reference EXE formats a bank filename as "bnk_%d.BNM" from
-    # SND_tdstSndBankDescriptorElement.lId (0x453945/0x453948).
-    # Derive a *candidate* bank ID from resource records only if all
-    # packed high16 values agree AND low16 equals the native table
-    # index, as the 0x453F90 resolver requires.
-    groups={ident>>16 for ident,_kind in resource_ids}
-    index_consistent=all(
-        (ident&0xFFFF)==i for i,(ident,_kind) in enumerate(resource_ids))
-    bank_group=(
-        next(iter(groups)) if len(groups)==1 and index_consistent
-        else None
-    )
+    # Both pinned CD and reference EXEs format a bank ID as bnk_%d.BNM,
+    # but a file's name is only an untrusted caller-supplied hint. The
+    # resource-record +0 ID does not prove the bank or the table index.
+    bank_group=bank_id_hint
     return {
         "candidate_format": "CPA Rayman 2 BNM metadata",
         "physical_size": len(raw),
@@ -164,12 +163,13 @@ def inspect_bytes(raw: bytes) -> dict:
         "candidate_metadata_end": max(HEADER_BYTES,ev_end,res_end),
         "media_offsets_unverified":declared_media,
         "declared_total_unverified": declared_total,
-        "resource_table_indices_match_packed_ids":index_consistent,
-        "candidate_bank_id_when_consistent":bank_group,
+        "resource_id_field_not_required_to_match_native_table_index": True,
+        "candidate_bank_id_from_filename_hint":bank_group,
         "candidate_reference_bnm_filename":(
             f"bnk_{bank_group}.BNM" if bank_group is not None else None
         ),
-        "filename_mapping_not_verified_on_original_cd": True,
+        "filename_is_not_bank_authenticity_proof": True,
+        "native_cd_bank_filename_format_previously_verified": True,
         "resource_type_counts": types,
         "event_type_counts":event_types,
         "theme_resources_candidate": themes,
@@ -182,7 +182,9 @@ def inspect_bytes(raw: bytes) -> dict:
 
 def inspect_file(path: Path) -> dict:
     raw = path.read_bytes()
-    result = inspect_bytes(raw)
+    match = re.fullmatch(r"bnk_(\d+)\.bnm", path.name, re.IGNORECASE)
+    hint = int(match.group(1)) if match else None
+    result = inspect_bytes(raw, bank_id_hint=hint)
     result["source_file"] = path.name
     result["sha256"] = hashlib.sha256(raw).hexdigest()
     return result
