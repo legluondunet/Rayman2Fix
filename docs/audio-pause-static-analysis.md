@@ -281,7 +281,7 @@ The loaded bank head `SND_tdstSndBankHead` contains its optimized **resource lis
 
 | Offset | Actual field |
 | --- | --- |
-| `+0x00` | `Id`, a packed bank/resource ID, **not a pointer** |
+| `+0x00` | `Id`, a 32-bit native record identifier, **not a pointer**; its upper/lower halves are **not independently verified** as that record’s BNM bank and table index |
 | `+0x04` | `eType` (`SND_E_TR_Theme=11`, `Sample=1`, etc.) |
 | `+0x08` | `eStorage` (external / megafile / bigfile) |
 | `+0x0C` | `ucVolume`, one byte; next three bytes may be padding |
@@ -292,9 +292,9 @@ The loaded bank head `SND_tdstSndBankHead` contains its optimized **resource lis
 
 ### Corrected interpretation of the old diagnostic masks
 
-The previous `desc_words_equal_mask` compares four words of **`SND_tdstBlockResourceMem`**, not four arbitrary pointers. A mask of `14` means **different resource IDs** but the same `eType`, `eStorage` and fourth DWORD. A mask of `6` means different **resource ID** and fourth DWORD; that last difference might be the volume byte or only another byte in that DWORD. **A matching SXD driver handle cannot establish the same resource identity.**
+The previous `desc_words_equal_mask` compares four words of **`SND_tdstBlockResourceMem`**, not four arbitrary pointers. A mask of `14` means **different native `Id` fields** but the same `eType`, `eStorage` and fourth DWORD. A mask of `6` means a different native **`Id` field** and fourth DWORD; that last difference might be the volume byte or only another byte in that DWORD. **A matching SXD driver handle cannot establish the same resource identity.**
 
-An older research probe incorrectly attempted to dereference the first DWORD of the resource record as a memory address. This interpretation was invalid because it is `Id`; the probe was bounded and read-only, but any output from it should be ignored. It has been **removed**. The research probe now only reports the decoded **bank group / resource index** and the actual volume byte for both compared records. No audio calls are altered.
+An older research probe incorrectly attempted to dereference the first DWORD of the resource record as a memory address. This interpretation was invalid because it is `Id`; the probe was bounded and read-only, but any output from it should be ignored. It has been **removed**. The research probe now reports the **upper16/lower16 components of the record `Id` field** and the actual volume byte; those numeric components must **not** be promoted to a verified BNM filename or resource table index without the originating bank file. No audio calls are altered.
 
 
 ### Original-CD dual-route proof for the same inner SXD handle
@@ -494,6 +494,25 @@ The offline PE inspector's optional `reference_extra2_file_manifest` section is 
 
 **Scope and caveat:** the available research workspace has the owner-supplied non-approved PE32 reference binary and older Wine logs, **but not a byte-for-byte BNM bank from a verified original CD**. The experimental readers below must not be described as validated retail format support, executable patching, working menu music, or an install/integrity implementation.
 
+### Correction: BNM lookup key vs the resource record's own `Id` (original-CD verified)
+
+This removes a previously **unsafe inference in the experimental BNM reader**. A direct disassembly of **the owner-approved retail CD**, independently identical to the reference for the **entire 64 bytes of native resolver `0x453F90`** (SHA-256 `1f4e185a18948dc27b9fe2af926984dbe0f4e4cbc846d66a9b2ff03b11b57c17`), proves the lookup algorithm:
+
+```text
+Input: packed reference from Play event [+8]
+bank_id  = reference >> 16
+index    = reference & 0xFFFF
+bank     = find_loaded_bank(bank_id)       ; 0x4538C0
+if not bank or index >= bank.resource_count: return null
+return bank.resource_first + index * 92    ; no comparison to record[+0].Id
+```
+
+The **reference** supplied to the resolver is a packed bank/index key; the **`Id` stored inside the returned record** is a separate field which the resolver never verifies against that key. The earlier prototype erroneously required equality, and even guessed the filename `bnk_73.BNM` from such stored IDs. This was **not a valid retail-CD proof**. The updated [BNM metadata inspector](../tools/inspect_rayman2_bnm.py) now rejects this equivalence assumption. External [OpenRayman sound format research](https://github.com/huntyh/OpenRayman/blob/master/docs/formats/sound.md) describes the on-disk record `+0` as an *editor ID* in its surveyed distribution; **the owner's original-CD BNM is still unavailable**, so do not claim that description is verified for the owner's edition.
+
+**Independent cross-distribution warning:** the publicly indexed [SteamDB depot 15061 sound manifest](https://steamdb.info/depot/15061/manifests/) lists `Data/World/Sound/Bnk_73.bnm` as **76 bytes**. Under the 44-byte BNM header + 92-byte resource-record layout, a file that small cannot contain a resource at **table index 48**. Meanwhile older runtime instrumentation printed `theme_bank=73 theme_resource=48` by splitting a native record's `Id` into two 16-bit words. These observations **must not be equated**. They concern different distributions, and the owner's actual `Bnk_73.bnm` has not been inspected; it is not proven whether the source of the discrepancy is edition differences or the older field interpretation. Thus `73:48` remains a **trace label**, not an authenticated filename, table position or audible soundtrack. The duplicate native Theme/inner-driver ownership and original driver pause/stop observations remain meaningful without such a filename claim.
+
+The retail-CD resolver digest check now lives in the SHA-pinned [CD parity tool](../tools/check_rayman2_cd_audio_parity.py) with no executable bytes redistributed. The BNM reader and its synthetic fixtures have been corrected; no production audio calls or INI options have been changed.
+
 ### BNM metadata layout: native table offsets, not inferred placement
 
 Independent reference sources: [Rayman2Lib `BNMFile.cs`](https://github.com/szymski/Rayman2Lib/blob/master/csharp_tools/Rayman2Lib/BNMFile.cs), [ACP_Ray2 `SND.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND.h), [`SND_Event.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Event.h), and [`SND_Resource.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h). The **non-approved** owner-supplied EXE's native loader `0x453990` reads precisely 44 bytes at `0x4539E7`.
@@ -510,15 +529,15 @@ Independent reference sources: [Rayman2Lib `BNMFile.cs`](https://github.com/szym
 | `+0x14..+0x24` | Declared media offsets (MPEG, MIDI, sample, ADPCM, streaming) | ACP_Ray2; **origin/physical sizes not verified** |
 | `+0x28` | `ulTotalSize`, a declared total | Not an independent file-integrity reference |
 
-**Event-to-resource structural mapping:** `SND_tdstBlockEvent` contains `Id (+0)`, `eType (+4)`, `uParams (+8)`, in 32-byte records. For event type `SND_EVT_Son_Play=1`, `uParams.stPlay.uResource.Id` at `+8` is a packed resource reference: the native type-1 dispatch table entry at `0x453E90` selects `0x453DC9`, which loads that DWORD and calls resource resolver `0x453F90` at `0x453DD6`. Native `0x453F90` uses **upper 16 bits for the loaded bank ID and lower 16 bits as a *direct resource table index***; it does **not** search the resource entries by their `Id` fields. Therefore a `Play` → local `Theme` match requires that the indexed record's full packed `Id` equals the original reference **and** `eType=11`. Any discrepancy, a missing local bank, or a reference beyond the local table is reported as unresolved. Theme playback from another bank cannot be linked from one BNM alone.
+**Event-to-resource structural mapping:** `SND_tdstBlockEvent` contains `Id (+0)`, `eType (+4)`, `uParams (+8)`, in 32-byte records. For event type `SND_EVT_Son_Play=1`, `uParams.stPlay.uResource.Id` at `+8` is a packed resource reference: the native type-1 dispatch table entry at `0x453E90` selects `0x453DC9`, which loads that DWORD and calls resource resolver `0x453F90` at `0x453DD6`. Native `0x453F90` uses **upper 16 bits of the event's +8 reference to select a loaded bank and lower 16 bits to index its 92-byte resource table**; it **does not compare the returned record's +0 `Id` field** with the requested reference at all. Thus the prior requirement `resource.Id == (bank<<16 | index)` was **incorrect** and could reject legitimate references. In a single BNM file, a `Play` → local `Theme` candidate can be emitted only if a **filename-provided bank ID hint** matches the reference's high16, the low16 index is in range, and the selected record has `eType=11`. This is a syntactic candidate, **not authenticated bank provenance or proof of the song**. Unknown filenames, other-bank references, and out-of-range indices stay unresolved; arbitrary on-disk `Id` values must not cause rejection. Theme playback from another bank cannot be linked from one BNM alone.
 
-The updated read-only [`tools/inspect_rayman2_bnm.py`](../tools/inspect_rayman2_bnm.py) validates independent event/resource ranges within the physical bank, rejects nonzero counts with nonexistent ranges and any overlap, reports `Theme=11` candidate metadata, and emits **only local candidate** `SND_EVT_Son_Play` → Theme references when the direct-index/full-ID test succeeds. It never decodes, extracts, modifies, or emits sound payloads. Use it locally on user-owned banks:
+The updated read-only [`tools/inspect_rayman2_bnm.py`](../tools/inspect_rayman2_bnm.py) validates independent event/resource ranges within the physical bank, rejects nonzero counts with nonexistent ranges and any overlap, reports `Theme=11` candidate metadata, and emits **only local candidate** `SND_EVT_Son_Play` → Theme references when this bounded direct-index/filename-hint test succeeds. It never decodes, extracts, modifies, or emits sound payloads. Use it locally on user-owned banks:
 
 ```bash
 python3 tools/inspect_rayman2_bnm.py /path/to/DATA/WORLD/SOUND/BNK_0.BNM
 ```
 
-The output includes `table_ranges_file_relative`, `play_event_references_candidate`, and `local_play_events_referring_to_themes_candidate`. These describe **candidate static structure**, not which song is heard in game, nor whether the file is an original retail bank. `verified_against_actual_retail_cd_bnm=false` and `audio_extracted=false` are mandatory. Media offsets, claimed data lengths and bank filename suffixes are **not authoritative** for CD installation or integrity. The [synthetic-only tests](../tests/test_audio_bnm_inspector.py) exercise contiguous, gapped, **reversed** lists, truncated records, overlapping or invalid offsets, null/other-bank event references, and deliberate resource-ID/index mismatch. No commercial bank/media assets are added to CI.
+The output includes `table_ranges_file_relative`, `play_event_references_candidate`, and `local_play_events_referring_to_themes_candidate`. These describe **candidate static structure**, not which song is heard in game, nor whether the file is an original retail bank. `verified_against_actual_retail_cd_bnm=false` and `audio_extracted=false` are mandatory. Media offsets, claimed data lengths and bank filename suffixes are **not authoritative** for CD installation or integrity. The [synthetic-only tests](../tests/test_audio_bnm_inspector.py) exercise contiguous, gapped, **reversed** lists, truncated records, overlapping or invalid offsets, null/other-bank event references, and a deliberate resource-record-`Id`/lookup-index mismatch that **must not** invalidate the native lookup. No commercial bank/media assets are added to CI.
 
 ### Why raw Theme part data is not yet directly addressable
 
@@ -536,7 +555,7 @@ bnk_%d.BNM
 
 Its output is copied into descriptor `szFileName[13]` starting at **+0x0C** (`0x45392E`). Therefore for the supplied reference EXE, **bank ID 23 deterministically formats to `bnk_23.BNM`** (for a valid short numeric name). This is not inferred from the unrelated `.extra2` filename inventory; it is a direct functional mapping visible in the sound-bank loader.
 
-The revised BNM inspector additionally reports `candidate_reference_bnm_filename` **only** if all on-disk resource IDs have the same upper16 bank ID and each low16 component equals its actual resource table index, precisely as `0x453F90` resolves references. Inconsistent indices, mixed bank IDs or empty resource lists yield no candidate filename. This still **does not** identify a particular audible song: a real BNM is required for the Theme resource identity, and independent retail-CD equivalence remains pending.
+The revised BNM inspector now reports `candidate_reference_bnm_filename` **only from an explicit filename hint such as `BNK_23.BNM`**, never by interpreting the resource records' +0 `Id` fields. The source filename can be renamed or tampered with, so its numeric suffix is **not authenticated bank provenance**. `inspect_bytes()` without a bank hint declines all local `Play`→`Theme` matches instead of silently guessing. Tests intentionally use on-disk `Id` values unrelated to the bank/index pair; valid native index references must continue to resolve. This still **does not** identify audible music or establish equivalence with the owner's retail-CD files.
 
 The standalone PE inspector verifies the exact format-string bytes, the `lId` assignment and the formatter call. No game binary, audio payload or game runtime is changed.
 
@@ -572,7 +591,7 @@ We now have a **concrete structural source-ID test**, independent of a guessed f
 
 1. The 64-entry native sound table `0x4B8C98` stores the **outer** Theme handle returned by `0x459950`/`0x459B3A`, which is the address of the Theme singleton `0x4B95B8`; its resource descriptor must have `SND_E_TR_Theme=11` at `+4`.
 2. The same singleton's `+0x30` field at `0x4B95E8` contains the **inner** sound-record pointer, not a numeric index. The inner record must be active, transition-enabled, carry a native SXD resource type `1`, and own a **unique** driver handle.
-3. Only if the paused driver handle is exactly this unique inner handle is `theme_owned_driver=1`. The outer Theme resource's packed ID identifies its **BNM bank** (upper16) and resource table index (lower16). The inner resource ID is logged separately. Any absent, inactive, shared or ambiguous record yields **no confirmed owner**.
+3. Only if the paused driver handle is exactly this unique inner handle is `theme_owned_driver=1`. The outer Theme resource record exposes a native `Id` field whose **upper16/lower16 components are logged**, but the record's actual originating BNM bank/table index **has not been independently resolved**. The inner record’s `Id` is logged separately. Any absent, inactive, shared or ambiguous record yields **no confirmed owner**.
 
 This is implemented as a **read-only, bounded** `inspect_audio_theme_owner()` probe in the optional `RAYMAN2FIX_AUDIO_TRACE` build only. It reports a separate `RUNTIME-AUDIO-THEME-OWNER` line for the first eight native `PauseTransitionSxd`, `ResumeTransitionSxd` and `StopTransitionSxd` events, with `outer_candidates`, `outer_slot`, `theme_bank`, `theme_resource`, `inner_slot`, `inner_bank`, `inner_resource`, `inner_active`, `inner_transition`, `inner_handle_matches`, and `theme_owned_driver`. No raw pointers or resource-file contents are logged; no driver argument, call order or return value is changed. The ordinary release build compiles the probe out entirely.
 
@@ -616,7 +635,7 @@ Trace the resource origin of event class 11 via the seven upstream callers; chec
 | Transition stop **while ESC remains paused** | 138.032 s | bank 73, resource 48, outer slot 6 | bank 73, resource 51 | **2** | \`StopTransitionSxd\` still \`theme_owned_driver=1\`; the stopped Theme is part of a legitimate native transition and must not be frozen |
 | Subsequent transition stop | 141.667 s | bank 89, resource 90, outer slot 0 | bank 89, resource 81 | **2** | distinct Theme identity, \`StopTransitionSxd\` with \`theme_owned_driver=1\`, reinforcing that stop and Theme replacement can occur while ESC pause depth remains elevated |
 
-**Interpretation:** the corrected pointer decoder establishes the *structural Theme owner → inner SXD transition → exact paused driver handle* association for ESC and resume, rather than guessing from mutable slot 1 or recycled handles. The same outer Theme (bank 73/resource 48) now corresponds to inner resource 50 at the first pause and 51 at the second: **inner resource identity is not a stable proxy for the logical Theme owner**. It is still **not independently confirmed which Theme corresponds to the audible level soundtrack** or whether bank 73 is present and structurally valid on the original retail CD. The reference-only filename formatter would produce \`bnk_73.BNM\`, but the actual owner CD bank file has not been examined here.
+**Interpretation:** the corrected pointer decoder establishes the *structural Theme owner → inner SXD transition → exact paused driver handle* association for ESC and resume, rather than guessing from mutable slot 1 or recycled handles. The same outer Theme (bank 73/resource 48) now corresponds to inner resource 50 at the first pause and 51 at the second: **inner resource identity is not a stable proxy for the logical Theme owner**. It is still **not independently confirmed which Theme corresponds to the audible level soundtrack** or whether bank 73 is present and structurally valid on the original retail CD. The **original-CD** formatter would produce \`bnk_73.BNM\` *if the genuine loaded bank ID were 73*, but a high16 component of a record’s `Id` is **not evidence** that the bank ID is 73. The actual owner-CD bank has not been examined here.
 
 Both ESC openings are classified \`audio_origin=game-script-pause\`, the first closing as \`game-script-resume\`; two transition calls per opening/closing have distinct observed stack candidate sequences. This supports multiple native dispatch layers, **not** a license to drop either call. Other SXD sound records have separate pause/resume events; no global bypass is acceptable. The log contains only \`foreground=1\` and **no** independently observed Win32 focus-out/in sequence, so Alt-Tab nested pause safety is still untested.
 
