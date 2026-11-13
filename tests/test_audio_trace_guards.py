@@ -147,20 +147,26 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("got==sizeof(words)", self.runtime)
         self.assertNotIn("MusicInPauseMenu", self.config)
 
-    def test_descriptor_head_and_volume_research_is_bounded(self):
-        # A difference in DWORD3 does not imply that its low volume
-        # byte changed, and a differing DWORD0 may encode a pointer.
+    def test_descriptor_is_resource_id_not_pointer(self):
+        # Source: ACP_Ray2 SND_tdstBlockResourceMem, matched by 0x453F90.
+        # DWORD0=Id, DWORD1=eType, DWORD2=eStorage, DWORD3=volume byte.
+        self.assertIn("The first DWORD is a PACKED RESOURCE ID", self.runtime)
         self.assertIn("desc_volume=%u", self.runtime)
         self.assertIn("play_volume=%u", self.runtime)
-        self.assertIn("desc_head_pair_readable=%u", self.runtime)
-        self.assertIn("desc_head_contents_match=%u", self.runtime)
+        self.assertIn("desc_resource_group=%d", self.runtime)
+        self.assertIn("desc_resource_index=%d", self.runtime)
+        self.assertIn("play_resource_group=%d", self.runtime)
+        self.assertIn("play_resource_index=%d", self.runtime)
+        self.assertIn("desc_resource_id_match=%u", self.runtime)
+        self.assertIn("const DWORD now_id=current_words[0];", self.runtime)
+        self.assertIn("const DWORD old_id=g_last_transition_desc_words[0].load(",self.runtime)
+        self.assertIn("out.descriptor_bank_group=int(now_id>>16)", self.runtime)
+        self.assertIn("out.descriptor_record_index=int(now_id&0xFFFFu)", self.runtime)
         self.assertIn("current_words[3]&0xFFu", self.runtime)
-        self.assertIn("g_last_transition_desc_words[3].load(", self.runtime)
-        self.assertIn("BYTE old_bytes[16]{},new_bytes[16]{}", self.runtime)
-        self.assertIn("safe_read(reinterpret_cast<const void*>(", self.runtime)
-        self.assertIn("std::memcmp(old_bytes,new_bytes,sizeof(old_bytes))==0", self.runtime)
-        self.assertIn("if(out.transition!=0u && old_head>=0x10000u", self.runtime)
         self.assertIn("out.match_count!=1u", self.runtime)
+        self.assertNotIn("BYTE old_bytes[16]{},new_bytes[16]{}", self.runtime)
+        self.assertNotIn("desc_head_pair_readable=%u", self.runtime)
+        self.assertNotIn("desc_head_contents_match=%u", self.runtime)
         self.assertNotIn("MusicInPauseMenu", self.config)
 
     def test_exact_owner_cd_slots_are_named_and_bounded(self):
