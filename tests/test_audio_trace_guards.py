@@ -38,6 +38,25 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("InterlockedCompareExchangePointer(ptr,hook,current)==current",
                       self.runtime)
 
+    def test_menu_and_engine_pause_probe_is_read_only_and_research_only(self):
+        # A future optional observation must distinguish the native menu
+        # boolean from the engine pause flag. Neither proves ESC vs F1.
+        section=self.runtime.split("void poll_audio_pause_trace() {",1)[1]
+        section=section.split("#endif // RAYMAN2FIX_AUDIO_TRACE",1)[0]
+        self.assertIn("module+0xB9BC8", section)
+        self.assertIn("module+0x100640", section)
+        self.assertIn("SizeOfImage>0x100641u", section)
+        self.assertIn("ReadProcessMemory(", section)
+        self.assertIn("menu_read==sizeof(in_game_menu)",section)
+        self.assertIn("engine_read==sizeof(engine_paused)",section)
+        self.assertIn("in_game_menu<=1u && engine_paused<=1u",section)
+        self.assertIn("g_audio_last_ingame_menu.exchange(",section)
+        self.assertIn("g_audio_last_engine_pause.exchange(",section)
+        self.assertIn("RUNTIME-AUDIO-UI-STATE: t_ms=",section)
+        self.assertIn("not ESC/F1 proof",section)
+        self.assertNotIn("WriteProcessMemory(",section)
+        self.assertNotIn("MusicInPauseMenu",self.config)
+
     def test_original_audio_function_always_called_unchanged(self):
         section=self.runtime.split("void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1]
         section=section.split("void __stdcall audio_pause_sxd(",1)[0]
