@@ -674,6 +674,44 @@ The [offline audio trace analyzer](../tools/analyze_rayman2_audio_trace.py) now 
 
 **New generation/identity guard in the specification-only state machine:** [`tools/audio_pause_policy_model.py`](../tools/audio_pause_policy_model.py) now requires **both** `owner_is_theme=True` **and** an **independently confirmed music identity** to adopt a newly started stream; a loaded Theme bank and record index alone are insufficient, even when their provenance is unique. Every legitimate native Stop invalidates the current stream **and clears previous menu eligibility** before any replacement generation can receive policy decisions. This is essential given the owner log's bank-9 Stop at depth 2 with `in_game_menu=0`; a future bank-9 record could be a different instance even if its address or internal `Id` were reused. Pure synthetic [policy tests](../tests/test_audio_pause_policy_model.py) now require the new stream to remain silent under the old pause until fresh menu eligibility is proven or the independent native pause has ended. This is **not implemented in the runtime** and does not demonstrate working music-in-pause playback.
 
+## Owner Wine trace 2026-11-13 23:24 — complete native pause/resume, then separate pause/stop
+
+**Source:** owner-supplied `Rayman2Fix(20261113-232408).log`, 185 lines, **57,232 bytes**, SHA-256 `85a4fc1589348971ff3f87e64374aac8523d7212a8ba4e78815f8648a933749a`. This trace is **not committed to the public repository**; only aggregate timings and non-reversible resource identifiers are recorded here. Audio research hooks identify themselves as `schema=2`, and **all original driver calls are forwarded unchanged**. The `research_probes=0` message refers to the standard rendering probes, **not** to the separately enabled audio-trace research hooks.
+
+**This is the first supplied post-bank-inversion log with a complete native pause→resume cycle at the Theme/SXD driver.** It demonstrates the sequence of original driver calls, not the actual audible sound or an ESC-only UI input origin.
+
+| Phase and time (elapsed) | UI flag at driver call | Global audio depth at driver call | Actual native Theme → inner SXD bank:index | Native driver evidence |
+|---|---:|---:|---|---|
+| First pause: **40,004–40,006 ms** | `0` | `1` | **9:5 → 9:7** | `PauseTransitionSxd` twice (`sample=1,2`), `audio_origin=game-script-pause`, `esc_down=1`, same unique verified loaded-bank identity; **72 nodes**, each owner and inner lookup complete |
+| First UI `1`: **40,021 ms** | periodic snapshot | `2` (periodic) | — | `AI_g_bInGameMenu=1`, engine pause byte `0` |
+| First resume: **48,154–48,155 ms** | **`1`** | **`1`** | **9:5 → 9:7** | `ResumeTransitionSxd` twice (`sample=1,2`), `audio_origin=game-script-resume`, same live Theme and SXD identity; companion `ResumeSxd` audio callbacks also observed |
+| UI `0` again: **48,537 ms** | periodic snapshot | `1` (periodic) | — | `AI_g_bInGameMenu=0` |
+| Second pause: **78,862–78,863 ms** | `0` | `1` | **9:5 → 9:10** | Two `PauseTransitionSxd` calls (`sample=3,4`); **same outer Theme table location, different inner SXD** |
+| Second UI `1`: **79,328 ms** | periodic snapshot | `2` (periodic) | — | Flag `1` with engine pause byte `0` |
+| **Second native stop: 81,731 ms** | **`0`** | **`2`** | **9:5 → 9:10** | `StopTransitionSxd`, `theme_owned_driver=1`, one complete unique bank scan; **no `ResumeTransitionSxd` recorded for this second cycle** |
+| Second UI `0`: **82,098 ms** | periodic snapshot | no further depth snapshot | — | Confirms `AI_g_bInGameMenu=0` after Stop |
+
+**Bounds rather than guessed menu timestamps:** the combined periodic/driver sample stream brackets four successive *native menu flag* changes, without guaranteeing the intermediate state was constant or that the flag denotes ESC exclusively:
+
+- First `0→1`: **[40,006; 40,021] ms** (**15 ms**); script-driven audio pause is already underway at flag `0`.
+- First `1→0`: **[48,156; 48,537] ms** (**381 ms**); at 48,154–48,155 ms the driver has **resumed** audio while the flag is still `1`. An additional `ResumeSxd` sample at 48,156 ms independently still sees `1`.
+- Second `0→1`: **[78,863; 79,328] ms** (**465 ms**).
+- Second `1→0`: **[79,328; 81,731] ms** (**2,403 ms**). By 81,731 ms the stopped Theme reports flag `0`, even though global audio depth is still `2`.
+
+There are **52 sampled native audio-driver calls**: 16 `StopSxd`, 16 `PauseSxd`, 9 `ResumeSxd`, 5 `StopTransitionSxd`, 4 `PauseTransitionSxd`, 2 `ResumeTransitionSxd`; **11 unique valid Theme-owner trace lines**. These counters reflect tracer limits, **not an exhaustive log of all runtime calls**. Seven of the Theme-owner samples belong to the two gameplay cycles above. The remaining early `StopTransitionSxd` traces establish loaded banks `278:0→278:4`, `282:0→282:1`, and `222:1→222:2`; the final Stop at 86,416 ms is `278:0→278:3`. All reported lookups have a complete unique bank traversal, but **loaded Theme ownership does not establish which sound is audible music**. No sampled audio event reports `foreground=0`; this is not a test of Alt-Tab behavior and the lack of `foreground=0` is not proof that no transient focus change occurred.
+
+**Independent engine-pause state, still not an ESC marker:** `engine_paused` is recorded as `1` at **62,856 ms** and cleared at **63,366 ms** (510 ms between observations), then again `1` at **78,301 ms** and `0` at **78,812 ms** (511 ms). In all four samples `in_game_menu=0` and `foreground=1`. No corresponding menu flag rise is observed during those intervals, and the global audio depth remains at its last observed baseline of 1. Do **not** classify these engine clock pauses as F1, ESC or actual Alt-Tab events without independent evidence; exact transition instants are unsampled.
+
+**Safety consequences:**
+
+1. A candidate sound-pause suppression conditioned only on the *current* `AI_g_bInGameMenu` flag at `PauseTransitionSxd` would **miss both observed pauses** (`0` at the calls). Conversely, a conditional driver `ResumeTransitionSxd` hook keyed only to `in_game_menu==1` would misclassify **a legitimate native resume**. State ownership and per-record pause mark semantics remain essential.
+2. The original CD at `0x4580B0` issues callbacks before increasing global pause depth; at `0x458110`, it **decrements** depth before issuing resume callbacks. The depth-at-call values **1 on both sides** therefore match the native ordering rather than implying two separate global operations.
+3. `Theme` **9:5** is observed with different inner resources **9:7** and **9:10**. Do not bind generation, audible music identity or a stable SXD buffer to outer Theme alone. The second valid native Stop at depth 2 must *always* be forwarded and invalidate any provisional playback authorization.
+4. The first cycle shows **two native resume callbacks for the same inner SXD**; this does **not** establish that an additional artificial resume is safe. Menu visibility is still only a generic VM boolean, its ESC/F1 distinction is not proven, and focus loss/recovery is not covered.
+
+A new [synthetic test](../tests/test_audio_trace_evidence.py) reconstructs the two trajectories and four bounded flag transitions without checking any proprietary file into GitHub. It asserts preservation of unique loaded-bank provenance, valid paired native driver events, the independent engine-pause pulses, the 2-depth stop, and the explicit **unknown ESC/F1 attribution**. The owner has not yet supplied a confirmed F1-only cycle or a controlled Alt-Tab-in-menu sample. No runtime audio behavior or INI setting has been changed; PR #2 stays draft.
+
+
 ## Safety requirements before a functional `MusicInPauseMenu` option
 
 - Prove a **music resource identity** independently of driver pointer, table index, SXD transport, default volume or descriptor equality.
