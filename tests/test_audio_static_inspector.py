@@ -56,6 +56,33 @@ class AudioStaticInspectorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             pe.read(len(pe.raw) - 1, 20)
 
+    def test_packed_resource_handle_is_group_and_record_not_song_id(self):
+        # Native 0x453F90: group=upper16, entry=lower16, stride=92.
+        self.assertEqual(M.decode_resource_handle(0x00170002),
+                         {"group_id": 23, "record_index": 2,
+                          "record_stride": 92})
+        self.assertEqual(M.decode_resource_handle(0x0000FFFF),
+                         {"group_id": 0, "record_index": 65535,
+                          "record_stride": 92})
+        with self.assertRaises(ValueError):
+            M.decode_resource_handle(-1)
+        with self.assertRaises(ValueError):
+            M.decode_resource_handle(0x1_0000_0000)
+
+    def test_resource_resolver_keeps_byte_verified_bounds(self):
+        src = SCRIPT.read_text(encoding="utf-8")
+        for fragment in ("group_high16", "index_low16",
+                         "group_registry_lookup", "registry_next_link",
+                         "index_stride_92", "type11_nested_resolve_first",
+                         "type11_nested_resolve_second",
+                         "type11_nested_stride24"):
+            self.assertIn(fragment, src)
+        # An unrelated PE must not be treated as the owner's reference.
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "other.exe"
+            path.write_bytes(synthetic_pe32())
+            self.assertIn("address_map_failure", M.inspect(path))
+
     def test_unknown_binary_never_invents_structural_matches(self):
         with tempfile.TemporaryDirectory() as d:
             fn = Path(d) / "synthetic.exe"
