@@ -652,7 +652,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     if(original) original(arg);
     if(!sampled)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
-    char line[430]{};
+    char line[512]{};
     std::snprintf(line,sizeof(line),
         "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_same_handle=%u transition_last_play_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
         kAudioSlots[slot].name,event+1u,
