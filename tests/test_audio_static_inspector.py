@@ -94,6 +94,14 @@ class AudioStaticInspectorTests(unittest.TestCase):
         self.assertIn("pe.call_target(0x45856F) == 0x45AA00", src)
         self.assertIn("pe.call_target(0x45855B) == 0x45A4A0", src)
 
+    def test_group_registry_is_command_loaded_not_a_disc_number(self):
+        src = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('result["resource_group_registration"]', src)
+        self.assertIn('pe.at(0x4507D5, 6)', src)
+        self.assertIn("pe.call_target(0x4507E3)", src)
+        self.assertIn("pe.call_target(0x450811)", src)
+        self.assertIn('"archive_identity_still_unproven": True', src)
+
     def test_unknown_binary_never_invents_structural_matches(self):
         with tempfile.TemporaryDirectory() as d:
             fn = Path(d) / "synthetic.exe"
