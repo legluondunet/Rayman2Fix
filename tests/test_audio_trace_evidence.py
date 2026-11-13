@@ -59,6 +59,39 @@ class TraceEvidenceTests(unittest.TestCase):
         self.assertTrue(result["focus_loss_not_proven_when_missing"])
         self.assertNotIn("KEEP_PRIVATE", str(result))
 
+    def test_pre_driver_menu_snapshots_are_observations_not_esc_proof(self):
+        events = [
+            trace("PauseTransitionSxd", 1, 8000) +
+            " ui_in_game_menu_at_call=0 ui_engine_paused_at_call=0",
+            owner("PauseTransitionSxd", 1),
+            trace("PauseTransitionSxd", 2, 8001) +
+            " ui_in_game_menu_at_call=1 ui_engine_paused_at_call=0",
+            owner("PauseTransitionSxd", 2),
+        ]
+        result = M.summarize("\n".join(events))
+        self.assertEqual(len(result["close_same_driver_event_pairs"]), 1)
+        pair = result["close_same_driver_event_pairs"][0]
+        self.assertEqual(pair["menu_state_at_calls"], [0, 1])
+        self.assertEqual(pair["engine_pause_state_at_calls"], [0, 0])
+        records = result["generic_script_driver_ui_snapshots"]
+        self.assertEqual(
+            [x["native_menu_flag_at_call"] for x in records], [0, 1])
+        self.assertTrue(all(x["game_menu_visibility_not_proven"]
+                            for x in records))
+        self.assertNotIn("KEEP_PRIVATE", str(result))
+
+    def test_older_trace_lacking_pre_driver_ui_fields_reports_unknown(self):
+        result = M.summarize("\n".join((
+            trace("PauseTransitionSxd", 1, 8000),
+            owner("PauseTransitionSxd", 1),
+        )))
+        self.assertEqual(
+            result["generic_script_driver_ui_snapshots"][0][
+                "native_menu_flag_at_call"], -1)
+        self.assertEqual(
+            result["generic_script_driver_ui_snapshots"][0][
+                "native_engine_pause_at_call"], -1)
+
     def test_owner_key_mismatch_and_ambiguous_owner_fail_closed(self):
         data = "\n".join((
             trace("PauseTransitionSxd", 1, 10),
