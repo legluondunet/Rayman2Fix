@@ -109,6 +109,30 @@ def decode_resource_handle(handle: int) -> dict:
     }
 
 
+def summarize_gog_sound_manifest(directory: bytes) -> dict:
+    """Names from the modified reference EXE only; never audio payloads."""
+    paths = re.findall(
+        rb"DATA\\WORLD\\SOUND\\([^\x00\r\n]{1,80}\.(?:APM|BNM))\x00",
+        directory, flags=re.IGNORECASE,
+    )
+    names = [p.decode("ascii", "replace").upper() for p in paths]
+    apms = {p for p in names if p.endswith(".APM")}
+    bnms = {p for p in names if p.endswith(".BNM")}
+    indexed_banks = {"BNK_%d.BNM" % i for i in range(405)}
+    return {
+        "apm_unique": len(apms),
+        "bnm_unique": len(bnms),
+        "bnk_0_to_404_complete": bnms == indexed_banks,
+        "main_menu_mm01_to_mm10_present": all(
+            ("MM%02d.APM" % i) in apms for i in range(1, 11)
+        ),
+        "intro_jailmus_present": "JAILMUS.APM" in apms,
+        "main_title_present": "MAIN TITLE.APM" in apms,
+        "contains_paths_not_sound_bytes": True,
+        "applies_to_original_cd": False,
+    }
+
+
 def inspect(executable: Path) -> dict:
     raw = executable.read_bytes()
     pe = PE32(raw)
@@ -308,30 +332,9 @@ def inspect(executable: Path) -> dict:
             if extra is not None:
                 _, _, _, file_size, file_offset = extra
                 directory = pe.read(file_offset, file_size)
-                paths = re.findall(
-                    rb"DATA\\WORLD\\SOUND\\([^\x00\r\n]{1,80}\.(?:APM|BNM))\x00",
-                    directory,
-                    flags=re.IGNORECASE,
-                )
-                names = [p.decode("ascii", "replace").upper() for p in paths]
-                apms = {p for p in names if p.endswith(".APM")}
-                bnms = {p for p in names if p.endswith(".BNM")}
-                indexed_banks = {
-                    "BNK_%d.BNM" % i for i in range(405)
-                }
                 result["reference_extra2_file_manifest"] = {
                     "source": ".extra2 reference-only file-path directory",
-                    "apm_unique": len(apms),
-                    "bnm_unique": len(bnms),
-                    "bnk_0_to_404_complete": bnms == indexed_banks,
-                    "main_menu_mm01_to_mm10_present": all(
-                        ("MM%02d.APM" % i) in apms
-                        for i in range(1, 11)
-                    ),
-                    "intro_jailmus_present": "JAILMUS.APM" in apms,
-                    "main_title_present": "MAIN TITLE.APM" in apms,
-                    "contains_paths_not_sound_bytes": True,
-                    "applies_to_original_cd": False,
+                    **summarize_gog_sound_manifest(directory),
                 }
     except ValueError as exc:
         # Known VA map can differ across editions: never invent matches.
