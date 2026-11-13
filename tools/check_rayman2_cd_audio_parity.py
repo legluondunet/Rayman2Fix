@@ -170,7 +170,7 @@ def inspect_native_menu_indicators(pe: "PE32") -> dict:
     engine_xrefs = tuple(absolute_dword_xrefs(pe, ENGINE_PAUSE_FLAG_VA))
     title_xrefs = tuple(absolute_dword_xrefs(pe, WINDOW_PAUSE_TITLE_VA))
     title_valid = pe.at(WINDOW_PAUSE_TITLE_VA,
-                        len(b"Rayman2 - pause\\x00")) == b"Rayman2 - pause\\x00"
+                        len(b"Rayman2 - pause" + bytes([0]))) == b"Rayman2 - pause" + bytes([0])
     all_checks = (
         byte_anchors_valid and vm_table_valid
         and menu_xrefs == AI_INGAME_MENU_XREFS
