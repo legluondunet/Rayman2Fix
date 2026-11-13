@@ -190,6 +190,54 @@ Records without the transition flag use `0x458070` / `0x458090`, which use nativ
 
 **Diagnostic correction:** the earlier `inspect_audio_sequence_context()` returned an initially-zero `AudioSequenceContext` whenever the controller DWORD was **not exactly 1** (`active!=1u`). The native `0x459C40` callback instead checks only **nonzero** (`cmp [eax],0; je ...`). Therefore the prior `sequence_active=0` log field **did not establish** the native DWORD was zero: an alternate nonzero state would have been silently reported as inactive. The optional research build now categorizes the state as `sequence_state_class` (0=unreadable, 1=zero, 2=one, 3=other nonzero), with `sequence_active` determined by nonzero state and a validated table slot. Existing Wine traces cannot reconstruct which class applied retrospectively; do not use them to claim the controller was idle.
 
+## Exact nested ESC / focus-loss pause state machine
+
+The code-level reason a naive "drop the Theme pause call" override is **not safe** is now independently reproduced without Wine. In the **non-approved reference EXE**:
+
+- Both the game-script ESC pause (`0x471E70`) and Win32 window deactivation pause (`0x401C9C`) call the *same* `0x4536D0` wrapper, which calls global `0x4580B0` at `0x4536ED`.
+- Both ESC resume (`0x471E67`) and Win32 reactivation resume (`0x401CE9`) call `0x453700`, which calls global `0x458110` at `0x45371D`.
+- The global pause counter lives at **`0x4A3CC8`**. Each 32-byte sound-table record has `active` at **+0x14**, a separate skip/state field at **+0x08**, a transition flag at **+0x10**, and the **per-record pause mark at +0x1C**.
+- `0x4580B0` loops over **64** slots. For every active record with `+0x08 == 0` and `pause_mark == 0`, it **stores the old global depth into +0x1C BEFORE dispatching** the native pause. It then increments global depth **after** walking all slots.
+- `0x458110` first **decrements** global depth, then on active records whose `+0x08 == 0` and `pause_mark <= new_depth`, **clears +0x1C BEFORE dispatching** the native resume. This order is visible at `0x458116`, `0x45813C` and `0x458143`.
+
+Narrow pseudocode for **one slot** (not a complete emulator of the game's audio subsystem):
+
+```python
+def native_pause(slot, depth):
+    if slot.active and slot.other_state == 0 and slot.pause_mark == 0:
+        slot.pause_mark = depth
+        native_driver_pause(slot)  # nested Theme / SXD dispatches still apply
+    return depth + 1
+
+def native_resume(slot, depth):
+    depth -= 1
+    if slot.active and slot.other_state == 0 and slot.pause_mark <= depth:
+        slot.pause_mark = 0
+        native_driver_resume(slot)
+    return depth
+```
+
+### Verified counterexample to a driver-only ESC bypass
+
+Take a participating Theme-related record with **global depth = 1** and **pause mark = 0**, matching the *starting global depth* reported in the owner's older ESC traces:
+
+| Operation | Depth before → after | Pause mark | Native driver pause request |
+| --- | --- | --- | --- |
+| ESC opens | 1 → 2 | 0 → 1 | **Yes**; a naive patch would drop **only this request** |
+| Window loses focus | 2 → 3 | 1 → 1 | **No request**; record already marked |
+| Window regains focus | 3 → 2 | 1 → 0 | **Native resume may be requested**, even though ESC remains open |
+
+Thus a patch that merely swallows `PauseTransitionSxd` during ESC **can leave audio playing after Alt-Tab**, because the game records the pause as completed independently of the driver. It can also create a spurious resume at focus gain. There is an additional edge case at **depth = 0**: the first mark written is **0**, so the next nested pause can still invoke the driver a second time. Both cases are covered by a pure test model in [`tests/test_audio_pause_invariants.py`](../tests/test_audio_pause_invariants.py), with direct call-site, opcode and branch-order verification integrated into [`tools/inspect_rayman2_audio.py`](../tools/inspect_rayman2_audio.py). The model is a logical counterexample based on static code, **not a report that sound was actually heard after Alt-Tab**.
+
+### Design requirements that follow
+
+1. Establish the actual **Theme resource ID / bank ID** and current nested sound instance before any exclusion; an SXD transport, driver handle or sound-table index is insufficient to identify music.
+2. Track **script pause** and **Win32 focus pause** as independent *causes*. Do not infer focus from ESC-key state; both invoke the same native wrappers but have distinct upstream return sites.
+3. Preserve each legitimate **Theme stop, transition and level unload**, allowing driver handle recycling without stale overrides.
+4. Preserve game sound-table and global depth consistency. If any Theme audio is deliberately kept running during a script pause, focus loss must explicitly suspend it and focus gain must restore it *only when the gameplay/menu state allows*.
+5. Unknown resource identity or unverified focus-origin must **fall back to original audio behavior**. No experimental setting or driver-bypass is justified yet.
+6. Verify the exact original retail-CD instructions independently before any hook design is merged, because these static VAs were observed in a non-approved reference EXE.
+
 ## Owner Wine observations already available
 
 From `Rayman2Fix(20261113-091415).log`:
