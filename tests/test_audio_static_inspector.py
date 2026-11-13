@@ -191,7 +191,7 @@ class AudioStaticInspectorTests(unittest.TestCase):
             valid + terminator + bytes([0, 1]),  # dirty padding
             valid + valid + terminator,  # duplicate
             struct.pack("<II", 5, 9999),  # out-of-bounds length
-            entry(1, b"A\\x00B.TXT") + terminator,  # NUL in name
+            entry(1, b"A" + bytes([0]) + b"B.TXT") + terminator,  # NUL in name
         ):
             with self.subTest(invalid=invalid[:16]):
                 with self.assertRaises(ValueError):
