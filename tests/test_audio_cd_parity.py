@@ -225,6 +225,30 @@ class ParityTests(unittest.TestCase):
             pe.chunks[0x4245C8] = b"\x90" + pe.chunks[0x4245C8][1:]
             self.assertFalse(MOD.inspect_menu_background_handle(pe)["matched"])
 
+    def test_inverse_loaded_bank_lookup_has_original_cd_code_anchors(self):
+        anchors = {
+            name: (address, raw)
+            for name, address, raw in MOD.ANCHOR_BYTES
+            if name.startswith("loaded_bank_")
+        }
+        self.assertEqual(len(anchors), 7)
+        self.assertEqual(anchors["loaded_bank_list_head"],
+                         (0x4538C0, bytes.fromhex("A1 50 4D 51 00")))
+        self.assertEqual(anchors["loaded_bank_id_field"],
+                         (0x4538CD, bytes.fromhex("39 48 04")))
+        self.assertEqual(anchors["loaded_bank_next_field"],
+                         (0x4538D2, bytes.fromhex("8B 40 3C")))
+        self.assertEqual(anchors["loaded_bank_descriptor_bytes"],
+                         (0x4538E2, bytes.fromhex("6A 48")))
+        self.assertEqual(anchors["loaded_bank_head_pointer"],
+                         (0x453FB2, bytes.fromhex("8B 40 24")))
+        self.assertEqual(anchors["loaded_bank_resource_count"],
+                         (0x453FB5, bytes.fromhex("3B 70 10")))
+        self.assertEqual(anchors["loaded_bank_resource_first"],
+                         (0x453FBA, bytes.fromhex("8B 50 0C")))
+        self.assertEqual(MOD.RESOURCE_RESOLVER_SIZE, 64)
+        self.assertEqual(MOD.RESOURCE_RESOLVER_VA, 0x453F90)
+
     def test_native_menu_viewport_switch_is_code_verified_not_esc_verified(self):
         class PE:
             def __init__(self):
