@@ -192,6 +192,57 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("if(original) original(arg);",trace)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
+    def test_native_bank_provenance_scan_is_bounded_and_fail_closed(self):
+        # The registry is a source of actual bank ID and table index,
+        # unlike arbitrary high/low halves of the record's +0 Id field.
+        section=self.runtime.split(
+            "AudioNativeBankOrigin inspect_audio_native_bank_origin(",1)[1]
+        section=section.split("// Read-only, source-backed link:",1)[0]
+        self.assertIn("kBankListRva=0x114D50",section)
+        self.assertIn("kMaxBankNodes=512",section)
+        self.assertIn("kNativeResourceStride=92",section)
+        self.assertIn("ReadProcessMemory(",section)
+        self.assertIn("node=descriptor[15]",section)
+        self.assertIn("const DWORD state=descriptor[8]",section)
+        self.assertIn("const DWORD head_ptr=descriptor[9]",section)
+        self.assertIn("const std::uintptr_t first=head[3]",section)
+        self.assertIn("const DWORD count=head[4]",section)
+        self.assertIn("difference%kNativeResourceStride==0u",section)
+        self.assertIn("difference/kNativeResourceStride<count",section)
+        self.assertIn("if(visited[k]==node)return out;",section)
+        self.assertIn("out.list_complete=1u",section)
+        self.assertIn("if(out.list_complete==0u || out.candidates!=1u)",section)
+        self.assertNotIn("WriteProcessMemory(",section)
+        self.assertNotIn("VirtualProtect(",section)
+        self.assertNotIn("if(original)",section)
+        self.assertNotIn("MusicInPauseMenu",self.config)
+
+    def test_native_bank_provenance_attached_only_to_unique_theme_and_inner(self):
+        owner=self.runtime.split(
+            "AudioThemeOwnerContext inspect_audio_theme_owner(",1)[1]
+        owner=owner.split("struct AudioSoundContext {",1)[0]
+        self.assertIn("outer_descriptor_address=descriptor;",owner)
+        self.assertIn("out.outer_bank_provenance=inspect_audio_native_bank_origin(",owner)
+        self.assertIn("out.inner_bank_provenance=inspect_audio_native_bank_origin(inner_desc)",owner)
+        self.assertLess(owner.index("out.outer_candidates!=1u"),
+                        owner.index("out.outer_bank_provenance=inspect_audio_native_bank_origin("))
+        self.assertLess(owner.index("inner_header[1]!=1u"),
+                        owner.index("out.inner_bank_provenance=inspect_audio_native_bank_origin(inner_desc)"))
+        trace=self.runtime.split(
+            "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1]
+        trace=trace.split("void __stdcall audio_pause_sxd(",1)[0]
+        for field in ("outer_native_bank=%d", "outer_native_index=%d",
+                      "outer_bank_candidates=%u",
+                      "outer_bank_list_complete=%u",
+                      "inner_native_bank=%d", "inner_native_index=%d",
+                      "inner_bank_candidates=%u",
+                      "inner_bank_list_complete=%u"):
+            self.assertIn(field,trace)
+        self.assertIn("Id halves NOT bank provenance",trace)
+        self.assertLess(trace.index("theme=inspect_audio_theme_owner(arg)"),
+                        trace.index("if(original) original(arg);"))
+        self.assertIn("if(original) original(arg);",trace)
+
     def test_theme_nested_ref_is_pointer_not_slot_number(self):
         # Native 0x4574E0 returns &sound_table[index], which 0x459AF4
         # stores at 0x4B95E8. The old probe compared the pointer to 64
@@ -257,7 +308,8 @@ class AudioTraceGuardTests(unittest.TestCase):
     def test_descriptor_is_resource_id_not_pointer(self):
         # Source: ACP_Ray2 SND_tdstBlockResourceMem, matched by 0x453F90.
         # DWORD0=Id, DWORD1=eType, DWORD2=eStorage, DWORD3=volume byte.
-        self.assertIn("The first DWORD is a PACKED RESOURCE ID", self.runtime)
+        self.assertIn("The first DWORD is a native resource record Id", self.runtime)
+        self.assertIn("its two halves need not equal the owning bank and table index", self.runtime)
         self.assertIn("desc_volume=%u", self.runtime)
         self.assertIn("play_volume=%u", self.runtime)
         self.assertIn("desc_resource_group=%d", self.runtime)
