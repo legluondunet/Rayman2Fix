@@ -17,7 +17,7 @@ The **owner's authentic protected original CD** and modified GOG-derived referen
 - Approved CD: `Rayman2(3).exe`, **676,352 bytes**, SHA-256 `7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`.
 - Research reference (not approved for runtime): `rayman2(4).exe`, **1,468,928 bytes**, SHA-256 `9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`.
 
-A fresh independent checked **PE32 VA → raw offset** reader was used, because the CD `.text` starts at file offset `0x400` whereas the reference starts at `0x1000`; both map to virtual address `0x401000`. The **13 selected audio-code intervals totaling 11,520 bytes** are **identical byte-for-byte**. They cover Win32 focus pause/resume callers, scripted ESC pause/resume callers, their shared wrappers, native 64-record pause/resume dispatcher, type-11 Theme lifecycle, resource-type dispatch, sound-record allocation, SXD transition playback/wrappers, bank loader/resource resolver, bank-registration command opcode handler, event creation and event dispatcher. The checked intervals are **selected**, not claimed to be exhaustive for all audio code.
+A fresh independent checked **PE32 VA → raw offset** reader was used, because the CD `.text` starts at file offset `0x400` whereas the reference starts at `0x1000`; both map to virtual address `0x401000`. The **13 selected audio-code intervals totaling 11,520 bytes** are **identical byte-for-byte**. They cover Win32 focus pause/resume callers, VM script sound-pause/resume callers (not menu-specific), their shared wrappers, native 64-record pause/resume dispatcher, type-11 Theme lifecycle, resource-type dispatch, sound-record allocation, SXD transition playback/wrappers, bank loader/resource resolver, bank-registration command opcode handler, event creation and event dispatcher. The checked intervals are **selected**, not claimed to be exhaustive for all audio code.
 
 In both binaries, **seven** exact `E8 rel32` call sites resolve to the same intended target:
 
@@ -25,8 +25,8 @@ In both binaries, **seven** exact `E8 rel32` call sites resolve to the same inte
 | --- | --- | --- |
 | Win32 window deactivation | `0x401C9C` | `0x4536D0` |
 | Win32 activation | `0x401CE9` | `0x453700` |
-| Game/script ESC pause | `0x471E70` | `0x4536D0` |
-| Game/script ESC resume | `0x471E67` | `0x453700` |
+| Generic script opcode `0x1AA` (pause) | `0x471E70` | `0x4536D0` |
+| Generic script opcode `0x1AB` (resume) | `0x471E67` | `0x453700` |
 | Shared pause wrapper | `0x4536ED` | `0x4580B0` |
 | Shared resume wrapper | `0x45371D` | `0x458110` |
 | Bank filename formatter call | `0x453948` | `0x453870` |
@@ -46,6 +46,30 @@ python3 tools/check_rayman2_cd_audio_parity.py /path/to/Rayman2-original-CD.exe 
 The tool refuses unrecognized SHA pairs by default, prints **no protected code bytes** and does not need or embed either executable in CI. The normal game DLL and launcher remain **unchanged**.
 
 **Impact on future ESC music feature:** core static native pause semantics and Theme ownership mechanism are now grounded in original-CD code. The remaining blockers are **real bank/Theme musical attribution** and an actual **origin-aware, stop-safe reconciliation** of original record pause marks and global depth with desired music state across ESC + Alt-Tab + level transitions. Never suppress driver calls in isolation; stop and resource replacement remain native. F1 stays excluded; `MusicInPauseMenu` stays disabled/unexposed.
+
+
+## Retail-CD correction: a script audio pause is NOT proof of the ESC menu
+
+**Critical origin classification correction (13 November 2026).** The native function `0x471E40` is **not** an ESC-key or pause-menu callback. Direct original-CD disassembly and the independently identical reference show:
+
+```text
+0x482690: lookup handler via [0x4A43E0 + opcode*8]
+0x4A5130 (opcode 0x1AA): handler 0x471E40, metadata DWORD 0
+0x4A5138 (opcode 0x1AB): handler 0x471E40, metadata DWORD 0
+0x4A5140 (opcode 0x1AC): handler 0x471E40, metadata DWORD 0
+
+0x471E40: ESI = second script parameter; EAX = [ESI-8]
+0x471E48: compare/subtract 0x1AA
+0x471E70: opcode 0x1AA -> global sound pause wrapper 0x4536D0
+0x471E67: opcode 0x1AB -> global sound resume wrapper 0x453700
+0x471E5B: opcode 0x1AC -> unrelated native sound call 0x453080
+```
+
+The three consecutive eight-byte dispatch entries share one opcode decoder; `0x482690` proves that the VM indexes the function-pointer table with the **opcode number**, not with an ESC event type. We do **not** know from these instructions which gameplay state, UI menu, cinematic script, engine event or command sequence emitted a given opcode. A user's observed ESC interaction during a diagnostic run is **external context**, not a property of opcode `0x1AA` or of the `game-script-pause` / `game-script-resume` log origin classifier.
+
+**Safety implication:** the previously considered trigger `audio_origin == game-script-pause` is **insufficient to enable music in the ESC menu** and must never be treated as `esc_menu_verified`. It can identify a plausible VM origin, but the same generic opcode may be used in other scripted situations. Raw `GetAsyncKeyState(VK_ESCAPE)` is equally insufficient; holding or tapping ESC cannot prove that the in-game menu is actually open. The independent Win32 pause branch may also run while scripts are active. A future opt-in intervention requires a separately proven, read-only identification of the **real ESC menu lifetime**, independent of F1, other dialogs, cutscenes and Win32 activation. On ambiguity, preserve all native audio calls unchanged.
+
+The exact VM opcode decoder instructions, three table entries, branch call targets and both pinned binary fingerprints are now verified in [`tools/check_rayman2_cd_audio_parity.py`](../tools/check_rayman2_cd_audio_parity.py). Synthetic [`tests/test_audio_cd_parity.py`](../tests/test_audio_cd_parity.py) deliberately asserts that generic script origin does **not** constitute menu evidence. **No actual game audio behavior has been modified.**
 
 
 ## Corrected nomenclature — three different classifications
@@ -299,8 +323,8 @@ Records without the transition flag use `0x458070` / `0x458090`, which use nativ
 
 The code-level reason a naive "drop the Theme pause call" override is **not safe** is now independently reproduced without Wine. In the **non-approved reference EXE**:
 
-- Both the game-script ESC pause (`0x471E70`) and Win32 window deactivation pause (`0x401C9C`) call the *same* `0x4536D0` wrapper, which calls global `0x4580B0` at `0x4536ED`.
-- Both ESC resume (`0x471E67`) and Win32 reactivation resume (`0x401CE9`) call `0x453700`, which calls global `0x458110` at `0x45371D`.
+- The **generic VM-script pause opcode 0x1AA** (`0x471E70`) and the Win32 window-event pause branch (`0x401C9C`) call the *same* `0x4536D0` wrapper, which calls global `0x4580B0` at `0x4536ED`. The VM opcode is **not in itself proof of ESC menu state**.
+- The **generic VM-script resume opcode 0x1AB** (`0x471E67`) and the Win32 window-event resume branch (`0x401CE9`) call `0x453700`, which calls global `0x458110` at `0x45371D`.
 - The global pause counter lives at **`0x4A3CC8`**. Each 32-byte sound-table record has `active` at **+0x14**, a separate skip/state field at **+0x08**, a transition flag at **+0x10**, and the **per-record pause mark at +0x1C**.
 - `0x4580B0` loops over **64** slots. For every active record with `+0x08 == 0` and `pause_mark == 0`, it **stores the old global depth into +0x1C BEFORE dispatching** the native pause. It then increments global depth **after** walking all slots.
 - `0x458110` first **decrements** global depth, then on active records whose `+0x08 == 0` and `pause_mark <= new_depth`, **clears +0x1C BEFORE dispatching** the native resume. This order is visible at `0x458116`, `0x45813C` and `0x458143`.
