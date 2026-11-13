@@ -89,6 +89,25 @@ class ParityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Section not present"):
             MOD.absolute_dword_xrefs(pe, 0x4B9618, ".missing")
 
+    def test_direct_rel32_scan_distinguishes_targets_and_sections(self):
+        f = fake_pe(0x400)
+        for offset in (0x10, 0x40):
+            va = 0x401000 + offset
+            f[0x400 + offset] = 0xE8
+            struct.pack_into("<i", f, 0x400 + offset + 1,
+                             0x401080 - (va + 5))
+        # This looks like E8 but targets a DIFFERENT call destination.
+        f[0x4A0] = 0xE8
+        struct.pack_into("<i", f, 0x4A1, 0)
+        pe = MOD.PE32(f)
+        self.assertEqual(MOD.direct_e8_candidate_sites(pe, 0x401080),
+                         [0x401010, 0x401040])
+        self.assertEqual(MOD.direct_e8_candidate_sites(pe, 0x4010A5),
+                         [0x4010A0])
+        self.assertEqual(MOD.direct_e8_candidate_sites(pe, 0x401077), [])
+        with self.assertRaisesRegex(ValueError, "Invalid x86"):
+            MOD.direct_e8_candidate_sites(pe, -1)
+
     def test_transaction_flag_requires_exact_known_code_locations(self):
         # Code and operand checks are separate: loose DWORD scanning alone
         # cannot prove that a hit was an actual machine-code instruction.
