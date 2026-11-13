@@ -14,7 +14,7 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
-FIELD = re.compile(r"(?:^|\\s)([A-Za-z_][A-Za-z_0-9]*)=([^\\s]+)")
+FIELD = re.compile(r"(?:^|\s)([A-Za-z_][A-Za-z_0-9]*)=([^\s]+)")
 TRACE = "RUNTIME-AUDIO-TRACE: event="
 OWNER = "RUNTIME-AUDIO-THEME-OWNER: channel="
 
