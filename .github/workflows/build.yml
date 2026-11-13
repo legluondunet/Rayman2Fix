@@ -299,6 +299,40 @@ jobs:
           Copy-Item build/Release/Rayman2Fix.exe audio-trace/Rayman2Fix.exe
           if (!(Test-Path audio-trace/Rayman2Fix.exe)) { throw 'Audio trace launcher not produced' }
           $global:LASTEXITCODE = 0
+      - name: Verify the research EXE deploys the exact corrected DLL
+        shell: pwsh
+        run: |
+          # Checking the DLL on disk before packaging is not enough:
+          # Rayman2Fix.exe must embed THAT DLL and install it at launch.
+          New-Item -ItemType Directory -Path research-package-smoke -Force | Out-Null
+          Copy-Item audio-trace/Rayman2Fix.exe research-package-smoke/Rayman2Fix.exe
+          & ./research-package-smoke/Rayman2Fix.exe --verify 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 2) {
+            throw 'No-media research launcher did not refuse missing installation as expected'
+          }
+          $deployed = 'research-package-smoke/Rayman2Fix/Rayman2Fix.dll'
+          if (!(Test-Path $deployed)) {
+            throw 'Research launcher did not deploy its embedded DLL'
+          }
+          $builtHash = (Get-FileHash build/Release/Rayman2Fix.dll -Algorithm SHA256).Hash
+          $embeddedHash = (Get-FileHash $deployed -Algorithm SHA256).Hash
+          if ($embeddedHash -ne $builtHash) {
+            throw 'STALE EMBEDDED DLL: research launcher differs from compiled runtime'
+          }
+          @'
+          from pathlib import Path
+          data=Path('research-package-smoke/Rayman2Fix/Rayman2Fix.dll').read_bytes()
+          for marker in (
+              b'RUNTIME-AUDIO-TRACE: enabled=1 schema=2 inner_record_ref=checked-pointer',
+              b'sequence_ref_class=%u',
+              b'inner_ref_class=%u',
+          ):
+              if marker not in data:
+                  raise SystemExit(f'Research DLL missing corrected trace field: {marker!r}')
+          print('Embedded research DLL exact-match and schema 2: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Embedded corrected audio trace marker check failed' }
+          $global:LASTEXITCODE = 0
       - name: Upload optional sound-pause research build
         uses: actions/upload-artifact@v4
         with:
