@@ -290,6 +290,41 @@ def inspect(executable: Path) -> dict:
             "request_sound_function_prologue": pe.at(0x452D20, 4)
                 == bytes.fromhex("8b442414"),
         }
+        # Native 0x453BB8 and 0x453BC3 relocate INDEPENDENT
+        # event/resource table offsets from the 44-byte BNM header.
+        # Never infer resources start at 44 + 32*event_count.
+        # Native 0x453DD6 resolves SND_EVT_Son_Play.uResource.Id.
+        result["bnm_disk_table_relocation"] = {
+            "source": "ACP_Ray2/SND and native 0x453990",
+            "retail_cd_bank_verified": False,
+            "header_bytes": 44,
+            "event_table_offset_field": 4,
+            "event_count_field": 8,
+            "resource_table_offset_field": 12,
+            "resource_count_field": 16,
+            "native_header_44_byte_read": pe.at(0x4539E4,2)
+                == bytes.fromhex("6a2c"),
+            "event_table_relative_offset_load": pe.at(0x453BB8,3)
+                == bytes.fromhex("8b4804"),
+            "event_table_relocated_from_header_base": pe.at(0x453BBB,2)
+                == bytes.fromhex("03c8"),
+            "resource_table_relative_offset_load": pe.at(0x453BC3,3)
+                == bytes.fromhex("8b480c"),
+            "resource_table_relocated_from_header_base": pe.at(0x453BC6,2)
+                == bytes.fromhex("03c8"),
+            "event_record_stride_32": pe.at(0x453C23,3)
+                == bytes.fromhex("83c720"),
+            "resource_record_stride_92": pe.at(0x453BD1,11)
+                == bytes.fromhex("8d1440c1e2032bd08b410c"),
+            "event_type_1_handler": f"0x{pe.dword(0x453E90):08X}",
+            "event_type_1_is_play": pe.dword(0x453E90)==0x453DC9,
+            "play_event_resource_id_offset_8": pe.at(0x453DC9,3)
+                == bytes.fromhex("8b4608"),
+            "play_event_resource_resolver": pe.call_target(0x453DD6)
+                == 0x453F90,
+            "play_event_resource_pointer_rewrite": pe.at(0x453DDB,3)
+                == bytes.fromhex("894608"),
+        }
         result["theme_controller_lifecycle"] = {
             # Check the lifecycle guard. The reference normally sets the
             # singleton active DWORD to 1 only after a nested table slot
