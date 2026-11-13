@@ -21,7 +21,7 @@ TYPE11_CONTROLLER = 0x459950
 INNER_SOUND_CREATE = 0x458220
 SXD_PLAY_WRAPPER = 0x455280
 CONTROLLER_BASE = 0x4B95B8
-CONTROLLER_INNER_SLOT = CONTROLLER_BASE + 0x30
+CONTROLLER_INNER_RECORD_PTR = CONTROLLER_BASE + 0x30
 PAUSE_DISPATCH_TABLE = 0x4A3BA8
 RESUME_DISPATCH_TABLE = 0x4A3BAC
 
@@ -226,9 +226,19 @@ def inspect(executable: Path) -> dict:
         } for site, target in edges]
         result["nested_type11"] = {
             "controller": f"0x{CONTROLLER_BASE:08X}",
-            "inner_record_slot": f"0x{CONTROLLER_INNER_SLOT:08X}",
-            "writes_nested_slot": pe.at(0x459AF4, 5)
+            "inner_record_ptr_field": f"0x{CONTROLLER_INNER_RECORD_PTR:08X}",
+            "writes_nested_record_ptr": pe.at(0x459AF4, 5)
                 == bytes.fromhex("a3e8954b00"),
+            "record_allocator_returns_address":
+                pe.at(0x45752C, 6) == bytes.fromhex("8d81988c4b00"),
+            "record_allocator_base": "0x004B8C98",
+            "record_allocator_stride": 32,
+            "record_allocator_capacity": 64,
+            "record_type": "pointer into native sound table, NOT ordinal",
+            "theme_pause_passes_record_address":
+                pe.at(0x459C49, 4) == bytes.fromhex("8b403050"),
+            "theme_resume_passes_record_address":
+                pe.at(0x459C69, 4) == bytes.fromhex("8b403050"),
             "pause_reads_plus_30": pe.at(0x459C49, 3)
                 == bytes.fromhex("8b4030"),
             "resume_reads_plus_30": pe.at(0x459C69, 3)
@@ -345,15 +355,15 @@ def inspect(executable: Path) -> dict:
         }
         result["theme_controller_lifecycle"] = {
             # Check the lifecycle guard. The reference normally sets the
-            # singleton active DWORD to 1 only after a nested table slot
+            # singleton active DWORD to 1 only after a nested record pointer
             # has been created, and clears it on stop/initialization.
             # These are identified *direct* writes, not an exhaustive
             # proof that no indirect memory writes exist.
             "singleton_active_dword": "0x004B95B8",
-            "nested_table_slot_dword": "0x004B95E8",
+            "nested_table_record_pointer_dword": "0x004B95E8",
             "initializes_active_zero": pe.at(0x4597EC, 5)
                 == bytes.fromhex("a3b8954b00"),
-            "nested_slot_minus_one_guard": pe.at(0x459B06, 6)
+            "nested_record_pointer_minus_one_guard": pe.at(0x459B06, 6)
                 == bytes.fromhex("3905e8954b00"),
             "sets_active_one_after_success": pe.at(0x459B0E, 10)
                 == bytes.fromhex("c705b8954b0001000000"),
