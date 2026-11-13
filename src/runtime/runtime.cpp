@@ -450,7 +450,10 @@ AudioSoundContext inspect_audio_sound_context(DWORD argument) {
 // Determine the *executed call path* from original retail-CD return sites,
 // not a heuristic based on the Escape key being held. This is a bounded,
 // read-only stack snapshot; "unknown" never authorizes a sound bypass.
-__declspec(noinline) const char* inspect_audio_pause_origin() {
+__declspec(noinline) const char* inspect_audio_pause_origin(
+    char* code_rva_preview,SIZE_T preview_capacity,unsigned* scanned_words) {
+    if(code_rva_preview && preview_capacity)code_rva_preview[0]='\0';
+    if(scanned_words)*scanned_words=0;
     const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
     if(!module)return "unknown";
     auto* stack=reinterpret_cast<const DWORD*>(_AddressOfReturnAddress());
@@ -462,16 +465,28 @@ __declspec(noinline) const char* inspect_audio_pause_origin() {
     const std::uintptr_t region_end=
         reinterpret_cast<std::uintptr_t>(page.BaseAddress)+page.RegionSize;
     if(region_end<=start)return "unknown";
-    const SIZE_T bytes=region_end-start<sizeof(DWORD)*96u ?
-        static_cast<SIZE_T>(region_end-start) : sizeof(DWORD)*96u;
+    // A 96-DWORD window found no script/activation return site during
+    // three verified ESC cycles. Allow 1,024 DWORDs (4 KiB) but never
+    // read past the first committed stack region.
+    constexpr SIZE_T kMaxStackWords=1024;
+    const SIZE_T bytes=region_end-start<sizeof(DWORD)*kMaxStackWords ?
+        static_cast<SIZE_T>(region_end-start) : sizeof(DWORD)*kMaxStackWords;
     const SIZE_T count=bytes/sizeof(DWORD);
     if(count==0)return "unknown";
-    DWORD words[96]{};
+    DWORD words[kMaxStackWords]{};
     SIZE_T got=0;
     if(!ReadProcessMemory(GetCurrentProcess(),stack,words,
                           count*sizeof(DWORD),&got) ||
        got!=count*sizeof(DWORD))return "unknown";
+    if(scanned_words)*scanned_words=unsigned(count);
     const auto base=reinterpret_cast<std::uintptr_t>(module);
+    // The approved CD's executable .text spans RVA 0x1000..0x9B1D0.
+    // Sample only the first four return-address *candidates* as RVAs,
+    // once or twice per channel. These are not proof of valid frames.
+    constexpr std::uintptr_t kCodeStartRva=0x1000;
+    constexpr std::uintptr_t kCodeEndRva=0x9B1D0;
+    unsigned preview_count=0;
+    SIZE_T preview_used=0;
     constexpr std::uintptr_t kScriptPauseReturnRva=0x71E75;
     constexpr std::uintptr_t kScriptResumeReturnRva=0x71E6C;
     constexpr std::uintptr_t kWindowsPauseReturnRva=0x01CA1;
@@ -480,6 +495,18 @@ __declspec(noinline) const char* inspect_audio_pause_origin() {
                      // 3=Windows pause, 4=Windows resume
     for(SIZE_T i=0;i<count;++i) {
         const auto v=std::uintptr_t(words[i]);
+        if(code_rva_preview && preview_capacity>preview_used+10 &&
+           v>=base+kCodeStartRva && v<base+kCodeEndRva &&
+           preview_count<4u) {
+            const int n=std::snprintf(code_rva_preview+preview_used,
+                preview_capacity-preview_used,"%s%05X",
+                preview_count ? "," : "",
+                unsigned(v-base));
+            if(n>0 && SIZE_T(n)<preview_capacity-preview_used) {
+                preview_used+=SIZE_T(n);
+                ++preview_count;
+            }
+        }
         unsigned match=0;
         if(v==base+kScriptPauseReturnRva)match=1;
         else if(v==base+kScriptResumeReturnRva)match=2;
@@ -511,9 +538,15 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     // an audio handle; never alter the arguments or call ordering.
     AudioSoundContext source{};
     const char* audio_origin="not-sampled";
+    char code_rva_preview[96]{};
+    unsigned scanned_words=0;
     if(sampled) {
         source=inspect_audio_sound_context(arg);
-        audio_origin=inspect_audio_pause_origin();
+        const bool preview=event<2u && slot<4u;
+        audio_origin=inspect_audio_pause_origin(
+            preview ? code_rva_preview : nullptr,
+            preview ? sizeof(code_rva_preview) : 0u,
+            preview ? &scanned_words : nullptr);
     }
     if(original) original(arg);
     if(!sampled)return;
@@ -528,6 +561,14 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         unsigned(game_window_is_foreground()),
         unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
     log_line(line);
+    if(event<2u && slot<4u) {
+        char stack_line[270]{};
+        std::snprintf(stack_line,sizeof(stack_line),
+            "RUNTIME-AUDIO-CALLSTACK: channel=%s sample=%u inspected_words=%u executable_rva_candidates=%s (read-only; candidates not validated return frames)",
+            kAudioSlots[slot].name,event+1u,scanned_words,
+            code_rva_preview[0] ? code_rva_preview : "none");
+        log_line(stack_line);
+    }
 }
 void __stdcall audio_pause_sxd(DWORD a){audio_trace_forward(0,a);}
 void __stdcall audio_resume_sxd(DWORD a){audio_trace_forward(1,a);}

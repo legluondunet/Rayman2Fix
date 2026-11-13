@@ -25,6 +25,14 @@ pause-depth counter every ~500 ms, including when no audio callback
 fires. The `sound_matches` field reports when several game sound
 records share the same driver handle; a non-unique `sound_slot`
 must **not** be assumed to identify an individual song.
+The first native source-classification test returned
+`audio_origin=unknown` for every observed call. The updated
+research build widens its stack read from 96 to at most 1,024
+32-bit words (4 KiB) within the first committed region and,
+on the first two events for each pause/resume channel, logs
+`RUNTIME-AUDIO-CALLSTACK` with up to four *candidate* code
+RVAs (no absolute pointers or data). Candidate RVAs are
+diagnostic evidence, not validated return frames.
 New `audio_origin` diagnostics attempt to distinguish actual
 `game-script-pause` / `game-script-resume` call paths from
 `windows-activation-pause` / `windows-activation-resume`

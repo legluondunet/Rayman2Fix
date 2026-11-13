@@ -1,3 +1,30 @@
+## 13 November 2026 — callstack provenance probe after Wine 06:23 log
+
+The owner's 170-line `Rayman2Fix(20261113-062347).log`
+contains three ESC pause cycles. Native global audio depth changes
+1→2 at 39923 ms, 2→1 at 55923 ms, 1→2 at 66423 ms,
+2→1 at 71423 ms, and 1→2 at 73923 ms. Transition
+slot 1 receives each PauseTransitionSxd and matching
+ResumeTransitionSxd when the original game exits pause.
+
+All 73 sampled driver events recorded `audio_origin=unknown`,
+which shows the 96-DWORD stack window could not classify any
+native caller. Do not claim script-origin classification is
+validated. Some generic SXD callbacks have `sound_matches=2`,
+meaning driver handles may be shared across game sound records;
+they cannot identify unique music tracks.
+
+The research DLL now bounds the stack snapshot to 1,024 DWORDs
+(4 KiB), never beyond the current committed region, and logs
+up to four *candidate* executable-code RVAs in separate
+`RUNTIME-AUDIO-CALLSTACK` lines for the first two events in
+each pause/resume channel. This reveals whether likely return
+addresses are visible at all. It still does not validate a
+call frame, alter the original audio driver call, install a
+native menu patch, or introduce a functional INI feature.
+
+---
+
 ## 13 November 2026 — original native audio pause call-path classification
 
 The owner's `Rayman2Fix(20261113-024221).log` conclusively
