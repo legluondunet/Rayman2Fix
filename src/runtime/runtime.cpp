@@ -445,6 +445,93 @@ AudioSequenceContext inspect_audio_sequence_context(DWORD argument) {
     out.same_handle=unsigned(argument!=0u && argument==handle);
     return out;
 }
+// Read-only, source-backed link: a SND_E_TR_Theme=11 outer sound
+// record's driver handle is the singleton controller address 0x4B95B8.
+// Its +0x30 field is the *inner* table index; that inner record owns the
+// native SXD driver handle. Neither an isolated SXD handle nor a fixed
+// sound-table slot is sufficient to prove Theme ownership.
+// The upper 16 bits of SND_tdstBlockResourceMem.Id select a BNM bank.
+struct AudioThemeOwnerContext {
+    unsigned outer_candidates=0;
+    int outer_slot=-1;
+    int theme_bank=-1;
+    int theme_resource=-1;
+    int inner_slot=-1;
+    int inner_bank=-1;
+    int inner_resource=-1;
+    unsigned inner_driver_matches=0;
+    unsigned inner_active=0;
+    unsigned inner_transition=0;
+    unsigned theme_owned_driver=0;
+};
+AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
+    AudioThemeOwnerContext out{};
+    auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!module)return out;
+    const auto safe_read=[&](const void* address,void* bytes,SIZE_T size) {
+        SIZE_T read=0;
+        return ReadProcessMemory(GetCurrentProcess(),address,bytes,size,&read)!=0 &&
+               read==size;
+    };
+    constexpr std::uintptr_t kControllerRva=0xB95B8; // 0x4B95B8
+    constexpr std::uintptr_t kNestedSlotRva=0xB95E8; // 0x4B95E8
+    constexpr std::uintptr_t kSoundTableRva=0xB8C98; // 0x4B8C98
+    struct Record { DWORD words[8]; };
+    Record table[64]{};
+    DWORD active=0,slot=0;
+    if(!safe_read(module+kControllerRva,&active,sizeof(active)) ||
+       !safe_read(module+kNestedSlotRva,&slot,sizeof(slot)) ||
+       !safe_read(module+kSoundTableRva,table,sizeof(table)))return out;
+    const DWORD singleton=static_cast<DWORD>(
+        reinterpret_cast<std::uintptr_t>(module)+kControllerRva);
+    // A matching outer record must be active and point to an actual
+    // SND_tdstBlockResourceMem of resource type 11 (Theme).
+    for(unsigned i=0;i<64u;++i) {
+        if(table[i].words[0]!=singleton || table[i].words[5]==0u)
+            continue;
+        const std::uintptr_t descriptor=table[i].words[1];
+        DWORD header[2]{};
+        if(descriptor<0x10000u ||
+           !safe_read(reinterpret_cast<const void*>(descriptor),
+                      header,sizeof(header)) || header[1]!=11u)
+            continue;
+        ++out.outer_candidates;
+        if(out.outer_candidates==1u) {
+            out.outer_slot=static_cast<int>(i);
+            out.theme_bank=static_cast<int>(header[0]>>16);
+            out.theme_resource=static_cast<int>(header[0]&0xFFFFu);
+        }
+    }
+    if(out.outer_candidates!=1u) {
+        out.outer_slot=-1;
+        out.theme_bank=-1;
+        out.theme_resource=-1;
+        return out; // ambiguous or absent Theme: never claim ownership
+    }
+    if(active==0u || slot>=64u)return out;
+    out.inner_slot=static_cast<int>(slot);
+    const auto& inner=table[slot];
+    out.inner_active=unsigned(inner.words[5]!=0u);
+    out.inner_transition=unsigned(inner.words[4]!=0u);
+    const DWORD inner_handle=inner.words[0];
+    if(inner_handle==0u || inner_handle==0xFFFFFFFFu ||
+       !out.inner_active || !out.inner_transition)return out;
+    for(const auto& record:table)
+        if(record.words[0]==inner_handle)
+            ++out.inner_driver_matches;
+    const std::uintptr_t inner_desc=inner.words[1];
+    DWORD inner_header[2]{};
+    if(inner_desc<0x10000u ||
+       !safe_read(reinterpret_cast<const void*>(inner_desc),
+                  inner_header,sizeof(inner_header)) ||
+       inner_header[1]!=1u)return out; // SXD sample, not MIDI
+    out.inner_bank=static_cast<int>(inner_header[0]>>16);
+    out.inner_resource=static_cast<int>(inner_header[0]&0xFFFFu);
+    out.theme_owned_driver=unsigned(
+        argument!=0u && argument==inner_handle &&
+        out.inner_driver_matches==1u);
+    return out;
+}
 struct AudioSoundContext {
     int table_index=-1;
     unsigned match_count=0; // A driver pointer may be shared by sound table entries.
@@ -732,6 +819,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     // an audio handle; never alter the arguments or call ordering.
     AudioSoundContext source{};
     AudioSequenceContext sequence{};
+    AudioThemeOwnerContext theme{};
     const DWORD last_play=g_last_transition_play_handle.load(
         std::memory_order_acquire);
     const unsigned last_play_match=unsigned(
@@ -742,6 +830,8 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     if(sampled) {
         source=inspect_audio_sound_context(arg);
         sequence=inspect_audio_sequence_context(arg);
+        if((slot==2u || slot==3u || slot==11u) && event<8u)
+            theme=inspect_audio_theme_owner(arg);
         const bool preview=event<2u && slot<4u;
         audio_origin=inspect_audio_pause_origin(
             preview ? code_rva_preview : nullptr,
@@ -770,6 +860,17 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         unsigned(game_window_is_foreground()),
         unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
     log_line(line);
+    if((slot==2u || slot==3u || slot==11u) && event<8u) {
+        char ownership[344]{};
+        std::snprintf(ownership,sizeof(ownership),
+            "RUNTIME-AUDIO-THEME-OWNER: channel=%s sample=%u outer_candidates=%u outer_slot=%d theme_bank=%d theme_resource=%d inner_slot=%d inner_bank=%d inner_resource=%d inner_active=%u inner_transition=%u inner_handle_matches=%u theme_owned_driver=%u (read-only; no music bypass)",
+            kAudioSlots[slot].name,event+1u,theme.outer_candidates,
+            theme.outer_slot,theme.theme_bank,theme.theme_resource,
+            theme.inner_slot,theme.inner_bank,theme.inner_resource,
+            theme.inner_active,theme.inner_transition,
+            theme.inner_driver_matches,theme.theme_owned_driver);
+        log_line(ownership);
+    }
     if(event<2u && slot<4u) {
         char stack_line[270]{};
         std::snprintf(stack_line,sizeof(stack_line),
