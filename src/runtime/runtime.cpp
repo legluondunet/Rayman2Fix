@@ -3569,7 +3569,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
 #if RAYMAN2FIX_AUDIO_TRACE
     if (g_log) {
         g_audio_origin.store(GetTickCount(),std::memory_order_release);
-        log_line("RUNTIME-AUDIO-TRACE: enabled=1; 14 native channels, 64 events for Sxd pause/resume, 16 per other channel; all forwarded unchanged");
+        log_line("RUNTIME-AUDIO-TRACE: enabled=1 schema=2 inner_record_ref=checked-pointer; 14 native channels, 64 events for Sxd pause/resume, 16 per other channel; all forwarded unchanged");
     }
 #endif
     if (g_log) log_line(kResearchProbes ?
