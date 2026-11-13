@@ -342,7 +342,7 @@ bool game_window_is_foreground() {
 // function slots on the regular camera callback. Never hook these in release.
 #if RAYMAN2FIX_AUDIO_TRACE
 using AudioPauseFn=void (__stdcall*)(DWORD);
-constexpr unsigned kAudioSlotCount=10;
+constexpr unsigned kAudioSlotCount=14;
 struct AudioSlot {
     const char* name;
     std::uintptr_t rva;
@@ -352,10 +352,12 @@ constexpr AudioSlot kAudioSlots[kAudioSlotCount]={
     {"PauseTransitionSxd",0xB8708}, {"ResumeTransitionSxd",0xB870C},
     {"PauseMidi",0xB87B8}, {"ResumeMidi",0xB87BC},
     {"PauseTransitionMidi",0xB87F4}, {"ResumeTransitionMidi",0xB87F0},
-    {"PauseCD",0xB8834}, {"ResumeCD",0xB883C}
+    {"PauseCD",0xB8834}, {"ResumeCD",0xB883C},
+    {"StopSxd",0xB8660}, {"StopTransitionSxd",0xB8704},
+    {"SetSoundVolumeSxd",0xB866C}, {"StopCD",0xB8840}
 };
 std::atomic<void*> g_audio_original[kAudioSlotCount]{};
-std::atomic<unsigned> g_audio_events{0};
+std::atomic<unsigned> g_audio_event_counts[kAudioSlotCount]{};
 std::atomic<unsigned> g_audio_hooks_installed{0};
 std::atomic<DWORD> g_audio_last_poll{0};
 std::atomic<DWORD> g_audio_origin{0};
@@ -389,11 +391,12 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     const auto original=reinterpret_cast<AudioPauseFn>(
         g_audio_original[slot].load(std::memory_order_acquire));
     if(original) original(arg);
-    // One global budget avoids audio-thread file writes during repeated
-    // high-frequency sound operations. We do not record source pointers,
-    // individual sound resource IDs, or playback data.
-    const auto event=g_audio_events.fetch_add(1u,std::memory_order_relaxed);
-    if(!g_log || event>=48u)return;
+    // Each channel has an independent 16-event budget, so startup SFX
+    // traffic cannot consume all diagnostics before the menu is opened.
+    // Never print resource IDs, pointers or sound data.
+    const auto event=g_audio_event_counts[slot].fetch_add(
+        1u,std::memory_order_relaxed);
+    if(!g_log || event>=16u)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
     char line[232]{};
     std::snprintf(line,sizeof(line),
@@ -415,13 +418,19 @@ void __stdcall audio_pause_transition_midi(DWORD a){audio_trace_forward(6,a);}
 void __stdcall audio_resume_transition_midi(DWORD a){audio_trace_forward(7,a);}
 void __stdcall audio_pause_cd(DWORD a){audio_trace_forward(8,a);}
 void __stdcall audio_resume_cd(DWORD a){audio_trace_forward(9,a);}
+void __stdcall audio_stop_sxd(DWORD a){audio_trace_forward(10,a);}
+void __stdcall audio_stop_transition_sxd(DWORD a){audio_trace_forward(11,a);}
+void __stdcall audio_set_sound_volume_sxd(DWORD a){audio_trace_forward(12,a);}
+void __stdcall audio_stop_cd(DWORD a){audio_trace_forward(13,a);}
 using AudioHook=void (__stdcall*)(DWORD);
 constexpr AudioHook kAudioHooks[kAudioSlotCount]={
     audio_pause_sxd,audio_resume_sxd,
     audio_pause_transition_sxd,audio_resume_transition_sxd,
     audio_pause_midi,audio_resume_midi,
     audio_pause_transition_midi,audio_resume_transition_midi,
-    audio_pause_cd,audio_resume_cd
+    audio_pause_cd,audio_resume_cd,
+    audio_stop_sxd,audio_stop_transition_sxd,
+    audio_set_sound_volume_sxd,audio_stop_cd
 };
 void poll_audio_pause_trace() {
     if(!g_log || InterlockedCompareExchange(&g_audio_poll_guard,1,0)!=0)
@@ -3005,7 +3014,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
 #if RAYMAN2FIX_AUDIO_TRACE
     if (g_log) {
         g_audio_origin.store(GetTickCount(),std::memory_order_release);
-        log_line("RUNTIME-AUDIO-TRACE: enabled=1; observing Sxd/music transitions/MIDI/CD; up to 48 forwarded native calls, do not infer menu state from key alone");
+        log_line("RUNTIME-AUDIO-TRACE: enabled=1; 14 native audio channels (pause/resume/stop/volume), max 16 events per channel; all calls forwarded unchanged");
     }
 #endif
     if (g_log) log_line(kResearchProbes ?

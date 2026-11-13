@@ -33,7 +33,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         section=self.runtime.split("void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1]
         section=section.split("void __stdcall audio_pause_sxd(",1)[0]
         self.assertIn("if(original) original(arg);",section)
-        self.assertIn("event>=48u",section)
+        self.assertIn("event>=16u",section)
         self.assertIn("arg_zero=",section)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
@@ -46,11 +46,13 @@ class AudioTraceGuardTests(unittest.TestCase):
             "PauseTransitionMidi":"0xB87F4",
             "ResumeTransitionMidi":"0xB87F0",
             "PauseCD":"0xB8834", "ResumeCD":"0xB883C",
+            "StopSxd":"0xB8660", "StopTransitionSxd":"0xB8704",
+            "SetSoundVolumeSxd":"0xB866C", "StopCD":"0xB8840",
         }
         for name,rva in expected.items():
             self.assertIn('{"'+name+'",'+rva+'}',self.runtime)
         self.assertIn("TimeDateStamp!=kOriginalTimestamp",self.runtime)
-        self.assertIn("kAudioSlotCount=10",self.runtime)
+        self.assertIn("kAudioSlotCount=14",self.runtime)
 
 if __name__=="__main__":
     unittest.main()

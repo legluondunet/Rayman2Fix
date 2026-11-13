@@ -10,9 +10,10 @@ The separately labelled GitHub Actions artifact
 `RAYMAN2FIX_AUDIO_TRACE=1`; the normal
 `Rayman2Fix-Windows-x86-bootstrap` build has **no audio tracer**.
 On the one SHA-256-approved original CD executable, and only when
-`[Debug] Log=1`, this tracer observes up to 48 native calls across
-pause/resume Sxd, Sxd transitions, MIDI, MIDI transitions and CD
-audio. The verified original driver function is always called with
+`[Debug] Log=1`, this tracer observes up to 16 calls per native
+audio channel (14 independently bounded channels), including Sxd
+pause/resume/stop, Sxd transitions, sound volume, MIDI,
+MIDI transitions and CD audio. The verified original driver function is always called with
 the same argument; no sound is silenced, played, skipped, replaced,
 or looped. Installation of those diagnostic-only hooks fails closed
 when driver functions or game-memory protections are unexpected.
