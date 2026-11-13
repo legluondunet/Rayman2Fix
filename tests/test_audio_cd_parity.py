@@ -182,7 +182,7 @@ class ParityTests(unittest.TestCase):
                 MOD.WINDOW_PAUSE_TITLE_VA: MOD.WINDOW_PAUSE_TITLE_XREFS,
             }[target]
 
-        with patch.object(M, "absolute_dword_xrefs", side_effect=xrefs):
+        with patch.object(MOD, "absolute_dword_xrefs", side_effect=xrefs):
             result = MOD.inspect_native_menu_indicators(a)
             self.assertTrue(result["native_relationships_verified"])
             self.assertEqual(result["ai_ingame_menu_read_sites"], 8)
