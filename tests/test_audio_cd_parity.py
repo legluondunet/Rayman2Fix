@@ -74,6 +74,34 @@ class ParityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MOD.compare_regions(a, a, (("bad", 0x401020, 0x401020),))
 
+    def test_absolute_dword_xrefs_are_section_scoped_and_va_based(self):
+        a = fake_pe(0x400)
+        operand = struct.pack("<I", 0x4B9618)
+        a[0x410:0x414] = operand
+        a[0x490:0x494] = operand
+        # Ignore the same literal in a different PE section.
+        a[0x500:0x504] = operand
+        pe = MOD.PE32(a)
+        self.assertEqual(MOD.absolute_dword_xrefs(pe, 0x4B9618),
+                         [0x401010, 0x401090])
+        with self.assertRaisesRegex(ValueError, "not a 32-bit"):
+            MOD.absolute_dword_xrefs(pe, 0x100000000)
+        with self.assertRaisesRegex(ValueError, "Section not present"):
+            MOD.absolute_dword_xrefs(pe, 0x4B9618, ".missing")
+
+    def test_transaction_flag_requires_exact_known_code_locations(self):
+        # Code and operand checks are separate: loose DWORD scanning alone
+        # cannot prove that a hit was an actual machine-code instruction.
+        self.assertEqual(len(MOD.THEME_TRANSACTION_OPS), 6)
+        self.assertEqual(len(MOD.THEME_FLAG_OPERAND_VAS), 6)
+        self.assertEqual(
+            [op[1] for op in MOD.THEME_TRANSACTION_OPS],
+            [0x459694, 0x4596E0, 0x45999D, 0x459B2C, 0x459BE5, 0x459C23]
+        )
+        self.assertEqual(MOD.THEME_TRANSACTION_FLAG_VA, 0x4B9618)
+        for _, _va, op in MOD.THEME_TRANSACTION_OPS:
+            self.assertIn(struct.pack("<I", 0x4B9618), op)
+
     def test_corrupted_headers_rejected(self):
         a = fake_pe()
         a[0:2] = b"NO"
