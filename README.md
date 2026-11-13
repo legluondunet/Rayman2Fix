@@ -19,8 +19,13 @@ The 1999 PC CD assembly additionally confirms a 64-record global
 sound table and one global audio pause-depth counter. Research-only
 log lines now include the matching `sound_slot` number (0–63, when
 available), native `sound_transport` (SXD=1 / MIDI=2 when readable),
-transition and active flags, and `global_pause_depth`. These are
-read-only observations, **not proof of a music stream**, and no
+transition and active flags, and `global_pause_depth`. Additional
+`RUNTIME-AUDIO-STATE` lines record actual changes of the native
+pause-depth counter every ~500 ms, including when no audio callback
+fires. The `sound_matches` field reports when several game sound
+records share the same driver handle; a non-unique `sound_slot`
+must **not** be assumed to identify an individual song.
+These are read-only observations, **not proof of a music stream**, and no
 raw memory address, sound resource filename or pointer is logged.
 The global audio pause routine is invoked both by the window
 activation handler and by a native game script, so suppressing its

@@ -40,12 +40,22 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("f1_down=",section)
         self.assertNotIn("VK_F1",self.runtime)
         self.assertIn("sound_slot=",section)
+        self.assertIn("sound_matches=",section)
         self.assertIn("global_pause_depth=",section)
+        self.assertIn("if(sampled)source=inspect_audio_sound_context(arg);",section)
+        self.assertIn("const bool sampled=g_log && event<budget;",section)
+        self.assertLess(section.index("if(sampled)source=inspect_audio_sound_context(arg);"),
+                        section.index("if(original) original(arg);"))
+        self.assertLess(section.index("if(original) original(arg);"),
+                        section.index("if(!sampled)return;"))
         self.assertIn("inspect_audio_sound_context(arg)",section)
         self.assertIn("ReadProcessMemory(process,address,bytes,size,&got)",self.runtime)
         self.assertIn("kSoundTableSlots=64u",self.runtime)
         self.assertIn("kSoundTableRva=0xB8C98",self.runtime)
         self.assertIn("kPauseDepthRva=0xA3CC8",self.runtime)
+        self.assertIn("RUNTIME-AUDIO-STATE: t_ms=",self.runtime)
+        self.assertIn("g_audio_last_depth.exchange(",self.runtime)
+        self.assertIn("++out.match_count;",self.runtime)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
     def test_exact_owner_cd_slots_are_named_and_bounded(self):

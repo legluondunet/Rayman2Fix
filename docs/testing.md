@@ -1,3 +1,26 @@
+## 13 November 2026 — nested native pause counter and shared sound handles
+
+After the owner-provided `Rayman2Fix(20261113-021629).log`, the
+experimental audio diagnostic now emits `RUNTIME-AUDIO-STATE`
+only when the native nested sound-pause depth changes. The previous
+sample confirmed the Escape menu issued PauseTransitionSxd for
+`sound_slot=1` and eight PauseSxd calls resolving to sound slots
+`2,3,4,5,9,9,11,11` at `t_ms=82615–82617` while the game had
+focus. No ResumeSxd/ResumeTransitionSxd callbacks were recorded
+before the log ended; later StopTransitionSxd callbacks at 136767ms
+and 141952ms carried `global_pause_depth=2`. This does **not**
+prove a malfunction: the user may not have resumed in-game before
+exiting. The global counter trace will identify actual unpauses.
+
+All sound record observations are captured **before** forwarding
+the original native function; the original still executes as-is.
+`sound_matches` now exposes non-unique driver handles rather
+than implying each matched table index is a unique music or
+sound effect. The feature remains scoped to Escape, with F1
+excluded and no game audio behavior changed.
+
+---
+
 ## 13 November 2026 — disabled deep probes in normal builds
 
 The regular Windows x86 DLL now uses

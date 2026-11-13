@@ -361,6 +361,7 @@ std::atomic<unsigned> g_audio_event_counts[kAudioSlotCount]{};
 std::atomic<unsigned> g_audio_hooks_installed{0};
 std::atomic<DWORD> g_audio_last_poll{0};
 std::atomic<DWORD> g_audio_origin{0};
+std::atomic<int> g_audio_last_depth{-1};
 volatile LONG g_audio_poll_guard=0;
 bool executable_page(const void* addr) {
     MEMORY_BASIC_INFORMATION m{};
@@ -395,6 +396,7 @@ bool writable_audio_slot(const void* addr) {
 // at 0x471E70; a key press alone cannot distinguish those sources.
 struct AudioSoundContext {
     int table_index=-1;
+    unsigned match_count=0; // A driver pointer may be shared by sound table entries.
     unsigned transport=0;
     unsigned transition=0;
     unsigned active=0;
@@ -422,6 +424,11 @@ AudioSoundContext inspect_audio_sound_context(DWORD argument) {
        entries,sizeof(entries)))return out;
     for(unsigned i=0;i<kSoundTableSlots;++i) {
         if(entries[i].words[0]!=argument)continue;
+        ++out.match_count;
+        // Never claim the first matching index is unique. Shared driver
+        // handles can represent several game records and must be treated
+        // as ambiguous when identifying music versus sound effects.
+        if(out.table_index>=0)continue;
         out.table_index=static_cast<int>(i);
         // These fields are read-only observations of the game's own sound
         // table. Their interpretation is not used to change playback.
@@ -433,7 +440,6 @@ AudioSoundContext inspect_audio_sound_context(DWORD argument) {
             reinterpret_cast<const void*>(desc+4u),&type,sizeof(type)) &&
             type>=1u && type<=2u)
             out.transport=type;
-        break;
     }
     return out;
 }
@@ -441,22 +447,26 @@ AudioSoundContext inspect_audio_sound_context(DWORD argument) {
 void audio_trace_forward(unsigned slot,DWORD arg) {
     const auto original=reinterpret_cast<AudioPauseFn>(
         g_audio_original[slot].load(std::memory_order_acquire));
-    if(original) original(arg);
-    // Ordinary 1-arg sound effects often consume 16 events in one pause.
-    // Permit four complete menu cycles for Pause/ResumeSxd (64 each);
-    // other channels remain bounded at 16. No raw sound identifiers.
+    // Count and bound diagnostics BEFORE the native driver call. Crucially,
+    // do not scan 64 sound records for every sound event after budget
+    // exhaustion: this research tracer must stay cheap during gameplay.
     const unsigned budget=(slot==0u || slot==1u) ? 64u : 16u;
     const auto event=g_audio_event_counts[slot].fetch_add(
         1u,std::memory_order_relaxed);
-    if(!g_log || event>=budget)return;
+    const bool sampled=g_log && event<budget;
+    // Capture table state BEFORE the original stop/pause might invalidate
+    // an audio handle; never alter the arguments or call ordering.
+    AudioSoundContext source{};
+    if(sampled)source=inspect_audio_sound_context(arg);
+    if(original) original(arg);
+    if(!sampled)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
-    const AudioSoundContext source=inspect_audio_sound_context(arg);
-    char line[330]{};
+    char line[360]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_transport=%u sound_transition=%u sound_active=%u global_pause_depth=%d foreground=%u esc_down=%u (forwarded unchanged)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u global_pause_depth=%d foreground=%u esc_down=%u (native table BEFORE call; forwarded unchanged)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
-        unsigned(arg==0),source.table_index,source.transport,
+        unsigned(arg==0),source.table_index,source.match_count,source.transport,
         source.transition,source.active,source.pause_depth,
         unsigned(game_window_is_foreground()),
         unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
@@ -510,6 +520,28 @@ void poll_audio_pause_trace() {
        pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
        pe->OptionalHeader.SizeOfImage<0xB8840) {
         InterlockedExchange(&g_audio_poll_guard,0);return;
+    }
+    // Sample the game's *global* nested audio-pause depth every ~500ms.
+    // This does not rely on Escape being held during the pause and thus
+    // shows whether the original menu ever reaches its matching resume.
+    DWORD depth=0;
+    SIZE_T got=0;
+    if(ReadProcessMemory(GetCurrentProcess(),module+0xA3CC8,&depth,
+                         sizeof(depth),&got) && got==sizeof(depth) &&
+       depth<=16u) {
+        const int previous=g_audio_last_depth.exchange(
+            static_cast<int>(depth),std::memory_order_relaxed);
+        if(previous!=static_cast<int>(depth)) {
+            char msg[180]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-AUDIO-STATE: t_ms=%lu global_pause_depth=%lu prior_depth=%d foreground=%u esc_down=%u (read-only; key is not a menu-state detector)",
+                static_cast<unsigned long>(now-g_audio_origin.load(
+                    std::memory_order_acquire)),
+                static_cast<unsigned long>(depth),previous,
+                unsigned(game_window_is_foreground()),
+                unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
+            log_line(msg);
+        }
     }
     const auto begin=reinterpret_cast<std::uintptr_t>(module);
     const auto end=begin+pe->OptionalHeader.SizeOfImage;
