@@ -81,7 +81,7 @@ class TraceEvidenceTests(unittest.TestCase):
         self.assertTrue(result["theme_ownership_does_not_prove_audible_music"])
 
     def test_native_menu_and_engine_pause_samples_cannot_prove_esc_or_f1(self):
-        data = "\\n".join((
+        data = "\n".join((
             "RUNTIME-AUDIO-UI-STATE: t_ms=700 in_game_menu=0 "
             "engine_paused=0 foreground=1 private_path=KEEP_PRIVATE",
             "RUNTIME-AUDIO-UI-STATE: t_ms=900 in_game_menu=1 "
