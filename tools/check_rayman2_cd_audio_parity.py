@@ -490,15 +490,19 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
         all(x["matched"] for x in menu_background.values()))
 
 
-    native_resource_lookup_cd = cd.at(
-        RESOURCE_RESOLVER_VA, RESOURCE_RESOLVER_SIZE)
-    native_resource_lookup_ref = ref.at(
-        RESOURCE_RESOLVER_VA, RESOURCE_RESOLVER_SIZE)
-    native_resource_lookup_verified = bool(check_anchors and
-        hashlib.sha256(native_resource_lookup_cd).hexdigest()
-            == RESOURCE_RESOLVER_SHA256 and
-        hashlib.sha256(native_resource_lookup_ref).hexdigest()
-            == RESOURCE_RESOLVER_SHA256)
+    # Synthetic PE tests intentionally skip proprietary native anchors.
+    # Do not read addresses absent from those small synthetic fixtures.
+    if check_anchors:
+        native_resource_lookup_verified = (
+            hashlib.sha256(cd.at(
+                RESOURCE_RESOLVER_VA, RESOURCE_RESOLVER_SIZE)).hexdigest()
+                == RESOURCE_RESOLVER_SHA256
+            and hashlib.sha256(ref.at(
+                RESOURCE_RESOLVER_VA, RESOURCE_RESOLVER_SIZE)).hexdigest()
+                == RESOURCE_RESOLVER_SHA256
+        )
+    else:
+        native_resource_lookup_verified = False
     rdata_identical = cd.section(".rdata") == ref.section(".rdata")
     verified_windows = all(w["identical"] for w in windows)
     verified_native_anchors = (
