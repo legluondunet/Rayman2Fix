@@ -17,6 +17,7 @@ from pathlib import Path
 FIELD = re.compile(r"(?:^|\s)([A-Za-z_][A-Za-z_0-9]*)=([^\s]+)")
 TRACE = "RUNTIME-AUDIO-TRACE: event="
 OWNER = "RUNTIME-AUDIO-THEME-OWNER: channel="
+UI_STATE = "RUNTIME-AUDIO-UI-STATE:"
 
 
 def fields(line: str) -> dict[str, str]:
@@ -34,6 +35,7 @@ def summarize(text: str) -> dict:
     events: list[dict] = []
     by_event_sample: dict[tuple[str, int], dict] = {}
     unmatched_owners = 0
+    ui_states: list[dict] = []
     schema2 = False
     for line in text.splitlines():
         if "RUNTIME-AUDIO-TRACE: enabled=1 schema=2" in line:
@@ -55,6 +57,16 @@ def summarize(text: str) -> dict:
             }
             events.append(obj)
             by_event_sample[(event, sample)] = obj
+        elif UI_STATE in line:
+            data = fields(line.split(UI_STATE, 1)[1])
+            menu, engine = number(data, "in_game_menu"), number(data, "engine_paused")
+            if menu in (0, 1) and engine in (0, 1):
+                ui_states.append({
+                    "ms": number(data, "t_ms"),
+                    "in_game_menu": menu,
+                    "engine_paused": engine,
+                    "foreground": number(data, "foreground"),
+                })
         elif OWNER in line:
             data = fields(line.split("RUNTIME-AUDIO-THEME-OWNER:", 1)[1])
             key = (data.get("channel", ""), number(data, "sample"))
@@ -139,6 +151,8 @@ def summarize(text: str) -> dict:
     focus_out = any(e["foreground"] == 0 for e in events)
     return {
         "schema_2_header_seen": schema2,
+        "native_ui_state_samples": ui_states,
+        "in_game_menu_flag_cannot_distinguish_ESC_from_F1": True,
         "events_sampled": len(events),
         "events_by_kind": dict(sorted(Counter(e["event"] for e in events).items())),
         "origins": dict(sorted(Counter(e["origin"] for e in events).items())),
