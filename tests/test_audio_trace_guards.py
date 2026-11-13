@@ -84,7 +84,8 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("kSequenceActiveRva=0xB95B8",self.runtime)
         self.assertIn("kSequenceSlotRva=0xB95E8",self.runtime)
         self.assertIn("kSoundTableRva=0xB8C98",self.runtime)
-        self.assertIn("slot>=64u",self.runtime)
+        self.assertIn("decode_audio_nested_record_ref(nested_ptr,module)",self.runtime)
+        self.assertIn("sequence_ref_class=%u",self.runtime)
         self.assertIn("sequence_same_handle=%u",self.runtime)
         self.assertIn("sequence=inspect_audio_sequence_context(arg);",self.runtime)
         section=self.runtime.split(
@@ -123,7 +124,9 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("out.outer_candidates!=1u",section)
         self.assertIn("out.inner_driver_matches==1u",section)
         self.assertIn("argument==inner_handle",section)
-        self.assertIn("active==0u || slot>=64u",section)
+        self.assertIn("if(active==0u)return out;",section)
+        self.assertIn("const auto ref=decode_audio_nested_record_ref(nested_ptr,module);",section)
+        self.assertIn("const auto& inner=table[ref.table_index];",section)
         self.assertIn("table[i].words[5]==0u",section)
         self.assertIn("theme_owned_driver",section)
         self.assertNotIn("WriteProcessMemory(",section)
@@ -137,6 +140,27 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertLess(trace.index("theme=inspect_audio_theme_owner(arg)"),
                         trace.index("if(original) original(arg);"))
         self.assertIn("if(original) original(arg);",trace)
+        self.assertNotIn("MusicInPauseMenu",self.config)
+
+    def test_theme_nested_ref_is_pointer_not_slot_number(self):
+        # Native 0x4574E0 returns &sound_table[index], which 0x459AF4
+        # stores at 0x4B95E8. The old probe compared the pointer to 64
+        # and incorrectly reported inner_slot=-1 even for active Themes.
+        section=self.runtime.split(
+            "AudioNestedRecordRef decode_audio_nested_record_ref(",1)[1]
+        section=section.split("struct AudioSequenceContext {",1)[0]
+        self.assertIn("kSoundTableRva=0xB8C98",section)
+        self.assertIn("kRecordSize=0x20",section)
+        self.assertIn("kRecordCount=64",section)
+        self.assertIn("address<base || address>=base+kRecordCount*kRecordSize",section)
+        self.assertIn("(address-base)%kRecordSize!=0u",section)
+        self.assertIn("(address-base)/kRecordSize",section)
+        self.assertIn("value==0xFFFFFFFFu",section)
+        self.assertNotIn("ReadProcessMemory(",section)
+        self.assertNotIn("WriteProcessMemory(",section)
+        self.assertNotIn("slot>=64u",self.runtime)
+        self.assertIn("inner_ref_class=%u",self.runtime)
+        self.assertIn("sequence_ref_class=%u",self.runtime)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
     def test_transition_play_to_pause_correlation_is_research_only(self):
