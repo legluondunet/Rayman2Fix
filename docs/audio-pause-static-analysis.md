@@ -72,6 +72,27 @@ The three consecutive eight-byte dispatch entries share one opcode decoder; `0x4
 The exact VM opcode decoder instructions, three table entries, branch call targets and both pinned binary fingerprints are now verified in [`tools/check_rayman2_cd_audio_parity.py`](../tools/check_rayman2_cd_audio_parity.py). Synthetic [`tests/test_audio_cd_parity.py`](../tests/test_audio_cd_parity.py) deliberately asserts that generic script origin does **not** constitute menu evidence. **No actual game audio behavior has been modified.**
 
 
+## Reproducible offline audit of the owner's corrected schema-2 Wine trace
+
+A new read-only [`tools/analyze_rayman2_audio_trace.py`](../tools/analyze_rayman2_audio_trace.py) summarizes sampled driver events, attaches the corrected `RUNTIME-AUDIO-THEME-OWNER` lines to their matching **(channel, sample)** trace lines, and emits only aggregate evidence (no source filename, raw driver handle, stack address, full log lines or game assets). It is exercised in Linux CI by [`tests/test_audio_trace_evidence.py`](../tests/test_audio_trace_evidence.py) using wholly synthetic records. For a locally owned log:
+
+```bash
+python3 tools/analyze_rayman2_audio_trace.py "/path/to/Rayman2Fix.log"
+```
+
+**Independent offline hand-inspection of `Rayman2Fix(20261113-171247).log`:** 48 sampled `RUNTIME-AUDIO-TRACE: event=...` records, including 16 `StopSxd`, 14 `PauseSxd`, seven `ResumeSxd`, five `StopTransitionSxd`, four `PauseTransitionSxd` and two `ResumeTransitionSxd`. Eleven `RUNTIME-AUDIO-THEME-OWNER` lines accompany transition events. In the intervals already cross-checked with the real native CD code:
+
+- **87,431–87,432 ms:** two `game-script-pause` transition driver calls, depth 1, one Theme outer `73:48` (slot 6), inner `73:50` (slot 1), correctly decoded native sound-record pointer.
+- **106,431–106,432 ms:** two `game-script-resume` transition driver calls with the same Theme and inner resource, depth 1.
+- **133,663–133,664 ms:** another pair of `game-script-pause` calls, outer Theme **still `73:48`**, but inner resource now **`73:51`**.
+- **138,032 ms** and **141,667 ms:** distinct owned `StopTransitionSxd` events **at native global depth 2**, first on Theme `73:48` / inner `73:51`, then Theme `89:90` / inner `89:81`. Both must remain intact across any future pause feature.
+- All reported `foreground` fields are **1**. There is **no sampled `foreground=0`** event and thus no independent Wine evidence for an Alt-Tab cycle. `esc_down=1` occurs during the script-origin pause and resume samples, but the **generic VM opcode alone plus key state is still not proof of in-game ESC-menu visibility**.
+
+This report distinguishes **recorded driver calls** from **inferred Theme controller ownership**, **correlated same-ms duplicate candidates**, and **untested UI/focus conditions**. It never infers the specific song from an ID or treats a script-origin pause as a confirmed ESC menu. Log tracing is sample-capped; missing records cannot establish that a type of event never happens.
+
+**No new Wine run or build of a patched runtime is required for this offline verification.** The original game DLL, launcher, INI, native audio semantics and the PR's draft state are unchanged.
+
+
 ## Corrected nomenclature — three different classifications
 
 Cross-checked against the public [ACP_Ray2 `SND_Resource.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h) and [`SND_Event.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Event.h):
