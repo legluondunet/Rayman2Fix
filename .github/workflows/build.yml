@@ -267,6 +267,45 @@ jobs:
           path: package/
           if-no-files-found: error
           retention-days: 30
+      - name: Verify standard x86 runtime has no audio research hooks
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          binary=Path('build/Release/Rayman2Fix.dll').read_bytes()
+          if b'RUNTIME-AUDIO-TRACE: enabled=1' in binary:
+              raise SystemExit('Normal DLL unexpectedly contains experimental audio tracer')
+          print('Standard DLL excludes audio tracer: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Standard DLL included research probes' }
+      - name: Build separate research-only audio trace launcher
+        shell: pwsh
+        run: |
+          # Reuse the pinned already-built GameFrame resources. No original
+          # Rayman 2 executable, ISO, soundtrack or private patch in artifacts.
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=OFF -DRAYMAN2FIX_AUDIO_TRACE=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Audio trace CMake configure failed' }
+          cmake --build build --config Release --target Rayman2Fix --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Audio trace Windows x86 build failed' }
+          @'
+          from pathlib import Path
+          binary=Path('build/Release/Rayman2Fix.dll').read_bytes()
+          if b'RUNTIME-AUDIO-TRACE: enabled=1' not in binary:
+              raise SystemExit('Research DLL missing distinctive audio trace marker')
+          print('Research DLL includes audio tracer: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Audio research instrumentation not linked' }
+          New-Item -Path audio-trace -ItemType Directory -Force | Out-Null
+          Copy-Item build/Release/Rayman2Fix.exe audio-trace/Rayman2Fix.exe
+          if (!(Test-Path audio-trace/Rayman2Fix.exe)) { throw 'Audio trace launcher not produced' }
+          $global:LASTEXITCODE = 0
+      - name: Upload optional sound-pause research build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rayman2Fix-Windows-x86-audio-trace
+          path: audio-trace/
+          if-no-files-found: error
+          retention-days: 30
 
   linux-tests:
     runs-on: ubuntu-latest
@@ -276,6 +315,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_fps_limit_patch.py'
       - name: Verify Learn_10 safe fallback
         run: python3 -m unittest discover -s tests -p 'test_learn10_readonly.py'
+      - name: Verify audio research trace stays out of normal builds
+        run: python3 -m unittest discover -s tests -p 'test_audio_trace_guards.py'
       - name: Configure
         run: cmake -S . -B build -DBUILD_TESTING=ON
       - name: Build

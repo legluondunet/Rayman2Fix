@@ -33,6 +33,12 @@
 #ifndef RAYMAN2FIX_RESEARCH_PROBES
 #define RAYMAN2FIX_RESEARCH_PROBES 0
 #endif
+#ifndef RAYMAN2FIX_AUDIO_TRACE
+#define RAYMAN2FIX_AUDIO_TRACE 0
+#endif
+#if RAYMAN2FIX_AUDIO_TRACE != 0 && RAYMAN2FIX_AUDIO_TRACE != 1
+#error RAYMAN2FIX_AUDIO_TRACE must be 0 or 1
+#endif
 #if RAYMAN2FIX_RESEARCH_PROBES != 0 && RAYMAN2FIX_RESEARCH_PROBES != 1
 #error RAYMAN2FIX_RESEARCH_PROBES must be 0 or 1
 #endif
@@ -329,6 +335,149 @@ bool game_window_is_foreground() {
     return foreground && GetWindowThreadProcessId(foreground, &pid) &&
            pid == GetCurrentProcessId();
 }
+
+// Research-only audio pause/resume trace for the owner's exact 1999 CD build.
+// No sound call is suppressed, delayed or modified. The native sound DLL is
+// loaded dynamically after the game starts, so sample its *existing* resolved
+// function slots on the regular camera callback. Never hook these in release.
+#if RAYMAN2FIX_AUDIO_TRACE
+using AudioPauseFn=void (__stdcall*)(DWORD);
+constexpr unsigned kAudioSlotCount=10;
+struct AudioSlot {
+    const char* name;
+    std::uintptr_t rva;
+};
+constexpr AudioSlot kAudioSlots[kAudioSlotCount]={
+    {"PauseSxd",0xB8664}, {"ResumeSxd",0xB8668},
+    {"PauseTransitionSxd",0xB8708}, {"ResumeTransitionSxd",0xB870C},
+    {"PauseMidi",0xB87B8}, {"ResumeMidi",0xB87BC},
+    {"PauseTransitionMidi",0xB87F4}, {"ResumeTransitionMidi",0xB87F0},
+    {"PauseCD",0xB8834}, {"ResumeCD",0xB883C}
+};
+std::atomic<void*> g_audio_original[kAudioSlotCount]{};
+std::atomic<unsigned> g_audio_events{0};
+std::atomic<unsigned> g_audio_hooks_installed{0};
+std::atomic<DWORD> g_audio_last_poll{0};
+std::atomic<DWORD> g_audio_origin{0};
+volatile LONG g_audio_poll_guard=0;
+bool executable_page(const void* addr) {
+    MEMORY_BASIC_INFORMATION m{};
+    if(!addr || VirtualQuery(addr,&m,sizeof(m))!=sizeof(m) ||
+       m.State!=MEM_COMMIT || (m.Protect&PAGE_GUARD) ||
+       (m.Protect&PAGE_NOACCESS))return false;
+    switch(m.Protect&0xffu) {
+        case PAGE_EXECUTE:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:return true;
+        default:return false;
+    }
+}
+bool writable_audio_slot(const void* addr) {
+    MEMORY_BASIC_INFORMATION m{};
+    if(!addr || VirtualQuery(addr,&m,sizeof(m))!=sizeof(m) ||
+       m.State!=MEM_COMMIT || (m.Protect&PAGE_GUARD))return false;
+    switch(m.Protect&0xffu) {
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:return true;
+        default:return false;
+    }
+}
+void audio_trace_forward(unsigned slot,DWORD arg) {
+    const auto original=reinterpret_cast<AudioPauseFn>(
+        g_audio_original[slot].load(std::memory_order_acquire));
+    if(original) original(arg);
+    // One global budget avoids audio-thread file writes during repeated
+    // high-frequency sound operations. We do not record source pointers,
+    // individual sound resource IDs, or playback data.
+    const auto event=g_audio_events.fetch_add(1u,std::memory_order_relaxed);
+    if(!g_log || event>=48u)return;
+    const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
+    char line[232]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u foreground=%u esc_down=%u f1_down=%u (forwarded unchanged; no sound modifications)",
+        kAudioSlots[slot].name,event+1u,
+        static_cast<unsigned long>(GetTickCount()-origin),
+        unsigned(arg==0),unsigned(game_window_is_foreground()),
+        unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0),
+        unsigned((GetAsyncKeyState(VK_F1)&0x8000)!=0));
+    log_line(line);
+}
+void __stdcall audio_pause_sxd(DWORD a){audio_trace_forward(0,a);}
+void __stdcall audio_resume_sxd(DWORD a){audio_trace_forward(1,a);}
+void __stdcall audio_pause_transition_sxd(DWORD a){audio_trace_forward(2,a);}
+void __stdcall audio_resume_transition_sxd(DWORD a){audio_trace_forward(3,a);}
+void __stdcall audio_pause_midi(DWORD a){audio_trace_forward(4,a);}
+void __stdcall audio_resume_midi(DWORD a){audio_trace_forward(5,a);}
+void __stdcall audio_pause_transition_midi(DWORD a){audio_trace_forward(6,a);}
+void __stdcall audio_resume_transition_midi(DWORD a){audio_trace_forward(7,a);}
+void __stdcall audio_pause_cd(DWORD a){audio_trace_forward(8,a);}
+void __stdcall audio_resume_cd(DWORD a){audio_trace_forward(9,a);}
+using AudioHook=void (__stdcall*)(DWORD);
+constexpr AudioHook kAudioHooks[kAudioSlotCount]={
+    audio_pause_sxd,audio_resume_sxd,
+    audio_pause_transition_sxd,audio_resume_transition_sxd,
+    audio_pause_midi,audio_resume_midi,
+    audio_pause_transition_midi,audio_resume_transition_midi,
+    audio_pause_cd,audio_resume_cd
+};
+void poll_audio_pause_trace() {
+    if(!g_log || InterlockedCompareExchange(&g_audio_poll_guard,1,0)!=0)
+        return;
+    const DWORD now=GetTickCount();
+    const DWORD last=g_audio_last_poll.load(std::memory_order_relaxed);
+    if(last && DWORD(now-last)<500u) {
+        InterlockedExchange(&g_audio_poll_guard,0);
+        return;
+    }
+    g_audio_last_poll.store(now,std::memory_order_relaxed);
+    auto* module=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+    if(!module) {InterlockedExchange(&g_audio_poll_guard,0);return;}
+    const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    if(dos->e_magic!=IMAGE_DOS_SIGNATURE || dos->e_lfanew<=0 ||
+       dos->e_lfanew>=0x1000) {
+        InterlockedExchange(&g_audio_poll_guard,0);return;
+    }
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+        module+dos->e_lfanew);
+    if(pe->Signature!=IMAGE_NT_SIGNATURE ||
+       pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
+       pe->OptionalHeader.SizeOfImage<0xB8840) {
+        InterlockedExchange(&g_audio_poll_guard,0);return;
+    }
+    const auto begin=reinterpret_cast<std::uintptr_t>(module);
+    const auto end=begin+pe->OptionalHeader.SizeOfImage;
+    for(unsigned i=0;i<kAudioSlotCount;++i) {
+        auto* ptr=reinterpret_cast<PVOID volatile*>(module+kAudioSlots[i].rva);
+        if(!writable_audio_slot(const_cast<const void*>(
+              reinterpret_cast<volatile void*>(ptr))))continue;
+        const PVOID current=*ptr;
+        const PVOID hook=reinterpret_cast<PVOID>(kAudioHooks[i]);
+        if(!current || current==hook)continue;
+        const auto address=reinterpret_cast<std::uintptr_t>(current);
+        // Ignore uninitialized internal fallback stubs (e.g. 0x455CE0).
+        if((address>=begin && address<end) ||
+           !executable_page(current))continue;
+        g_audio_original[i].store(current,std::memory_order_release);
+        if(InterlockedCompareExchangePointer(ptr,hook,current)==current) {
+            const unsigned n=g_audio_hooks_installed.fetch_add(
+                1u,std::memory_order_relaxed)+1u;
+            if(n<=kAudioSlotCount) {
+                char line[140]{};
+                std::snprintf(line,sizeof(line),
+                    "RUNTIME-AUDIO-TRACE: installed=%s slot_rva=0x%06X (calls forwarded; research-only)",
+                    kAudioSlots[i].name,unsigned(kAudioSlots[i].rva));
+                log_line(line);
+            }
+        }
+    }
+    InterlockedExchange(&g_audio_poll_guard,0);
+}
+#endif // RAYMAN2FIX_AUDIO_TRACE
+
 
 
 // Safe memory reads for recognized live game actors. No actor
@@ -1357,6 +1506,9 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // Camera adjustment executes on the game's own render/main thread.
     // Use it only as a safe tick to request a *deferred* native transition.
     poll_second_intro_skip();
+#if RAYMAN2FIX_AUDIO_TRACE
+    poll_audio_pause_trace();
+#endif
 #if RAYMAN2FIX_RESEARCH_PROBES
     // This is exclusively the disabled Learn_10 research observer.
     // Never invoke it from an ordinary release camera callback.
@@ -2850,6 +3002,12 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
+#if RAYMAN2FIX_AUDIO_TRACE
+    if (g_log) {
+        g_audio_origin.store(GetTickCount(),std::memory_order_release);
+        log_line("RUNTIME-AUDIO-TRACE: enabled=1; observing Sxd/music transitions/MIDI/CD; up to 48 forwarded native calls, do not infer menu state from key alone");
+    }
+#endif
     if (g_log) log_line(kResearchProbes ?
         "RUNTIME-CONFIG: research_probes=1 (read-only experimental trace build)" :
         "RUNTIME-CONFIG: research_probes=0 (standard release instrumentation)");

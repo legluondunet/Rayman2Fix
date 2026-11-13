@@ -1,3 +1,35 @@
+## Sound while F1/Escape menus are open — research build
+
+Requested future setting: `[Features] MusicInPauseMenu=0` (disabled by
+default). **Not yet implemented in the user INI**, because a reliable
+audio-only pause policy has not been identified. No placebo option is
+shipped. The original music and the game's sound driver are unchanged.
+
+The separately labelled GitHub Actions artifact
+`Rayman2Fix-Windows-x86-audio-trace` has a **research-only** DLL with
+`RAYMAN2FIX_AUDIO_TRACE=1`; the normal
+`Rayman2Fix-Windows-x86-bootstrap` build has **no audio tracer**.
+On the one SHA-256-approved original CD executable, and only when
+`[Debug] Log=1`, this tracer observes up to 48 native calls across
+pause/resume Sxd, Sxd transitions, MIDI, MIDI transitions and CD
+audio. The verified original driver function is always called with
+the same argument; no sound is silenced, played, skipped, replaced,
+or looped. Installation of those diagnostic-only hooks fails closed
+when driver functions or game-memory protections are unexpected.
+The research build is **not a stable release**.
+
+For a reproducible Wine test, play until music is audible, open
+the Escape menu for a few seconds, return to the level, open
+the F1 information screen for a few seconds and return, then
+Alt-Tab away and back (to contrast focus-based audio pauses).
+Exit the game and provide **both** `Rayman2Fix_installer.log` and
+`Rayman2Fix.log` from beside `Rayman2Fix.exe`. The lines
+`RUNTIME-AUDIO-TRACE` identify exactly which native music/sound
+pause channel is invoked and whether the game had focus at
+that moment; a key-down flag is only supporting evidence, not
+a menu-state detector. Without an actual test trace, do not
+enable an audio bypass. See issue #4.
+
 # Rayman2Fix
 
 **A new, independent compatibility project for Rayman 2: The Great Escape (PC CD editions).**

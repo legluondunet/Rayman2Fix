@@ -67,6 +67,8 @@ target_compile_definitions(Rayman2Fix PRIVATE
 # No additional user-facing INI option is needed.
 option(RAYMAN2FIX_RESEARCH_PROBES
   "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
+option(RAYMAN2FIX_AUDIO_TRACE
+  "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
 
 # Rayman 2 itself is 32-bit; runtime builds are Windows x86 only.
 if(WIN32)
@@ -78,6 +80,9 @@ if(WIN32)
   target_compile_definitions(Rayman2FixRuntime PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
   if(RAYMAN2FIX_RESEARCH_PROBES)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
+  endif()
+  if(RAYMAN2FIX_AUDIO_TRACE)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_AUDIO_TRACE=1)
   endif()
   target_include_directories(Rayman2FixRuntime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
