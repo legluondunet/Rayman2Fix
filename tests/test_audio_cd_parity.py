@@ -124,7 +124,7 @@ class ParityTests(unittest.TestCase):
                     self.mem[va+4] = struct.pack("<I", 0)
 
             def at(self, va, length):
-                return self.mem.get(va, b"\\x00" * length)[:length]
+                return self.mem.get(va, bytes(length))[:length]
 
             def call_target(self, va):
                 return self.calls.get(va)
