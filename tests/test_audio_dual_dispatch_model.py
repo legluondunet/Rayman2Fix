@@ -77,6 +77,17 @@ class DualDispatchModelTests(unittest.TestCase):
         # Exact consequences of a driver-only ESC bypass are unsafe.
         # The feature must never be implemented by dropping the driver call.
 
+    def test_esc_close_after_focus_gain_can_resume_again_without_mark(self):
+        d = NativeDispatcher()
+        self.assertEqual(len(d.pause()), 2)  # ESC open
+        self.assertEqual(d.pause(), [])       # Focus loss
+        self.assertEqual(len(d.resume()), 2)  # Focus gain with ESC still open
+        # Native +0x1c marks were cleared at focus gain; the closing
+        # script resume also passes the mark <= depth test.
+        self.assertEqual(d.resume(), ["resume:inner", "resume:inner"])
+        self.assertEqual(d.depth, 1)
+        self.assertEqual([r.mark for r in d.records], [0, 0])
+
     def test_outer_theme_inactive_causes_only_one_driver_pause(self):
         d = NativeDispatcher(theme_controller_active=False)
         self.assertEqual(d.pause(), ["pause:inner"])
