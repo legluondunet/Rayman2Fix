@@ -31,6 +31,18 @@ def number(obj: dict, key: str, default: int = -1) -> int:
         return default
 
 
+def native_bank_location(fields_map: dict[str, str], prefix: str) -> tuple[int, int] | None:
+    """Require complete, unique native loaded-bank membership evidence."""
+    bank = number(fields_map, prefix + "_native_bank")
+    index = number(fields_map, prefix + "_native_index")
+    count = number(fields_map, prefix + "_bank_candidates")
+    complete = number(fields_map, prefix + "_bank_list_complete")
+    if (0 <= bank <= 0xFFFF and 0 <= index <= 0xFFFF
+            and count == 1 and complete == 1):
+        return bank, index
+    return None
+
+
 def summarize(text: str) -> dict:
     events: list[dict] = []
     by_event_sample: dict[tuple[int, str, int], dict] = {}
@@ -102,6 +114,17 @@ def summarize(text: str) -> dict:
                 ),
                 "inner_slot": number(data, "inner_slot"),
                 "outer_slot": number(data, "outer_slot"),
+                # New research-only fields from the *loaded bank registry*;
+                # previous theme_bank/inner_bank are merely halves of Id.
+                "outer_native": native_bank_location(data, "outer"),
+                "inner_native": native_bank_location(data, "inner"),
+                "bank_provenance_fields_present": (
+                    "outer_native_bank" in data and
+                    "inner_native_bank" in data),
+                "outer_bank_scan_complete": number(
+                    data, "outer_bank_list_complete"),
+                "inner_bank_scan_complete": number(
+                    data, "inner_bank_list_complete"),
             }
 
     qualified = [
@@ -126,6 +149,8 @@ def summarize(text: str) -> dict:
             and left["depth"] == right["depth"]
             and left["owner"]["outer"] == right["owner"]["outer"]
             and left["owner"]["inner"] == right["owner"]["inner"]
+            and left["owner"]["outer_native"] == right["owner"]["outer_native"]
+            and left["owner"]["inner_native"] == right["owner"]["inner_native"]
         ):
             pairs.append({
                 "session": left["session"],
@@ -136,6 +161,12 @@ def summarize(text: str) -> dict:
                 "outer_resource": list(left["owner"]["outer"]),
                 "inner_resource": list(left["owner"]["inner"]),
                 "global_depth": left["depth"],
+                "outer_loaded_bank_and_index": (
+                    list(left["owner"]["outer_native"])
+                    if left["owner"]["outer_native"] is not None else None),
+                "inner_loaded_bank_and_index": (
+                    list(left["owner"]["inner_native"])
+                    if left["owner"]["inner_native"] is not None else None),
                 "menu_state_at_calls": [
                     left["ui_in_game_menu_at_call"],
                     right["ui_in_game_menu_at_call"],
@@ -155,6 +186,12 @@ def summarize(text: str) -> dict:
             "time_ms": e["ms"],
             "outer_resource": list(e["owner"]["outer"]),
             "inner_resource": list(e["owner"]["inner"]),
+            "outer_loaded_bank_and_index": (
+                list(e["owner"]["outer_native"])
+                if e["owner"]["outer_native"] is not None else None),
+            "inner_loaded_bank_and_index": (
+                list(e["owner"]["inner_native"])
+                if e["owner"]["inner_native"] is not None else None),
             "global_depth": e["depth"],
         }
         for e in qualified
@@ -167,6 +204,7 @@ def summarize(text: str) -> dict:
             "outer_resource": list(root),
             "observed_inner_resources": [list(x) for x in sorted(inner)],
             "inner_resource_changed": len(inner) > 1,
+            "these_are_native_record_Id_halves_not_authenticated_bank_indices": True,
         }
         for (session_id, root), inner in sorted(roots.items())
     ]
@@ -195,6 +233,24 @@ def summarize(text: str) -> dict:
         ],
         "origins": dict(sorted(Counter(e["origin"] for e in events).items())),
         "ownership_records_validated": len(qualified),
+        "ownership_has_native_loaded_bank_provenance": sum(
+            1 for e in qualified
+            if e["owner"]["outer_native"] is not None
+            and e["owner"]["inner_native"] is not None),
+        "native_loaded_bank_provenance": [
+            {
+                "session": e["session"],
+                "event": e["event"],
+                "time_ms": e["ms"],
+                "outer_bank_and_index": list(e["owner"]["outer_native"]),
+                "inner_bank_and_index": list(e["owner"]["inner_native"]),
+                "native_bank_lookup_is_not_audio_or_ESC_proof": True,
+            }
+            for e in qualified
+            if e["owner"]["outer_native"] is not None
+            and e["owner"]["inner_native"] is not None
+        ],
+        "record_Id_halves_are_not_authenticated_BNM_provenance": True,
         "ownership_lines_unmatched": unmatched_owners,
         "close_same_driver_event_pairs": pairs,
         "theme_controller_resources_observed": roots_out,
