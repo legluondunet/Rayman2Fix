@@ -108,6 +108,51 @@ class ParityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid x86"):
             MOD.direct_e8_candidate_sites(pe, -1)
 
+    def test_script_opcode_dispatch_is_generic_not_menu_confirmation(self):
+        class ScriptPeStub:
+            def __init__(self):
+                self.mem = {
+                    va: expected for _, va, expected in MOD.SCRIPT_MACHINE_ANCHORS
+                }
+                self.calls = {
+                    site: target for _, _op, site, target
+                    in MOD.SCRIPT_OPCODE_BRANCHES
+                }
+                for opcode in MOD.SCRIPT_AUDIO_OPCODE_IDS:
+                    va = MOD.SCRIPT_OPCODE_TABLE_VA + opcode * 8
+                    self.mem[va] = struct.pack("<I", MOD.SCRIPT_DISPATCHER_VA)
+                    self.mem[va+4] = struct.pack("<I", 0)
+
+            def at(self, va, length):
+                return self.mem.get(va, b"\\x00" * length)[:length]
+
+            def call_target(self, va):
+                return self.calls.get(va)
+
+        pe = ScriptPeStub()
+        result = MOD.verify_script_opcode_dispatch(pe)
+        self.assertTrue(result["verified_native_dispatcher"])
+        self.assertEqual(result["opcodes"], [0x1AA, 0x1AB, 0x1AC])
+        self.assertFalse(result["script_origin_alone_proves_esc_menu"])
+        self.assertFalse(result["script_origin_alone_proves_f1_menu"])
+        self.assertTrue(result["script_caller_or_menu_ui_state_observation_needed"])
+        pe.mem[MOD.SCRIPT_OPCODE_TABLE_VA + 0x1AB * 8] = struct.pack(
+            "<I", 0x471E80)
+        self.assertFalse(MOD.verify_script_opcode_dispatch(pe)[
+            "verified_native_dispatcher"])
+        pe.mem[MOD.SCRIPT_OPCODE_TABLE_VA + 0x1AB * 8] = struct.pack(
+            "<I", MOD.SCRIPT_DISPATCHER_VA)
+        pe.calls[0x471E70] = 0x453700
+        self.assertFalse(MOD.verify_script_opcode_dispatch(pe)[
+            "verified_native_dispatcher"])
+
+    def test_script_opcode_dispatch_uses_actual_index_not_key_name(self):
+        self.assertEqual(MOD.SCRIPT_OPCODE_TABLE_VA + 0x1AA * 8, 0x4A5130)
+        self.assertEqual(MOD.SCRIPT_OPCODE_TABLE_VA + 0x1AB * 8, 0x4A5138)
+        self.assertEqual(MOD.SCRIPT_OPCODE_TABLE_VA + 0x1AC * 8, 0x4A5140)
+        self.assertEqual(MOD.SCRIPT_OPCODE_BRANCHES[0][2], 0x471E70)
+        self.assertEqual(MOD.SCRIPT_OPCODE_BRANCHES[1][2], 0x471E67)
+
     def test_transaction_flag_requires_exact_known_code_locations(self):
         # Code and operand checks are separate: loose DWORD scanning alone
         # cannot prove that a hit was an actual machine-code instruction.
