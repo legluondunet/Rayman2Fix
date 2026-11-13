@@ -75,6 +75,14 @@ ANCHOR_BYTES = (
     ("resume_depth_store", 0x458118, bytes.fromhex("A3 C8 3C 4A 00")),
     ("resume_mark_compare", 0x45813C, bytes.fromhex("3B C8")),
     ("resume_mark_clear", 0x458143, bytes.fromhex("C7 06 00 00 00 00")),
+    # Original-CD bank registry and resource resolver share these fields.
+    ("loaded_bank_list_head", 0x4538C0, bytes.fromhex("A1 50 4D 51 00")),
+    ("loaded_bank_id_field", 0x4538CD, bytes.fromhex("39 48 04")),
+    ("loaded_bank_next_field", 0x4538D2, bytes.fromhex("8B 40 3C")),
+    ("loaded_bank_descriptor_bytes", 0x4538E2, bytes.fromhex("6A 48")),
+    ("loaded_bank_head_pointer", 0x453FB2, bytes.fromhex("8B 40 24")),
+    ("loaded_bank_resource_count", 0x453FB5, bytes.fromhex("3B 70 10")),
+    ("loaded_bank_resource_first", 0x453FBA, bytes.fromhex("8B 50 0C")),
     ("bank_id_store", 0x453945, bytes.fromhex("89 46 04")),
     ("bank_filename_literal", 0x4A252C, b"bnk_%d.BNM\x00"),
 )
@@ -521,6 +529,20 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             "exact_pinned_pair": pinned, "selected_audio_code_equal": all_checks,
             "original_cd_audio_path_confirmed": pinned and all_checks and check_anchors,
             "original_cd_bank_filename_formatter_verified": pinned and bank_checked,
+            "native_loaded_bank_inverse_mapping": {
+                "verified_pinned_cd_and_reference": pinned and
+                    all(x["verified_both"] for x in byte_anchors if
+                        x["name"].startswith("loaded_bank_")),
+                "list_head_va": "0x00514D50",
+                "bank_id_offset": 4,
+                "next_bank_offset": 60,
+                "bank_head_pointer_offset": 36,
+                "resource_first_pointer_offset": 12,
+                "resource_count_offset": 16,
+                "resource_record_stride_bytes": 92,
+                "does_not_rely_on_record_Id_halves": True,
+                "live_loaded_bank_membership_not_observed_yet": True,
+            },
             "native_resource_lookup": {
                 "verified_pinned_cd_and_reference": pinned and
                     native_resource_lookup_verified,
