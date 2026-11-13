@@ -456,8 +456,13 @@ struct AudioSoundContext {
     unsigned descriptor_words_equal_mask=0;
     unsigned descriptor_volume_byte=256;
     unsigned play_volume_byte=256;
-    unsigned descriptor_head_pair_readable=0;
-    unsigned descriptor_head_contents_match=0;
+    // ACP_Ray2 SND_tdstBlockResourceMem: Id/eType/eStorage/ucVolume.
+    // The first DWORD is a PACKED RESOURCE ID, never a pointer.
+    int descriptor_bank_group=-1;
+    int descriptor_record_index=-1;
+    int play_bank_group=-1;
+    int play_record_index=-1;
+    unsigned descriptor_resource_id_match=0;
     int pause_depth=-1;
 };
 AudioSoundContext inspect_audio_sound_context(DWORD argument) {
@@ -517,25 +522,17 @@ AudioSoundContext inspect_audio_sound_context(DWORD argument) {
             out.descriptor_volume_byte=current_words[3]&0xFFu;
             out.play_volume_byte=g_last_transition_desc_words[3].load(
                 std::memory_order_acquire)&0xFFu;
-            // Determine whether differing first words represent resource
-            // pointers to identical small headers, not merely equal types.
-            // Only dereference addresses via bounded ReadProcessMemory.
-            // No addresses, header bytes or checksums enter the log.
-            const DWORD old_head=g_last_transition_desc_words[0].load(
+            // The original resource ID is a packed bank/record key,
+            // as verified against ACP_Ray2 SND_tdstBlockResourceMem and
+            // native 0x453F90. Never dereference that ID as an address.
+            const DWORD old_id=g_last_transition_desc_words[0].load(
                 std::memory_order_acquire);
-            const DWORD new_head=current_words[0];
-            if(out.transition!=0u && old_head>=0x10000u &&
-               new_head>=0x10000u) {
-                BYTE old_bytes[16]{},new_bytes[16]{};
-                if(safe_read(reinterpret_cast<const void*>(
-                             std::uintptr_t(old_head)),old_bytes,sizeof(old_bytes)) &&
-                   safe_read(reinterpret_cast<const void*>(
-                             std::uintptr_t(new_head)),new_bytes,sizeof(new_bytes))) {
-                    out.descriptor_head_pair_readable=1u;
-                    out.descriptor_head_contents_match=unsigned(
-                        std::memcmp(old_bytes,new_bytes,sizeof(old_bytes))==0);
-                }
-            }
+            const DWORD now_id=current_words[0];
+            out.play_bank_group=int(old_id>>16);
+            out.play_record_index=int(old_id&0xFFFFu);
+            out.descriptor_bank_group=int(now_id>>16);
+            out.descriptor_record_index=int(now_id&0xFFFFu);
+            out.descriptor_resource_id_match=unsigned(old_id==now_id);
         }
         DWORD type=0;
         const std::uintptr_t desc=std::uintptr_t(entries[i].words[1]);
@@ -551,8 +548,11 @@ AudioSoundContext inspect_audio_sound_context(DWORD argument) {
         out.descriptor_words_equal_mask=0u;
         out.descriptor_volume_byte=256u;
         out.play_volume_byte=256u;
-        out.descriptor_head_pair_readable=0u;
-        out.descriptor_head_contents_match=0u;
+        out.descriptor_bank_group=-1;
+        out.descriptor_record_index=-1;
+        out.play_bank_group=-1;
+        out.play_record_index=-1;
+        out.descriptor_resource_id_match=0u;
     }
     return out;
 }
@@ -753,9 +753,9 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     if(original) original(arg);
     if(!sampled)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
-    char line[900]{};
+    char line[1024]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_state_class=%u sequence_same_handle=%u transition_last_play_match=%u transition_desc_match=%u desc_words_readable=%u desc_words_equal_mask=%u desc_volume=%u play_volume=%u desc_head_pair_readable=%u desc_head_contents_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_state_class=%u sequence_same_handle=%u transition_last_play_match=%u transition_desc_match=%u desc_words_readable=%u desc_words_equal_mask=%u desc_volume=%u play_volume=%u desc_resource_group=%d desc_resource_index=%d play_resource_group=%d play_resource_index=%d desc_resource_id_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
         unsigned(arg==0),source.table_index,source.match_count,source.transport,
@@ -763,8 +763,10 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         sequence.active,sequence.state_class,sequence.same_handle,last_play_match,
         source.descriptor_matches_play,source.descriptor_words_readable,
         source.descriptor_words_equal_mask,source.descriptor_volume_byte,
-        source.play_volume_byte,source.descriptor_head_pair_readable,
-        source.descriptor_head_contents_match,source.pause_depth,audio_origin,
+        source.play_volume_byte,source.descriptor_bank_group,
+        source.descriptor_record_index,source.play_bank_group,
+        source.play_record_index,source.descriptor_resource_id_match,
+        source.pause_depth,audio_origin,
         unsigned(game_window_is_foreground()),
         unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
     log_line(line);
