@@ -159,6 +159,44 @@ class AudioStaticInspectorTests(unittest.TestCase):
         self.assertIn("research_inference", src)
         self.assertIn('"implemented_audio_bypass": False', src)
 
+    def test_reference_file_directory_is_structured_not_file_integrity(self):
+        # Synthetic path directory: [declared size, length incl NUL, path]...
+        names = [
+            (1_000_000, "DATA/FAKE_BIG.DAT"),
+            (48_592, "DATA\\\\WORLD\\\\SOUND\\\\MM01.APM"),
+            (6_642_012, "DATA\\\\WORLD\\\\SOUND\\\\BNK_0.BNM"),
+        ]
+        def make_entry(declared, filename):
+            raw = filename.encode("ascii")
+            return struct.pack("<II", declared, len(raw) + 1) + raw + bytes([0])
+        data = b"".join(make_entry(v, n) for v, n in names)
+        data += struct.pack("<II", 0xFFFFFFFF, 0) + bytes(12)
+        info = M.summarize_reference_file_directory(data)
+        self.assertEqual(info["entries"], 3)
+        self.assertEqual(info["unique_paths"], 3)
+        self.assertTrue(info["sentinel_verified"])
+        self.assertEqual(info["declared_bytes_total_not_integrity"], 7_690_604)
+        self.assertEqual(info["sound_entries"], {"APM": 1, "BNM": 1})
+        self.assertFalse(info["sizes_verified_against_files"])
+        self.assertFalse(info["approved_cd_metadata"])
+
+    def test_reference_file_directory_rejects_malformed_entries(self):
+        entry = lambda size, name: (
+            struct.pack("<II", size, len(name) + 1) + name + bytes([0])
+        )
+        valid = entry(123, b"README.TXT")
+        terminator = struct.pack("<II", 0xFFFFFFFF, 0)
+        for invalid in (
+            valid,  # missing sentinel
+            valid + terminator + bytes([0, 1]),  # dirty padding
+            valid + valid + terminator,  # duplicate
+            struct.pack("<II", 5, 9999),  # out-of-bounds length
+            entry(1, b"A\\x00B.TXT") + terminator,  # NUL in name
+        ):
+            with self.subTest(invalid=invalid[:16]):
+                with self.assertRaises(ValueError):
+                    M.summarize_reference_file_directory(invalid)
+
     def test_unknown_binary_never_invents_structural_matches(self):
         with tempfile.TemporaryDirectory() as d:
             fn = Path(d) / "synthetic.exe"
