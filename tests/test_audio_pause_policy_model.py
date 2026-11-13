@@ -16,7 +16,7 @@ class ProposedPolicyTests(unittest.TestCase):
     def running(self):
         p=M.EscThemePolicy()
         p.set_focus(known=True, foreground=True)
-        self.assertEqual(p.start(0x00170003,101,owner_is_theme=True),"none")
+        self.assertEqual(p.start(0x00170003,101,owner_is_theme=True,music_identity_confirmed=True),"none")
         self.assertTrue(p.playing)
         return p
 
@@ -53,8 +53,40 @@ class ProposedPolicyTests(unittest.TestCase):
         self.assertEqual(p.esc_close(),"none")
         self.assertEqual(p.set_focus(known=True,foreground=True),"none")
         self.assertFalse(p.playing)
-        self.assertEqual(p.start(0x00170005,102,owner_is_theme=True),"none")
+        self.assertEqual(p.start(0x00170005,102,owner_is_theme=True,music_identity_confirmed=True),"none")
         self.assertEqual(p.stop(101),"none")
+        self.assertTrue(p.playing)
+
+    def test_native_theme_bank_alone_is_not_music_identity(self):
+        p=M.EscThemePolicy()
+        p.set_focus(known=True,foreground=True)
+        self.assertEqual(
+            p.start(0x00090005,77,owner_is_theme=True),
+            "none")
+        self.assertIsNone(p.owner_resource_id)
+        self.assertFalse(p.playing)
+        # An observed Theme bank/index pair, even unique and valid,
+        # is *not* evidence the stream is audible level music.
+        self.assertEqual(
+            p.start(0x00090005,77,owner_is_theme=True,
+                    music_identity_confirmed=True),
+            "none")
+        self.assertTrue(p.playing)
+
+    def test_stop_clears_menu_proof_for_replacement_generation(self):
+        p=self.running()
+        p.esc_open(True)
+        self.assertTrue(p.esc_menu_verified)
+        self.assertEqual(p.stop(101),"forget")
+        self.assertFalse(p.esc_menu_verified)
+        self.assertEqual(p.esc_pause_depth,1)
+        # The new level's Theme may reuse a driver or old bank/index;
+        # eligibility must NOT be inherited from the stopped instance.
+        self.assertEqual(
+            p.start(0x00170003,102,owner_is_theme=True,
+                    music_identity_confirmed=True),"pause")
+        self.assertFalse(p.playing)
+        self.assertEqual(p.esc_close(),"resume")
         self.assertTrue(p.playing)
 
     def test_unverified_owner_does_not_receive_policy(self):
