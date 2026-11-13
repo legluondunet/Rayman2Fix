@@ -33,20 +33,27 @@ def number(obj: dict, key: str, default: int = -1) -> int:
 
 def summarize(text: str) -> dict:
     events: list[dict] = []
-    by_event_sample: dict[tuple[str, int], dict] = {}
+    by_event_sample: dict[tuple[int, str, int], dict] = {}
     unmatched_owners = 0
     ui_states: list[dict] = []
     schema2 = False
+    session = 0  # 0 means data before any explicit session header
+    unmarked_prefix_events = 0
     for line in text.splitlines():
         if "RUNTIME-AUDIO-TRACE: enabled=1 schema=2" in line:
             schema2 = True
+            session += 1
+            continue
         if TRACE in line:
             data = fields(line.split("RUNTIME-AUDIO-TRACE:", 1)[1])
             event = data.get("event")
             sample = number(data, "sample")
             if not event or sample < 0:
                 continue
+            if session == 0:
+                unmarked_prefix_events += 1
             obj = {
+                "session": session,
                 "event": event, "sample": sample,
                 "ms": number(data, "t_ms"),
                 "origin": data.get("audio_origin", "unknown"),
@@ -58,12 +65,13 @@ def summarize(text: str) -> dict:
                 "owner": None,
             }
             events.append(obj)
-            by_event_sample[(event, sample)] = obj
+            by_event_sample[(session, event, sample)] = obj
         elif UI_STATE in line:
             data = fields(line.split(UI_STATE, 1)[1])
             menu, engine = number(data, "in_game_menu"), number(data, "engine_paused")
             if menu in (0, 1) and engine in (0, 1):
                 ui_states.append({
+                    "session": session,
                     "ms": number(data, "t_ms"),
                     "in_game_menu": menu,
                     "engine_paused": engine,
@@ -71,7 +79,7 @@ def summarize(text: str) -> dict:
                 })
         elif OWNER in line:
             data = fields(line.split("RUNTIME-AUDIO-THEME-OWNER:", 1)[1])
-            key = (data.get("channel", ""), number(data, "sample"))
+            key = (session, data.get("channel", ""), number(data, "sample"))
             event = by_event_sample.get(key)
             if event is None or event["owner"] is not None:
                 unmatched_owners += 1
@@ -99,9 +107,9 @@ def summarize(text: str) -> dict:
     qualified = [
         e for e in events if e["owner"] is not None and e["owner"]["eligible"]
     ]
-    roots: dict[tuple[int, int], set[tuple[int, int]]] = defaultdict(set)
+    roots: dict[tuple[int, tuple[int, int]], set[tuple[int, int]]] = defaultdict(set)
     for e in qualified:
-        roots[e["owner"]["outer"]].add(e["owner"]["inner"])
+        roots[(e["session"], e["owner"]["outer"])].add(e["owner"]["inner"])
 
     # A pair is only a close-in-time, same-root, same-part correlation.
     # The native call stacks and per-record marks are NOT part of this trace.
@@ -110,7 +118,8 @@ def summarize(text: str) -> dict:
     while index + 1 < len(qualified):
         left, right = qualified[index], qualified[index + 1]
         if (
-            left["event"] == right["event"]
+            left["session"] == right["session"]
+            and left["event"] == right["event"]
             and left["event"] in ("PauseTransitionSxd", "ResumeTransitionSxd")
             and left["origin"] == right["origin"]
             and left["ms"] >= 0 and 0 <= right["ms"] - left["ms"] <= 5
@@ -119,6 +128,7 @@ def summarize(text: str) -> dict:
             and left["owner"]["inner"] == right["owner"]["inner"]
         ):
             pairs.append({
+                "session": left["session"],
                 "event": left["event"],
                 "time_first_ms": left["ms"],
                 "time_second_ms": right["ms"],
@@ -141,6 +151,7 @@ def summarize(text: str) -> dict:
 
     stops_while_nested = [
         {
+            "session": e["session"],
             "time_ms": e["ms"],
             "outer_resource": list(e["owner"]["outer"]),
             "inner_resource": list(e["owner"]["inner"]),
@@ -152,21 +163,25 @@ def summarize(text: str) -> dict:
 
     roots_out = [
         {
+            "session": session_id,
             "outer_resource": list(root),
             "observed_inner_resources": [list(x) for x in sorted(inner)],
             "inner_resource_changed": len(inner) > 1,
         }
-        for root, inner in sorted(roots.items())
+        for (session_id, root), inner in sorted(roots.items())
     ]
     focus_out = any(e["foreground"] == 0 for e in events)
     return {
         "schema_2_header_seen": schema2,
+        "explicit_sessions_detected": session,
+        "unmarked_prefix_events": unmarked_prefix_events,
         "native_ui_state_samples": ui_states,
         "in_game_menu_flag_cannot_distinguish_ESC_from_F1": True,
         "events_sampled": len(events),
         "events_by_kind": dict(sorted(Counter(e["event"] for e in events).items())),
         "generic_script_driver_ui_snapshots": [
             {
+                "session": e["session"],
                 "event": e["event"],
                 "time_ms": e["ms"],
                 "origin": e["origin"],
