@@ -538,6 +538,34 @@ The exact original-CD x86 instruction bytes supporting all seven bank-registry o
 **Current validation boundary:** these are code-reviewed/static assertions and Windows/Linux CI tests, **not a live Wine observation of the new registry inverse**. To establish the original music's true bank, we still need a future diagnostic run or a separately authenticated CD BNM/level sound resource. No audio hook behavior is changed.
 
 
+### Real Wine evidence: native Theme bank recovered (13 November 2026, 21:54 log)
+
+The user supplied the **original diagnostic trace** `Rayman2Fix(20261113-215423).log` (142 display lines, **141 physical lines**; no game or CD assets were added to the repository). The read-only `RUNTIME-AUDIO-THEME-OWNER` snapshots finally provide **actual loaded-bank registry membership**, rather than speculative high/low halves of the resource record `Id` field:
+
+| Observed native call / timestamp | Historical record `Id` halves (NOT bank keys) | True loaded Theme record bank/index | True inner SXD bank/index | Unique / registry fully traversed |
+| --- | --- | --- | --- | --- |
+| `StopTransitionSxd` 5,693 ms | outer `89:90`, inner `89:81` | **278:0** | **278:3** | 1 / yes, 31 nodes |
+| `StopTransitionSxd` 8,238 ms | outer `89:96`, inner `89:91` | **282:0** | **282:1** | 1 / yes, 15 nodes |
+| `StopTransitionSxd` 10,262 ms | outer `89:94`, inner `89:93` | **222:1** | **222:2** | 1 / yes, 49 nodes |
+| First `PauseTransitionSxd` 38,779 ms | outer `73:48`, inner `73:49` | **9:5** | **9:6** | 1 / yes, 72 nodes |
+| Second `PauseTransitionSxd` 38,780 ms | same as above | **9:5** | **9:6** | 1 / yes, 72 nodes |
+| `StopTransitionSxd` 50,497 ms | same as above | **9:5** | **9:6** | 1 / yes, 72 nodes |
+| `StopTransitionSxd` 55,999 ms | outer `89:90`, inner `89:82` | **278:0** | **278:4** | 1 / yes, 31 nodes |
+
+This is a particularly strong validation of the inverse-lookup probe: **all seven ownership snapshots are unique and fully traversed**, and the exact *same native Theme 9:5 / inner SXD 9:6* appears twice in the duplicate pause callbacks and then in the later stop. The loaded bank ID `9` maps by the CD's native decimal filename formatter to the **expected filename `bnk_9.BNM`**. However, this log does **not** authenticate the user-owned physical BNM file, resolve the specific audio asset/track, prove that the given Theme is the sole audible music stream, or establish the true ESC menu identity. It is a runtime **bank/record-pointer provenance proof**, not an audio source/content hash.
+
+**Critical pause/menu sequence (snapshot timing, not inferred UI events):**
+
+- The native generic `game-script-pause` path yields two `PauseTransitionSxd` calls at **38,779/38,780 ms** on this exact Theme, both with `esc_down=1`, `ui_in_game_menu_at_call=0`, `ui_engine_paused_at_call=0`, `global_pause_depth=1`, and `foreground=1`. The shared driver is demonstrably reached twice from the native resource-routing structure. **The script command is still not an ESC-only opcode.**
+- The 500 ms read-only poll at **39,162 ms** observes `in_game_menu=1`, `engine_paused=0` and audio `global_pause_depth=2`; thus the flag changes **after** both sampled audio pauses, within sampling resolution. This is why it would be unsafe to decide whether to suppress an incoming driver pause by reading the UI flag at that very call.
+- The later `StopTransitionSxd` at **50,497 ms** targets **the same Theme 9:5 / inner 9:6**, with **`global_pause_depth=2` yet `ui_in_game_menu_at_call=0`**. The next periodic poll at **50,864 ms** also sees `in_game_menu=0`, while `engine_paused` remains 0. Another `StopTransitionSxd` at 55,999 ms targets a *different* Theme (278:0 / 278:4) at depth 2. **Stopping and menu-lifetime flags are independent of the outstanding audio-pause depth. Never resurrect a Theme after native stop based on menu flag changes.**
+- There are **zero recorded `ResumeTransitionSxd` calls**. The optional resume hook is installed, and its per-channel sample budget is **16**, so this is not explained by that channel's budget being exhausted. However, the file does not contain a session-end marker or full evidence of all possible native resume paths; **zero sampled calls is not absolute proof that no resume happened at any other point or through a different path**.
+- There are no `foreground=0` events: this trace **does not test Alt-Tab**. F1 was not independently classified or contrasted in this log. The engine-pause flag stays `0` in reported UI samples even while the separate audio-pause depth is 2, so these two states must remain distinct in implementation.
+
+The [read-only trace analyzer](../tools/analyze_rayman2_audio_trace.py) now includes **menu/engine/foreground snapshots at owned stops** and explicit observed pause/resume/stop counts. [Synthetic regression tests](../tests/test_audio_trace_evidence.py) model exactly the condition `native_menu_flag=0`, `global_pause_depth=2`, `StopTransitionSxd`, and *no observed resume*, without asserting an ESC-only event or changing audio calls.
+
+**Implication:** the experiment proves that a design based solely on `AI_g_bInGameMenu`, key state, or the first pause callback will be **timing-unsafe**. A future audio policy must distinguish the menu's **confirmed lifetime**, preserve both native transition dispatch paths and their `+0x1C` pause marks, and forward all Theme stops and replacements irrespective of audio depth. This evidence improves the model, **not** the readiness of a runtime music bypass.
+
 ### BNM metadata layout: native table offsets, not inferred placement
 
 Independent reference sources: [Rayman2Lib `BNMFile.cs`](https://github.com/szymski/Rayman2Lib/blob/master/csharp_tools/Rayman2Lib/BNMFile.cs), [ACP_Ray2 `SND.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND.h), [`SND_Event.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Event.h), and [`SND_Resource.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h). The **non-approved** owner-supplied EXE's native loader `0x453990` reads precisely 44 bytes at `0x4539E7`.
