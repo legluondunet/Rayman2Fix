@@ -35,6 +35,17 @@ AUDIO_WINDOWS = (
     ("sound_event_dispatch", 0x45A230, 0x45B100),
 )
 
+# Original CD's entire 64-byte 0x453F90 resource resolver, obtained
+# independently from the pinned protected CD and the research reference.
+# It selects bank=ref>>16 and resource_array[ref&0xFFFF] (92-byte stride),
+# checks bounds, and DOES NOT compare the returned record's +0 Id field.
+# Store a digest of the code; never publish the proprietary function bytes.
+RESOURCE_RESOLVER_VA = 0x453F90
+RESOURCE_RESOLVER_SIZE = 64
+RESOURCE_RESOLVER_SHA256 = (
+    "1f4e185a18948dc27b9fe2af926984dbe0f4e4cbc846d66a9b2ff03b11b57c17"
+)
+
 # Exact x86 E8 call sites: validates both direct script and focus routes and
 # their shared pause/resume wrappers, independently in CD and reference.
 CALL_TARGETS = (
@@ -479,6 +490,15 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
         all(x["matched"] for x in menu_background.values()))
 
 
+    native_resource_lookup_cd = cd.at(
+        RESOURCE_RESOLVER_VA, RESOURCE_RESOLVER_SIZE)
+    native_resource_lookup_ref = ref.at(
+        RESOURCE_RESOLVER_VA, RESOURCE_RESOLVER_SIZE)
+    native_resource_lookup_verified = bool(check_anchors and
+        hashlib.sha256(native_resource_lookup_cd).hexdigest()
+            == RESOURCE_RESOLVER_SHA256 and
+        hashlib.sha256(native_resource_lookup_ref).hexdigest()
+            == RESOURCE_RESOLVER_SHA256)
     rdata_identical = cd.section(".rdata") == ref.section(".rdata")
     verified_windows = all(w["identical"] for w in windows)
     verified_native_anchors = (
@@ -488,6 +508,7 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
         and transaction_xrefs_verified and callback_registration_verified
         and script_opcode_verified and menu_render_verified
         and menu_background_verified
+        and native_resource_lookup_verified
     ) if check_anchors else False
     # A caller may disable native anchors for synthetic PE parser tests only.
     # That MUST NOT accidentally yield a full original-CD audio-path proof.
@@ -496,6 +517,16 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             "exact_pinned_pair": pinned, "selected_audio_code_equal": all_checks,
             "original_cd_audio_path_confirmed": pinned and all_checks and check_anchors,
             "original_cd_bank_filename_formatter_verified": pinned and bank_checked,
+            "native_resource_lookup": {
+                "verified_pinned_cd_and_reference": pinned and
+                    native_resource_lookup_verified,
+                "function_va": "0x00453F90",
+                "selects_bank_from_upper16": True,
+                "selects_record_index_from_lower16": True,
+                "record_stride_bytes": 92,
+                "does_not_compare_returned_record_id_field": True,
+                "record_id_is_not_proof_of_filename": True,
+            },
             "rdata_raw_identical": rdata_identical,
             "rdata_raw_bytes": len(cd.section(".rdata")),
             "regions": windows, "call_sites": call_sites, "opcode_anchors": byte_anchors,
