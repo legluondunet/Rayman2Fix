@@ -31,8 +31,13 @@ research build widens its stack read from 96 to at most 1,024
 32-bit words (4 KiB) within the first committed region and,
 on the first two events for each pause/resume channel, logs
 `RUNTIME-AUDIO-CALLSTACK` with up to four *candidate* code
-RVAs (no absolute pointers or data). Candidate RVAs are
-diagnostic evidence, not validated return frames.
+RVAs (no absolute pointers or data) plus `wrapper_returns`
+and `paired_callers` counts. A provenance label now requires
+**exactly one** adjacent pair from the approved CD's native
+pause/resume wrapper and its verified outer script/Windows
+caller; solitary stale return addresses never qualify.
+Candidate RVAs by themselves are diagnostic evidence,
+not validated return frames.
 New `audio_origin` diagnostics attempt to distinguish actual
 `game-script-pause` / `game-script-resume` call paths from
 `windows-activation-pause` / `windows-activation-resume`

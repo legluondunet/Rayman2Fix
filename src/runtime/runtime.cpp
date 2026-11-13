@@ -451,9 +451,12 @@ AudioSoundContext inspect_audio_sound_context(DWORD argument) {
 // not a heuristic based on the Escape key being held. This is a bounded,
 // read-only stack snapshot; "unknown" never authorizes a sound bypass.
 __declspec(noinline) const char* inspect_audio_pause_origin(
-    char* code_rva_preview,SIZE_T preview_capacity,unsigned* scanned_words) {
+    char* code_rva_preview,SIZE_T preview_capacity,unsigned* scanned_words,
+    unsigned* wrapper_returns,unsigned* confirmed_pairs) {
     if(code_rva_preview && preview_capacity)code_rva_preview[0]='\0';
     if(scanned_words)*scanned_words=0;
+    if(wrapper_returns)*wrapper_returns=0;
+    if(confirmed_pairs)*confirmed_pairs=0;
     const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
     if(!module)return "unknown";
     auto* stack=reinterpret_cast<const DWORD*>(_AddressOfReturnAddress());
@@ -487,12 +490,21 @@ __declspec(noinline) const char* inspect_audio_pause_origin(
     constexpr std::uintptr_t kCodeEndRva=0x9B1D0;
     unsigned preview_count=0;
     SIZE_T preview_used=0;
+    // The original CD wrapper at 0x4536D0 calls the global pause
+    // dispatcher at 0x4536ED and leaves 0x4536F2 on the stack;
+    // the resume wrapper leaves 0x453722. In both original wrappers
+    // these returns are directly adjacent to the *outer* caller's
+    // script/activation return address. A standalone 0x471E75 left
+    // in recycled stack memory must NEVER be accepted as provenance.
+    constexpr std::uintptr_t kWrapperPauseReturnRva=0x536F2;
+    constexpr std::uintptr_t kWrapperResumeReturnRva=0x53722;
     constexpr std::uintptr_t kScriptPauseReturnRva=0x71E75;
     constexpr std::uintptr_t kScriptResumeReturnRva=0x71E6C;
     constexpr std::uintptr_t kWindowsPauseReturnRva=0x01CA1;
     constexpr std::uintptr_t kWindowsResumeReturnRva=0x01CEE;
     unsigned kind=0; // 1=script pause, 2=script resume,
                      // 3=Windows pause, 4=Windows resume
+    unsigned roots=0,pairs=0;
     for(SIZE_T i=0;i<count;++i) {
         const auto v=std::uintptr_t(words[i]);
         if(code_rva_preview && preview_capacity>preview_used+10 &&
@@ -508,13 +520,29 @@ __declspec(noinline) const char* inspect_audio_pause_origin(
             }
         }
         unsigned match=0;
-        if(v==base+kScriptPauseReturnRva)match=1;
-        else if(v==base+kScriptResumeReturnRva)match=2;
-        else if(v==base+kWindowsPauseReturnRva)match=3;
-        else if(v==base+kWindowsResumeReturnRva)match=4;
-        if(match && kind && kind!=match)return "ambiguous";
-        if(match)kind=match;
+        // The second DWORD must be the caller of the verified wrapper.
+        // This adjacent pair avoids false positives from old unrelated
+        // return addresses in a stack snapshot.
+        if(i+1<count && v==base+kWrapperPauseReturnRva) {
+            ++roots;
+            const auto caller=std::uintptr_t(words[i+1]);
+            if(caller==base+kScriptPauseReturnRva)match=1;
+            else if(caller==base+kWindowsPauseReturnRva)match=3;
+        } else if(i+1<count && v==base+kWrapperResumeReturnRva) {
+            ++roots;
+            const auto caller=std::uintptr_t(words[i+1]);
+            if(caller==base+kScriptResumeReturnRva)match=2;
+            else if(caller==base+kWindowsResumeReturnRva)match=4;
+        }
+        if(match) {
+            ++pairs;
+            if(kind && kind!=match)kind=5; // conflicting pairs
+            else if(!kind)kind=match;
+        }
     }
+    if(wrapper_returns)*wrapper_returns=roots;
+    if(confirmed_pairs)*confirmed_pairs=pairs;
+    if(pairs!=1 || kind==5)return pairs>1 ? "ambiguous" : "unknown";
     switch(kind) {
         case 1:return "game-script-pause";
         case 2:return "game-script-resume";
@@ -539,14 +567,16 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     AudioSoundContext source{};
     const char* audio_origin="not-sampled";
     char code_rva_preview[96]{};
-    unsigned scanned_words=0;
+    unsigned scanned_words=0,wrapper_returns=0,confirmed_pairs=0;
     if(sampled) {
         source=inspect_audio_sound_context(arg);
         const bool preview=event<2u && slot<4u;
         audio_origin=inspect_audio_pause_origin(
             preview ? code_rva_preview : nullptr,
             preview ? sizeof(code_rva_preview) : 0u,
-            preview ? &scanned_words : nullptr);
+            preview ? &scanned_words : nullptr,
+            preview ? &wrapper_returns : nullptr,
+            preview ? &confirmed_pairs : nullptr);
     }
     if(original) original(arg);
     if(!sampled)return;
@@ -564,8 +594,9 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     if(event<2u && slot<4u) {
         char stack_line[270]{};
         std::snprintf(stack_line,sizeof(stack_line),
-            "RUNTIME-AUDIO-CALLSTACK: channel=%s sample=%u inspected_words=%u executable_rva_candidates=%s (read-only; candidates not validated return frames)",
+            "RUNTIME-AUDIO-CALLSTACK: channel=%s sample=%u inspected_words=%u wrapper_returns=%u paired_callers=%u executable_rva_candidates=%s (read-only; paired returns checked)",
             kAudioSlots[slot].name,event+1u,scanned_words,
+            wrapper_returns,confirmed_pairs,
             code_rva_preview[0] ? code_rva_preview : "none");
         log_line(stack_line);
     }

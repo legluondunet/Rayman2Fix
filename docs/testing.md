@@ -1,3 +1,27 @@
+## 13 November 2026 — paired native callsite provenance
+
+The first 4 KiB extension on the shared research branch revealed
+that mere RVA candidates from the stack must not automatically
+be classified as live call frames. The verified CD wrappers
+leave 0x4536F2 (global pause) and 0x453722 (global resume)
+directly below the caller's own return site. Provenance now
+requires an **adjacent** [wrapper return, caller return] pair:
+the script's 0x471E75/0x471E6C or the window activation
+handler's 0x401CA1/0x401CEE. Precisely one matching pair
+permits a diagnostic label; zero yields `unknown`, and
+multiple pairs yield `ambiguous`. This is conservative
+observational evidence, *not* a menu-state permission.
+
+In the first two events for each of the four pause/resume
+channels, the bounded callstack diagnostic includes
+`wrapper_returns` and `paired_callers` counts, alongside
+up to four code RVA candidates; raw stack addresses are not
+logged or shared. The same 1,024-DWORD (~4 KiB) read limit
+and read-only audio forwarding remain in effect. Other
+display/HUD and sound hooks are unaffected.
+
+---
+
 ## 13 November 2026 — callstack provenance probe after Wine 06:23 log
 
 The owner's 170-line `Rayman2Fix(20261113-062347).log`
