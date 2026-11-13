@@ -92,7 +92,9 @@ def summarize(text: str) -> dict:
     # A pair is only a close-in-time, same-root, same-part correlation.
     # The native call stacks and per-record marks are NOT part of this trace.
     pairs: list[dict] = []
-    for left, right in zip(qualified, qualified[1:]):
+    index = 0
+    while index + 1 < len(qualified):
+        left, right = qualified[index], qualified[index + 1]
         if (
             left["event"] == right["event"]
             and left["event"] in ("PauseTransitionSxd", "ResumeTransitionSxd")
@@ -111,6 +113,9 @@ def summarize(text: str) -> dict:
                 "inner_resource": list(left["owner"]["inner"]),
                 "global_depth": left["depth"],
             })
+            index += 2  # one pair consumes two samples
+        else:
+            index += 1
 
     stops_while_nested = [
         {
