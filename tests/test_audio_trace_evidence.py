@@ -61,6 +61,101 @@ class TraceEvidenceTests(unittest.TestCase):
         self.assertTrue(result["focus_loss_not_proven_when_missing"])
         self.assertNotIn("KEEP_PRIVATE", str(result))
 
+    def test_two_cycles_resume_before_menu_clears_then_stop_at_nested_depth(self):
+        # Synthetic reduction of two observed workflows. Neither
+        # sequence proves ESC exclusivity or that Theme is audible music.
+        bank7 = (
+            " outer_native_bank=9 outer_native_index=5"
+            " outer_bank_candidates=1 outer_bank_list_complete=1"
+            " inner_native_bank=9 inner_native_index=7"
+            " inner_bank_candidates=1 inner_bank_list_complete=1")
+        bank10 = bank7.replace("inner_native_index=7", "inner_native_index=10")
+        ui0 = " ui_in_game_menu_at_call=0 ui_engine_paused_at_call=0"
+        ui1 = " ui_in_game_menu_at_call=1 ui_engine_paused_at_call=0"
+        data = [
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=1333 in_game_menu=0 "
+            "engine_paused=0 foreground=1",
+            trace("PauseTransitionSxd", 1, 40004) + ui0,
+            owner("PauseTransitionSxd", 1, inner=50) + bank7,
+            trace("PauseTransitionSxd", 2, 40006) + ui0,
+            owner("PauseTransitionSxd", 2, inner=50) + bank7,
+            "RUNTIME-AUDIO-UI-STATE: t_ms=40021 in_game_menu=1 "
+            "engine_paused=0 foreground=1",
+            trace("ResumeTransitionSxd", 1, 48154,
+                  origin="game-script-resume") + ui1,
+            owner("ResumeTransitionSxd", 1, inner=50) + bank7,
+            trace("ResumeTransitionSxd", 2, 48155,
+                  origin="game-script-resume") + ui1,
+            owner("ResumeTransitionSxd", 2, inner=50) + bank7,
+            trace("ResumeSxd", 1, 48156, origin="game-script-resume") + ui1,
+            "RUNTIME-AUDIO-UI-STATE: t_ms=48537 in_game_menu=0 "
+            "engine_paused=0 foreground=1",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=62856 in_game_menu=0 "
+            "engine_paused=1 foreground=1",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=63366 in_game_menu=0 "
+            "engine_paused=0 foreground=1",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=78301 in_game_menu=0 "
+            "engine_paused=1 foreground=1",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=78812 in_game_menu=0 "
+            "engine_paused=0 foreground=1",
+            trace("PauseTransitionSxd", 3, 78862) + ui0,
+            owner("PauseTransitionSxd", 3, inner=66) + bank10,
+            trace("PauseTransitionSxd", 4, 78863) + ui0,
+            owner("PauseTransitionSxd", 4, inner=66) + bank10,
+            "RUNTIME-AUDIO-UI-STATE: t_ms=79328 in_game_menu=1 "
+            "engine_paused=0 foreground=1",
+            trace("StopTransitionSxd", 1, 81731, depth=2,
+                  origin="unknown") + ui0,
+            owner("StopTransitionSxd", 1, inner=66) + bank10,
+            "RUNTIME-AUDIO-UI-STATE: t_ms=82098 in_game_menu=0 "
+            "engine_paused=0 foreground=1",
+        ]
+        result = M.summarize("\n".join(data))
+        self.assertEqual(result["observed_transition_counts"],
+                         {"pause": 4, "resume": 2, "stop": 1})
+        self.assertEqual(result["ownership_records_validated"], 7)
+        self.assertEqual(result["ownership_has_native_loaded_bank_provenance"], 7)
+        self.assertEqual(
+            [p["event"] for p in result["close_same_driver_event_pairs"]],
+            ["PauseTransitionSxd", "ResumeTransitionSxd",
+             "PauseTransitionSxd"])
+        self.assertEqual(
+            [p["inner_loaded_bank_and_index"]
+             for p in result["close_same_driver_event_pairs"]],
+            [[9, 7], [9, 7], [9, 10]])
+        self.assertEqual(
+            [p["menu_state_at_calls"]
+             for p in result["close_same_driver_event_pairs"]],
+            [[0, 0], [1, 1], [0, 0]])
+
+        windows = result["observed_native_menu_flag_change_windows"]
+        self.assertEqual(
+            [(w["observed_change"],w["earliest_bound_ms"],
+              w["latest_bound_ms"]) for w in windows],
+            [("0-to-1",40006,40021), ("1-to-0",48156,48537),
+             ("0-to-1",78863,79328), ("1-to-0",79328,81731)])
+        self.assertEqual(result["unusable_nonmonotonic_menu_timestamp_pairs"], 0)
+        self.assertTrue(all(w["not_proof_of_ESC_or_F1_menu"]
+                            and w["exact_change_time_not_observed"]
+                            for w in windows))
+        stops = result["owned_stops_at_nested_depth"]
+        self.assertEqual(len(stops), 1)
+        self.assertEqual(
+            (stops[0]["global_depth"],stops[0]["native_menu_flag_at_call"]),
+            (2,0))
+        self.assertEqual(stops[0]["outer_loaded_bank_and_index"], [9,5])
+        self.assertEqual(stops[0]["inner_loaded_bank_and_index"], [9,10])
+        ui = result["native_ui_state_samples"]
+        self.assertEqual(
+            [x["engine_paused"] for x in ui if 60000 < x["ms"] < 79000],
+            [1, 0, 1, 0])
+        self.assertTrue(
+            all(x["in_game_menu"] == 0 for x in ui if 60000 < x["ms"] < 79000))
+        self.assertTrue(result["focus_loss_not_proven_when_missing"])
+        self.assertTrue(result["menu_windows_are_not_confirmed_ESC_UI_lifetimes"])
+        self.assertNotIn("KEEP_PRIVATE",str(result))
+
     def test_live_like_pause_menu_flag_timing_and_owned_stop_are_not_resume(self):
         # Synthetic timing modeled after an opt-in, read-only Wine trace.
         # Engine pause depth 2 may outlive the visual menu flag. A stop
