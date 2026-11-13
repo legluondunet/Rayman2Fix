@@ -513,6 +513,31 @@ The **reference** supplied to the resolver is a packed bank/index key; the **`Id
 
 The retail-CD resolver digest check now lives in the SHA-pinned [CD parity tool](../tools/check_rayman2_cd_audio_parity.py) with no executable bytes redistributed. The BNM reader and its synthetic fixtures have been corrected; no production audio calls or INI options have been changed.
 
+### Inverting the native loaded-bank registry — no BNM file needed for live provenance
+
+An important new read-only research path is now implemented **only in the opt-in `RAYMAN2FIX_AUDIO_TRACE` build**, not in the normal game. Instead of guessing the BNM bank from the first DWORD of `SND_tdstBlockResourceMem`, it performs the exact *inverse* of the original-CD resource resolver `0x453F90`:
+
+1. Read `SND_g_stBankDescriptionList` first pointer at **`VA 0x514D50`**, using module RVA `0x114D50`. The native original-CD `0x4538C0` has `mov eax,[0x514D50]`.
+2. Traverse at most **512** `0x48`-byte loaded-bank descriptors. Their **real bank ID** is at `+4`, next pointer at `+0x3C`, native state at `+0x20` (accept only `SND_BANK_Loaded=1`), and `p_stData` at `+0x24`. The native CD lookup independently reads the ID at `0x4538CD` and follows `+0x3C` at `0x4538D2`.
+3. From each loaded bank head, read its **resource-table pointer** at `+0x0C` and **resource count** at `+0x10` (direct native reads at `0x453FBA` and `0x453FB5`). For a pointer to a live Theme or nested SXD resource descriptor, accept a candidate only when the address is inside that precise table, **aligned to 92 bytes**, and the calculated index is less than the count.
+4. Require a fully traversed, **acyclic**, readable bank list with **exactly one match** before reporting `(native_bank_id, native_resource_table_index)`. Any missing bank, invalid loaded-bank header, cyclic links, 512-node limit, duplicate/overlapping tables, out-of-range pointers, or nonunique owner returns **-1/unknown**. The scan uses `ReadProcessMemory` only and is limited to the already-sampled initial transition driver events, never the normal build.
+
+The trace keeps the **old** `theme_bank/theme_resource` and `inner_bank/inner_resource` fields solely for backwards compatibility: these are the **high/low 16-bit halves of the resource record's own `Id`**, *not* native loaded-bank provenance. **New distinct fields** in `RUNTIME-AUDIO-THEME-OWNER` are:
+
+```text
+outer_native_bank, outer_native_index,
+outer_bank_candidates, outer_bank_list_complete, outer_bank_nodes,
+inner_native_bank, inner_native_index,
+inner_bank_candidates, inner_bank_list_complete, inner_bank_nodes
+```
+
+The [offline trace analyzer](../tools/analyze_rayman2_audio_trace.py) reports `native_loaded_bank_provenance` **only when both Theme and inner SXD have one unique, complete registry match**, and it refuses to pair otherwise similar samples if their newly verified native bank/index differs. Old logs get `None` for bank provenance, never a retrospectively invented `BNK_73.BNM` claim. Importantly this diagnostic is **not proof of audible music** or of ESC-menu visibility: it proves where a currently loaded *native record address* belongs in the bank registry, provided the memory snapshot is consistent.
+
+The exact original-CD x86 instruction bytes supporting all seven bank-registry offsets (list head, bank ID, next, 72-byte descriptor allocation, bank-head pointer, resource count and resource first pointer) were added to the [SHA-pinned retail-CD parity audit](../tools/check_rayman2_cd_audio_parity.py); all are also present in the original signed CD PE's byte-identical region in the independent reference. The [research C++ guard tests](../tests/test_audio_trace_guards.py) forbid writes and unbounded traversal, while [synthetic trace evidence tests](../tests/test_audio_trace_evidence.py) prove `Id` halves are separate from native provenance and that ambiguous/incomplete lists cannot be treated as verified.
+
+**Current validation boundary:** these are code-reviewed/static assertions and Windows/Linux CI tests, **not a live Wine observation of the new registry inverse**. To establish the original music's true bank, we still need a future diagnostic run or a separately authenticated CD BNM/level sound resource. No audio hook behavior is changed.
+
+
 ### BNM metadata layout: native table offsets, not inferred placement
 
 Independent reference sources: [Rayman2Lib `BNMFile.cs`](https://github.com/szymski/Rayman2Lib/blob/master/csharp_tools/Rayman2Lib/BNMFile.cs), [ACP_Ray2 `SND.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND.h), [`SND_Event.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Event.h), and [`SND_Resource.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h). The **non-approved** owner-supplied EXE's native loader `0x453990` reads precisely 44 bytes at `0x4539E7`.
