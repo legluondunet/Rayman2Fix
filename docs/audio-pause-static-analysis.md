@@ -38,14 +38,14 @@ case 1..11 targets at 0x457FA0:
            -> 0x455280: wrapper around the dynamic x86 5-argument
               _SND_fn_lPlayTransitionExSxd@20 at slot 0x4B86F0
            -> 0x457570: retain native driver handle and descriptor
-        -> 0x459AF4: store nested sound-table index at 0x4B95E8
+        -> 0x459AF4: store inner sound-record pointer at 0x4B95E8
      -> 0x457F92: save *outer* event/controller record (separate)
 ```
 
 Critical distinctions:
 - The game sound table begins `0x4B8C98` and has **64 entries of 0x20 bytes**.
 - A table record stores the **driver handle at +0**, **game-native descriptor at +4**, **transition flag at +0x10**, and **active flag at +0x14** (see `0x4575D5–0x4575F0`). The handle is not a song ID, and equal handles do not entail equal source descriptors.
-- `0x459950` maintains its type-11 controller at `0x4B95B8`. The nested sound-table entry index lives at controller **+0x30** (`0x4B95E8`). This is structurally separate from the *outer* type-11 sound-table record. It is inappropriate to treat one fixed table slot as “music.”
+- `0x459950` maintains its type-11 controller at `0x4B95B8`. The nested sound-record **pointer** lives at controller **+0x30** (`0x4B95E8`); its address must be decoded to an index after checking the native 64 × 0x20-byte table bounds and alignment. This is structurally separate from the *outer* type-11 sound-table record. It is inappropriate to treat one fixed table slot as “music.”
 - In the reference binary, `0x4597E0` explicitly clears the controller's active state and is called during native audio initialization from `0x457E2D`. Other lifecycle paths use indirect entry points and pointer writes, so *initialization is not proof of all later state transitions*.
 - Direct `call` instructions to `0x457E60` occur at `0x452E63`, `0x4579E2`, `0x45A26D`, `0x45A6BE`, `0x45A7D6`, `0x45ADD8`, `0x45AFD2`. These seven upstream sites are the next useful static provenance targets; their event arguments need to be linked to an actual resource category.
 
@@ -188,7 +188,7 @@ Records without the transition flag use `0x458070` / `0x458090`, which use nativ
 
 **Important architectural finding:** when both an inner transition record and its outer type-11 controller record participate in a native pause, two separate code paths can reach the *same* driver `PauseTransitionSxd`/resume entry. This is a concrete explanation **candidate** for the repeated calls to slot 1 observed at the same millisecond in Wine. It is **not fully proven as the cause**: the controller pointer and the true executed call stacks still need to be verified.
 
-**Diagnostic correction:** the earlier `inspect_audio_sequence_context()` returned an initially-zero `AudioSequenceContext` whenever the controller DWORD was **not exactly 1** (`active!=1u`). The native `0x459C40` callback instead checks only **nonzero** (`cmp [eax],0; je ...`). Therefore the prior `sequence_active=0` log field **did not establish** the native DWORD was zero: an alternate nonzero state would have been silently reported as inactive. The optional research build now categorizes the state as `sequence_state_class` (0=unreadable, 1=zero, 2=one, 3=other nonzero), with `sequence_active` determined by nonzero state and a validated table slot. Existing Wine traces cannot reconstruct which class applied retrospectively; do not use them to claim the controller was idle.
+**Diagnostic correction:** the earlier `inspect_audio_sequence_context()` returned an initially-zero `AudioSequenceContext` whenever the controller DWORD was **not exactly 1** (`active!=1u`). The native `0x459C40` callback instead checks only **nonzero** (`cmp [eax],0; je ...`). Therefore the prior `sequence_active=0` log field **did not establish** the native DWORD was zero: an alternate nonzero state would have been silently reported as inactive. The optional research build now categorizes the state as `sequence_state_class` (0=unreadable, 1=zero, 2=one, 3=other nonzero), with `sequence_active` determined by nonzero state and a validated aligned record pointer. Existing Wine traces cannot reconstruct which class applied retrospectively; do not use them to claim the controller was idle.
 
 ## Exact nested ESC / focus-loss pause state machine
 
@@ -257,8 +257,8 @@ The direct x86 lifecycle of the **Theme singleton**, base `0x4B95B8`, is now ver
 | Operation | Native address | Result |
 | --- | --- | --- |
 | Initialization `0x4597E0` | `0x4597EC` | Sets `[0x4B95B8]=0` |
-| New inner stream | `0x459AF4` | Stores its sound-table index at `0x4B95E8` |
-| Start success check | `0x459B06` | Compares the stored index with the `-1` sentinel |
+| New inner stream | `0x459AF4` | Stores its sound-record pointer at `0x4B95E8` |
+| Start success check | `0x459B06` | Compares the stored record pointer with the `-1` sentinel |
 | Successful Theme activation | `0x459B0E` | Sets `[0x4B95B8]=1` |
 | Theme stop | `0x459C0D` | Sets first controller DWORD back to `0` |
 | Theme pause / resume | `0x459C44`, `0x459C64` | Dispatches its nested sound only when controller first DWORD is **nonzero** |
@@ -363,6 +363,20 @@ This is a deliberately narrow **fail-closed state specification**, not a simple 
 
 **Remaining integration work:** determine the actual Theme bank/resource ownership of the audible soundtrack and verify a way to reconcile this desired state with original `0x4580B0`/`0x458110` markers and driver calls. A model passing synthetic tests is **not** evidence the feature works or is safe under Wine/Windows; original-CD parity and one consolidated end-to-end test are still mandatory before release.
 
+## Correction after owner Wine test — 13 November 2026, 14:40
+
+A critical mismatch in our **research instrument**, not an absence of level music, was identified by comparing `Rayman2Fix(20261113-144018).log` with native x86 disassembly.
+
+- Native allocator `0x4574E0` computes `lea eax,[ecx+0x4B8C98]` at **`0x45752C`** where `ecx=32*ordinal`: it returns a **pointer to an actual 32-byte sound-table record**, not the ordinal.
+- Native Theme controller `0x459950` stores that pointer at **`0x4B95E8`** (`0x459AF4`).
+- Native Theme pause `0x459C40` and resume `0x459C60` read `[controller+0x30]` and **pass this pointer directly** to `0x4584A0` / `0x458470`. They do *not* convert a slot index.
+- Our previous probe wrongly tested the raw pointer with `slot>=64`, so it returned `sequence_slot=-1` and `inner_slot=-1` even with **controller state 1**. The resulting `theme_owned_driver=0` **cannot be used as evidence against Theme ownership**.
+- The corrected probe takes the raw pointer as an **unsigned 32-bit address**, checks the pointer falls inside `[module+0xB8C98,module+0xB8C98+64*0x20)`, rejects misalignment and null/`-1` sentinels, and only then converts it to an index `(ptr-base)/0x20`. It never dereferences unvalidated addresses. The new `sequence_ref_class` and `inner_ref_class` distinguish the valid aligned-record-pointer class (3) from null (1), sentinel (2), unreadable (0), or invalid (4). Ordinary audio playback is unchanged.
+
+**Test facts, not assumptions:** the new log has two ESC-triggered Theme-like transition pauses at **49.802–49.803 s**, two resumes at **59.502–59.503 s**, and a second pair of pauses at **63.735–63.736 s**. Each driver call is `game-script-pause` or `game-script-resume`, `sound_slot=1`, `sound_matches=1`, with native controller `sequence_state_class=2` meaning native active DWORD **exactly one**, and **one unique outer resource Theme** in native slot 8: **bank 73, resource 48**. The paused inner driver record reports resource **bank 73, resource 51**. This strongly motivates verifying their relationship with the corrected pointer decoder, but the old instrumentation failed to record it. The log contains no `foreground=0` event, so Alt-Tab has not been validated. A separate `StopTransitionSxd` at **67.387 s** while global depth 2 confirms the importance of forwarding legitimate stops.
+
+This correction supersedes all earlier references in this report that described the Theme's `+0x30` value as a **numeric sound-table index**. Do not use the old `inner_slot=-1` or `sequence_slot=-1` observations to reject Theme attribution.
+
 ## Current next step: prove Theme ownership from one native pause event
 
 The goal remains **level music audible during the in-game ESC pause**, while SFX obey their normal pause, the original Theme stop/change operations remain effective, and all audio pauses on loss of window focus. No F1 handling is in scope.
@@ -370,7 +384,7 @@ The goal remains **level music audible during the in-game ESC pause**, while SFX
 We now have a **concrete structural source-ID test**, independent of a guessed fixed sound-table slot:
 
 1. The 64-entry native sound table `0x4B8C98` stores the **outer** Theme handle returned by `0x459950`/`0x459B3A`, which is the address of the Theme singleton `0x4B95B8`; its resource descriptor must have `SND_E_TR_Theme=11` at `+4`.
-2. The same singleton's `+0x30` field at `0x4B95E8` contains the **inner** sound-table index. The inner record must be active, transition-enabled, carry a native SXD resource type `1`, and own a **unique** driver handle.
+2. The same singleton's `+0x30` field at `0x4B95E8` contains the **inner** sound-record pointer, not a numeric index. The inner record must be active, transition-enabled, carry a native SXD resource type `1`, and own a **unique** driver handle.
 3. Only if the paused driver handle is exactly this unique inner handle is `theme_owned_driver=1`. The outer Theme resource's packed ID identifies its **BNM bank** (upper16) and resource table index (lower16). The inner resource ID is logged separately. Any absent, inactive, shared or ambiguous record yields **no confirmed owner**.
 
 This is implemented as a **read-only, bounded** `inspect_audio_theme_owner()` probe in the optional `RAYMAN2FIX_AUDIO_TRACE` build only. It reports a separate `RUNTIME-AUDIO-THEME-OWNER` line for the first eight native `PauseTransitionSxd`, `ResumeTransitionSxd` and `StopTransitionSxd` events, with `outer_candidates`, `outer_slot`, `theme_bank`, `theme_resource`, `inner_slot`, `inner_bank`, `inner_resource`, `inner_active`, `inner_transition`, `inner_handle_matches`, and `theme_owned_driver`. No raw pointers or resource-file contents are logged; no driver argument, call order or return value is changed. The ordinary release build compiles the probe out entirely.
