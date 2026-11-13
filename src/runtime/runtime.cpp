@@ -363,6 +363,7 @@ constexpr std::uintptr_t kTransitionPlayExRva=0xB86F0;
 using AudioPlayTransitionExFn=DWORD (__stdcall*)(DWORD,DWORD,DWORD,DWORD,DWORD);
 std::atomic<void*> g_transition_play_original{nullptr};
 std::atomic<DWORD> g_last_transition_play_handle{0};
+std::atomic<DWORD> g_last_transition_play_descriptor{0};
 std::atomic<unsigned> g_transition_play_calls{0};
 std::atomic<void*> g_audio_original[kAudioSlotCount]{};
 std::atomic<unsigned> g_audio_event_counts[kAudioSlotCount]{};
@@ -442,6 +443,7 @@ struct AudioSoundContext {
     unsigned transport=0;
     unsigned transition=0;
     unsigned active=0;
+    unsigned descriptor_matches_play=0;
     int pause_depth=-1;
 };
 AudioSoundContext inspect_audio_sound_context(DWORD argument) {
@@ -464,6 +466,8 @@ AudioSoundContext inspect_audio_sound_context(DWORD argument) {
     SoundTableRecord entries[kSoundTableSlots]{};
     if(!argument || !safe_read(module+kSoundTableRva,
        entries,sizeof(entries)))return out;
+    const DWORD last_descriptor=g_last_transition_play_descriptor.load(
+        std::memory_order_acquire);
     for(unsigned i=0;i<kSoundTableSlots;++i) {
         if(entries[i].words[0]!=argument)continue;
         ++out.match_count;
@@ -476,6 +480,9 @@ AudioSoundContext inspect_audio_sound_context(DWORD argument) {
         // table. Their interpretation is not used to change playback.
         out.transition=unsigned(entries[i].words[4]!=0);
         out.active=unsigned(entries[i].words[5]!=0);
+        out.descriptor_matches_play=unsigned(last_descriptor!=0u &&
+            entries[i].words[1]==last_descriptor &&
+            out.transition!=0u);
         DWORD type=0;
         const std::uintptr_t desc=std::uintptr_t(entries[i].words[1]);
         if(desc>=0x10000u && safe_read(
@@ -483,6 +490,8 @@ AudioSoundContext inspect_audio_sound_context(DWORD argument) {
             type>=1u && type<=2u)
             out.transport=type;
     }
+    // Shared handles cannot identify a unique native source descriptor.
+    if(out.match_count!=1u)out.descriptor_matches_play=0u;
     return out;
 }
 
@@ -600,19 +609,37 @@ DWORD __stdcall audio_play_transition_ex(DWORD a,DWORD b,DWORD c,DWORD d,DWORD e
     // The five native arguments and DWORD result are forwarded exactly.
     // Neither music nor SFX identity is assumed from this API alone.
     const DWORD result=original ? original(a,b,c,d,e) : 0xFFFFFFFFu;
-    if(result && result!=0xFFFFFFFFu)
+    if(result && result!=0xFFFFFFFFu) {
+        // Original CD 0x4582A4 passes the sound descriptor first to
+        // the five-argument SXD driver. The game records this same
+        // descriptor in the 64-entry sound table at 0x4575D1.
+        g_last_transition_play_descriptor.store(a,std::memory_order_release);
         g_last_transition_play_handle.store(result,std::memory_order_release);
+    }
     const unsigned event=g_transition_play_calls.fetch_add(
         1u,std::memory_order_relaxed);
     if(g_log && event<16u) {
-        char line[200]{};
+        // No raw pointer or sound payload is logged. On the approved
+        // CD executable, descriptor+4 is the transport type (1=SXD,
+        // 2=MIDI), and descriptor+12 is the native volume byte.
+        // The latter is observational metadata, not a music selector.
+        struct NativeDesc { DWORD id; DWORD transport; DWORD extra; BYTE volume; };
+        NativeDesc desc{};
+        SIZE_T got=0;
+        const bool readable=a>=0x10000u && ReadProcessMemory(
+            GetCurrentProcess(),reinterpret_cast<const void*>(
+                std::uintptr_t(a)),&desc,sizeof(desc),&got)!=0 &&
+                got==sizeof(desc);
+        char line[255]{};
         std::snprintf(line,sizeof(line),
             "RUNTIME-AUDIO-TRANSITION-PLAY: sample=%u handle_valid=%u "
-            "last_handle_stored=%u (five args/result forwarded unchanged; "
+            "descriptor_readable=%u descriptor_transport=%u "
+            "descriptor_volume=%d (five args/result forwarded unchanged; "
             "not music-identified)",
             event+1u,unsigned(result && result!=0xFFFFFFFFu),
-            unsigned(g_last_transition_play_handle.load(
-                std::memory_order_acquire)!=0u));
+            unsigned(readable),
+            unsigned(readable && desc.transport<=2u ? desc.transport : 0u),
+            readable ? int(desc.volume) : -1);
         log_line(line);
     }
     return result;
@@ -652,15 +679,15 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     if(original) original(arg);
     if(!sampled)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
-    char line[512]{};
+    char line[620]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_same_handle=%u transition_last_play_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_same_handle=%u transition_last_play_match=%u transition_desc_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
         unsigned(arg==0),source.table_index,source.match_count,source.transport,
         source.transition,source.active,sequence.table_index,
         sequence.active,sequence.same_handle,last_play_match,
-        source.pause_depth,audio_origin,
+        source.descriptor_matches_play,source.pause_depth,audio_origin,
         unsigned(game_window_is_foreground()),
         unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
     log_line(line);
