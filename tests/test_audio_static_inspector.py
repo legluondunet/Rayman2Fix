@@ -143,6 +143,22 @@ class AudioStaticInspectorTests(unittest.TestCase):
         self.assertTrue(info["contains_paths_not_sound_bytes"])
         self.assertFalse(info["applies_to_original_cd"])
 
+    def test_esc_and_focus_share_native_pause_and_resume_wrappers(self):
+        src = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('result["native_audio_pause_invariants"]', src)
+        self.assertIn("pe.call_target(0x401C9C) == 0x4536D0", src)
+        self.assertIn("pe.call_target(0x471E70) == 0x4536D0", src)
+        self.assertIn("pe.call_target(0x401CE9) == 0x453700", src)
+        self.assertIn("pe.call_target(0x471E67) == 0x453700", src)
+        self.assertIn("pe.call_target(0x4536ED) == 0x4580B0", src)
+        self.assertIn("pe.call_target(0x45371D) == 0x458110", src)
+        self.assertIn("mark_written_before_dispatch", src)
+        self.assertIn("pause_record_mark_guard", src)
+        self.assertIn("clear_mark_before_resume", src)
+        self.assertIn("global_resume_depth_dec", src)
+        self.assertIn("research_inference", src)
+        self.assertIn('"implemented_audio_bypass": False', src)
+
     def test_unknown_binary_never_invents_structural_matches(self):
         with tempfile.TemporaryDirectory() as d:
             fn = Path(d) / "synthetic.exe"
