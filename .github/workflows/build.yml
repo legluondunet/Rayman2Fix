@@ -319,6 +319,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_audio_trace_guards.py'
       - name: Verify standalone PE32 audio inspector with synthetic fixtures
         run: python3 -m unittest discover -s tests -p 'test_audio_static_inspector.py'
+      - name: Verify native audio pause invariants against synthetic model
+        run: python3 -m unittest discover -s tests -p 'test_audio_pause_invariants.py'
       - name: Configure
         run: cmake -S . -B build -DBUILD_TESTING=ON
       - name: Build
