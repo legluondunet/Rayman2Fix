@@ -413,6 +413,36 @@ bool writable_audio_slot(const void* addr) {
 // its active flag at 0x4B95B8. Its role (music or other sequenced sound)
 // is NOT established: observe whether the sequencer handle is the one
 // paused during the Escape menu, without changing driver calls.
+// Native 0x4574E0 returns the ADDRESS of a 32-byte sound record,
+// not its ordinal. Native 0x459AF4 stores that address at 0x4B95E8.
+// Code 0x459C49 passes the pointer directly to 0x4584A0.
+// Never interpret this DWORD as a numeric slot or dereference it blindly.
+struct AudioNestedRecordRef {
+    int table_index=-1;
+    // 0=unreadable/undetermined, 1=null, 2=minus-one sentinel,
+    // 3=aligned pointer into native 64-record table, 4=invalid pointer.
+    unsigned pointer_class=0;
+};
+AudioNestedRecordRef decode_audio_nested_record_ref(
+    DWORD value, const BYTE* module) {
+    AudioNestedRecordRef out{};
+    if(value==0u) {out.pointer_class=1u;return out;}
+    if(value==0xFFFFFFFFu) {out.pointer_class=2u;return out;}
+    if(!module)return out;
+    constexpr std::uintptr_t kSoundTableRva=0xB8C98;
+    constexpr std::uintptr_t kRecordSize=0x20;
+    constexpr std::uintptr_t kRecordCount=64;
+    const auto base=reinterpret_cast<std::uintptr_t>(module)+kSoundTableRva;
+    const auto address=static_cast<std::uintptr_t>(value);
+    if(address<base || address>=base+kRecordCount*kRecordSize ||
+       (address-base)%kRecordSize!=0u) {
+        out.pointer_class=4u;
+        return out;
+    }
+    out.pointer_class=3u;
+    out.table_index=static_cast<int>((address-base)/kRecordSize);
+    return out;
+}
 struct AudioSequenceContext {
     int table_index=-1;
     unsigned active=0;
@@ -420,6 +450,7 @@ struct AudioSequenceContext {
     // 0=unreadable, 1=zero, 2=one, 3=other nonzero.
     // The native type-11 callback at 0x459C40 accepts any nonzero state.
     unsigned state_class=0;
+    unsigned nested_ref_class=0;
 };
 AudioSequenceContext inspect_audio_sequence_context(DWORD argument) {
     AudioSequenceContext out{};
@@ -434,20 +465,24 @@ AudioSequenceContext inspect_audio_sequence_context(DWORD argument) {
     constexpr std::uintptr_t kSequenceActiveRva=0xB95B8; // 0x4B95B8
     constexpr std::uintptr_t kSequenceSlotRva=0xB95E8;   // 0x4B95E8
     constexpr std::uintptr_t kSoundTableRva=0xB8C98;    // 0x4B8C98
-    DWORD active=0,slot=0,handle=0;
+    DWORD active=0,nested_ptr=0,handle=0;
     if(!read_word(kSequenceActiveRva,&active))return out;
     out.state_class=active==0u ? 1u : (active==1u ? 2u : 3u);
-    if(active==0u || !read_word(kSequenceSlotRva,&slot) || slot>=64u ||
-       !read_word(kSoundTableRva+std::uintptr_t(slot)*32u,&handle) ||
+    if(active==0u || !read_word(kSequenceSlotRva,&nested_ptr))return out;
+    const auto ref=decode_audio_nested_record_ref(nested_ptr,module);
+    out.nested_ref_class=ref.pointer_class;
+    if(ref.table_index<0 ||
+       !read_word(kSoundTableRva+
+                  std::uintptr_t(ref.table_index)*32u,&handle) ||
        !handle || handle==0xFFFFFFFFu)return out;
-    out.table_index=static_cast<int>(slot);
+    out.table_index=ref.table_index;
     out.active=1;
     out.same_handle=unsigned(argument!=0u && argument==handle);
     return out;
 }
 // Read-only, source-backed link: a SND_E_TR_Theme=11 outer sound
 // record's driver handle is the singleton controller address 0x4B95B8.
-// Its +0x30 field is the *inner* table index; that inner record owns the
+// Its +0x30 field is an *inner RECORD POINTER*; that record owns the
 // native SXD driver handle. Neither an isolated SXD handle nor a fixed
 // sound-table slot is sufficient to prove Theme ownership.
 // The upper 16 bits of SND_tdstBlockResourceMem.Id select a BNM bank.
@@ -457,6 +492,7 @@ struct AudioThemeOwnerContext {
     int theme_bank=-1;
     int theme_resource=-1;
     int inner_slot=-1;
+    unsigned inner_ref_class=0;
     int inner_bank=-1;
     int inner_resource=-1;
     unsigned inner_driver_matches=0;
@@ -478,9 +514,9 @@ AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
     constexpr std::uintptr_t kSoundTableRva=0xB8C98; // 0x4B8C98
     struct Record { DWORD words[8]; };
     Record table[64]{};
-    DWORD active=0,slot=0;
+    DWORD active=0,nested_ptr=0;
     if(!safe_read(module+kControllerRva,&active,sizeof(active)) ||
-       !safe_read(module+kNestedSlotRva,&slot,sizeof(slot)) ||
+       !safe_read(module+kNestedSlotRva,&nested_ptr,sizeof(nested_ptr)) ||
        !safe_read(module+kSoundTableRva,table,sizeof(table)))return out;
     const DWORD singleton=static_cast<DWORD>(
         reinterpret_cast<std::uintptr_t>(module)+kControllerRva);
@@ -508,9 +544,12 @@ AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
         out.theme_resource=-1;
         return out; // ambiguous or absent Theme: never claim ownership
     }
-    if(active==0u || slot>=64u)return out;
-    out.inner_slot=static_cast<int>(slot);
-    const auto& inner=table[slot];
+    if(active==0u)return out;
+    const auto ref=decode_audio_nested_record_ref(nested_ptr,module);
+    out.inner_ref_class=ref.pointer_class;
+    if(ref.table_index<0)return out;
+    out.inner_slot=ref.table_index;
+    const auto& inner=table[ref.table_index];
     out.inner_active=unsigned(inner.words[5]!=0u);
     out.inner_transition=unsigned(inner.words[4]!=0u);
     const DWORD inner_handle=inner.words[0];
@@ -845,12 +884,13 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
     char line[1024]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_state_class=%u sequence_same_handle=%u transition_last_play_match=%u transition_desc_match=%u desc_words_readable=%u desc_words_equal_mask=%u desc_volume=%u play_volume=%u desc_resource_group=%d desc_resource_index=%d play_resource_group=%d play_resource_index=%d desc_resource_id_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_state_class=%u sequence_ref_class=%u sequence_same_handle=%u transition_last_play_match=%u transition_desc_match=%u desc_words_readable=%u desc_words_equal_mask=%u desc_volume=%u play_volume=%u desc_resource_group=%d desc_resource_index=%d play_resource_group=%d play_resource_index=%d desc_resource_id_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
         unsigned(arg==0),source.table_index,source.match_count,source.transport,
         source.transition,source.active,sequence.table_index,
-        sequence.active,sequence.state_class,sequence.same_handle,last_play_match,
+        sequence.active,sequence.state_class,sequence.nested_ref_class,
+        sequence.same_handle,last_play_match,
         source.descriptor_matches_play,source.descriptor_words_readable,
         source.descriptor_words_equal_mask,source.descriptor_volume_byte,
         source.play_volume_byte,source.descriptor_bank_group,
@@ -863,10 +903,11 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     if((slot==2u || slot==3u || slot==11u) && event<8u) {
         char ownership[344]{};
         std::snprintf(ownership,sizeof(ownership),
-            "RUNTIME-AUDIO-THEME-OWNER: channel=%s sample=%u outer_candidates=%u outer_slot=%d theme_bank=%d theme_resource=%d inner_slot=%d inner_bank=%d inner_resource=%d inner_active=%u inner_transition=%u inner_handle_matches=%u theme_owned_driver=%u (read-only; no music bypass)",
+            "RUNTIME-AUDIO-THEME-OWNER: channel=%s sample=%u outer_candidates=%u outer_slot=%d theme_bank=%d theme_resource=%d inner_slot=%d inner_ref_class=%u inner_bank=%d inner_resource=%d inner_active=%u inner_transition=%u inner_handle_matches=%u theme_owned_driver=%u (read-only; no music bypass)",
             kAudioSlots[slot].name,event+1u,theme.outer_candidates,
             theme.outer_slot,theme.theme_bank,theme.theme_resource,
-            theme.inner_slot,theme.inner_bank,theme.inner_resource,
+            theme.inner_slot,theme.inner_ref_class,theme.inner_bank,
+            theme.inner_resource,
             theme.inner_active,theme.inner_transition,
             theme.inner_driver_matches,theme.theme_owned_driver);
         log_line(ownership);
