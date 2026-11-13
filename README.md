@@ -1,4 +1,4 @@
-## Sound while F1/Escape menus are open — research build
+## Music in the Escape pause menu — research build
 
 Requested future setting: `[Features] MusicInPauseMenu=0` (disabled by
 default). **Not yet implemented in the user INI**, because a reliable
@@ -31,16 +31,16 @@ when driver functions or game-memory protections are unexpected.
 The research build is **not a stable release**.
 
 For a reproducible Wine test, play until music is audible, open
-the Escape menu for a few seconds, return to the level, open
-the F1 information screen for a few seconds and return, then
-Alt-Tab away and back (to contrast focus-based audio pauses).
+the Escape menu for a few seconds, return to the level,
+then Alt-Tab away and back (to contrast focus-based audio pauses).
 Exit the game and provide **both** `Rayman2Fix_installer.log` and
 `Rayman2Fix.log` from beside `Rayman2Fix.exe`. The lines
 `RUNTIME-AUDIO-TRACE` identify exactly which native music/sound
 pause channel is invoked and whether the game had focus at
 that moment; a key-down flag is only supporting evidence, not
-a menu-state detector. Without an actual test trace, do not
-enable an audio bypass. See issue #4.
+a menu-state detector. F1 is out of scope for this improvement.
+Until the exact music-only record is verified, do not enable
+an audio bypass. See issue #4.
 
 # Rayman2Fix
 

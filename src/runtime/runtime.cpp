@@ -453,14 +453,13 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     const AudioSoundContext source=inspect_audio_sound_context(arg);
     char line[330]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_transport=%u sound_transition=%u sound_active=%u global_pause_depth=%d foreground=%u esc_down=%u f1_down=%u (forwarded unchanged)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_transport=%u sound_transition=%u sound_active=%u global_pause_depth=%d foreground=%u esc_down=%u (forwarded unchanged)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
         unsigned(arg==0),source.table_index,source.transport,
         source.transition,source.active,source.pause_depth,
         unsigned(game_window_is_foreground()),
-        unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0),
-        unsigned((GetAsyncKeyState(VK_F1)&0x8000)!=0));
+        unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
     log_line(line);
 }
 void __stdcall audio_pause_sxd(DWORD a){audio_trace_forward(0,a);}
