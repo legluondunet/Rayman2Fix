@@ -356,6 +356,14 @@ constexpr AudioSlot kAudioSlots[kAudioSlotCount]={
     {"StopSxd",0xB8660}, {"StopTransitionSxd",0xB8704},
     {"SetSoundVolumeSxd",0xB866C}, {"StopCD",0xB8840}
 };
+// PlayTransitionExSxd is a separate five-argument stdcall entry
+// (_SND_fn_lPlayTransitionExSxd@20). Track its last returned handle as
+// evidence for a later PauseTransitionSxd call. No call is modified.
+constexpr std::uintptr_t kTransitionPlayExRva=0xB86F0;
+using AudioPlayTransitionExFn=DWORD (__stdcall*)(DWORD,DWORD,DWORD,DWORD,DWORD);
+std::atomic<void*> g_transition_play_original{nullptr};
+std::atomic<DWORD> g_last_transition_play_handle{0};
+std::atomic<unsigned> g_transition_play_calls{0};
 std::atomic<void*> g_audio_original[kAudioSlotCount]{};
 std::atomic<unsigned> g_audio_event_counts[kAudioSlotCount]{};
 std::atomic<unsigned> g_audio_hooks_installed{0};
@@ -586,6 +594,29 @@ __declspec(noinline) const char* inspect_audio_pause_origin(
     }
 }
 
+DWORD __stdcall audio_play_transition_ex(DWORD a,DWORD b,DWORD c,DWORD d,DWORD e) {
+    const auto original=reinterpret_cast<AudioPlayTransitionExFn>(
+        g_transition_play_original.load(std::memory_order_acquire));
+    // The five native arguments and DWORD result are forwarded exactly.
+    // Neither music nor SFX identity is assumed from this API alone.
+    const DWORD result=original ? original(a,b,c,d,e) : 0xFFFFFFFFu;
+    if(result && result!=0xFFFFFFFFu)
+        g_last_transition_play_handle.store(result,std::memory_order_release);
+    const unsigned event=g_transition_play_calls.fetch_add(
+        1u,std::memory_order_relaxed);
+    if(g_log && event<16u) {
+        char line[200]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-AUDIO-TRANSITION-PLAY: sample=%u handle_valid=%u "
+            "last_handle_stored=%u (five args/result forwarded unchanged; "
+            "not music-identified)",
+            event+1u,unsigned(result && result!=0xFFFFFFFFu),
+            unsigned(g_last_transition_play_handle.load(
+                std::memory_order_acquire)!=0u));
+        log_line(line);
+    }
+    return result;
+}
 void audio_trace_forward(unsigned slot,DWORD arg) {
     const auto original=reinterpret_cast<AudioPauseFn>(
         g_audio_original[slot].load(std::memory_order_acquire));
@@ -600,6 +631,10 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     // an audio handle; never alter the arguments or call ordering.
     AudioSoundContext source{};
     AudioSequenceContext sequence{};
+    const DWORD last_play=g_last_transition_play_handle.load(
+        std::memory_order_acquire);
+    const unsigned last_play_match=unsigned(
+        arg!=0u && last_play!=0u && arg==last_play);
     const char* audio_origin="not-sampled";
     char code_rva_preview[96]{};
     unsigned scanned_words=0,wrapper_returns=0,confirmed_pairs=0;
@@ -619,12 +654,13 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
     char line[430]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_same_handle=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_same_handle=%u transition_last_play_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
         unsigned(arg==0),source.table_index,source.match_count,source.transport,
         source.transition,source.active,sequence.table_index,
-        sequence.active,sequence.same_handle,source.pause_depth,audio_origin,
+        sequence.active,sequence.same_handle,last_play_match,
+        source.pause_depth,audio_origin,
         unsigned(game_window_is_foreground()),
         unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
     log_line(line);
@@ -733,6 +769,25 @@ void poll_audio_pause_trace() {
                     kAudioSlots[i].name,unsigned(kAudioSlots[i].rva));
                 log_line(line);
             }
+        }
+    }
+    // Hook the five-argument transition playback API independently from
+    // the one-argument pause/stop table: mixing their signatures would
+    // corrupt the x86 stdcall stack.
+    auto* play_slot=reinterpret_cast<PVOID volatile*>(
+        module+kTransitionPlayExRva);
+    if(writable_audio_slot(const_cast<const void*>(
+          reinterpret_cast<volatile void*>(play_slot)))) {
+        const PVOID current=*play_slot;
+        const PVOID hook=reinterpret_cast<PVOID>(audio_play_transition_ex);
+        const auto address=reinterpret_cast<std::uintptr_t>(current);
+        if(current && current!=hook &&
+           !(address>=begin && address<end) && executable_page(current)) {
+            g_transition_play_original.store(current,std::memory_order_release);
+            if(InterlockedCompareExchangePointer(play_slot,hook,current)==current)
+                log_line("RUNTIME-AUDIO-TRANSITION-PLAY: "
+                         "installed=PlayTransitionExSxd rva=0x0B86F0 "
+                         "(five args/result forwarded unchanged; research-only)");
         }
     }
     InterlockedExchange(&g_audio_poll_guard,0);
