@@ -44,6 +44,7 @@ CALL_TARGETS = (
     ("script_resume", 0x471E67, 0x453700),
     ("wrapper_pause", 0x4536ED, 0x4580B0),
     ("wrapper_resume", 0x45371D, 0x458110),
+    ("bank_filename_formatter", 0x453948, 0x453870),
 )
 
 # Exact original-CD pause mark/depth branch order, rechecked in the ref.
@@ -57,6 +58,8 @@ ANCHOR_BYTES = (
     ("resume_depth_store", 0x458118, bytes.fromhex("A3 C8 3C 4A 00")),
     ("resume_mark_compare", 0x45813C, bytes.fromhex("3B C8")),
     ("resume_mark_clear", 0x458143, bytes.fromhex("C7 06 00 00 00 00")),
+    ("bank_id_store", 0x453945, bytes.fromhex("89 46 04")),
+    ("bank_filename_literal", 0x4A252C, b"bnk_%d.BNM\x00"),
 )
 
 
@@ -161,12 +164,17 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
         byte_anchors.append({"name": "type_11_theme_dispatch", "verified_both":
                              struct.unpack("<I", cd.at(0x457FC8, 4))[0] == 0x457F21 and
                              struct.unpack("<I", ref.at(0x457FC8, 4))[0] == 0x457F21})
+    bank_checked = (cd.call_target(0x453948) == 0x453870 and
+                    ref.call_target(0x453948) == 0x453870 and
+                    cd.at(0x453945, 3) == ref.at(0x453945, 3) == bytes.fromhex("89 46 04") and
+                    cd.at(0x4A252C, 11) == ref.at(0x4A252C, 11) == b"bnk_%d.BNM\x00") if check_anchors else False
     rdata_identical = cd.section(".rdata") == ref.section(".rdata")
     all_checks = (all(w["identical"] for w in windows) and
                   all(x["verified_both"] for x in call_sites+byte_anchors))
     return {"cd_sha256": cd_digest, "reference_sha256": ref_digest,
             "exact_pinned_pair": pinned, "selected_audio_code_equal": all_checks,
             "original_cd_audio_path_confirmed": pinned and all_checks,
+            "original_cd_bank_filename_formatter_verified": pinned and bank_checked,
             "rdata_raw_identical": rdata_identical,
             "rdata_raw_bytes": len(cd.section(".rdata")),
             "regions": windows, "call_sites": call_sites, "opcode_anchors": byte_anchors,
