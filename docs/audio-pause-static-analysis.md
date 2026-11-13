@@ -91,6 +91,29 @@ but it still does not label a record as music versus sound effect. The
 next required provenance link is the group's archive registration/loading,
 which likely requires corresponding game resource files for confirmation.
 
+### Native command stream registers runtime resource groups
+
+The resource group IDs are *not* hardcoded as disc indices in the path
+just traced. At `0x4507D5`, a native command-stream interpreter
+distinguishes numeric opcode **0x5D** from **0x5E** (subtract 0x5D,
+then decrement):
+
+- The **0x5E** branch obtains one group identifier from
+  `0x44F8D0` and calls `0x454050` at site `0x4507E3`.
+- The **0x5D** branch reads a count and a list of group IDs through
+  `0x44F930`, and calls the same `0x454050` at
+  `0x450811` for each entry.
+- `0x454050` forwards to `0x454060`, which searches the runtime
+  group registry (`0x4538C0`) and creates missing registry records
+  (`0x4538E0`) before the later per-record resolution.
+
+This confirms how the packed ID's **upper 16 bits** can refer to a
+runtime group registered from loaded command data. It does **not**
+establish which `MUSIC*.DAT`, `SOUNDS*.DAT` or `.apm` asset
+corresponds to that group: an actual group command and resource database
+would have to be decoded, and the non-approved reference EXE cannot
+replace retail-CD evidence.
+
 ### A third, distinct dispatcher: `0x458530`
 
 Do not conflate event class, event descriptor conversion, and native driver
