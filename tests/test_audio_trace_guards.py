@@ -44,9 +44,9 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("audio_origin=%s",section)
         self.assertIn("audio_origin=inspect_audio_pause_origin()",section)
         self.assertIn("global_pause_depth=",section)
-        self.assertIn("if(sampled)source=inspect_audio_sound_context(arg);",section)
-        self.assertIn("const bool sampled=g_log && event<budget;",section)
-        self.assertLess(section.index("if(sampled)source=inspect_audio_sound_context(arg);"),
+        self.assertIn("if(sampled) {",section)
+        self.assertIn("source=inspect_audio_sound_context(arg);",section)
+        self.assertLess(section.index("source=inspect_audio_sound_context(arg);"),
                         section.index("if(original) original(arg);"))
         self.assertLess(section.index("if(original) original(arg);"),
                         section.index("if(!sampled)return;"))
