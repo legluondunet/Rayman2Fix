@@ -9,10 +9,15 @@ Research note, **13 November 2026**. This document records the source of each bi
 - Tools: `objdump -d -M intel`, `objdump -p`, and Python's built-in `struct`, running locally. All addresses below are x86 image VAs, not file offsets. For this image's `.text` and `.data` the file offset equals `VA-0x400000`.
 - The existing optional `RAYMAN2FIX_AUDIO_TRACE` build changes no audio arguments, return values, or playback behavior. The normal build does not include its hooks.
 
-## Two different kinds of type
+## Corrected nomenclature — three different classifications
 
-1. **Sound-event class**: `[event_descriptor+4]` selects a branch in `0x457E60`, with a table of eleven 32-bit destinations starting at `0x457FA0`. Branch **11** is `0x457F21`.
-2. **Driver transport**: `[native_descriptor+4]` in `0x458220` chooses **1=SXD** versus **2=MIDI**. Type 11 is *not* a third native transport.
+Cross-checked against the public [ACP_Ray2 `SND_Resource.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h) and [`SND_Event.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Event.h):
+
+1. **Sound *resource* type** (`SND_tdeTypeResource`): `[resource+4]` in `0x457E60` chooses the 11-way resource dispatcher. **Type 11 = `SND_E_TR_Theme`**, **type 10 = `SND_E_TR_Random`**, **type 8 = `SND_E_TR_Switch`**, **type 4 = `SND_E_TR_Sequence`**, and **type 1 = `SND_E_TR_Sample`**. This previously had the misleading name "event class" in the research notes.
+2. **Sound *event* type** (`SND_tdeTypeEvent`): a separate enum (`SND_EVT_Son_Play=1`, `SND_EVT_Son_ChangeVolume=11`, etc.). It is **not** the 11-way resource dispatch described above.
+3. **Driver transport**: `[native_descriptor+4]` in `0x458220` chooses the actual **sample/SXD resource type 1 versus MIDI type 2** for the inner stream. A Theme resource is itself not a third driver transport.
+
+Theme parts are described by [`SND_Theme.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Theme.h): per-part resource, loop start/end, number of loops, transition mode (crossfade, end-of-part or outro), and fade duration. This is a *positive static identification* of the type-11 Theme controller. It does **not** alone establish which audible song or which nested sample plays at a given moment.
 
 The jump table was decoded from the file, not guessed from contiguous disassembly:
 
@@ -25,7 +30,7 @@ case 1..11 targets at 0x457FA0:
 ## Confirmed transition creation chain
 
 ```text
-0x457E60: dispatch event class 11
+0x457E60: dispatch resource type 11 = SND_E_TR_Theme
   -> 0x457F21
      -> 0x459950: single type-11 controller, base 0x4B95B8
         -> 0x458530: select/copy nested native sound descriptors
@@ -46,12 +51,12 @@ Critical distinctions:
 
 ## Offline resource-ID tracing — nested type-11 events
 
-The type-11 controller does not merely store an opaque driver handle. Its
+The type-11 **Theme** controller does not merely store an opaque driver handle. Its
 source data has a variable number of nested entries and a reference-fixup
 stage. This is a promising **resource provenance** path that can be mapped
 without launching Wine, provided the actual resource databases are present.
 
-### Packed source identifiers: `0x453F90`
+### Packed sound-bank resource identifiers: `0x453F90`
 
 The original x86 instructions at `0x453F90–0x453FC9` resolve a **DWORD
 resource identifier**, with a guard for `0xFFFFFFFF`:
@@ -61,10 +66,10 @@ packed_id (DWORD)
   upper 16 bits -> runtime resource-group key
   lower 16 bits -> record index in the loaded group
 
-0x4538C0: registry lookup in linked list at 0x514D50
-           group key = [node+4], next node = [node+0x3C]
-0x453F90: group_base = [[node+0x24]+0x0C]
-           record_count = [[node+0x24]+0x10]
+0x4538C0: SND_tdstSndBankDescriptorList at 0x514D50
+           bank ID = [descriptor+4], next = [descriptor+0x3C]
+0x453F90: resource_base = [[bank+0x24]+0x0C]
+           resource_count = [[bank+0x24]+0x10]
            if index >= record_count: return NULL
            record_ptr = group_base + 92 * index
 ```
@@ -72,13 +77,13 @@ packed_id (DWORD)
 The **92-byte record stride** is obtained from real instructions,
 `lea ecx,[esi+esi*2]`, `shl ecx,3`, `sub ecx,esi`,
 `lea eax,[edx+ecx*4]`: `4 × (24 - 1) = 92`. The group ID is a key
-in a **runtime registry**, **not** automatically a disc index, archive number,
-CD track or music ID. No concrete packed ID has yet been recovered from an
+in the **runtime sound-bank list**, **not** automatically a disc index, archive number,
+CD track or song ID. No concrete packed ID has yet been recovered from an
 actual level's resources.
 
 ### Type-11 resource fixups: `0x459840`
 
-`0x459840` translates an event descriptor into controller-owned memory.
+`0x459840` converts a disk-format Theme resource into controller-owned memory.
 It walks a **24-byte-stride** collection of nested records, invoking
 `0x453F90` on the first DWORD of each element (`call` at `0x459869`).
 An optional secondary pointer from descriptor `+0x28` is independently
@@ -116,12 +121,11 @@ replace retail-CD evidence.
 
 ### A third, distinct dispatcher: `0x458530`
 
-Do not conflate event class, event descriptor conversion, and native driver
-transport. The 11-byte conversion table at `0x4585A0` maps event
-classes 1..11 to categories:
+Do not conflate resource type, resource-descriptor conversion, sound-event type, and native driver transport. The 11-byte conversion table at `0x4585A0` maps **resource**
+types 1..11 to categories:
 
 ```text
-event class :  1  2  3  4  5  6  7  8  9  10 11
+resource type:  1  2  3  4  5  6  7  8  9  10 11
 category    :  0  0  0  0  4  4  4  1  4   2  3
 ```
 
@@ -130,12 +134,46 @@ Category **3** used by type **11** returns the input descriptor at
 and type **10** selects `0x458550 → 0x45A4A0`. These conversion functions
 can resolve nested descriptors within an already selected type-11 event.
 Transport class **1=SXD / 2=MIDI** is a *separate* selector inside
-`0x458220`, unrelated to an event class number.
+`0x458220`, unrelated to the *outer* Theme resource's type number.
 
 All static checks above have been added to the read-only JSON inspector
 `tools/inspect_rayman2_audio.py` and its synthetic-only tests. A future
 comparison with the approved retail-CD binary is needed before using the
 addresses as patch locations.
+
+## Cross-checked sound-bank data structures (ACP_Ray2)
+
+The open-source [ACP_Ray2 sound module](https://github.com/raytools/ACP_Ray2/tree/master/src/SND) supplies the original CPA structure names and matches **three exact addresses in the supplied EXE**: `SND_g_stBankDescriptionList = 0x514D50` (`SND.c`), `SND_fn_lSendRequestSound = 0x452D20`, and the bank-registry instructions at `0x4538C0`. The first address is exactly the global read in the native bank lookup; the second matches the native function prologue. This is strong evidence that the named layouts match this *reference* binary.
+
+**Loaded bank descriptor** `SND_tdstSndBankDescriptorElement` (72 bytes, allocated at `0x4538E2`):
+
+| Offset | Name | Native check |
+| --- | --- | --- |
+| `+0x04` | `lId` | `0x4538CD` compares bank ID |
+| `+0x0C` | `szFileName[13]` | Named bank filename within the descriptor |
+| `+0x24` | `p_stData` | `0x453FB2` loads bank head |
+| `+0x3C` | `hNextBrotherDyn` | `0x4538D2` advances linked list |
+
+The loaded bank head `SND_tdstSndBankHead` contains its optimized **resource list first pointer at `+0x0C`** and **resource count at `+0x10`**. Native `0x453F90` reads those exact fields and selects one **92-byte** `SND_tdstBlockResourceMem` record. This resolves the previously unnamed “resource groups”: they are **sound banks**. The packed upper16 value is a bank **ID**, not necessarily the numeric suffix of a `BNK_N.BNM` filename.
+
+**Loaded resource record** `SND_tdstBlockResourceMem` (92 bytes):
+
+| Offset | Actual field |
+| --- | --- |
+| `+0x00` | `Id`, a packed bank/resource ID, **not a pointer** |
+| `+0x04` | `eType` (`SND_E_TR_Theme=11`, `Sample=1`, etc.) |
+| `+0x08` | `eStorage` (external / megafile / bigfile) |
+| `+0x0C` | `ucVolume`, one byte; next three bytes may be padding |
+| `+0x10` | `bIsLoaded` |
+| `+0x14` | `uRes`, union of in-memory resource definitions |
+
+**Disk Theme descriptor**: [`SND_tdstBlockResourceDisk`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h) has its on-disk Theme union beginning at `+0x18`; the [`SND_tdstTypeThemeDisk`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Theme.h) has `ulNbParts` at union `+0x0C` (overall `+0x24`) and `lOffsetPartOutro` at union `+0x10` (overall `+0x28`). The native Theme fixup `0x459840` reads precisely these fields at `0x45985A` and `0x45987F`. Its collection elements are 24-byte `SND_tdstThemePart` entries.
+
+### Corrected interpretation of the old diagnostic masks
+
+The previous `desc_words_equal_mask` compares four words of **`SND_tdstBlockResourceMem`**, not four arbitrary pointers. A mask of `14` means **different resource IDs** but the same `eType`, `eStorage` and fourth DWORD. A mask of `6` means different **resource ID** and fourth DWORD; that last difference might be the volume byte or only another byte in that DWORD. **A matching SXD driver handle cannot establish the same resource identity.**
+
+An older research probe incorrectly attempted to dereference the first DWORD of the resource record as a memory address. This interpretation was invalid because it is `Id`; the probe was bounded and read-only, but any output from it should be ignored. It has been **removed**. The research probe now only reports the decoded **bank group / resource index** and the actual volume byte for both compared records. No audio calls are altered.
 
 ## Native pause/resume dispatch — verified indirection
 
