@@ -197,6 +197,34 @@ class ParityTests(unittest.TestCase):
                 MOD.inspect_native_menu_indicators(a)["native_relationships_verified"]
             )
 
+    def test_menu_background_handle_is_not_menu_visibility_evidence(self):
+        from unittest.mock import patch
+
+        class PE:
+            def __init__(self):
+                self.chunks = {
+                    0x40406A: bytes.fromhex(
+                        "8B 48 14 8B 11 89 15 50 72 4A 00"),
+                    0x4245C8: bytes.fromhex(
+                        "8B 0D AC 36 50 00 8B 15 50 72 4A 00 "
+                        "51 52 FF 15 54 48 50 00"),
+                }
+
+            def at(self, va, size):
+                return self.chunks.get(va, bytes(size))[:size]
+
+        pe = PE()
+        with patch.object(MOD, "absolute_dword_xrefs", return_value=(
+            0x404071, 0x4245D0
+        )):
+            result = MOD.inspect_menu_background_handle(pe)
+            self.assertTrue(result["matched"])
+            self.assertTrue(result["initialization_is_not_menu_open"])
+            self.assertTrue(result["render_use_is_not_proof_of_ESC"])
+            self.assertTrue(result["render_use_is_not_proof_of_F1"])
+            pe.chunks[0x4245C8] = b"\x90" + pe.chunks[0x4245C8][1:]
+            self.assertFalse(MOD.inspect_menu_background_handle(pe)["matched"])
+
     def test_native_menu_viewport_switch_is_code_verified_not_esc_verified(self):
         class PE:
             def __init__(self):
