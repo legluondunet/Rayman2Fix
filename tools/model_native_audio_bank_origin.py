@@ -40,12 +40,12 @@ def invert_native_loaded_bank_registry(
     """Only an exhaustive, unique match may produce a bank/index pair."""
     visited: set[int] = set()
     matches: list[tuple[int, int]] = []
-    if resource_ptr < 0x10000 or max_nodes <= 0:
+    if not (0x10000 <= resource_ptr <= 0xFFFFFFFF) or max_nodes <= 0:
         return BankOrigin()
     node = first_node
     for _ in range(max_nodes):
         if node == 0:
-            if len(matches) == 1:
+            if len(matches) == 1 and 0 <= matches[0][0] <= 0xFFFF:
                 return BankOrigin(*matches[0], len(matches), True, len(visited))
             return BankOrigin(candidates=len(matches), list_complete=True,
                               nodes_scanned=len(visited))
