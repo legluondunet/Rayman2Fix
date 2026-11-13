@@ -290,6 +290,28 @@ def inspect(executable: Path) -> dict:
             "request_sound_function_prologue": pe.at(0x452D20, 4)
                 == bytes.fromhex("8b442414"),
         }
+        result["theme_controller_lifecycle"] = {
+            # Check the lifecycle guard. The reference normally sets the
+            # singleton active DWORD to 1 only after a nested table slot
+            # has been created, and clears it on stop/initialization.
+            # These are identified *direct* writes, not an exhaustive
+            # proof that no indirect memory writes exist.
+            "singleton_active_dword": "0x004B95B8",
+            "nested_table_slot_dword": "0x004B95E8",
+            "initializes_active_zero": pe.at(0x4597EC, 5)
+                == bytes.fromhex("a3b8954b00"),
+            "nested_slot_minus_one_guard": pe.at(0x459B06, 6)
+                == bytes.fromhex("3905e8954b00"),
+            "sets_active_one_after_success": pe.at(0x459B0E, 10)
+                == bytes.fromhex("c705b8954b0001000000"),
+            "stops_clear_active_zero": pe.at(0x459C0D, 6)
+                == bytes.fromhex("c70600000000"),
+            "pause_requires_active_nonzero": pe.at(0x459C44, 3)
+                == bytes.fromhex("833800"),
+            "resume_requires_active_nonzero": pe.at(0x459C64, 3)
+                == bytes.fromhex("833800"),
+            "does_not_establish_esc_runtime_state": True,
+        }
         # The actual resource's nested IDs are
         # resolved through a two-stage loaded-group registry. This map
         # verifies instruction bytes, not a soundtrack identifier.
