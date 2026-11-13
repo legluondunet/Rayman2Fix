@@ -53,6 +53,8 @@ def summarize(text: str) -> dict:
                 "depth": number(data, "global_pause_depth"),
                 "foreground": number(data, "foreground"),
                 "esc_key_down": number(data, "esc_down"),
+                "ui_in_game_menu_at_call": number(data, "ui_in_game_menu_at_call"),
+                "ui_engine_paused_at_call": number(data, "ui_engine_paused_at_call"),
                 "owner": None,
             }
             events.append(obj)
@@ -124,6 +126,14 @@ def summarize(text: str) -> dict:
                 "outer_resource": list(left["owner"]["outer"]),
                 "inner_resource": list(left["owner"]["inner"]),
                 "global_depth": left["depth"],
+                "menu_state_at_calls": [
+                    left["ui_in_game_menu_at_call"],
+                    right["ui_in_game_menu_at_call"],
+                ],
+                "engine_pause_state_at_calls": [
+                    left["ui_engine_paused_at_call"],
+                    right["ui_engine_paused_at_call"],
+                ],
             })
             index += 2  # one pair consumes two samples
         else:
@@ -155,6 +165,19 @@ def summarize(text: str) -> dict:
         "in_game_menu_flag_cannot_distinguish_ESC_from_F1": True,
         "events_sampled": len(events),
         "events_by_kind": dict(sorted(Counter(e["event"] for e in events).items())),
+        "generic_script_driver_ui_snapshots": [
+            {
+                "event": e["event"],
+                "time_ms": e["ms"],
+                "origin": e["origin"],
+                "native_menu_flag_at_call": e["ui_in_game_menu_at_call"],
+                "native_engine_pause_at_call": e["ui_engine_paused_at_call"],
+                "game_menu_visibility_not_proven": True,
+            }
+            for e in events
+            if e["origin"] in ("game-script-pause", "game-script-resume")
+            and e["event"] in ("PauseTransitionSxd", "ResumeTransitionSxd")
+        ],
         "origins": dict(sorted(Counter(e["origin"] for e in events).items())),
         "ownership_records_validated": len(qualified),
         "ownership_lines_unmatched": unmatched_owners,
