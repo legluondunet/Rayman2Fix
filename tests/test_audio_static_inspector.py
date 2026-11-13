@@ -208,6 +208,20 @@ class AudioStaticInspectorTests(unittest.TestCase):
         self.assertIn("resume_requires_active_nonzero", src)
         self.assertIn('"does_not_establish_esc_runtime_state": True', src)
 
+    def test_bnm_uses_two_native_offsets_and_play_event_ref_resolver(self):
+        src=SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('result["bnm_disk_table_relocation"]',src)
+        self.assertIn('"event_table_offset_field": 4',src)
+        self.assertIn('"resource_table_offset_field": 12',src)
+        self.assertIn("pe.at(0x453BB8,3)",src)
+        self.assertIn("pe.at(0x453BC3,3)",src)
+        self.assertIn("pe.at(0x453C23,3)",src)
+        self.assertIn("pe.at(0x453BD1,11)",src)
+        self.assertIn("pe.dword(0x453E90)==0x453DC9",src)
+        self.assertIn("pe.at(0x453DC9,3)",src)
+        self.assertIn("pe.call_target(0x453DD6)",src)
+        self.assertIn('"retail_cd_bank_verified": False',src)
+
     def test_unknown_binary_never_invents_structural_matches(self):
         with tempfile.TemporaryDirectory() as d:
             fn = Path(d) / "synthetic.exe"
