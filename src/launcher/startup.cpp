@@ -297,16 +297,21 @@ void Startup::initialize(bool provision_files) {
     log("CONFIG: Graphics.FPSLimit=" +
         (fps.empty() ? "60 (default)" : fps));
 
-    log("RUNTIME: Rayman2Fix.dll=" +
-        std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));
-    if (gameframe_glide_ready(game_dir_))
-        log("RENDERER: GameFrame glide2x.dll=verified sha256=" +
-            gameframe_glide_expected_sha256() +
-            " upstream=f195a074a63cc150673c38becdec696163b0b3d1");
-    else
-        log("RENDERER: GameFrame glide2x.dll=not bundled in this developer build");
-    log("INPUT: SDL3 deferred to second phase; controller support not yet active");
-    log("INSTALL: no verified CD edition profile, no playable installation");
+    if (provision_files) {
+        log("RUNTIME: Rayman2Fix.dll=" +
+            std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));
+        if (gameframe_glide_ready(game_dir_))
+            log("RENDERER: GameFrame glide2x.dll=verified sha256=" +
+                gameframe_glide_expected_sha256() +
+                " upstream=f195a074a63cc150673c38becdec696163b0b3d1");
+        else
+            log("RENDERER: GameFrame glide2x.dll=not bundled in this developer build");
+        log("INPUT: SDL3 deferred to second phase; controller support not yet active");
+        log("INSTALL: no verified CD edition profile, no playable installation");
+    } else {
+        log("STARTUP: --launch-no-verify skips DLL deployment, runtime "
+            "hash checks, installation repair and INI creation");
+    }
 }
 
 void Startup::log(const std::string& line) {
