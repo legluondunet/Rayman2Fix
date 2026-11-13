@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -124,12 +125,16 @@ def inspect(executable: Path) -> dict:
     }
     try:
         events = [pe.dword(EVENT_TABLE + 4 * i) for i in range(11)]
-        result["event_type11"] = {
+        result["resource_type11"] = {
             "dispatch_prologue_expected": pe.at(EVENT_DISPATCH, 6)
                 == bytes.fromhex("53e87af6ffff"),
             "table_entries": len(events),
             "case11_target": f"0x{events[10]:08X}",
             "case11_verified": events[10] == 0x457F21,
+            "resource_enum_source":
+                "raytools/ACP_Ray2 src/SND/SND_Resource.h",
+            "resource_type": "SND_E_TR_Theme",
+            "enum_value": 11,
         }
         edges = [
             (0x457F38, TYPE11_CONTROLLER),
@@ -159,7 +164,59 @@ def inspect(executable: Path) -> dict:
             "resume_controller_handler":
                 f"0x{pe.dword(RESUME_DISPATCH_TABLE + 24 * 11):08X}",
         }
-        # The actual event descriptor's nested resource IDs are
+        # ACP_Ray2 maps the native values at [resource+4] to actual
+        # *resource kinds*, NOT SND_tdeTypeEvent. Cross-check the native
+        # SND_ResBank linked list and the resource layout against code.
+        result["sound_bank_and_resource_layout"] = {
+            "source": "https://github.com/raytools/ACP_Ray2/tree/master/src/SND",
+            "bank_list_global": "0x00514D50",
+            "bank_list_pointer": pe.at(0x4538C0, 5)
+                == bytes.fromhex("a1504d5100"),
+            "bank_id_offset": 4,
+            "bank_id_cmp": pe.at(0x4538CD, 3)
+                == bytes.fromhex("394804"),
+            "bank_filename_offset": 12,
+            "bank_data_pointer_offset": 36,
+            "bank_next_pointer_offset": 60,
+            "bank_next_link": pe.at(0x4538D2, 3)
+                == bytes.fromhex("8b403c"),
+            "bank_descriptor_bytes": 72,
+            "bank_allocates_72_bytes": pe.at(0x4538E2, 2)
+                == bytes.fromhex("6a48"),
+            "bank_head_resource_first_offset": 12,
+            "bank_head_resource_count_offset": 16,
+            "bank_head_resource_first_read": pe.at(0x453FBA, 3)
+                == bytes.fromhex("8b500c"),
+            "bank_head_resource_count_cmp": pe.at(0x453FB5, 3)
+                == bytes.fromhex("3b7010"),
+            "resource_record_bytes": 92,
+            "resource_fields": {
+                "Id": 0,
+                "eType": 4,
+                "eStorage": 8,
+                "ucVolume": 12,
+                "bIsLoaded": 16,
+                "uRes": 20,
+            },
+            "resource_types": {
+                "SND_E_TR_Sample": 1,
+                "SND_E_TR_Midi": 2,
+                "SND_E_TR_Sequence": 4,
+                "SND_E_TR_Switch": 8,
+                "SND_E_TR_Random": 10,
+                "SND_E_TR_Theme": 11,
+            },
+            "theme_disk_parts_count_offset": 36,
+            "theme_disk_parts_count_read": pe.at(0x45985A, 3)
+                == bytes.fromhex("8b4124"),
+            "theme_disk_outro_offset": 40,
+            "theme_disk_outro_read": pe.at(0x45987F, 3)
+                == bytes.fromhex("8b4128"),
+            "request_sound_public_address": "0x00452D20",
+            "request_sound_function_prologue": pe.at(0x452D20, 4)
+                == bytes.fromhex("8b442414"),
+        }
+        # The actual resource's nested IDs are
         # resolved through a two-stage loaded-group registry. This map
         # verifies instruction bytes, not a soundtrack identifier.
         # 0x458530 has its OWN dispatch table, distinct from
@@ -170,7 +227,7 @@ def inspect(executable: Path) -> dict:
                               for i in range(5)]
         result["sound_event_conversion"] = {
             "function": "0x00458530",
-            "event_classes_1_to_11": conversion_tags,
+            "resource_types_1_to_11": conversion_tags,
             "dispatch_targets": [f"0x{x:08X}" for x in conversion_targets],
             "type11_is_passthrough": (
                 conversion_tags[10] == 3 and
@@ -208,13 +265,13 @@ def inspect(executable: Path) -> dict:
                 == bytes.fromhex("c1e810"),
             "index_low16": pe.at(0x453FA0, 6)
                 == bytes.fromhex("81e6ffff0000"),
-            "group_registry_lookup": pe.call_target(0x453FA6)
+            "sound_bank_registry_lookup": pe.call_target(0x453FA6)
                 == 0x4538C0,
             "registry_head_load": pe.at(0x4538C0, 5)
                 == bytes.fromhex("a1504d5100"),
-            "registry_key_equals_group": pe.at(0x4538CD, 3)
+            "bank_id_equals_group": pe.at(0x4538CD, 3)
                 == bytes.fromhex("394804"),
-            "registry_next_link": pe.at(0x4538D2, 3)
+            "bank_next_link": pe.at(0x4538D2, 3)
                 == bytes.fromhex("8b403c"),
             "record_base_plus24": pe.at(0x453FB2, 3)
                 == bytes.fromhex("8b4024"),
@@ -241,6 +298,41 @@ def inspect(executable: Path) -> dict:
                 "MUSIC": pe.name_at(pe.dword(0x4A2090 + (8 * disc + 5) * 4)),
             } for disc in range(3)
         }
+        # This reference's .extra2 is a file-path manifest, NOT game
+        # sound data and NOT part of the approved retail CD image.
+        if result["known_reference_only"]:
+            extra = next(
+                (entry for entry in pe.sections if entry[0] == ".extra2"),
+                None,
+            )
+            if extra is not None:
+                _, _, _, file_size, file_offset = extra
+                directory = pe.read(file_offset, file_size)
+                paths = re.findall(
+                    rb"DATA\\WORLD\\SOUND\\([^\x00\r\n]{1,80}\.(?:APM|BNM))\x00",
+                    directory,
+                    flags=re.IGNORECASE,
+                )
+                names = [p.decode("ascii", "replace").upper() for p in paths]
+                apms = {p for p in names if p.endswith(".APM")}
+                bnms = {p for p in names if p.endswith(".BNM")}
+                indexed_banks = {
+                    "BNK_%d.BNM" % i for i in range(405)
+                }
+                result["reference_extra2_file_manifest"] = {
+                    "source": ".extra2 reference-only file-path directory",
+                    "apm_unique": len(apms),
+                    "bnm_unique": len(bnms),
+                    "bnk_0_to_404_complete": bnms == indexed_banks,
+                    "main_menu_mm01_to_mm10_present": all(
+                        ("MM%02d.APM" % i) in apms
+                        for i in range(1, 11)
+                    ),
+                    "intro_jailmus_present": "JAILMUS.APM" in apms,
+                    "main_title_present": "MAIN TITLE.APM" in apms,
+                    "contains_paths_not_sound_bytes": True,
+                    "applies_to_original_cd": False,
+                }
     except ValueError as exc:
         # Known VA map can differ across editions: never invent matches.
         result["address_map_failure"] = str(exc)
