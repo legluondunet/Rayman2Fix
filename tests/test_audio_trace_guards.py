@@ -77,6 +77,25 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("case 3:return \"windows-activation-pause\"",self.runtime)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
+    def test_native_sequence_slot_is_only_read_in_audio_research_build(self):
+        # The original single-stream controller's sound-table index is
+        # observed, not treated as an independently proven music identity.
+        self.assertIn("struct AudioSequenceContext",self.runtime)
+        self.assertIn("kSequenceActiveRva=0xB95B8",self.runtime)
+        self.assertIn("kSequenceSlotRva=0xB95E8",self.runtime)
+        self.assertIn("kSoundTableRva=0xB8C98",self.runtime)
+        self.assertIn("slot>=64u",self.runtime)
+        self.assertIn("sequence_same_handle=%u",self.runtime)
+        self.assertIn("sequence=inspect_audio_sequence_context(arg);",self.runtime)
+        section=self.runtime.split(
+            "AudioSequenceContext inspect_audio_sequence_context(DWORD argument) {",1)[1]
+        section=section.split("struct AudioSoundContext {",1)[0]
+        self.assertIn("ReadProcessMemory(",section)
+        self.assertNotIn("WriteProcessMemory(",section)
+        self.assertNotIn("InterlockedCompareExchangePointer(",section)
+        self.assertIn("argument==handle",section)
+        self.assertNotIn("MusicInPauseMenu",self.config)
+
     def test_exact_owner_cd_slots_are_named_and_bounded(self):
         expected={
             "PauseSxd":"0xB8664", "ResumeSxd":"0xB8668",
