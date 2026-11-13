@@ -9,6 +9,45 @@ Research note, **13 November 2026**. This document records the source of each bi
 - Tools: `objdump -d -M intel`, `objdump -p`, and Python's built-in `struct`, running locally. All addresses below are x86 image VAs, not file offsets. For this image's `.text` and `.data` the file offset equals `VA-0x400000`.
 - The existing optional `RAYMAN2FIX_AUDIO_TRACE` build changes no audio arguments, return values, or playback behavior. The normal build does not include its hooks.
 
+
+## Independent retail-CD byte-for-byte parity audit (13 November 2026)
+
+The **owner's authentic protected original CD** and modified GOG-derived reference were both recovered from the owner's private file collection **for local offline reading only**:
+
+- Approved CD: \`Rayman2(3).exe\`, **676,352 bytes**, SHA-256 \`7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3\`.
+- Research reference (not approved for runtime): \`rayman2(4).exe\`, **1,468,928 bytes**, SHA-256 \`9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713\`.
+
+A fresh independent checked **PE32 VA → raw offset** reader was used, because the CD \`.text\` starts at file offset \`0x400\` whereas the reference starts at \`0x1000\`; both map to virtual address \`0x401000\`. The **13 selected audio-code intervals totaling 11,520 bytes** are **identical byte-for-byte**. They cover Win32 focus pause/resume callers, scripted ESC pause/resume callers, their shared wrappers, native 64-record pause/resume dispatcher, type-11 Theme lifecycle, resource-type dispatch, sound-record allocation, SXD transition playback/wrappers, bank loader/resource resolver, bank-registration command opcode handler, event creation and event dispatcher. The checked intervals are **selected**, not claimed to be exhaustive for all audio code.
+
+In both binaries, **seven** exact \`E8 rel32\` call sites resolve to the same intended target:
+
+| Call origin | VA | Target |
+| --- | --- | --- |
+| Win32 window deactivation | \`0x401C9C\` | \`0x4536D0\` |
+| Win32 activation | \`0x401CE9\` | \`0x453700\` |
+| Game/script ESC pause | \`0x471E70\` | \`0x4536D0\` |
+| Game/script ESC resume | \`0x471E67\` | \`0x453700\` |
+| Shared pause wrapper | \`0x4536ED\` | \`0x4580B0\` |
+| Shared resume wrapper | \`0x45371D\` | \`0x458110\` |
+| Bank filename formatter call | \`0x453948\` | \`0x453870\` |
+
+Nine machine-code anchors for native pause-mark/depth ordering and the **type-11 jump-table entry** \`0x457FC8 → 0x457F21\` match independently in both CD and reference. Crucially, the CD bytes directly prove the order **write per-record pause mark, dispatch driver pause, increase global depth** and **decrease global depth, clear mark, dispatch driver resume**. This upgrades the earlier focus-loss counterexample from reference-only static reasoning to **original-CD code-verified reasoning**. It still does **not** show that an unsafe patch has ever run or that a particular soundtrack was audible.
+
+**New retail-CD bank-name proof:** the original CD also contains exact NUL-terminated \`bnk_%d.BNM\` at VA \`0x4A252C\`. Its untouched native loader stores \`lId\` to \`[esi+4]\` at \`0x453945\` and passes the same value to the formatter at \`0x453948\`. Thus this code's numeric bank-ID to decimal filename formatting is **verified on the approved retail-CD executable**, not merely on the GOG-derived reference. For example, bank ID **73** formats to **\`bnk_73.BNM\`**. No genuine extracted \`bnk_73.BNM\` file has been inspected, so the file's actual existence, contents, Theme ID \`73:48\`, relationships to \`.APM\` assets and audible musical identity are still **unverified**.
+
+\`.rdata\` also matches across the two files at **12,288 on-disk bytes**. But \`.data\` differs at **127 bytes in 16 runs**, \`.text\` differs elsewhere, and their PE sections/entrypoint-related material differ. **This is NOT whole-program equivalence**; unchanged code does not prove identical runtime game state or licensing/protection behavior.
+
+The reproducible, **read-only SHA-pinned** tool is [\`tools/check_rayman2_cd_audio_parity.py\`](../tools/check_rayman2_cd_audio_parity.py); synthetic PE fixture tests are [\`tests/test_audio_cd_parity.py\`](../tests/test_audio_cd_parity.py), included in Linux CI. Example **local** use with personally owned EXEs:
+
+\`\`\`bash
+python3 tools/check_rayman2_cd_audio_parity.py /path/to/Rayman2-original-CD.exe /path/to/Rayman2-reference.exe
+\`\`\`
+
+The tool refuses unrecognized SHA pairs by default, prints **no protected code bytes** and does not need or embed either executable in CI. The normal game DLL and launcher remain **unchanged**.
+
+**Impact on future ESC music feature:** core static native pause semantics and Theme ownership mechanism are now grounded in original-CD code. The remaining blockers are **real bank/Theme musical attribution** and an actual **origin-aware, stop-safe reconciliation** of original record pause marks and global depth with desired music state across ESC + Alt-Tab + level transitions. Never suppress driver calls in isolation; stop and resource replacement remain native. F1 stays excluded; \`MusicInPauseMenu\` stays disabled/unexposed.
+
+
 ## Corrected nomenclature — three different classifications
 
 Cross-checked against the public [ACP_Ray2 `SND_Resource.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h) and [`SND_Event.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Event.h):
