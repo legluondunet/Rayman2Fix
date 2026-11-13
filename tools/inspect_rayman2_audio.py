@@ -94,6 +94,27 @@ class PE32:
         return data.decode("ascii", "replace")
 
 
+def decode_native_sound_record_pointer(
+    raw_pointer: int, table_base: int, count: int = 64, stride: int = 32,
+) -> int | None:
+    """Return the ordinal for a *validated record pointer*, never its raw value.
+
+    Native 0x4574E0/0x45752C returns &table[n], which 0x459AF4
+    stores at singleton+0x30. A raw pointer is not a 0..63 index.
+    No dereference is performed by this helper.
+    """
+    if not (0 <= raw_pointer <= 0xFFFFFFFF):
+        return None
+    if not (0 <= table_base <= 0xFFFFFFFF):
+        return None
+    if raw_pointer in (0, 0xFFFFFFFF) or stride <= 0 or count <= 0:
+        return None
+    if raw_pointer < table_base or raw_pointer >= table_base + stride * count:
+        return None
+    delta = raw_pointer - table_base
+    return delta // stride if delta % stride == 0 else None
+
+
 def decode_resource_handle(handle: int) -> dict:
     """Decode the packed handle that native 0x453F90 accepts.
 
