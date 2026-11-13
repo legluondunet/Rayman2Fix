@@ -60,6 +60,81 @@ class TraceEvidenceTests(unittest.TestCase):
         self.assertTrue(result["focus_loss_not_proven_when_missing"])
         self.assertNotIn("KEEP_PRIVATE", str(result))
 
+    def test_real_loaded_bank_provenance_is_separate_from_Id_halves(self):
+        def mk(event, sample, timestamp, bank, index, inner_bank, inner_index):
+            return (
+                trace(event, sample, timestamp),
+                owner(event, sample) +
+                f" outer_native_bank={bank} outer_native_index={index}"
+                f" outer_bank_candidates=1 outer_bank_list_complete=1"
+                f" inner_native_bank={inner_bank} inner_native_index={inner_index}"
+                f" inner_bank_candidates=1 inner_bank_list_complete=1"
+            )
+
+        data = ["RUNTIME-AUDIO-TRACE: enabled=1 schema=2"]
+        for t in (mk("PauseTransitionSxd", 1, 200, 19, 4, 19, 5),
+                  mk("PauseTransitionSxd", 2, 201, 19, 4, 19, 5)):
+            data.extend(t)
+        result = M.summarize("\n".join(data))
+        self.assertTrue(result["record_Id_halves_are_not_authenticated_BNM_provenance"])
+        self.assertEqual(result["ownership_has_native_loaded_bank_provenance"], 2)
+        roots = result["theme_controller_resources_observed"]
+        self.assertEqual(roots[0]["outer_resource"], [73, 48])
+        self.assertTrue(roots[0][
+            "these_are_native_record_Id_halves_not_authenticated_bank_indices"])
+        pair = result["close_same_driver_event_pairs"][0]
+        self.assertEqual(pair["outer_loaded_bank_and_index"], [19, 4])
+        self.assertEqual(pair["inner_loaded_bank_and_index"], [19, 5])
+        self.assertNotEqual(pair["outer_resource"],pair["outer_loaded_bank_and_index"])
+        self.assertTrue(result["native_loaded_bank_provenance"][0][
+            "native_bank_lookup_is_not_audio_or_ESC_proof"])
+
+    def test_incomplete_or_ambiguous_bank_scan_is_unknown(self):
+        for fields in (
+            "outer_native_bank=19 outer_native_index=4 "
+            "outer_bank_candidates=1 outer_bank_list_complete=0",
+            "outer_native_bank=19 outer_native_index=4 "
+            "outer_bank_candidates=2 outer_bank_list_complete=1",
+            "outer_native_bank=19 outer_native_index=-1 "
+            "outer_bank_candidates=1 outer_bank_list_complete=1",
+            "outer_native_bank=65536 outer_native_index=4 "
+            "outer_bank_candidates=1 outer_bank_list_complete=1",
+            "",
+        ):
+            with self.subTest(fields=fields):
+                result = M.summarize("\n".join((
+                    trace("PauseTransitionSxd",1,10),
+                    owner("PauseTransitionSxd",1)+" "+fields,
+                )))
+                self.assertEqual(result[
+                    "ownership_has_native_loaded_bank_provenance"],0)
+
+    def test_mismatched_native_loaded_bank_identity_prevents_pair(self):
+        a = " outer_native_bank=19 outer_native_index=4 "
+        a += "outer_bank_candidates=1 outer_bank_list_complete=1 "
+        a += "inner_native_bank=19 inner_native_index=5 "
+        a += "inner_bank_candidates=1 inner_bank_list_complete=1"
+        b = a.replace("outer_native_bank=19", "outer_native_bank=20")
+        data = "\n".join((
+            trace("PauseTransitionSxd",1,10),
+            owner("PauseTransitionSxd",1)+a,
+            trace("PauseTransitionSxd",2,11),
+            owner("PauseTransitionSxd",2)+b,
+        ))
+        result = M.summarize(data)
+        self.assertEqual(result["ownership_has_native_loaded_bank_provenance"],2)
+        self.assertEqual(result["close_same_driver_event_pairs"],[])
+
+    def test_legacy_owner_trace_preserves_Theme_without_false_provenance(self):
+        result = M.summarize("\n".join((
+            trace("PauseTransitionSxd",1,10),
+            owner("PauseTransitionSxd",1),
+        )))
+        self.assertEqual(result["ownership_records_validated"],1)
+        self.assertEqual(result["ownership_has_native_loaded_bank_provenance"],0)
+        self.assertEqual(result["native_loaded_bank_provenance"],[])
+        self.assertTrue(result["record_Id_halves_are_not_authenticated_BNM_provenance"])
+
     def test_appended_runs_cannot_pair_identical_ids_from_different_sessions(self):
         data = "\n".join((
             "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
