@@ -58,6 +58,9 @@ def bracket_observed_menu_flag_changes(
     nonmonotonic = 0
     for obs in observations:
         if obs["value"] not in (0, 1) or obs["ms"] < 0:
+            # A failed or missing read breaks observability. Skipping it
+            # would invent continuity between two valid snapshots.
+            prior_by_session.pop(obs["session"], None)
             continue
         previous = prior_by_session.get(obs["session"])
         if previous is not None and obs["ms"] < previous["ms"]:
@@ -118,13 +121,14 @@ def summarize(text: str) -> dict:
             }
             events.append(obj)
             by_event_sample[(session, event, sample)] = obj
-            if obj["ui_in_game_menu_at_call"] in (0, 1):
-                menu_flag_observations.append({
-                    "session": session,
-                    "ms": obj["ms"],
-                    "value": obj["ui_in_game_menu_at_call"],
-                    "source": "before-sampled-audio-driver-call",
-                })
+            # Missing UI fields are -1 (including older logs). Preserve
+            # that failed observation to prevent fabricated bounds.
+            menu_flag_observations.append({
+                "session": session,
+                "ms": obj["ms"],
+                "value": obj["ui_in_game_menu_at_call"],
+                "source": "before-sampled-audio-driver-call",
+            })
         elif UI_STATE in line:
             data = fields(line.split(UI_STATE, 1)[1])
             menu, engine = number(data, "in_game_menu"), number(data, "engine_paused")
