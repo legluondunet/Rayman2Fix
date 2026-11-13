@@ -45,6 +45,12 @@ CALL_TARGETS = (
     ("wrapper_pause", 0x4536ED, 0x4580B0),
     ("wrapper_resume", 0x45371D, 0x458110),
     ("bank_filename_formatter", 0x453948, 0x453870),
+    ("direct_inner_pause_dispatch", 0x4580E1, 0x4584A0),
+    ("outer_resource_pause_dispatch", 0x4580EF, 0x458070),
+    ("theme_delegated_pause", 0x459C4D, 0x4584A0),
+    ("direct_inner_resume_dispatch", 0x458151, 0x458470),
+    ("outer_resource_resume_dispatch", 0x45815F, 0x458090),
+    ("theme_delegated_resume", 0x459C6D, 0x458470),
 )
 
 # Exact original-CD pause mark/depth branch order, rechecked in the ref.
@@ -60,6 +66,13 @@ ANCHOR_BYTES = (
     ("resume_mark_clear", 0x458143, bytes.fromhex("C7 06 00 00 00 00")),
     ("bank_id_store", 0x453945, bytes.fromhex("89 46 04")),
     ("bank_filename_literal", 0x4A252C, b"bnk_%d.BNM\x00"),
+)
+
+# Type 11 native resource dispatcher has a 24-byte stride per kind;
+# pause entry is at base+8 and resume at base+12 (indexed by 11).
+DISPATCH_POINTERS = (
+    ("theme_type11_pause", 0x4A3BA8 + 24 * 11, 0x459C40),
+    ("theme_type11_resume", 0x4A3BAC + 24 * 11, 0x459C60),
 )
 
 
@@ -153,6 +166,7 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
     windows = compare_regions(cd, ref, regions)
     call_sites = []
     byte_anchors = []
+    dispatcher_pointers = []
     if check_anchors:
         for name, addr, expected in CALL_TARGETS:
             call_sites.append({"name": name, "verified_both":
@@ -161,6 +175,9 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             byte_anchors.append({"name": name, "verified_both":
                                  cd.at(addr, len(expected)) == expected and
                                  ref.at(addr, len(expected)) == expected})
+        for name, addr, target in DISPATCH_POINTERS:
+            dispatcher_pointers.append({"name": name, "verified_both":
+                _u32(cd.at(addr, 4), 0) == target and _u32(ref.at(addr, 4), 0) == target})
         byte_anchors.append({"name": "type_11_theme_dispatch", "verified_both":
                              struct.unpack("<I", cd.at(0x457FC8, 4))[0] == 0x457F21 and
                              struct.unpack("<I", ref.at(0x457FC8, 4))[0] == 0x457F21})
@@ -170,7 +187,7 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
                     cd.at(0x4A252C, 11) == ref.at(0x4A252C, 11) == b"bnk_%d.BNM\x00") if check_anchors else False
     rdata_identical = cd.section(".rdata") == ref.section(".rdata")
     all_checks = (all(w["identical"] for w in windows) and
-                  all(x["verified_both"] for x in call_sites+byte_anchors))
+                  all(x["verified_both"] for x in call_sites+byte_anchors+dispatcher_pointers))
     return {"cd_sha256": cd_digest, "reference_sha256": ref_digest,
             "exact_pinned_pair": pinned, "selected_audio_code_equal": all_checks,
             "original_cd_audio_path_confirmed": pinned and all_checks,
@@ -178,6 +195,9 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             "rdata_raw_identical": rdata_identical,
             "rdata_raw_bytes": len(cd.section(".rdata")),
             "regions": windows, "call_sites": call_sites, "opcode_anchors": byte_anchors,
+            "resource_dispatcher_pointers": dispatcher_pointers,
+            "theme_inner_and_outer_pause_paths_byte_verified": pinned and all(
+                x["verified_both"] for x in call_sites + dispatcher_pointers),
             "not_whole_executable_equivalence": True,
             "does_not_verify_retail_bnm_files_or_pause_patch": True}
 
