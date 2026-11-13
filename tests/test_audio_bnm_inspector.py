@@ -46,6 +46,10 @@ class BnmMetadataTests(unittest.TestCase):
         x = M.inspect_bytes(fake_bnm())
         self.assertEqual((x["events_declared"], x["resources_declared"]), (2,3))
         self.assertEqual(x["resource_type_counts"], {"1":2,"11":1})
+        self.assertTrue(x["resource_table_indices_match_packed_ids"])
+        self.assertEqual(x["candidate_bank_id_when_consistent"],23)
+        self.assertEqual(x["candidate_reference_bnm_filename"],"bnk_23.BNM")
+        self.assertTrue(x["filename_mapping_not_verified_on_original_cd"])
         self.assertEqual(x["table_ranges_file_relative"],
                          {"events":[44,108],"resources":[108,384]})
         self.assertEqual(x["event_type_counts"],{"1":2})
@@ -105,6 +109,8 @@ class BnmMetadataTests(unittest.TestCase):
             x["play_event_references_candidate"][0]["candidate_resolution"],
             "bank-id-or-record-index-mismatch")
         self.assertEqual(x["local_play_events_referring_to_themes_candidate"],[])
+        self.assertFalse(x["resource_table_indices_match_packed_ids"])
+        self.assertIsNone(x["candidate_reference_bnm_filename"])
         # Event references index 2: this points to a non-Theme record,
         # regardless of any other record's Id field.
         raw=bytearray(fake_bnm())
