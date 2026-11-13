@@ -232,7 +232,9 @@ The launcher now performs an initial game-startup experiment with strict
 original/unprotected EXE SHA-256 and size checks. It starts `rayman2.exe`
 through Win32 `CreateProcessW` with `Rayman2Fix/` as the working directory,
 waits for the process to exit, and logs the full exit code and duration in
-the existing single `Rayman2Fix.log`. Invalid editions are never executed.
+the existing single `Rayman2Fix.log`. In the default verified path,
+unknown editions are never executed; the explicitly requested
+`--launch-no-verify` mode bypasses those safeguards for troubleshooting.
 Testing is required on both Windows 11 and Wine/Proton before claiming support.
 
 ## Original executable and patch backup
