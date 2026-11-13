@@ -333,6 +333,12 @@ python3 tools/inspect_rayman2_bnm.py /path/to/DATA/WORLD/SOUND/BNK_0.BNM
 
 The output includes `table_ranges_file_relative`, `play_event_references_candidate`, and `local_play_events_referring_to_themes_candidate`. These describe **candidate static structure**, not which song is heard in game, nor whether the file is an original retail bank. `verified_against_actual_retail_cd_bnm=false` and `audio_extracted=false` are mandatory. Media offsets, claimed data lengths and bank filename suffixes are **not authoritative** for CD installation or integrity. The [synthetic-only tests](../tests/test_audio_bnm_inspector.py) exercise contiguous, gapped, **reversed** lists, truncated records, overlapping or invalid offsets, null/other-bank event references, and deliberate resource-ID/index mismatch. No commercial bank/media assets are added to CI.
 
+### Why raw Theme part data is not yet directly addressable
+
+An additional native constraint was verified in the Theme fixup routine: at `0x459847` the loader reads the disk resource's `ulDataOffset` from `[ecx+0x10]`, at `0x45984A` obtains a **separately supplied data-segment base** and at `0x459853` adds the two before walking 24-byte Theme part records. The caller `0x457A10` receives that base from the bank resource converter, which selects different storage/media blocks. This means **`ulDataOffset` is not yet proven to be an absolute byte offset from the beginning of a BNM file**. Parsing `ThemePart` bytes at `file[ulDataOffset]` would be another unjustified shortcut.
+
+Accordingly the metadata inspector reports `disk_data_offset_declared_unverified`, `number_of_parts_candidate` and `outro_offset_candidate`, but **does not dereference the Theme part list or claim it decoded a particular `.APM` track**. The necessary next offline task is to reconstruct each storage mode's data-segment base and validate on a genuine BNM. This protects us from misidentifying music or reading unrelated data.
+
 ### Filename mapping proven in the supplied reference EXE
 
 A previously open gap is now closed **for this exact reference executable**. The native `SND_tdstSndBankDescriptorElement` allocator `0x4538E0` stores the numeric `lId` argument at **descriptor+4** (`0x453945`) and passes that **same argument** to `0x453870` at **`0x453948`**. The formatter pushes a literal format string from VA `0x4A252C`, whose bytes decode exactly to:
