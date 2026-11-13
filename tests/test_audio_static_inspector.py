@@ -197,6 +197,17 @@ class AudioStaticInspectorTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     M.summarize_reference_file_directory(invalid)
 
+    def test_theme_singleton_lifecycle_guard_is_verified(self):
+        src = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('result["theme_controller_lifecycle"]', src)
+        self.assertIn("initializes_active_zero", src)
+        self.assertIn("nested_slot_minus_one_guard", src)
+        self.assertIn("sets_active_one_after_success", src)
+        self.assertIn("stops_clear_active_zero", src)
+        self.assertIn("pause_requires_active_nonzero", src)
+        self.assertIn("resume_requires_active_nonzero", src)
+        self.assertIn('"does_not_establish_esc_runtime_state": True', src)
+
     def test_unknown_binary_never_invents_structural_matches(self):
         with tempfile.TemporaryDirectory() as d:
             fn = Path(d) / "synthetic.exe"
