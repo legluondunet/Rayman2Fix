@@ -11,7 +11,8 @@ The separately labelled GitHub Actions artifact
 `Rayman2Fix-Windows-x86-bootstrap` build has **no audio tracer**.
 On the one SHA-256-approved original CD executable, and only when
 `[Debug] Log=1`, this tracer observes up to 16 calls per native
-audio channel (14 independently bounded channels), including Sxd
+audio channel (14 independently bounded channels; 64 for the
+common Sxd pause/resume channels so multiple menus fit), including Sxd
 pause/resume/stop, Sxd transitions, sound volume, MIDI,
 MIDI transitions and CD audio.
 The 1999 PC CD assembly additionally confirms a 64-record global

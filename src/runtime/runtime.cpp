@@ -442,12 +442,13 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     const auto original=reinterpret_cast<AudioPauseFn>(
         g_audio_original[slot].load(std::memory_order_acquire));
     if(original) original(arg);
-    // Each channel has an independent 16-event budget, so startup SFX
-    // traffic cannot consume all diagnostics before the menu is opened.
-    // Never print resource IDs, pointers or sound data.
+    // Ordinary 1-arg sound effects often consume 16 events in one pause.
+    // Permit four complete menu cycles for Pause/ResumeSxd (64 each);
+    // other channels remain bounded at 16. No raw sound identifiers.
+    const unsigned budget=(slot==0u || slot==1u) ? 64u : 16u;
     const auto event=g_audio_event_counts[slot].fetch_add(
         1u,std::memory_order_relaxed);
-    if(!g_log || event>=16u)return;
+    if(!g_log || event>=budget)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
     const AudioSoundContext source=inspect_audio_sound_context(arg);
     char line[330]{};
@@ -3068,7 +3069,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
 #if RAYMAN2FIX_AUDIO_TRACE
     if (g_log) {
         g_audio_origin.store(GetTickCount(),std::memory_order_release);
-        log_line("RUNTIME-AUDIO-TRACE: enabled=1; 14 native audio channels (pause/resume/stop/volume), max 16 events per channel; all calls forwarded unchanged");
+        log_line("RUNTIME-AUDIO-TRACE: enabled=1; 14 native channels, 64 events for Sxd pause/resume, 16 per other channel; all forwarded unchanged");
     }
 #endif
     if (g_log) log_line(kResearchProbes ?

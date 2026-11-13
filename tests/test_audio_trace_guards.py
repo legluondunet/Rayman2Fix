@@ -33,7 +33,8 @@ class AudioTraceGuardTests(unittest.TestCase):
         section=self.runtime.split("void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1]
         section=section.split("void __stdcall audio_pause_sxd(",1)[0]
         self.assertIn("if(original) original(arg);",section)
-        self.assertIn("event>=16u",section)
+        self.assertIn("event>=budget",section)
+        self.assertIn("(slot==0u || slot==1u) ? 64u : 16u",section)
         self.assertIn("arg_zero=",section)
         self.assertIn("sound_slot=",section)
         self.assertIn("global_pause_depth=",section)
