@@ -242,13 +242,18 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
         and ref.call_target(0x459AEC) == 0x458220
     ) if check_anchors else False
     rdata_identical = cd.section(".rdata") == ref.section(".rdata")
-    all_checks = (all(w["identical"] for w in windows) and
-                  all(x["verified_both"] for x in call_sites+byte_anchors+dispatcher_pointers+
-                      transaction_ops) and transaction_xrefs_verified and
-                  callback_registration_verified)
+    verified_windows = all(w["identical"] for w in windows)
+    verified_native_anchors = (
+        all(x["verified_both"] for x in
+            call_sites + byte_anchors + dispatcher_pointers + transaction_ops)
+        and transaction_xrefs_verified and callback_registration_verified
+    ) if check_anchors else False
+    # A caller may disable native anchors for synthetic PE parser tests only.
+    # That MUST NOT accidentally yield a full original-CD audio-path proof.
+    all_checks = verified_windows and (not check_anchors or verified_native_anchors)
     return {"cd_sha256": cd_digest, "reference_sha256": ref_digest,
             "exact_pinned_pair": pinned, "selected_audio_code_equal": all_checks,
-            "original_cd_audio_path_confirmed": pinned and all_checks,
+            "original_cd_audio_path_confirmed": pinned and all_checks and check_anchors,
             "original_cd_bank_filename_formatter_verified": pinned and bank_checked,
             "rdata_raw_identical": rdata_identical,
             "rdata_raw_bytes": len(cd.section(".rdata")),
