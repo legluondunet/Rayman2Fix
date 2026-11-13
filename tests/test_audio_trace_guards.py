@@ -209,7 +209,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("const DWORD count=head[4]",section)
         self.assertIn("difference%kNativeResourceStride==0u",section)
         self.assertIn("difference/kNativeResourceStride<count",section)
-        self.assertIn("if(visited[k]==node)return out;",section)
+        self.assertIn("if(visited[k]==node)return fail_closed();",section)
         self.assertIn("out.list_complete=1u",section)
         self.assertIn("if(out.list_complete==0u || out.candidates!=1u)",section)
         self.assertIn("const auto fail_closed=[&]()",section)
