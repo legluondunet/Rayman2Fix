@@ -321,6 +321,10 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_audio_static_inspector.py'
       - name: Verify native audio pause invariants against synthetic model
         run: python3 -m unittest discover -s tests -p 'test_audio_pause_invariants.py'
+      - name: Verify offline BNM candidate metadata with synthetic banks
+        run: python3 -m unittest discover -s tests -p 'test_audio_bnm_inspector.py'
+      - name: Verify proposed ESC Theme focus-policy invariants
+        run: python3 -m unittest discover -s tests -p 'test_audio_pause_policy_model.py'
       - name: Configure
         run: cmake -S . -B build -DBUILD_TESTING=ON
       - name: Build
