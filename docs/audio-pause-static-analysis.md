@@ -250,6 +250,23 @@ This remains a **constrained hypothesis, not proof of the executed callback stac
 5. Unknown resource identity or unverified focus-origin must **fall back to original audio behavior**. No experimental setting or driver-bypass is justified yet.
 6. Verify the exact original retail-CD instructions independently before any hook design is merged, because these static VAs were observed in a non-approved reference EXE.
 
+### Theme controller lifetime is explicitly gated
+
+The direct x86 lifecycle of the **Theme singleton**, base `0x4B95B8`, is now verified in addition to its nested-slot `+0x30` dispatch:
+
+| Operation | Native address | Result |
+| --- | --- | --- |
+| Initialization `0x4597E0` | `0x4597EC` | Sets `[0x4B95B8]=0` |
+| New inner stream | `0x459AF4` | Stores its sound-table index at `0x4B95E8` |
+| Start success check | `0x459B06` | Compares the stored index with the `-1` sentinel |
+| Successful Theme activation | `0x459B0E` | Sets `[0x4B95B8]=1` |
+| Theme stop | `0x459C0D` | Sets first controller DWORD back to `0` |
+| Theme pause / resume | `0x459C44`, `0x459C64` | Dispatches its nested sound only when controller first DWORD is **nonzero** |
+
+The code therefore provides an ordinary zero/one lifecycle for these direct paths, but this does not prove indirect writes, alternate states or the value during an owner's historical ESC session. The previous diagnostic accepted only `state==1`, so its `sequence_active=0` result could not distinguish native zero from any other non-one value or a failed record read. The corrected research probe and static inspector leave that uncertainty explicit.
+
+This *also* means it would be unsound to infer that **every** SXD transition pause is music or Theme-related. The actual active Theme resource/inner stream relation must be validated separately; an SXD driver handle alone is not an owner identity.
+
 ## Owner Wine observations already available
 
 From `Rayman2Fix(20261113-091415).log`:
