@@ -212,6 +212,11 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("if(visited[k]==node)return out;",section)
         self.assertIn("out.list_complete=1u",section)
         self.assertIn("if(out.list_complete==0u || out.candidates!=1u)",section)
+        self.assertIn("const auto fail_closed=[&]()",section)
+        self.assertIn("return fail_closed();",section)
+        # Only the fail_closed lambda and the final post-validation
+        # return may publish "out"; every other return must scrub it.
+        self.assertEqual(section.count("return out;"),2)
         self.assertNotIn("WriteProcessMemory(",section)
         self.assertNotIn("VirtualProtect(",section)
         self.assertNotIn("if(original)",section)
