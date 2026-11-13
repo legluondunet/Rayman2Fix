@@ -119,6 +119,86 @@ def verify_script_opcode_dispatch(pe: "PE32") -> dict:
     }
 
 
+# ACP_Ray2 names the first byte as AI_g_bInGameMenu (AI.c). This is
+# NOT yet evidence of the ESC menu specifically or F1 exclusion. The second
+# byte is the engine's separate pause flag (GAM.c / 0x405CC0, 0x405CE0).
+AI_INGAME_MENU_FLAG_VA = 0x4B9BC8
+AI_INGAME_MENU_XREFS = (
+    0x40376C, 0x40B004, 0x44B1C5, 0x44B25E, 0x44B31A,
+    0x44B337, 0x44B3B7, 0x46082E, 0x460EF3, 0x4730CE,
+)
+ENGINE_PAUSE_FLAG_VA = 0x500640
+ENGINE_PAUSE_XREFS = (0x405CC7, 0x405CE7, 0x405D01)
+WINDOW_PAUSE_TITLE_VA = 0x49F0A8
+WINDOW_PAUSE_TITLE_XREFS = (0x401767, 0x401A19)
+AI_MENU_VM_OPCODE_ID = 0x1F8
+AI_MENU_VM_HANDLER_VA = 0x4730A0
+AI_MENU_VM_ENTRY_VA = 0x4A43E0 + 8 * AI_MENU_VM_OPCODE_ID
+INGAME_MENU_CODE_ANCHORS = (
+    ("initialise_false", 0x40376A, bytes.fromhex("C6 05 C8 9B 4B 00 00")),
+    ("load_VM_opcode_and_compare_1F8", 0x4730A0,
+     bytes.fromhex("8B 44 24 08 83 EC 10 81 78 F8 F8 01 00 00")),
+    ("evaluate_VM_boolean_argument", 0x4730BB,
+     bytes.fromhex("E8 D0 DA 00 00")),
+    ("normalize_boolean_and_store", 0x4730C7,
+     bytes.fromhex("85 C9 0F 95 C1 88 0D C8 9B 4B 00")),
+    ("engine_pause_flag_set", 0x405CC0,
+     bytes.fromhex("A1 A0 4E 51 00 C6 05 40 06 50 00 01")),
+    ("engine_pause_flag_clear", 0x405CE0,
+     bytes.fromhex("A1 E8 6A 4A 00 C6 05 40 06 50 00 00")),
+    ("engine_pause_flag_getter", 0x405D00,
+     bytes.fromhex("A0 40 06 50 00")),
+    ("window_title_pause_call_1", 0x401766,
+     bytes.fromhex("68 A8 F0 49 00 56 FF 15 2C C2 49 00")),
+    ("window_title_pause_call_2", 0x401A18,
+     bytes.fromhex("68 A8 F0 49 00 56 FF 15 2C C2 49 00")),
+)
+
+
+def inspect_native_menu_indicators(pe: "PE32") -> dict:
+    """Compare only static relationships: never assert ESC or F1 UI state."""
+    byte_anchors_valid = all(
+        pe.at(va, len(signature)) == signature
+        for _, va, signature in INGAME_MENU_CODE_ANCHORS
+    )
+    entry = pe.at(AI_MENU_VM_ENTRY_VA, 8)
+    vm_table_valid = (
+        struct.unpack_from("<II", entry) == (AI_MENU_VM_HANDLER_VA, 0)
+        and pe.call_target(0x4730BB) == 0x480B90
+    )
+    menu_xrefs = tuple(absolute_dword_xrefs(pe, AI_INGAME_MENU_FLAG_VA))
+    engine_xrefs = tuple(absolute_dword_xrefs(pe, ENGINE_PAUSE_FLAG_VA))
+    title_xrefs = tuple(absolute_dword_xrefs(pe, WINDOW_PAUSE_TITLE_VA))
+    title_valid = pe.at(WINDOW_PAUSE_TITLE_VA,
+                        len(b"Rayman2 - pause\\x00")) == b"Rayman2 - pause\\x00"
+    all_checks = (
+        byte_anchors_valid and vm_table_valid
+        and menu_xrefs == AI_INGAME_MENU_XREFS
+        and engine_xrefs == ENGINE_PAUSE_XREFS
+        and title_xrefs == WINDOW_PAUSE_TITLE_XREFS
+        and title_valid
+    )
+    return {
+        "native_relationships_verified": all_checks,
+        "ai_ingame_menu_byte_va": f"0x{AI_INGAME_MENU_FLAG_VA:08X}",
+        "ai_ingame_menu_read_sites": len(AI_INGAME_MENU_XREFS) - 2,
+        "ai_ingame_menu_direct_init_and_vm_writer_sites": 2,
+        "script_vm_flag_set_opcode": f"0x{AI_MENU_VM_OPCODE_ID:X}",
+        "script_vm_flag_set_handler": f"0x{AI_MENU_VM_HANDLER_VA:08X}",
+        "engine_pause_byte_va": f"0x{ENGINE_PAUSE_FLAG_VA:08X}",
+        "engine_pause_is_separate_from_ai_ingame_menu": True,
+        "win32_pause_window_title_is_not_a_menu_state": True,
+        "ai_ingame_menu_does_not_prove_ESC_specific": True,
+        "ai_ingame_menu_does_not_exclude_F1": True,
+        "gameplay_menu_lifetime_requires_independent_validation": True,
+        "vm_table_valid": vm_table_valid,
+        "byte_anchors_valid": byte_anchors_valid,
+        "menu_xrefs_verified": menu_xrefs == AI_INGAME_MENU_XREFS,
+        "engine_xrefs_verified": engine_xrefs == ENGINE_PAUSE_XREFS,
+        "title_xrefs_verified": title_xrefs == WINDOW_PAUSE_TITLE_XREFS and title_valid,
+    }
+
+
 # Exhaustive bytewise E8-rel32 *candidates* in .text for selected known
 # original-CD targets. These are not a complete control-flow graph: indirect
 # calls and instruction decoding still require separate analysis.
@@ -337,6 +417,13 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
     } if check_anchors else {}
     script_opcode_verified = bool(check_anchors and
         all(x["verified_native_dispatcher"] for x in script_opcode.values()))
+    menu_indicators = {
+        "cd": inspect_native_menu_indicators(cd),
+        "reference": inspect_native_menu_indicators(ref),
+    } if check_anchors else {}
+    menu_indicators_verified = bool(check_anchors and
+        all(x["native_relationships_verified"]
+            for x in menu_indicators.values()))
     rdata_identical = cd.section(".rdata") == ref.section(".rdata")
     verified_windows = all(w["identical"] for w in windows)
     verified_native_anchors = (
@@ -356,6 +443,15 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             "rdata_raw_identical": rdata_identical,
             "rdata_raw_bytes": len(cd.section(".rdata")),
             "regions": windows, "call_sites": call_sites, "opcode_anchors": byte_anchors,
+            "original_cd_menu_state_relationships_verified":
+                pinned and menu_indicators_verified,
+            "native_menu_indicator_audit": {
+                "verified_both": menu_indicators_verified,
+                "cd": menu_indicators.get("cd", {}),
+                "reference": menu_indicators.get("reference", {}),
+                "in_game_menu_is_not_proven_ESC_only": True,
+                "does_not_justify_runtime_audio_change": True,
+            },
             "resource_dispatcher_pointers": dispatcher_pointers,
             "script_vm_audio_opcode_dispatch": {
                 "verified_both": script_opcode_verified,
