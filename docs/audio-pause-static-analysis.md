@@ -102,6 +102,26 @@ This report distinguishes **recorded driver calls** from **inferred Theme contro
 **No new Wine run or build of a patched runtime is required for this offline verification.** The original game DLL, launcher, INI, native audio semantics and the PR's draft state are unchanged.
 
 
+## Original-CD in-game menu flag candidate (read-only, ESC and F1 still unresolved)
+
+A more relevant native state candidate has been found in the public, third-party reverse-engineered [ACP_Ray2 `src/AI/AI.c`](https://github.com/raytools/ACP_Ray2/blob/master/src/AI/AI.c): the byte pointer **`AI_g_bInGameMenu = 0x4B9BC8`**. Its original-CD native code was compared with the owner-supplied static reference. These are **real code relationships on both the owner's original protected CD and the non-approved reference**, not guesses from naming.
+
+- **10 identical little-endian pointer references within `.text`**, all with verified native instructions. The only two direct stores are **initialisation to zero** at `0x40376A` (`mov byte [0x4B9BC8],0`) and **a script-controlled boolean store** at `0x4730CC` (`mov byte [0x4B9BC8],cl`). There are **eight direct native reads**: `0x40B003`, `0x44B1C4`, `0x44B25D`, `0x44B319`, `0x44B336`, `0x44B3B6`, `0x46082D`, and `0x460EF2`.
+- The script/VM dispatcher at **`0x4730A0`** checks opcode **`0x1F8`**; the eight-byte VM table entry at **`0x4A53A0`** points to that handler in both binaries. The native code calls `0x480B90` to evaluate the command's parameter, normalizes it to a boolean with `test ecx,ecx; setne cl` and stores it to `0x4B9BC8`. Therefore the flag is **actively set by game scripts**, not a mere input-key latch or HWND.
+- The separate **engine-timer pause byte** is at **`0x500640`**, set to 1 at **`0x405CC5`** and cleared at **`0x405CE5`**, with getter `0x405D00`. It belongs to ACP_Ray2's named `GAM_fn_vSetEngineInPaused`/`GAM_fn_vResetEngineFromPaused`, **not** `AI_g_bInGameMenu`; the engine pause flag can be modified by an independent Win32 path. Never treat it as the ESC menu flag.
+- The UI-looking literal **`Rayman2 - pause`**, at **`0x49F0A8`**, is passed to imported `SetWindowTextA` at **`0x401766`** and **`0x401A18`**, which operate on the **Windows window title**, not the game's displayed menu. These are the only literal title xrefs found in `.text`. It is another **rejected** ESC-menu state proxy.
+
+**Independent modding corroboration, not native proof of an ESC-only flag:**
+
+- [Original Ray2Fix `GliFixVf/fix.c`](https://github.com/spitfirex86/Ray2Fix/blob/master/GliFixVf/fix.c) draws its version text when `*AI_g_bInGameMenu` is true; another comment calls that version text the "pause menu version display". This corroborates the variable's practical association with an in-game menu.
+- [Rayman2AP `src/mod.c`](https://github.com/Aeltumn/Rayman2AP/blob/main/src/mod.c) refers explicitly to the **escape menu** and, when the same variable is set, looks for the gameplay object named **`YAM_GenMenuMap_I1`**. It inspects that object's AI/behaviour state and menu entry arrays. This suggests a **second independent object-lifetime check** may separate a visible gameplay menu from generic scripted pause, but the object name's presence and lifetime **have not been independently verified on the owner's CD files**, and we do not know whether F1 shares this flag or object.
+- [Twofold `Twofold/hooks.c`](https://github.com/spitfirex86/Twofold/blob/master/Twofold/hooks.c) independently shows the version string when either `*AI_g_bInGameMenu` or a main-menu-level flag is true, supporting the distinction between **menu in a level** and the separately loaded **main-menu level**.
+
+**Safety gate:** the known `AI_g_bInGameMenu` byte is **the first defensible native candidate**, much stronger than the generic script audio opcode `0x1AA`, raw Escape keyboard state, `ISPAUSEDEVT` or the Windows `Rayman2 - pause` caption. It still cannot yet authorize a music override: *ESC vs F1*, menu visibility timing, other gameplay UI, and the native two-record pause/stop/focus policy must be independently proven or treated as unknown. The [SHA-pinned parity inspector](../tools/check_rayman2_cd_audio_parity.py) now verifies all native xrefs and code anchors and explicitly reports **`ai_ingame_menu_does_not_prove_ESC_specific: true`**. Synthetic tests do not embed either game binary.
+
+**Next planned narrow probe:** if further offline analysis cannot establish ESC-only semantics, a **read-only optional diagnostic** could record this byte, the distinct engine-pause byte, and object presence during ordinary ESC and F1 UI cycles, with all driver calls forwarded and the production build unchanged. Do not merge an audio behavior change based only on this flag.
+
+
 ## Corrected nomenclature — three different classifications
 
 Cross-checked against the public [ACP_Ray2 `SND_Resource.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h) and [`SND_Event.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Event.h):
