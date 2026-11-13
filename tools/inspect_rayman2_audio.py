@@ -93,6 +93,21 @@ class PE32:
         return data.decode("ascii", "replace")
 
 
+def decode_resource_handle(handle: int) -> dict:
+    """Decode the packed handle that native 0x453F90 accepts.
+
+    Group ID indexes a *loaded runtime registry*, not a disc, archive or
+    file number. An integer handle alone never establishes soundtrack ID.
+    """
+    if handle < 0 or handle > 0xFFFFFFFF:
+        raise ValueError("Resource handle outside DWORD range")
+    return {
+        "group_id": handle >> 16,
+        "record_index": handle & 0xFFFF,
+        "record_stride": 92,
+    }
+
+
 def inspect(executable: Path) -> dict:
     raw = executable.read_bytes()
     pe = PE32(raw)
@@ -143,6 +158,42 @@ def inspect(executable: Path) -> dict:
                 f"0x{pe.dword(PAUSE_DISPATCH_TABLE + 24 * 11):08X}",
             "resume_controller_handler":
                 f"0x{pe.dword(RESUME_DISPATCH_TABLE + 24 * 11):08X}",
+        }
+        # The actual event descriptor's nested resource IDs are
+        # resolved through a two-stage loaded-group registry. This map
+        # verifies instruction bytes, not a soundtrack identifier.
+        result["resource_handle_resolver"] = {
+            "function": "0x00453F90",
+            "group_high16": pe.at(0x453F9C, 3)
+                == bytes.fromhex("c1e810"),
+            "index_low16": pe.at(0x453FA0, 6)
+                == bytes.fromhex("81e6ffff0000"),
+            "group_registry_lookup": pe.call_target(0x453FA6)
+                == 0x4538C0,
+            "registry_head_load": pe.at(0x4538C0, 5)
+                == bytes.fromhex("a1504d5100"),
+            "registry_key_equals_group": pe.at(0x4538CD, 3)
+                == bytes.fromhex("394804"),
+            "registry_next_link": pe.at(0x4538D2, 3)
+                == bytes.fromhex("8b403c"),
+            "record_base_plus24": pe.at(0x453FB2, 3)
+                == bytes.fromhex("8b4024"),
+            "index_bounds_check": pe.at(0x453FB5, 3)
+                == bytes.fromhex("3b7010"),
+            "record_data_plus0c": pe.at(0x453FBA, 3)
+                == bytes.fromhex("8b500c"),
+            "index_stride_92": (
+                pe.at(0x453FBD, 11)
+                == bytes.fromhex("8d0c76c1e1032bce8d048a")
+            ),
+            "type11_nested_resolve_first": pe.call_target(0x459869)
+                == 0x453F90,
+            "type11_nested_resolve_second": pe.call_target(0x459890)
+                == 0x453F90,
+            "type11_nested_stride24": pe.at(0x459874, 3)
+                == bytes.fromhex("83c618"),
+            "example_decode_not_actual_music_id":
+                decode_resource_handle(0x00170002),
         }
         result["archive_table"] = {
             f"disc_{disc}": {
