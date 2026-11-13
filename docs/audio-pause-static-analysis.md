@@ -303,6 +303,34 @@ A second inspection of the same section establishes its **complete binary record
 
 The offline PE inspector's optional `reference_extra2_file_manifest` section is SHA-gated to the **exact supplied non-approved executable** and now validates the complete record stream as well as aggregate path counts. Its new `declared_bytes_total_not_integrity`, `sound_declared_bytes_not_integrity`, `sizes_verified_against_files=false` and `approved_cd_metadata=false` fields make this limitation explicit. Its synthetic tests reject missing sentinels, duplicate records, truncated lengths, embedded NULs and nonzero padding. The tool neither exports content nor claims a stock CD contains these paths.
 
+## Research-only BNM metadata reader and ESC focus policy model
+
+**Scope and caveat:** the available research workspace has the owner-supplied non-approved PE32 reference binary and older Wine logs, **but not a byte-for-byte BNM bank from a verified original CD**. The experimental readers below must not be described as validated retail format support, executable patching, working menu music, or an install/integrity implementation.
+
+### Candidate BNM metadata structure (no audio extracted)
+
+The independently available [Rayman2Lib `BNMFile.cs`](https://github.com/szymski/Rayman2Lib/blob/master/csharp_tools/Rayman2Lib/BNMFile.cs) reads a 44-byte header with event and resource counts, a 32-byte event table, and 92-byte resource entries. The public [ACP_Ray2 resource declarations](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h) name the resource types and the disk representation (`Id, eType, eStorage, ulDataSize, ulDataOffset, ucVolume, uRes`). The reference binary's `0x45399E`/`0x4539E7` copies 44 bytes from the bank header, and `0x453F90` uses 92-byte records. These are converging clues, **not a validated sample bank**.
+
+The new standalone [`tools/inspect_rayman2_bnm.py`](../tools/inspect_rayman2_bnm.py) deliberately performs **metadata-only** inspection of owner-provided BNM files. It bounds-checks counts and offsets, reports any **candidate** `SND_E_TR_Theme=11` record, emits its packed resource ID split into upper16 sound-bank group and lower16 record index, and labels candidate volume, number of parts and outro offset as unverified. It does **not** decode, copy, extract, modify, or publish sound payloads. Its command is:
+
+```bash
+python3 tools/inspect_rayman2_bnm.py /path/to/Data/World/Sound/Bnk_0.bnm
+```
+
+The output marks `verified_against_actual_retail_cd_bnm=false` and `audio_extracted=false`. Even a numerically matching bank-file suffix is **not** taken as proof of the loaded bank ID. Header total/offset declarations are treated as hints, never actual verified file integrity.
+
+[Its synthetic-only tests](../tests/test_audio_bnm_inspector.py) cover multiple resource types, two Theme-related fields, an empty bank, count inflation, truncated records and suspect declared sizes. No commercial media files are committed or needed by CI.
+
+### Proposed independent-cause pause policy — specification only
+
+The new [`tools/audio_pause_policy_model.py`](../tools/audio_pause_policy_model.py) expresses a **proposed desired audio state** for a future *proven-owned Theme stream*. It is **not connected** to the runtime or the native driver and does not fix the game's sound record pause marks (`+0x1C`) or global pause depth.
+
+Conceptually, music may remain audible through **verified ESC-menu pauses only**, while all these causes require silence: focus loss, unknown focus state, any other/native game pause, unknown pause origin or actual Theme stop/level unload. The model also requires a resource ID and a generation token: an old stop event must never affect a newly started theme whose driver handle was recycled. Re-entering the foreground may restore the Theme only while still valid and otherwise eligible.
+
+This is a deliberately narrow **fail-closed state specification**, not a simple `PauseTransitionSxd` interception. [Synthetic tests](../tests/test_audio_pause_policy_model.py) cover ESC→focus loss→focus gain, closing ESC while unfocused, unknown script causes, nested script causes, other audio pauses, level stops, stale generations and an exhaustive set of **4,096** short event sequences, with invariants that no owned Theme can be playing in the background or during an independently active pause cause. No F1 controls are introduced.
+
+**Remaining integration work:** determine the actual Theme bank/resource ownership of the audible soundtrack and verify a way to reconcile this desired state with original `0x4580B0`/`0x458110` markers and driver calls. A model passing synthetic tests is **not** evidence the feature works or is safe under Wine/Windows; original-CD parity and one consolidated end-to-end test are still mandatory before release.
+
 ## Safety requirements before a functional `MusicInPauseMenu` option
 
 - Prove a **music resource identity** independently of driver pointer, table index, SXD transport, default volume or descriptor equality.
