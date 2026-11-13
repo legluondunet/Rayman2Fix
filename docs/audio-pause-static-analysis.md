@@ -307,19 +307,31 @@ The offline PE inspector's optional `reference_extra2_file_manifest` section is 
 
 **Scope and caveat:** the available research workspace has the owner-supplied non-approved PE32 reference binary and older Wine logs, **but not a byte-for-byte BNM bank from a verified original CD**. The experimental readers below must not be described as validated retail format support, executable patching, working menu music, or an install/integrity implementation.
 
-### Candidate BNM metadata structure (no audio extracted)
+### BNM metadata layout: native table offsets, not inferred placement
 
-The independently available [Rayman2Lib `BNMFile.cs`](https://github.com/szymski/Rayman2Lib/blob/master/csharp_tools/Rayman2Lib/BNMFile.cs) reads a 44-byte header with event and resource counts, a 32-byte event table, and 92-byte resource entries. The public [ACP_Ray2 resource declarations](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h) name the resource types and the disk representation (`Id, eType, eStorage, ulDataSize, ulDataOffset, ucVolume, uRes`). The reference binary's `0x45399E`/`0x4539E7` copies 44 bytes from the bank header, and `0x453F90` uses 92-byte records. These are converging clues, **not a validated sample bank**.
+Independent reference sources: [Rayman2Lib `BNMFile.cs`](https://github.com/szymski/Rayman2Lib/blob/master/csharp_tools/Rayman2Lib/BNMFile.cs), [ACP_Ray2 `SND.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND.h), [`SND_Event.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Event.h), and [`SND_Resource.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h). The **non-approved** owner-supplied EXE's native loader `0x453990` reads precisely 44 bytes at `0x4539E7`.
 
-The new standalone [`tools/inspect_rayman2_bnm.py`](../tools/inspect_rayman2_bnm.py) deliberately performs **metadata-only** inspection of owner-provided BNM files. It bounds-checks counts and offsets, reports any **candidate** `SND_E_TR_Theme=11` record, emits its packed resource ID split into upper16 sound-bank group and lower16 record index, and labels candidate volume, number of parts and outro offset as unverified. It does **not** decode, copy, extract, modify, or publish sound payloads. Its command is:
+**Important correction to the original research-only BNM inspector:** the two lists are **independently offset-addressed** within the 44-byte `SND_tdstSndBankHead`, **not guaranteed to be adjacent**. The original scanner incorrectly assumed `resource_start=44+event_count*32`; that could read an unrelated region and produce false Theme identifiers.
+
+| Header byte offset | Native field | Verification |
+| --- | --- | --- |
+| `+0x00` | Bank format version | ACP_Ray2 |
+| `+0x04` | `stEventList.hFirstElementOpt`, on-disk **relative offset** | Native `0x453BB8`: `mov ecx,[eax+4]`; `0x453BBB`: add header base |
+| `+0x08` | Event count | `0x453C0C`; 32-byte event records |
+| `+0x0C` | `stResList.hFirstElementOpt`, on-disk **relative offset** | Native `0x453BC3`: `mov ecx,[eax+0xC]`; `0x453BC6`: add header base |
+| `+0x10` | Resource count | `0x453BCE` followed by 92-byte stride computation |
+| `+0x14..+0x24` | Declared media offsets (MPEG, MIDI, sample, ADPCM, streaming) | ACP_Ray2; **origin/physical sizes not verified** |
+| `+0x28` | `ulTotalSize`, a declared total | Not an independent file-integrity reference |
+
+**Event-to-resource structural mapping:** `SND_tdstBlockEvent` contains `Id (+0)`, `eType (+4)`, `uParams (+8)`, in 32-byte records. For event type `SND_EVT_Son_Play=1`, `uParams.stPlay.uResource.Id` at `+8` is a packed resource reference: the native type-1 dispatch table entry at `0x453E90` selects `0x453DC9`, which loads that DWORD and calls resource resolver `0x453F90` at `0x453DD6`. Native `0x453F90` uses **upper 16 bits for the loaded bank ID and lower 16 bits as a *direct resource table index***; it does **not** search the resource entries by their `Id` fields. Therefore a `Play` → local `Theme` match requires that the indexed record's full packed `Id` equals the original reference **and** `eType=11`. Any discrepancy, a missing local bank, or a reference beyond the local table is reported as unresolved. Theme playback from another bank cannot be linked from one BNM alone.
+
+The updated read-only [`tools/inspect_rayman2_bnm.py`](../tools/inspect_rayman2_bnm.py) validates independent event/resource ranges within the physical bank, rejects nonzero counts with nonexistent ranges and any overlap, reports `Theme=11` candidate metadata, and emits **only local candidate** `SND_EVT_Son_Play` → Theme references when the direct-index/full-ID test succeeds. It never decodes, extracts, modifies, or emits sound payloads. Use it locally on user-owned banks:
 
 ```bash
-python3 tools/inspect_rayman2_bnm.py /path/to/Data/World/Sound/Bnk_0.bnm
+python3 tools/inspect_rayman2_bnm.py /path/to/DATA/WORLD/SOUND/BNK_0.BNM
 ```
 
-The output marks `verified_against_actual_retail_cd_bnm=false` and `audio_extracted=false`. Even a numerically matching bank-file suffix is **not** taken as proof of the loaded bank ID. Header total/offset declarations are treated as hints, never actual verified file integrity.
-
-[Its synthetic-only tests](../tests/test_audio_bnm_inspector.py) cover multiple resource types, two Theme-related fields, an empty bank, count inflation, truncated records and suspect declared sizes. No commercial media files are committed or needed by CI.
+The output includes `table_ranges_file_relative`, `play_event_references_candidate`, and `local_play_events_referring_to_themes_candidate`. These describe **candidate static structure**, not which song is heard in game, nor whether the file is an original retail bank. `verified_against_actual_retail_cd_bnm=false` and `audio_extracted=false` are mandatory. Media offsets, claimed data lengths and bank filename suffixes are **not authoritative** for CD installation or integrity. The [synthetic-only tests](../tests/test_audio_bnm_inspector.py) exercise contiguous, gapped, **reversed** lists, truncated records, overlapping or invalid offsets, null/other-bank event references, and deliberate resource-ID/index mismatch. No commercial bank/media assets are added to CI.
 
 ### Proposed independent-cause pause policy — specification only
 
