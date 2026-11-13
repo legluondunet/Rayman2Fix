@@ -109,6 +109,56 @@ def decode_resource_handle(handle: int) -> dict:
     }
 
 
+def summarize_reference_file_directory(directory: bytes) -> dict:
+    """Parse the reference EXE's length-prefixed file directory, read-only.
+
+    Each entry is <u32 declared_size><u32 NUL-terminated name length><name>.
+    Sentinel (0xFFFFFFFF,0) is followed by zero padding to section end.
+    The declared sizes are *not verified disk lengths*; protected discs can
+    contain intentionally implausible sizes. Never use for file integrity.
+    """
+    offset = 0
+    count = 0
+    declared_total = 0
+    sound_ext_count = {"APM": 0, "BNM": 0}
+    sound_ext_declared = {"APM": 0, "BNM": 0}
+    seen = set()
+    while offset + 8 <= len(directory):
+        declared_size, path_len = struct.unpack_from("<II", directory, offset)
+        offset += 8
+        if declared_size == 0xFFFFFFFF and path_len == 0:
+            if any(directory[offset:]):
+                raise ValueError("Reference directory has nonzero padding")
+            return {
+                "entries": count,
+                "unique_paths": len(seen),
+                "sentinel_verified": True,
+                "declared_bytes_total_not_integrity": declared_total,
+                "sound_entries": sound_ext_count,
+                "sound_declared_bytes_not_integrity": sound_ext_declared,
+                "sizes_verified_against_files": False,
+                "approved_cd_metadata": False,
+            }
+        if not (2 <= path_len <= 256) or offset + path_len > len(directory):
+            raise ValueError("Invalid reference directory path length")
+        encoded = directory[offset:offset + path_len]
+        offset += path_len
+        if encoded[-1] != 0 or b"\\x00" in encoded[:-1]:
+            raise ValueError("Invalid reference directory terminator")
+        name = encoded[:-1].decode("ascii")
+        key = name.casefold()
+        if key in seen:
+            raise ValueError("Duplicate reference directory entry")
+        seen.add(key)
+        count += 1
+        declared_total += declared_size
+        suffix = name.rsplit(".", 1)[-1].upper()
+        if suffix in sound_ext_count:
+            sound_ext_count[suffix] += 1
+            sound_ext_declared[suffix] += declared_size
+    raise ValueError("Reference directory sentinel not found")
+
+
 def summarize_gog_sound_manifest(directory: bytes) -> dict:
     """Names from the modified reference EXE only; never audio payloads."""
     paths = re.findall(
@@ -376,6 +426,7 @@ def inspect(executable: Path) -> dict:
                 directory = pe.read(file_offset, file_size)
                 result["reference_extra2_file_manifest"] = {
                     "source": ".extra2 reference-only file-path directory",
+                    **summarize_reference_file_directory(directory),
                     **summarize_gog_sound_manifest(directory),
                 }
     except ValueError as exc:
