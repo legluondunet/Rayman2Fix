@@ -214,6 +214,36 @@ The previous `desc_words_equal_mask` compares four words of **`SND_tdstBlockReso
 
 An older research probe incorrectly attempted to dereference the first DWORD of the resource record as a memory address. This interpretation was invalid because it is `Id`; the probe was bounded and read-only, but any output from it should be ignored. It has been **removed**. The research probe now only reports the decoded **bank group / resource index** and the actual volume byte for both compared records. No audio calls are altered.
 
+
+### Original-CD dual-route proof for the same inner SXD handle
+
+A further independent read of the pinned original CD PE, crosschecked byte-for-byte against the reference, verifies **both possible routes** from the native 64-slot audio dispatcher to the same inner transition SXD driver:
+
+```text
+0x4580B0 pause loop, eligible inner transition record (+0x10 != 0)
+    0x4580E1 -> 0x4584A0 -> SXD PauseTransition
+
+0x4580B0 pause loop, eligible outer type-11 Theme record (+0x10 == 0)
+    0x4580EF -> 0x458070
+       native resource-type pause table [0x4A3BA8 + 24*11] = 0x459C40
+       0x459C4D -> 0x4584A0 -> SXD PauseTransition on Theme's inner record
+
+0x458110 resume loop, eligible inner transition record
+    0x458151 -> 0x458470 -> SXD ResumeTransition
+
+0x458110 resume loop, eligible outer type-11 Theme record
+    0x45815F -> 0x458090
+       native resource-type resume table [0x4A3BAC + 24*11] = 0x459C60
+       0x459C6D -> 0x458470 -> SXD ResumeTransition on Theme's inner record
+```
+
+All **six E8-relative call targets** and both **type-11 function-table pointers** were checked in the original retail-CD bytes and in the non-approved reference. They have been added to the SHA-pinned, read-only [CD parity inspector](../tools/check_rayman2_cd_audio_parity.py). The prior Wine schema-2 trace reports one active outer Theme at slot 6 pointing to the unique inner transition driver at slot 1; the driver sees two ESC pause and two ESC resume calls at the same global depth. The native code graph therefore supplies a **specific sufficient explanation for duplicate calls when both records are eligible**, without assuming the handle is a fixed music slot. It **does not prove** from the log alone that both pathways were taken at runtime; the exact live per-record pause eligibility and full caller stacks have not been captured.
+
+A new [seven-case research-only synthetic dual-dispatch model](../tests/test_audio_dual_dispatch_model.py) exercises two eligible records, one ineligible record, inactive Theme, extra unrelated SFX, zero initial depth, and nested ESC/focus. In the straightforward `depth=1` state, both records have `pause_mark=0`, so ESC can pause the *same* driver twice, setting both native marks to 1 and global depth to 2. An additional Win32 focus pause at depth 2 dispatches **no** further driver pause; its matching resume from depth 3 to 2 can resume the same driver **twice while ESC remains open**. This is a structural demonstration of why dropping or compensating one low-level call alone is unsafe. It neither runs the original game nor makes audio playback changes.
+
+**Implementation guard:** a future opt-in feature must reconcile the **two original participating records** (both of their native marks, logical Theme lifetime, and independent ESC/focus reasons), never just intercept one `PauseTransitionSxd` by driver handle. Even a post-dispatch `resume` is insufficient unless a subsequent focus loss can force an actual driver pause despite the game's already-set marks and focus gain cannot resume it inadvertently. Preserve `StopTransitionSxd` and level transitions unchanged; no F1 changes, INI key, DLL hook, or default behavior changes.
+
+
 ## Native pause/resume dispatch — verified indirection
 
 `0x4580B0` is the game's global **pause** loop over 64 sound-table records. It increments nested depth at `0x4A3CC8`. `0x458110` is the inverse **resume** loop. Records whose `+0x10` transition flag is nonzero are dispatched through `0x4584A0` / `0x458470`, where SXD uses `0x4553A0` / `0x4553C0` and their dynamic slots `0x4B8708` / `0x4B870C`.
