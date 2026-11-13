@@ -270,6 +270,48 @@ def inspect(executable: Path) -> dict:
             "transport_type_is_separate":
                 pe.at(0x458236, 3) == bytes.fromhex("8b4604"),
         }
+        # Exact disassembly signatures for the two native pause origins:
+        # script 426/427 and Win32 activation call the SAME wrappers.
+        # The record's +0x1C mark is written BEFORE its audio-driver
+        # pause call. A naive bypass leaves that mark untouched and
+        # can block focus-loss pausing of the same Theme stream.
+        result["native_audio_pause_invariants"] = {
+            "win32_pause_wrapper": pe.call_target(0x401C9C) == 0x4536D0,
+            "script_pause_wrapper": pe.call_target(0x471E70) == 0x4536D0,
+            "win32_resume_wrapper": pe.call_target(0x401CE9) == 0x453700,
+            "script_resume_wrapper": pe.call_target(0x471E67) == 0x453700,
+            "wrapper_pause_global": pe.call_target(0x4536ED) == 0x4580B0,
+            "wrapper_resume_global": pe.call_target(0x45371D) == 0x458110,
+            "pause_table_slots_64": pe.at(0x4580B7, 5)
+                == bytes.fromhex("bf40000000"),
+            "pause_record_mark_guard": pe.at(0x4580CA, 3)
+                == bytes.fromhex("833e00"),
+            "mark_written_before_dispatch": pe.at(0x4580D4, 2)
+                == bytes.fromhex("8906"),
+            "transition_pause_dispatch": pe.call_target(0x4580E1)
+                == 0x4584A0,
+            "other_resource_pause_dispatch": pe.call_target(0x4580EF)
+                == 0x458070,
+            "global_pause_depth_inc": pe.at(0x458100, 1)
+                == bytes.fromhex("40"),
+            "global_pause_depth_store": pe.at(0x458102, 5)
+                == bytes.fromhex("a3c83c4a00"),
+            "global_resume_depth_dec": pe.at(0x458116, 1)
+                == bytes.fromhex("48"),
+            "global_resume_depth_store": pe.at(0x458118, 5)
+                == bytes.fromhex("a3c83c4a00"),
+            "resume_record_mark_cmp": pe.at(0x45813C, 4)
+                == bytes.fromhex("3bc87f24"),
+            "clear_mark_before_resume": pe.at(0x458143, 6)
+                == bytes.fromhex("c70600000000"),
+            "transition_resume_dispatch": pe.call_target(0x458151)
+                == 0x458470,
+            "other_resource_resume_dispatch": pe.call_target(0x45815F)
+                == 0x458090,
+            "research_inference":
+                "Dropping only a driver pause cannot guarantee focus-loss silence",
+            "implemented_audio_bypass": False,
+        }
         # Resource groups are introduced by *command-stream data*,
         # not by assuming a CD or MUSIC.DAT index. Two original command
         # tokens 0x5D/0x5E feed the same group registry preload path.
