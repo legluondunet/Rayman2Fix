@@ -444,6 +444,59 @@ AudioSoundContext inspect_audio_sound_context(DWORD argument) {
     return out;
 }
 
+
+// The native sound pause dispatcher can be entered either from an in-game
+// script (CD script procedure 426/427) or Windows WM_ACTIVATE handling.
+// Determine the *executed call path* from original retail-CD return sites,
+// not a heuristic based on the Escape key being held. This is a bounded,
+// read-only stack snapshot; "unknown" never authorizes a sound bypass.
+__declspec(noinline) const char* inspect_audio_pause_origin() {
+    const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!module)return "unknown";
+    auto* stack=reinterpret_cast<const DWORD*>(_AddressOfReturnAddress());
+    MEMORY_BASIC_INFORMATION page{};
+    if(VirtualQuery(stack,&page,sizeof(page))!=sizeof(page) ||
+       page.State!=MEM_COMMIT || (page.Protect&PAGE_GUARD) ||
+       (page.Protect&PAGE_NOACCESS))return "unknown";
+    const std::uintptr_t start=reinterpret_cast<std::uintptr_t>(stack);
+    const std::uintptr_t region_end=
+        reinterpret_cast<std::uintptr_t>(page.BaseAddress)+page.RegionSize;
+    if(region_end<=start)return "unknown";
+    const SIZE_T bytes=region_end-start<sizeof(DWORD)*96u ?
+        static_cast<SIZE_T>(region_end-start) : sizeof(DWORD)*96u;
+    const SIZE_T count=bytes/sizeof(DWORD);
+    if(count==0)return "unknown";
+    DWORD words[96]{};
+    SIZE_T got=0;
+    if(!ReadProcessMemory(GetCurrentProcess(),stack,words,
+                          count*sizeof(DWORD),&got) ||
+       got!=count*sizeof(DWORD))return "unknown";
+    const auto base=reinterpret_cast<std::uintptr_t>(module);
+    constexpr std::uintptr_t kScriptPauseReturnRva=0x71E75;
+    constexpr std::uintptr_t kScriptResumeReturnRva=0x71E6C;
+    constexpr std::uintptr_t kWindowsPauseReturnRva=0x01CA1;
+    constexpr std::uintptr_t kWindowsResumeReturnRva=0x01CEE;
+    unsigned kind=0; // 1=script pause, 2=script resume,
+                     // 3=Windows pause, 4=Windows resume
+    for(SIZE_T i=0;i<count;++i) {
+        const auto v=std::uintptr_t(words[i]);
+        unsigned match=0;
+        if(v==base+kScriptPauseReturnRva)match=1;
+        else if(v==base+kScriptResumeReturnRva)match=2;
+        else if(v==base+kWindowsPauseReturnRva)match=3;
+        else if(v==base+kWindowsResumeReturnRva)match=4;
+        if(match && kind && kind!=match)return "ambiguous";
+        if(match)kind=match;
+    }
+    switch(kind) {
+        case 1:return "game-script-pause";
+        case 2:return "game-script-resume";
+        case 3:return "windows-activation-pause";
+        case 4:return "windows-activation-resume";
+        default:return "unknown";
+    }
+}
+
 void audio_trace_forward(unsigned slot,DWORD arg) {
     const auto original=reinterpret_cast<AudioPauseFn>(
         g_audio_original[slot].load(std::memory_order_acquire));
@@ -457,17 +510,21 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     // Capture table state BEFORE the original stop/pause might invalidate
     // an audio handle; never alter the arguments or call ordering.
     AudioSoundContext source{};
-    if(sampled)source=inspect_audio_sound_context(arg);
+    const char* audio_origin="not-sampled";
+    if(sampled) {
+        source=inspect_audio_sound_context(arg);
+        audio_origin=inspect_audio_pause_origin();
+    }
     if(original) original(arg);
     if(!sampled)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
-    char line[360]{};
+    char line[430]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u global_pause_depth=%d foreground=%u esc_down=%u (native table BEFORE call; forwarded unchanged)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
         unsigned(arg==0),source.table_index,source.match_count,source.transport,
-        source.transition,source.active,source.pause_depth,
+        source.transition,source.active,source.pause_depth,audio_origin,
         unsigned(game_window_is_foreground()),
         unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
     log_line(line);

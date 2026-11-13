@@ -1,3 +1,36 @@
+## 13 November 2026 — original native audio pause call-path classification
+
+The owner's `Rayman2Fix(20261113-024221).log` conclusively
+shows a **complete** ESC pause/resume cycle:
+`PauseTransitionSxd` slot 1 twice at 77812 ms,
+`global_pause_depth` 1→2 at 78145 ms,
+`ResumeTransitionSxd` slot 1 twice at 84878–84879 ms,
+then `global_pause_depth` 2→1 at 85145 ms,
+all while `foreground=1`. A second ESC pause is visible
+at 87411 ms, with 1→2 at 87645 ms; this second menu
+was not exited via an observed native resume before the log ended.
+This confirms the original engine's correct paired unpause behavior.
+It **does not prove** the recurring native transition slot 1 is
+the soundtrack rather than an ambience/transition effect.
+
+The approved PC CD original has two call routes into the common
+native sound pause dispatcher. The script operation 426 returns
+from the `call` at 0x471E70 to 0x471E75; script operation 427
+returns from 0x471E67 to 0x471E6C. The Windows activation
+handler's corresponding return sites are 0x401CA1 and 0x401CEE.
+For the **research DLL only**, the sound callback snapshots
+at most 96 stack DWORDs from the current committed stack region
+(using `ReadProcessMemory` and `VirtualQuery`) and reports a
+source category when a verified return address is present.
+Multiple conflicting matches result in `ambiguous`; none in
+`unknown`. No pointer, return address or game text is logged.
+This research-only provenance check does not patch the game or
+change audio calls. It will help distinguish script-issued ESC
+pauses from activation loss. Script provenance alone is NOT
+equivalent to a proven menu-state discriminator.
+
+---
+
 ## 13 November 2026 — nested native pause counter and shared sound handles
 
 After the owner-provided `Rayman2Fix(20261113-021629).log`, the

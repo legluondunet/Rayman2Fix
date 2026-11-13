@@ -41,6 +41,8 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("VK_F1",self.runtime)
         self.assertIn("sound_slot=",section)
         self.assertIn("sound_matches=",section)
+        self.assertIn("audio_origin=%s",section)
+        self.assertIn("audio_origin=inspect_audio_pause_origin()",section)
         self.assertIn("global_pause_depth=",section)
         self.assertIn("if(sampled)source=inspect_audio_sound_context(arg);",section)
         self.assertIn("const bool sampled=g_log && event<budget;",section)
@@ -56,6 +58,13 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("RUNTIME-AUDIO-STATE: t_ms=",self.runtime)
         self.assertIn("g_audio_last_depth.exchange(",self.runtime)
         self.assertIn("++out.match_count;",self.runtime)
+        self.assertIn("kScriptPauseReturnRva=0x71E75",self.runtime)
+        self.assertIn("kScriptResumeReturnRva=0x71E6C",self.runtime)
+        self.assertIn("kWindowsPauseReturnRva=0x01CA1",self.runtime)
+        self.assertIn("kWindowsResumeReturnRva=0x01CEE",self.runtime)
+        self.assertIn("_AddressOfReturnAddress()",self.runtime)
+        self.assertIn("case 1:return \"game-script-pause\"",self.runtime)
+        self.assertIn("case 3:return \"windows-activation-pause\"",self.runtime)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
     def test_exact_owner_cd_slots_are_named_and_bounded(self):

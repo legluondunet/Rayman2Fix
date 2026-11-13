@@ -25,6 +25,13 @@ pause-depth counter every ~500 ms, including when no audio callback
 fires. The `sound_matches` field reports when several game sound
 records share the same driver handle; a non-unique `sound_slot`
 must **not** be assumed to identify an individual song.
+New `audio_origin` diagnostics attempt to distinguish actual
+`game-script-pause` / `game-script-resume` call paths from
+`windows-activation-pause` / `windows-activation-resume`
+using the original CD's verified code-return addresses. If the
+bounded read-only call-stack snapshot cannot classify safely,
+it reports `unknown` or `ambiguous`; a pressed Esc key
+alone must never authorize music to continue.
 These are read-only observations, **not proof of a music stream**, and no
 raw memory address, sound resource filename or pointer is logged.
 The global audio pause routine is invoked both by the window
