@@ -143,7 +143,7 @@ def summarize_reference_file_directory(directory: bytes) -> dict:
             raise ValueError("Invalid reference directory path length")
         encoded = directory[offset:offset + path_len]
         offset += path_len
-        if encoded[-1] != 0 or b"\\x00" in encoded[:-1]:
+        if encoded[-1] != 0 or 0 in encoded[:-1]:
             raise ValueError("Invalid reference directory terminator")
         name = encoded[:-1].decode("ascii")
         key = name.casefold()
