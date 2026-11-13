@@ -375,6 +375,10 @@ std::atomic<unsigned> g_audio_hooks_installed{0};
 std::atomic<DWORD> g_audio_last_poll{0};
 std::atomic<DWORD> g_audio_origin{0};
 std::atomic<int> g_audio_last_depth{-1};
+// Optional, read-only UI research: do NOT interpret the generic menu flag
+// as ESC-only, and do NOT treat the engine clock pause as a menu flag.
+std::atomic<int> g_audio_last_ingame_menu{-1};
+std::atomic<int> g_audio_last_engine_pause{-1};
 volatile LONG g_audio_poll_guard=0;
 bool executable_page(const void* addr) {
     MEMORY_BASIC_INFORMATION m{};
@@ -970,6 +974,39 @@ void poll_audio_pause_trace() {
        pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
        pe->OptionalHeader.SizeOfImage<0xB8840) {
         InterlockedExchange(&g_audio_poll_guard,0);return;
+    }
+    // Independently inspect the original game's MENU flag and ENGINE pause
+    // flag. 0x4B9BC8 is ACP_Ray2 AI_g_bInGameMenu, set by VM opcode 0x1F8.
+    // 0x500640 belongs to GAM engine timer pause/unpause, not the ESC menu.
+    // These original-CD xrefs were verified offline and are not written here.
+    // Read-only, research-build-only, sample-capped; F1 and ESC are NOT
+    // classified by either flag alone.
+    if(pe->OptionalHeader.SizeOfImage>0x100641u) {
+        BYTE in_game_menu=0, engine_paused=0;
+        SIZE_T menu_read=0, engine_read=0;
+        const bool menu_ok=ReadProcessMemory(GetCurrentProcess(),
+            module+0xB9BC8,&in_game_menu,sizeof(in_game_menu),&menu_read)!=0 &&
+            menu_read==sizeof(in_game_menu);
+        const bool engine_ok=ReadProcessMemory(GetCurrentProcess(),
+            module+0x100640,&engine_paused,sizeof(engine_paused),
+            &engine_read)!=0 && engine_read==sizeof(engine_paused);
+        if(menu_ok && engine_ok && in_game_menu<=1u && engine_paused<=1u) {
+            const int old_menu=g_audio_last_ingame_menu.exchange(
+                static_cast<int>(in_game_menu),std::memory_order_relaxed);
+            const int old_engine=g_audio_last_engine_pause.exchange(
+                static_cast<int>(engine_paused),std::memory_order_relaxed);
+            if(old_menu!=static_cast<int>(in_game_menu) ||
+               old_engine!=static_cast<int>(engine_paused)) {
+                char msg[236]{};
+                std::snprintf(msg,sizeof(msg),
+                    "RUNTIME-AUDIO-UI-STATE: t_ms=%lu in_game_menu=%u engine_paused=%u prior_menu=%d prior_engine_paused=%d foreground=%u (read-only; generic menu flag, not ESC/F1 proof)",
+                    static_cast<unsigned long>(now-g_audio_origin.load(
+                        std::memory_order_acquire)),
+                    unsigned(in_game_menu),unsigned(engine_paused),
+                    old_menu,old_engine,unsigned(game_window_is_foreground()));
+                log_line(msg);
+            }
+        }
     }
     // Sample the game's *global* nested audio-pause depth every ~500ms.
     // This does not rely on Escape being held during the pause and thus
