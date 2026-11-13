@@ -238,7 +238,7 @@ The open-source [ACP_Ray2 sound module](https://github.com/raytools/ACP_Ray2/tre
 | `+0x24` | `p_stData` | `0x453FB2` loads bank head |
 | `+0x3C` | `hNextBrotherDyn` | `0x4538D2` advances linked list |
 
-The loaded bank head `SND_tdstSndBankHead` contains its optimized **resource list first pointer at `+0x0C`** and **resource count at `+0x10`**. Native `0x453F90` reads those exact fields and selects one **92-byte** `SND_tdstBlockResourceMem` record. This resolves the previously unnamed “resource groups”: they are **sound banks**. The packed upper16 value is the loaded bank **ID**. In this **non-approved reference EXE**, the native filename formatter maps it to `bnk_<decimal bank ID>.BNM` (verified below); this correspondence is not independently verified against the original retail CD.
+The loaded bank head `SND_tdstSndBankHead` contains its optimized **resource list first pointer at `+0x0C`** and **resource count at `+0x10`**. Native `0x453F90` reads those exact fields and selects one **92-byte** `SND_tdstBlockResourceMem` record. This resolves the previously unnamed “resource groups”: they are **sound banks**. The packed upper16 value is the loaded bank **ID**. The non-approved reference and the **original retail-CD EXE independently** confirm the native bank-ID filename formatter `bnk_<decimal bank ID>.BNM` (see the pinned byte-parity section). The bank files and their contents themselves have not been inspected.
 
 **Loaded resource record** `SND_tdstBlockResourceMem` (92 bytes):
 
@@ -340,7 +340,7 @@ Records without the transition flag use `0x458070` / `0x458090`, which use nativ
 
 **Diagnostic correction:** the earlier `inspect_audio_sequence_context()` returned an initially-zero `AudioSequenceContext` whenever the controller DWORD was **not exactly 1** (`active!=1u`). The native `0x459C40` callback instead checks only **nonzero** (`cmp [eax],0; je ...`). Therefore the prior `sequence_active=0` log field **did not establish** the native DWORD was zero: an alternate nonzero state would have been silently reported as inactive. The optional research build now categorizes the state as `sequence_state_class` (0=unreadable, 1=zero, 2=one, 3=other nonzero), with `sequence_active` determined by nonzero state and a validated aligned record pointer. Existing Wine traces cannot reconstruct which class applied retrospectively; do not use them to claim the controller was idle.
 
-## Exact nested ESC / focus-loss pause state machine
+## Exact nested script / focus-loss audio state machine
 
 The code-level reason a naive "drop the Theme pause call" override is **not safe** is now independently reproduced without Wine. In the **non-approved reference EXE**:
 
