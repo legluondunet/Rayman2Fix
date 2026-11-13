@@ -68,6 +68,37 @@ ANCHOR_BYTES = (
     ("bank_filename_literal", 0x4A252C, b"bnk_%d.BNM\x00"),
 )
 
+# Exhaustive bytewise E8-rel32 *candidates* in .text for selected known
+# original-CD targets. These are not a complete control-flow graph: indirect
+# calls and instruction decoding still require separate analysis.
+DIRECT_CALLERS = (
+    ("shared_pause_wrapper", 0x4536D0, (0x401C9C, 0x471E70)),
+    ("shared_resume_wrapper", 0x453700, (0x401CE9, 0x471E67)),
+    ("global_pause_loop", 0x4580B0, (0x4536ED,)),
+    ("global_resume_loop", 0x458110, (0x45371D,)),
+    ("inner_transition_pause", 0x4584A0, (0x4580E1, 0x459C4D)),
+    ("inner_transition_resume", 0x458470, (0x458151, 0x459C6D)),
+)
+
+
+def direct_e8_candidate_sites(pe, target: int, section: str = ".text") -> list[int]:
+    """Scan E8 rel32 encodings; each candidate still needs disassembly."""
+    if not (0 <= target <= 0xFFFFFFFF):
+        raise ValueError("Invalid x86 target VA")
+    if section not in pe.sections:
+        raise ValueError("Section not found")
+    base, raw_pos, raw_size, _ = pe.sections[section]
+    data = pe.data[raw_pos:raw_pos + raw_size]
+    sites = []
+    for idx in range(len(data) - 4):
+        if data[idx] != 0xE8:
+            continue
+        rel = struct.unpack_from("<i", data, idx + 1)[0]
+        if base + idx + 5 + rel == target:
+            sites.append(base + idx)
+    return sites
+
+
 # Controller-wide dynamic guard during Theme creation/replacement and stop.
 # This is a game-internal reentrancy/transition inhibit flag, NOT a mutex.
 THEME_TRANSACTION_FLAG_VA = 0x4B9618
@@ -230,6 +261,14 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             ref.at(addr, len(expected)) == expected}
         for name, addr, expected in THEME_TRANSACTION_OPS
     ] if check_anchors else []
+    direct_call_candidates = [
+        {"name": name, "target_va": f"0x{target:08X}",
+         "confirmed_bytewise_both": (
+             tuple(direct_e8_candidate_sites(cd, target)) == expected
+             and tuple(direct_e8_candidate_sites(ref, target)) == expected),
+         "number_of_known_direct_e8_sites": len(expected)}
+        for name, target, expected in DIRECT_CALLERS
+    ] if check_anchors else []
     cd_flag_xrefs = absolute_dword_xrefs(cd, THEME_TRANSACTION_FLAG_VA)
     ref_flag_xrefs = absolute_dword_xrefs(ref, THEME_TRANSACTION_FLAG_VA)
     transaction_xrefs_verified = (
@@ -246,6 +285,7 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
     verified_native_anchors = (
         all(x["verified_both"] for x in
             call_sites + byte_anchors + dispatcher_pointers + transaction_ops)
+        and all(x["confirmed_bytewise_both"] for x in direct_call_candidates)
         and transaction_xrefs_verified and callback_registration_verified
     ) if check_anchors else False
     # A caller may disable native anchors for synthetic PE parser tests only.
@@ -259,6 +299,11 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             "rdata_raw_bytes": len(cd.section(".rdata")),
             "regions": windows, "call_sites": call_sites, "opcode_anchors": byte_anchors,
             "resource_dispatcher_pointers": dispatcher_pointers,
+            "direct_call_candidate_audit": {
+                "targets": direct_call_candidates,
+                "indirect_calls_not_enumerated": True,
+                "bytewise_scan_is_not_full_disassembly": True,
+            },
             "theme_transaction_inhibit": {
                 "verified_both": transaction_xrefs_verified and
                     callback_registration_verified and
