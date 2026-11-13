@@ -153,6 +153,58 @@ class ParityTests(unittest.TestCase):
         self.assertEqual(MOD.SCRIPT_OPCODE_BRANCHES[0][2], 0x471E70)
         self.assertEqual(MOD.SCRIPT_OPCODE_BRANCHES[1][2], 0x471E67)
 
+    def test_original_game_menu_flag_relationships_are_not_esc_proof(self):
+        from unittest.mock import patch
+
+        class NativeMenuSyntheticPE:
+            def __init__(self):
+                self.memory = {
+                    va: b for _, va, b in M.INGAME_MENU_CODE_ANCHORS
+                }
+                self.memory[M.AI_MENU_VM_ENTRY_VA] = struct.pack(
+                    "<II", M.AI_MENU_VM_HANDLER_VA, 0
+                )
+                self.memory[M.WINDOW_PAUSE_TITLE_VA] = (
+                    b"Rayman2 - pause" + bytes([0])
+                )
+
+            def at(self, va, size):
+                return self.memory.get(va, bytes(size))[:size]
+
+            def call_target(self, va):
+                return 0x480B90 if va == 0x4730BB else None
+
+        a = NativeMenuSyntheticPE()
+        def xrefs(pe, target):
+            return {
+                M.AI_INGAME_MENU_FLAG_VA: M.AI_INGAME_MENU_XREFS,
+                M.ENGINE_PAUSE_FLAG_VA: M.ENGINE_PAUSE_XREFS,
+                M.WINDOW_PAUSE_TITLE_VA: M.WINDOW_PAUSE_TITLE_XREFS,
+            }[target]
+
+        with patch.object(M, "absolute_dword_xrefs", side_effect=xrefs):
+            result = M.inspect_native_menu_indicators(a)
+            self.assertTrue(result["native_relationships_verified"])
+            self.assertEqual(result["ai_ingame_menu_read_sites"], 8)
+            self.assertEqual(result["ai_ingame_menu_direct_init_and_vm_writer_sites"], 2)
+            self.assertTrue(result["engine_pause_is_separate_from_ai_ingame_menu"])
+            self.assertTrue(result["ai_ingame_menu_does_not_prove_ESC_specific"])
+            self.assertTrue(result["ai_ingame_menu_does_not_exclude_F1"])
+            self.assertTrue(result["gameplay_menu_lifetime_requires_independent_validation"])
+            # A changed VM script handler must invalidate the evidence.
+            a.memory[M.AI_MENU_VM_ENTRY_VA] = struct.pack("<II", 0x4730B0, 0)
+            self.assertFalse(
+                M.inspect_native_menu_indicators(a)["native_relationships_verified"]
+            )
+
+    def test_menu_xrefs_and_opcode_assumptions_are_anchored(self):
+        self.assertEqual(len(M.AI_INGAME_MENU_XREFS), 10)
+        self.assertEqual(len(M.ENGINE_PAUSE_XREFS), 3)
+        self.assertEqual(len(M.WINDOW_PAUSE_TITLE_XREFS), 2)
+        self.assertEqual(M.AI_MENU_VM_ENTRY_VA, 0x4A53A0)
+        self.assertEqual(M.AI_MENU_VM_OPCODE_ID, 0x1F8)
+        self.assertNotEqual(M.AI_INGAME_MENU_FLAG_VA, M.ENGINE_PAUSE_FLAG_VA)
+
     def test_transaction_flag_requires_exact_known_code_locations(self):
         # Code and operand checks are separate: loose DWORD scanning alone
         # cannot prove that a hit was an actual machine-code instruction.
