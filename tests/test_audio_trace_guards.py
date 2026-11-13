@@ -18,6 +18,15 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("RAYMAN2FIX_AUDIO_TRACE=1",self.cmake)
         self.assertIn("#define RAYMAN2FIX_AUDIO_TRACE 0",self.runtime)
 
+    def test_research_trace_schema_is_identifiable(self):
+        # A renamed, stale log must not be mistaken for a new Wine test.
+        self.assertIn(
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2 inner_record_ref=checked-pointer",
+            self.runtime)
+        self.assertIn("sequence_ref_class=%u",self.runtime)
+        self.assertIn("inner_ref_class=%u",self.runtime)
+        self.assertNotIn("MusicInPauseMenu",self.config)
+
     def test_hook_is_compiled_out_of_normal_approved_camera_path(self):
         self.assertRegex(self.runtime,
             r'#if RAYMAN2FIX_AUDIO_TRACE\s+poll_audio_pause_trace\(\);\s+#endif')
