@@ -53,7 +53,8 @@ class TraceEvidenceTests(unittest.TestCase):
             "session": 1,
             "outer_resource": [73, 48],
             "observed_inner_resources": [[73, 50], [73, 51]],
-            "inner_resource_changed": True
+            "inner_resource_changed": True,
+            "these_are_native_record_Id_halves_not_authenticated_bank_indices": True
         }])
         self.assertTrue(result["script_origin_does_not_prove_ESC_menu"])
         self.assertTrue(result["esc_key_down_does_not_prove_ESC_menu"])
