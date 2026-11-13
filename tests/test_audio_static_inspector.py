@@ -83,6 +83,17 @@ class AudioStaticInspectorTests(unittest.TestCase):
             path.write_bytes(synthetic_pe32())
             self.assertIn("address_map_failure", M.inspect(path))
 
+    def test_event_conversion_is_not_confused_with_sxd_transport(self):
+        src = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('result["sound_event_conversion"]', src)
+        self.assertIn("conversion_tags = list(pe.at(0x4585A0, 11))", src)
+        self.assertIn("type11_is_passthrough", src)
+        self.assertIn("type8_nested_conversion", src)
+        self.assertIn("type10_nested_conversion", src)
+        self.assertIn("transport_type_is_separate", src)
+        self.assertIn("pe.call_target(0x45856F) == 0x45AA00", src)
+        self.assertIn("pe.call_target(0x45855B) == 0x45A4A0", src)
+
     def test_unknown_binary_never_invents_structural_matches(self):
         with tempfile.TemporaryDirectory() as d:
             fn = Path(d) / "synthetic.exe"
