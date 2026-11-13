@@ -394,6 +394,40 @@ bool writable_audio_slot(const void* addr) {
 // SOUND TABLE INDEX, not a song ID. The same dispatcher is called by
 // Win32 activation code at 0x401C9C and by native script dispatcher
 // at 0x471E70; a key press alone cannot distinguish those sources.
+// This native subsystem has its own single-handle sound sequencer, distinct
+// from the 64-entry sound table. The original x86 code at 0x459AEC stores
+// the table slot returned by 0x458220 at 0x4B95E8, and 0x4597E0 clears
+// its active flag at 0x4B95B8. Its role (music or other sequenced sound)
+// is NOT established: observe whether the sequencer handle is the one
+// paused during the Escape menu, without changing driver calls.
+struct AudioSequenceContext {
+    int table_index=-1;
+    unsigned active=0;
+    unsigned same_handle=0;
+};
+AudioSequenceContext inspect_audio_sequence_context(DWORD argument) {
+    AudioSequenceContext out{};
+    const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!module)return out;
+    const HANDLE process=GetCurrentProcess();
+    const auto read_word=[&](std::uintptr_t rva,DWORD* value) {
+        SIZE_T got=0;
+        return ReadProcessMemory(process,module+rva,value,sizeof(*value),
+                                 &got)!=0 && got==sizeof(*value);
+    };
+    constexpr std::uintptr_t kSequenceActiveRva=0xB95B8; // 0x4B95B8
+    constexpr std::uintptr_t kSequenceSlotRva=0xB95E8;   // 0x4B95E8
+    constexpr std::uintptr_t kSoundTableRva=0xB8C98;    // 0x4B8C98
+    DWORD active=0,slot=0,handle=0;
+    if(!read_word(kSequenceActiveRva,&active) || active!=1u ||
+       !read_word(kSequenceSlotRva,&slot) || slot>=64u ||
+       !read_word(kSoundTableRva+std::uintptr_t(slot)*32u,&handle) ||
+       !handle || handle==0xFFFFFFFFu)return out;
+    out.table_index=static_cast<int>(slot);
+    out.active=1;
+    out.same_handle=unsigned(argument!=0u && argument==handle);
+    return out;
+}
 struct AudioSoundContext {
     int table_index=-1;
     unsigned match_count=0; // A driver pointer may be shared by sound table entries.
@@ -565,11 +599,13 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     // Capture table state BEFORE the original stop/pause might invalidate
     // an audio handle; never alter the arguments or call ordering.
     AudioSoundContext source{};
+    AudioSequenceContext sequence{};
     const char* audio_origin="not-sampled";
     char code_rva_preview[96]{};
     unsigned scanned_words=0,wrapper_returns=0,confirmed_pairs=0;
     if(sampled) {
         source=inspect_audio_sound_context(arg);
+        sequence=inspect_audio_sequence_context(arg);
         const bool preview=event<2u && slot<4u;
         audio_origin=inspect_audio_pause_origin(
             preview ? code_rva_preview : nullptr,
@@ -583,11 +619,12 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
     char line[430]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_same_handle=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
         unsigned(arg==0),source.table_index,source.match_count,source.transport,
-        source.transition,source.active,source.pause_depth,audio_origin,
+        source.transition,source.active,sequence.table_index,
+        sequence.active,sequence.same_handle,source.pause_depth,audio_origin,
         unsigned(game_window_is_foreground()),
         unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
     log_line(line);
