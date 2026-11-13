@@ -289,11 +289,19 @@ std::uint64_t parse_msf(const std::string& value) {
     return (static_cast<std::uint64_t>(m) * 60 + s) * 75 + f;
 }
 
-TrackSpec parse_cue(const fs::path& cue) {
+TrackSpec parse_cue(const fs::path& cue, const fs::path& override) {
     std::ifstream input(cue);
     if (!input) fail("cannot open CUE file");
 
     fs::path current_file;
+    std::size_t file_records = 0;
+    if (!override.empty()) {
+        const auto extension = upper(override.extension().string());
+        if (extension != ".BIN" && extension != ".IMG")
+            fail("CUE override must be a BIN or IMG track");
+        if (!fs::is_regular_file(override) || fs::is_symlink(override))
+            fail("explicit CUE data track is not a regular file");
+    }
     TrackSpec selected;
     bool have_selected = false;
     bool data_track = false;
@@ -308,6 +316,9 @@ TrackSpec parse_cue(const fs::path& cue) {
         tag = upper(tag);
 
         if (tag == "FILE") {
+            ++file_records;
+            if (!override.empty() && file_records != 1)
+                fail("explicit CUE track override requires exactly one FILE declaration");
             const auto left = line.find('"');
             const auto right = left == std::string::npos
                                    ? std::string::npos : line.find('"', left + 1);
@@ -319,7 +330,7 @@ TrackSpec parse_cue(const fs::path& cue) {
                 if (component == "..") fail("CUE path traversal refused");
             const auto file_type = upper(trim(line.substr(right + 1)));
             if (file_type != "BINARY") fail("only BINARY CUE tracks are supported");
-            current_file = cue.parent_path() / filename;
+            current_file = override.empty() ? cue.parent_path() / filename : override;
         } else if (tag == "TRACK") {
             std::string number, mode;
             in >> number >> mode;
@@ -478,15 +489,16 @@ void DiscImage::scan_directory(std::uint32_t extent,
     ancestors.pop_back();
 }
 
-DiscImage DiscImage::open(const fs::path& source) {
+DiscImage DiscImage::open(const fs::path& source, const fs::path& cue_data_override) {
     if (!fs::is_regular_file(source)) fail("source must be an existing ISO or CUE file");
     DiscImage image;
     TrackSpec track;
     if (ends_with_case_insensitive(source, ".ISO")) {
+        if (!cue_data_override.empty()) fail("BIN/IMG override requires a CUE sheet");
         track.file = source;
         image.info_.format = "ISO9660 / 2048-byte sectors";
     } else if (ends_with_case_insensitive(source, ".CUE")) {
-        track = parse_cue(source);
+        track = parse_cue(source, cue_data_override);
         image.info_.format = "CUE/BIN MODE1 / " + std::to_string(track.sector_bytes);
     } else {
         fail("supported inputs: .iso and .cue (not raw .bin without CUE)");
