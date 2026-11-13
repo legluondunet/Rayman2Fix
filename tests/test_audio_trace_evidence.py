@@ -61,6 +61,50 @@ class TraceEvidenceTests(unittest.TestCase):
         self.assertTrue(result["focus_loss_not_proven_when_missing"])
         self.assertNotIn("KEEP_PRIVATE", str(result))
 
+    def test_live_like_pause_menu_flag_timing_and_owned_stop_are_not_resume(self):
+        # Synthetic timing modeled after an opt-in, read-only Wine trace.
+        # Engine pause depth 2 may outlive the visual menu flag. A stop
+        # in that window must NEVER be inferred to imply a driver resume.
+        bank = (" outer_native_bank=9 outer_native_index=5"
+                " outer_bank_candidates=1 outer_bank_list_complete=1"
+                " inner_native_bank=9 inner_native_index=6"
+                " inner_bank_candidates=1 inner_bank_list_complete=1")
+        data = [
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
+            trace("PauseTransitionSxd", 1, 38779) +
+            " ui_in_game_menu_at_call=0 ui_engine_paused_at_call=0",
+            owner("PauseTransitionSxd", 1, inner=49) + bank,
+            trace("PauseTransitionSxd", 2, 38780) +
+            " ui_in_game_menu_at_call=0 ui_engine_paused_at_call=0",
+            owner("PauseTransitionSxd", 2, inner=49) + bank,
+            "RUNTIME-AUDIO-UI-STATE: t_ms=39162 in_game_menu=1 "
+            "engine_paused=0 foreground=1",
+            trace("StopTransitionSxd", 1, 50497, depth=2,
+                  origin="unknown") +
+            " ui_in_game_menu_at_call=0 ui_engine_paused_at_call=0",
+            owner("StopTransitionSxd", 1, inner=49) + bank,
+            "RUNTIME-AUDIO-UI-STATE: t_ms=50864 in_game_menu=0 "
+            "engine_paused=0 foreground=1",
+        ]
+        result = M.summarize("\n".join(data))
+        self.assertEqual(result["observed_transition_counts"],
+                         {"pause": 2, "resume": 0, "stop": 1})
+        self.assertTrue(result["zero_recorded_resume_is_not_proof_of_no_native_resume"])
+        self.assertEqual(result["ownership_has_native_loaded_bank_provenance"], 3)
+        self.assertEqual(len(result["close_same_driver_event_pairs"]), 1)
+        self.assertEqual(
+            result["close_same_driver_event_pairs"][0][
+                "outer_loaded_bank_and_index"], [9, 5])
+        stop = result["owned_stops_at_nested_depth"][0]
+        self.assertEqual(stop["global_depth"], 2)
+        self.assertEqual(stop["native_menu_flag_at_call"], 0)
+        self.assertEqual(stop["engine_pause_flag_at_call"], 0)
+        self.assertEqual(stop["outer_loaded_bank_and_index"], [9, 5])
+        self.assertEqual(stop["inner_loaded_bank_and_index"], [9, 6])
+        self.assertTrue(
+            stop["menu_flag_zero_is_not_a_resume_or_stop_reason_proof"])
+        self.assertTrue(result["in_game_menu_flag_cannot_distinguish_ESC_from_F1"])
+
     def test_real_loaded_bank_provenance_is_separate_from_Id_halves(self):
         def mk(event, sample, timestamp, bank, index, inner_bank, inner_index):
             return (
