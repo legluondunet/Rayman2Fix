@@ -214,6 +214,14 @@ Public [Ray2Get documentation](https://github.com/Synthesis/ray2get) identifies 
 
 The three named `MUSIC*.DAT` entries in the *level archive directory* therefore should be treated as likely *metadata candidates*, not assumed to be the actual compressed waveform files. The next safe static question is how the event controller's descriptor is allocated and which resource identifiers it carries; do not substitute the filename-based music list for a runtime identity.
 
+## File-path manifest corroboration (non-CD extra section only)
+
+A direct bounded scan of the supplied `rayman2(4).exe` **`.extra2` section** finds **1,284 distinct `DATA\\WORLD\\SOUND\\*.APM` paths** and **405 distinct `*.BNM` paths**. All BNM entries are exactly `BNK_0.BNM` through `BNK_404.BNM`, with no gap. This extra section is **not present in the reference retail-CD assumptions**; its file-path entries establish filenames for a modified distribution, **not actual loaded audio bytes**, bank IDs, or corresponding original-CD files.
+
+These path names independently overlap with the publicly documented [Ray2Get sequence list](https://github.com/Synthesis/ray2get/blob/master/file_sequences.txt) (2018): the main-menu music loops through `MM01` ... `MM10`, all of which appear in the extra2 inventory, and the introductory `JailMus` sequence corresponds to an available `JAILMUS.APM` filename. The inventory also contains `MAIN TITLE.APM`. This is a **filename cross-check**; it is not evidence that a specific Theme resource or driver handle plays a particular sequence during ESC.
+
+The offline PE inspector's optional `reference_extra2_file_manifest` section is SHA-gated to the **exact supplied non-approved executable**, reports only aggregate path counts and a few boolean name-presence checks, and does **not** export content or claim that a stock CD contains those paths.
+
 ## Safety requirements before a functional `MusicInPauseMenu` option
 
 - Prove a **music resource identity** independently of driver pointer, table index, SXD transport, default volume or descriptor equality.
