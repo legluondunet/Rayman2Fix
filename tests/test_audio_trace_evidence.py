@@ -80,6 +80,26 @@ class TraceEvidenceTests(unittest.TestCase):
         self.assertFalse(result["focus_loss_not_proven_when_missing"])
         self.assertTrue(result["theme_ownership_does_not_prove_audible_music"])
 
+    def test_native_menu_and_engine_pause_samples_cannot_prove_esc_or_f1(self):
+        data = "\\n".join((
+            "RUNTIME-AUDIO-UI-STATE: t_ms=700 in_game_menu=0 "
+            "engine_paused=0 foreground=1 private_path=KEEP_PRIVATE",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=900 in_game_menu=1 "
+            "engine_paused=0 foreground=1",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=1200 in_game_menu=1 "
+            "engine_paused=1 foreground=0",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=1400 in_game_menu=9 "
+            "engine_paused=0 foreground=1",
+        ))
+        result = M.summarize(data)
+        self.assertEqual(
+            [(x["in_game_menu"],x["engine_paused"],x["foreground"])
+             for x in result["native_ui_state_samples"]],
+            [(0,0,1),(1,0,1),(1,1,0)],
+        )
+        self.assertTrue(result["in_game_menu_flag_cannot_distinguish_ESC_from_F1"])
+        self.assertNotIn("KEEP_PRIVATE",str(result))
+
     def test_empty_log(self):
         result = M.summarize("irrelevant log\nRUNTIME-AUDIO-TRACE: enabled=1 schema=2")
         self.assertEqual(result["events_sampled"], 0)
