@@ -77,6 +77,12 @@ The equal-descriptor mask is an *observational comparison of four 32-bit fields*
 
 The static 24-pointer archive table at `0x4A2090` has three groups of eight. For discs 0, 1, 2, `SOUNDS*.DAT` occurs at indices **4, 12, 20** and `MUSIC*.DAT` at **5, 13, 21** (zero-based). These pointers establish archive *names*, not a direct connection to type-11 events. Indirect code reads of the base pointer at `0x44DE9D`, `0x44EB6C` and `0x44F13A` refer to the first archive entry, `LEVELS0.DAT`, rather than MUSIC archives. The reference EXE contains additional `.extra` sections that may be GOG-specific; do not interpret them as approved-CD filesystem behavior.
 
+## Separating archive metadata from playable music
+
+Public [Ray2Get documentation](https://github.com/Synthesis/ray2get) identifies the Rayman 2 PC **soundtrack itself** as sequences of `.apm` files that can be reconstructed/replaced per location (see its `file_sequences.txt`). A [community extraction discussion](https://raymanpc.com/forum/threads/does-anyone-know-how-to-rip-the-sound-files-from-the-pc-port-of-rayman.74978/) places these APM/BNM sound resources under `Data/World/Sound`. These are independent, external format descriptions, **not proof** that this binary's type-11 sound event was loaded from an APM, BNM or `MUSIC*.DAT` archive.
+
+The three named `MUSIC*.DAT` entries in the *level archive directory* therefore should be treated as likely *metadata candidates*, not assumed to be the actual compressed waveform files. The next safe static question is how the event controller's descriptor is allocated and which resource identifiers it carries; do not substitute the filename-based music list for a runtime identity.
+
 ## Safety requirements before a functional `MusicInPauseMenu` option
 
 - Prove a **music resource identity** independently of driver pointer, table index, SXD transport, default volume or descriptor equality.
