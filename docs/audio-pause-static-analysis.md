@@ -229,6 +229,18 @@ Take a participating Theme-related record with **global depth = 1** and **pause 
 
 Thus a patch that merely swallows `PauseTransitionSxd` during ESC **can leave audio playing after Alt-Tab**, because the game records the pause as completed independently of the driver. It can also create a spurious resume at focus gain. There is an additional edge case at **depth = 0**: the first mark written is **0**, so the next nested pause can still invoke the driver a second time. Both cases are covered by a pure test model in [`tests/test_audio_pause_invariants.py`](../tests/test_audio_pause_invariants.py), with direct call-site, opcode and branch-order verification integrated into [`tools/inspect_rayman2_audio.py`](../tools/inspect_rayman2_audio.py). The model is a logical counterexample based on static code, **not a report that sound was actually heard after Alt-Tab**.
 
+### Cross-check with existing Wine traces: two calls, one depth
+
+The old owner logs, without any additional Wine test, corroborate the structural need to account for two possible pause paths. At the first ESC opening in `Rayman2Fix(20261113-091415).log`:
+
+- `PauseTransitionSxd` at **45.605 s** and **45.606 s**, both `audio_origin=game-script-pause`, `sound_slot=1`, `sound_matches=1`, and `global_pause_depth=1`.
+- The corresponding `ResumeTransitionSxd` calls at **55.988–55.989 s** both show `global_pause_depth=1`.
+- Two later script-origin pause calls at **72.027–72.028 s** also have the same depth, slot and handle match; the native source-id comparison mask is `6` versus earlier `14`.
+
+Because the global routine at `0x4580B0` increments depth **only after its full 64-record loop**, two identical driver calls observed at the same depth are **consistent with two routes being invoked by the same global operation**, not necessarily two separate calls to that global routine. The disassembly provides **two possible routes**: directly through the inner transition record and indirectly through the outer `SND_E_TR_Theme` record's controller callback `0x459C40`. The outer record has a distinct game-side handle, so `sound_matches=1` for the *driver* handle does not preclude two paths referring to it.
+
+This remains a **constrained hypothesis, not proof of the executed callback stacks**, because the old trace sampled the driver interface, not both of its higher-level callers. The earlier `sequence_active=0` value is also ambiguous because its instrumentation only accepted a raw active state equal to exactly one. Do not turn this hypothesis into a bypass rule.
+
 ### Design requirements that follow
 
 1. Establish the actual **Theme resource ID / bank ID** and current nested sound instance before any exclusion; an SXD transport, driver handle or sound-table index is insufficient to identify music.
