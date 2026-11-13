@@ -189,6 +189,19 @@ def inspect(executable: Path) -> dict:
             "transport_type_is_separate":
                 pe.at(0x458236, 3) == bytes.fromhex("8b4604"),
         }
+        # Resource groups are introduced by *command-stream data*,
+        # not by assuming a CD or MUSIC.DAT index. Two original command
+        # tokens 0x5D/0x5E feed the same group registry preload path.
+        result["resource_group_registration"] = {
+            "command_class_5d_or_5e":
+                pe.at(0x4507D5, 6) == bytes.fromhex("83e85d741048"),
+            "single_group_register": pe.call_target(0x4507E3)
+                == 0x454050,
+            "listed_group_register": pe.call_target(0x450811)
+                == 0x454050,
+            "group_register_source": "command-stream",
+            "archive_identity_still_unproven": True,
+        }
         result["resource_handle_resolver"] = {
             "function": "0x00453F90",
             "group_high16": pe.at(0x453F9C, 3)
