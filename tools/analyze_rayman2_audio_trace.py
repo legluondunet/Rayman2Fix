@@ -43,11 +43,51 @@ def native_bank_location(fields_map: dict[str, str], prefix: str) -> tuple[int, 
     return None
 
 
+def bracket_observed_menu_flag_changes(
+    observations: list[dict],
+) -> tuple[list[dict], int]:
+    """Consecutive 0/1 snapshots bound *observations*, not true UI events.
+
+    A VM script may set this flag before/after a sound driver call. Polling
+    and sample caps mean intermediate flips can be missed. F1 versus ESC is
+    never inferred. A timestamp reset within one session invalidates an
+    interval; header-defined sessions never bridge.
+    """
+    prior_by_session: dict[int, dict] = {}
+    windows: list[dict] = []
+    nonmonotonic = 0
+    for obs in observations:
+        if obs["value"] not in (0, 1) or obs["ms"] < 0:
+            continue
+        previous = prior_by_session.get(obs["session"])
+        if previous is not None and obs["ms"] < previous["ms"]:
+            nonmonotonic += 1
+            prior_by_session[obs["session"]] = obs
+            continue
+        if previous is not None and obs["value"] != previous["value"]:
+            windows.append({
+                "session": obs["session"],
+                "observed_change": (
+                    "0-to-1" if obs["value"] == 1 else "1-to-0"),
+                "earliest_bound_ms": previous["ms"],
+                "latest_bound_ms": obs["ms"],
+                "bounds_width_ms": obs["ms"] - previous["ms"],
+                "previous_sample_source": previous["source"],
+                "new_sample_source": obs["source"],
+                "exact_change_time_not_observed": True,
+                "intermediate_state_changes_cannot_be_excluded": True,
+                "not_proof_of_ESC_or_F1_menu": True,
+            })
+        prior_by_session[obs["session"]] = obs
+    return windows, nonmonotonic
+
+
 def summarize(text: str) -> dict:
     events: list[dict] = []
     by_event_sample: dict[tuple[int, str, int], dict] = {}
     unmatched_owners = 0
     ui_states: list[dict] = []
+    menu_flag_observations: list[dict] = []
     schema2 = False
     session = 0  # 0 means data before any explicit session header
     unmarked_prefix_events = 0
@@ -78,6 +118,13 @@ def summarize(text: str) -> dict:
             }
             events.append(obj)
             by_event_sample[(session, event, sample)] = obj
+            if obj["ui_in_game_menu_at_call"] in (0, 1):
+                menu_flag_observations.append({
+                    "session": session,
+                    "ms": obj["ms"],
+                    "value": obj["ui_in_game_menu_at_call"],
+                    "source": "before-sampled-audio-driver-call",
+                })
         elif UI_STATE in line:
             data = fields(line.split(UI_STATE, 1)[1])
             menu, engine = number(data, "in_game_menu"), number(data, "engine_paused")
@@ -88,6 +135,12 @@ def summarize(text: str) -> dict:
                     "in_game_menu": menu,
                     "engine_paused": engine,
                     "foreground": number(data, "foreground"),
+                })
+                menu_flag_observations.append({
+                    "session": session,
+                    "ms": number(data, "t_ms"),
+                    "value": menu,
+                    "source": "periodic-ui-poll-change",
                 })
         elif OWNER in line:
             data = fields(line.split("RUNTIME-AUDIO-THEME-OWNER:", 1)[1])
@@ -214,11 +267,16 @@ def summarize(text: str) -> dict:
         for (session_id, root), inner in sorted(roots.items())
     ]
     focus_out = any(e["foreground"] == 0 for e in events)
+    menu_windows, menu_nonmonotonic = bracket_observed_menu_flag_changes(
+        menu_flag_observations)
     return {
         "schema_2_header_seen": schema2,
         "explicit_sessions_detected": session,
         "unmarked_prefix_events": unmarked_prefix_events,
         "native_ui_state_samples": ui_states,
+        "observed_native_menu_flag_change_windows": menu_windows,
+        "unusable_nonmonotonic_menu_timestamp_pairs": menu_nonmonotonic,
+        "menu_windows_are_not_confirmed_ESC_UI_lifetimes": True,
         "in_game_menu_flag_cannot_distinguish_ESC_from_F1": True,
         "events_sampled": len(events),
         "events_by_kind": dict(sorted(Counter(e["event"] for e in events).items())),
