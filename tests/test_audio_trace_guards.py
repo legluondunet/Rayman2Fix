@@ -112,6 +112,18 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("not music-identified",self.runtime)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
+    def test_transition_descriptor_identity_is_read_only_and_bounded(self):
+        self.assertIn("g_last_transition_play_descriptor",self.runtime)
+        self.assertIn("transition_desc_match=%u",self.runtime)
+        self.assertIn("entries[i].words[1]==last_descriptor",self.runtime)
+        self.assertIn("out.match_count!=1u",self.runtime)
+        self.assertIn("descriptor_transport=%u",self.runtime)
+        self.assertIn("descriptor_volume=%d",self.runtime)
+        self.assertIn("event<16u",self.runtime)
+        self.assertIn("ReadProcessMemory(",self.runtime)
+        self.assertIn("0x4582A4",self.runtime)
+        self.assertNotIn("MusicInPauseMenu",self.config)
+
     def test_exact_owner_cd_slots_are_named_and_bounded(self):
         expected={
             "PauseSxd":"0xB8664", "ResumeSxd":"0xB8668",
