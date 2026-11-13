@@ -182,39 +182,49 @@ assets are preserved.
 On a disc whose volume label is exactly `RAYMAN2`, we recognize **23 exact
 `Data/World/Levels/*.DAT` paths** discarded by the author's original
 [Lutris CD installation script](https://lutris.net/games/install/39141/view).
-Those entries stay visible in `--inspect`, but are skipped during
-`--extract` (including any unreadable/fictitiously large extents).
-**Other unrecognized out-of-range files no longer abort `--inspect`**: they
-are shown with a `SUSPECT` label and their path, LBA and size are recorded
-in the log. `--extract` still refuses to start if any such unknown entry
-exists. No invalid data is silently copied. The log
-distinguishes **declared total bytes**, **source image size**, **selected
-extraction bytes** and each known exclusion. Unknown/unlisted oversized files
-still cause a safe error; no blanket skip-by-size is performed.
+Those known exclusions are skipped during normal installation, including
+unreadable or fictitiously large CD extents. Other unrecognized out-of-range
+files still block installation safely, with a `SUSPECT` diagnostic in the
+installer log. The log distinguishes declared total bytes, physical image
+size, selected extraction bytes and each exclusion; there is no blanket
+skip-by-size.
+
+### Installer commands
 
 ```text
-Rayman2Fix.exe                    (automatic install/verify workflow)
-Rayman2Fix.exe --verify           (check local CD file-size receipt)
-Rayman2Fix.exe --inspect "my-disc.iso"
-Rayman2Fix.exe --inspect "my-disc.cue"
-Rayman2Fix.exe --extract "my-disc.cue"
-Rayman2Fix.exe --extract "my-disc.iso" "custom-output-folder"
-Rayman2Fix.exe --help
+Rayman2Fix.exe                        automatic install / verify / launch
+Rayman2Fix.exe --install-only         install / verify, but never launch
+Rayman2Fix.exe --launch-no-verify     attempt direct game launch, no checks or repair
+Rayman2Fix.exe --verify              verify local CD receipt, sizes and SHA-256
+Rayman2Fix.exe --version             display version
+Rayman2Fix.exe --help                display CLI help (also -h)
+Rayman2Fix.exe --verbose             print detailed diagnostics to console
 ```
 
-The explicit diagnostic `--extract` command still targets
-`Rayman2Fix/DiscContent/` by default. Both it and the automatic installer
-display a readable command-line progress report: current operation, copied
-bytes and files at 5% increments, then a success summary including the
-actual files/bytes written, excluded files/bytes, destination, and duration.
-The automatic installer also reports the audio, graphics configuration,
-executable patch and final SHA-256 verification status. Progress uses
-ordinary flushed lines (no ANSI or terminal-only carriage returns), so it
-remains readable in Windows cmd/PowerShell, Wine and redirected output. **The no-argument installer does
-not use DiscContent**: it publishes the staged assets directly under
-`Rayman2Fix/`. Extraction never runs the CD's own installers or modifies
-the retail executable. `--verify` checks installed file presence, sizes and SHA-256,
-but is not a trusted retail-edition allowlist/profile check.
+`--verbose` is an optional modifier, e.g. `Rayman2Fix.exe --install-only --verbose`;
+it may appear before or after the primary command. If no command is given,
+the launcher detects an existing installation or exactly one neighboring
+`.iso`/`.cue` image, safely stages files under `Rayman2Fix/`, verifies
+them, and attempts to launch the approved game. `--install-only` uses
+the **same installation and verification logic** but finishes without
+starting the game. The old diagnostic `--inspect` and `--extract`
+commands are intentionally no longer accepted; no duplicate
+`DiscContent/` extraction path is exposed.
+
+The installer displays progress with ordinary flushed text lines, so it
+remains readable in Windows cmd/PowerShell, Wine and redirected output.
+It reports copied files/bytes, exclusions, audio and graphics settings,
+executable patch and SHA-256 results. The ordinary `--verify` command checks
+installed file presence, sizes and SHA-256 against a **local receipt**,
+not a trusted retail-edition allowlist.
+
+`--launch-no-verify` is for intentional troubleshooting: it does **not**
+verify executable presence, hashes, backup, CD assets or GameFrame and it
+does not extract, patch, repair or provision game DLLs. It attempts to start
+`Rayman2Fix/rayman2.exe` using the existing display settings (desktop
+defaults if the INI is absent); Win32 reports the error if the file is
+missing. It can therefore attempt an unsupported executable and **does not**
+imply that the installation was authenticated.
 
 GameFrame integration means the correct open-source graphics DLL is installed
 and SHA-256-verified; it does **not** prove that Rayman 2 can render with it.
