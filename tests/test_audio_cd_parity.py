@@ -197,6 +197,30 @@ class ParityTests(unittest.TestCase):
                 MOD.inspect_native_menu_indicators(a)["native_relationships_verified"]
             )
 
+    def test_native_menu_viewport_switch_is_code_verified_not_esc_verified(self):
+        class PE:
+            def __init__(self):
+                self.render = MOD.MENU_RENDER_BRANCH_BYTES
+                self.targets = {
+                    0x40B014: 0x424440,  # in-game menu UI camera
+                    0x40B029: 0x429F70,  # normal scene branch
+                }
+
+            def at(self, va, size):
+                return self.render[:size] if va == 0x40B003 else bytes(size)
+
+            def call_target(self, va):
+                return self.targets.get(va)
+
+        pe = PE()
+        self.assertEqual(len(MOD.MENU_RENDER_BRANCH_BYTES), 47)
+        self.assertTrue(MOD.verify_native_menu_viewport_branch(pe))
+        pe.targets[0x40B029] = 0x424440
+        self.assertFalse(MOD.verify_native_menu_viewport_branch(pe))
+        pe.targets[0x40B029] = 0x429F70
+        pe.render = b"\x90" + pe.render[1:]
+        self.assertFalse(MOD.verify_native_menu_viewport_branch(pe))
+
     def test_menu_xrefs_and_opcode_assumptions_are_anchored(self):
         self.assertEqual(len(MOD.AI_INGAME_MENU_XREFS), 10)
         self.assertEqual(len(MOD.ENGINE_PAUSE_XREFS), 3)
