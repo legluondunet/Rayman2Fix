@@ -222,6 +222,16 @@ class AudioStaticInspectorTests(unittest.TestCase):
         self.assertIn("pe.call_target(0x453DD6)",src)
         self.assertIn('"retail_cd_bank_verified": False',src)
 
+    def test_reference_bank_id_is_formatted_as_bnm_filename(self):
+        src=SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('result["bank_id_to_bnm_filename_reference"]',src)
+        self.assertIn('pe.name_at(0x4A252C) == "bnk_%d.BNM"',src)
+        self.assertIn("pe.at(0x453945,3)",src)
+        self.assertIn("pe.call_target(0x453948)",src)
+        self.assertIn("pe.at(0x45387F,5)",src)
+        self.assertIn("pe.at(0x45392E,3)",src)
+        self.assertIn('"reference_only_not_verified_on_original_cd": True',src)
+
     def test_unknown_binary_never_invents_structural_matches(self):
         with tempfile.TemporaryDirectory() as d:
             fn = Path(d) / "synthetic.exe"
