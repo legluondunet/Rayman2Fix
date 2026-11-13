@@ -294,6 +294,24 @@ def inspect(executable: Path) -> dict:
         # event/resource table offsets from the 44-byte BNM header.
         # Never infer resources start at 44 + 32*event_count.
         # Native 0x453DD6 resolves SND_EVT_Son_Play.uResource.Id.
+        # The source EXE's sound-bank allocator stores the SAME numeric
+        # bank ID at descriptor +4 and formats its filename using
+        # literal "bnk_%d.BNM" at 0x4A252C. This closes bank ID→name
+        # for this reference only; not a proof of the protected retail CD.
+        result["bank_id_to_bnm_filename_reference"] = {
+            "formatter": pe.name_at(0x4A252C),
+            "formatter_is_bnk_decimal_bnm":
+                pe.name_at(0x4A252C) == "bnk_%d.BNM",
+            "bank_id_record_write": pe.at(0x453945,3)
+                == bytes.fromhex("894604"),
+            "bank_filename_formatter_call": pe.call_target(0x453948)
+                == 0x453870,
+            "formatter_literal_push": pe.at(0x45387F,5)
+                == bytes.fromhex("682c254a00"),
+            "bank_filename_buffer_pointer": pe.at(0x45392E,3)
+                == bytes.fromhex("8d560c"),
+            "reference_only_not_verified_on_original_cd": True,
+        }
         result["bnm_disk_table_relocation"] = {
             "source": "ACP_Ray2/SND and native 0x453990",
             "retail_cd_bank_verified": False,
