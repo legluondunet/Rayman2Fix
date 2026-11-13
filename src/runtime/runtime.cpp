@@ -870,7 +870,24 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     const char* audio_origin="not-sampled";
     char code_rva_preview[96]{};
     unsigned scanned_words=0,wrapper_returns=0,confirmed_pairs=0;
+    // Supplement the coarse UI poll with a BEFORE-driver-call snapshot.
+    // Neither game flag proves an ESC menu, and neither is a F1 detector.
+    int in_game_menu_at_call=-1,engine_paused_at_call=-1;
     if(sampled) {
+        auto* game_module=reinterpret_cast<const BYTE*>(
+            GetModuleHandleW(nullptr));
+        BYTE menu_byte=0,paused_byte=0;
+        SIZE_T menu_read=0,pause_read=0;
+        if(game_module &&
+           ReadProcessMemory(GetCurrentProcess(),game_module+0xB9BC8,
+                             &menu_byte,sizeof(menu_byte),&menu_read) &&
+           menu_read==sizeof(menu_byte) && menu_byte<=1u)
+            in_game_menu_at_call=int(menu_byte);
+        if(game_module &&
+           ReadProcessMemory(GetCurrentProcess(),game_module+0x100640,
+                             &paused_byte,sizeof(paused_byte),&pause_read) &&
+           pause_read==sizeof(paused_byte) && paused_byte<=1u)
+            engine_paused_at_call=int(paused_byte);
         source=inspect_audio_sound_context(arg);
         sequence=inspect_audio_sequence_context(arg);
         if((slot==2u || slot==3u || slot==11u) && event<8u)
@@ -888,7 +905,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
     char line[1024]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_state_class=%u sequence_ref_class=%u sequence_same_handle=%u transition_last_play_match=%u transition_desc_match=%u desc_words_readable=%u desc_words_equal_mask=%u desc_volume=%u play_volume=%u desc_resource_group=%d desc_resource_index=%d play_resource_group=%d play_resource_index=%d desc_resource_id_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u (read-only origin; forwarded unchanged)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_state_class=%u sequence_ref_class=%u sequence_same_handle=%u transition_last_play_match=%u transition_desc_match=%u desc_words_readable=%u desc_words_equal_mask=%u desc_volume=%u play_volume=%u desc_resource_group=%d desc_resource_index=%d play_resource_group=%d play_resource_index=%d desc_resource_id_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u ui_in_game_menu_at_call=%d ui_engine_paused_at_call=%d (read-only origin; forwarded unchanged; UI flags not ESC/F1 proof)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
         unsigned(arg==0),source.table_index,source.match_count,source.transport,
@@ -902,7 +919,8 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         source.play_record_index,source.descriptor_resource_id_match,
         source.pause_depth,audio_origin,
         unsigned(game_window_is_foreground()),
-        unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0));
+        unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0),
+        in_game_menu_at_call,engine_paused_at_call);
     log_line(line);
     if((slot==2u || slot==3u || slot==11u) && event<8u) {
         char ownership[344]{};
