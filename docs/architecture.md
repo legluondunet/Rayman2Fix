@@ -19,7 +19,8 @@ screen-world viewport X squeeze at once.
 
 ```text
 Rayman2Fix.exe                       launcher / installer / verifier
-Rayman2Fix.log                       one log, reset at each launcher start
+Rayman2Fix_installer.log             installer + launcher, reset per launch
+Rayman2Fix.log                       DLL + GameFrame, reset at game launch
 Rayman2Fix/
     rayman2.exe                      copied from original CD (not yet playable)
     Rayman2Fix.dll                   unpacked from launcher (currently inert)
@@ -60,7 +61,8 @@ SDL3 and controller support are deferred to a subsequent phase.
    `Rayman2Fix.dll`, retaining exactly one rolling backup:
    `Rayman2Fix.dll.bak` (the immediately previous DLL). An older `.bak` is
    discarded after successful replacement; legacy numbered backups migrate.
-   Write a single optional log beside the launcher with passive system info.
+   Write `Rayman2Fix_installer.log` beside the launcher with passive system
+    information; reserve `Rayman2Fix.log` for the game and its DLL.
 3. If `Rayman2Fix/rayman2.exe` exists, check its **local CD receipt**:
    expected file names, sizes and SHA-256 hashes, sound initialization and game executable.
    If any file is missing or changed, refuse startup, **never auto-repair or

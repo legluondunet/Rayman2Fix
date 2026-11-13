@@ -319,7 +319,7 @@ Hor+ 3D and the 4:3 HUD. This rollback does not merge the PR.
 
 The currently approved 3D/2D rendering is unchanged. While `[Debug] Log=1`,
 the pinned GameFrame Glide wrapper emits a **small capped number** of
-`RUNTIME-GLIDE:` lines to the existing `Rayman2Fix.log` (no second log):
+`RUNTIME-GLIDE:` lines to the existing `Rayman2Fix.log` (the dedicated game/runtime log):
 framebuffer pixel mode and colour format, large CPU framebuffer transfers,
 and early texture/palette uploads. These diagnostics let us distinguish a
 16-bit R/B ordering error in LFB images from palette/texture upload errors.
@@ -393,7 +393,8 @@ On first execution it generates (and subsequently preserves):
 
 ```text
 Rayman2Fix.exe
-Rayman2Fix.log                  (generated beside EXE when Log=1)
+Rayman2Fix_installer.log        (installer/launcher when Log=1)
+Rayman2Fix.log                  (DLL, GameFrame and game, after launch)
 Rayman2Fix/
     Rayman2Fix.dll             (unpacked from the EXE; inert placeholder)
     Rayman2Fix.dll.bak         (only if updated; one latest backup)
@@ -466,7 +467,12 @@ their custom values, unrelated settings and comments.
 These are maximum frame rates, not guaranteed measured FPS: actual performance
 may be lower. Very high limits may affect classic-game timing and require
 in-game testing; 60 is the default setting to validate on real hardware.
-`Log=0` suppresses diagnostics and removes stale launcher logs.
+`Log=0` suppresses both installer and game/runtime diagnostics and removes
+both stale log files. With `Log=1`, the installer log is reset at each
+launcher invocation; the runtime log is reset only when a verified game
+is about to launch. Launcher-only commands or a missing-CD error do not
+erase the previous runtime trace. Both logs are beside `Rayman2Fix.exe`,
+never rotate into `.bak` history, and share the single INI switch.
 
 Rayman 2 still needs its legacy `ubi.ini` in the game directory, but **the
 user must not maintain it**. The launcher preserves its unrelated CD settings
@@ -578,7 +584,8 @@ The launcher now performs an initial game-startup experiment with strict
 original/unprotected EXE SHA-256 and size checks. It starts `rayman2.exe`
 through Win32 `CreateProcessW` with `Rayman2Fix/` as the working directory,
 waits for the process to exit, and logs the full exit code and duration in
-the existing single `Rayman2Fix.log`. Invalid editions are never executed.
+`Rayman2Fix_installer.log`; the injected DLL and GameFrame diagnostics
+go to the separate `Rayman2Fix.log`. Invalid editions are never executed.
 Testing is required on both Windows 11 and Wine/Proton before claiming support.
 
 ## Original executable and patch backup

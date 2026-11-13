@@ -120,23 +120,32 @@ int main() {
     try {
         r2fix::Startup app(root / "Rayman2Fix.exe");
         app.initialize();
-        // The child runtime writes to the same launcher-side log while the
-        // launcher waits. Verify ordering and append-only reopen behavior.
         app.log("LAUNCH-PRETEST: launcher active");
-        app.suspend_logging_for_child();
+        check(!fs::exists(root / "Rayman2Fix.log"),
+              "runtime log is not created during installer initialization");
+        app.prepare_runtime_log();
         {
-            std::ofstream child(root / "Rayman2Fix.log", std::ios::binary | std::ios::app);
-            check(static_cast<bool>(child), "child should be able to append launcher log");
+            std::ofstream child(root / "Rayman2Fix.log",
+                                std::ios::binary | std::ios::app);
+            check(static_cast<bool>(child), "DLL can append to runtime log");
             child << "RUNTIME-HUD: child log visible\n";
-            check(static_cast<bool>(child), "child runtime log write succeeds");
+            check(static_cast<bool>(child), "runtime log write succeeds");
         }
-        app.resume_logging_after_child();
         app.log("LAUNCH-POSTTEST: launcher resumed");
-        const auto shared_log = contents(root / "Rayman2Fix.log");
-        check(shared_log.find("LAUNCH-PRETEST: launcher active") != std::string::npos &&
-              shared_log.find("RUNTIME-HUD: child log visible") != std::string::npos &&
-              shared_log.find("LAUNCH-POSTTEST: launcher resumed") != std::string::npos,
-              "single launcher/runtime log preserves all messages");
+        const auto installer_log=contents(root / "Rayman2Fix_installer.log");
+        const auto runtime_log=contents(root / "Rayman2Fix.log");
+        check(installer_log.find("LAUNCH-PRETEST: launcher active") != std::string::npos &&
+              installer_log.find("LAUNCH-POSTTEST: launcher resumed") != std::string::npos &&
+              installer_log.find("RUNTIME-HUD:") == std::string::npos &&
+              runtime_log.find("RUNTIME-HUD: child log visible") != std::string::npos &&
+              runtime_log.find("LAUNCH-PRETEST:") == std::string::npos,
+              "installer and runtime traces must not mix");
+        app.prepare_runtime_log();
+        check(contents(root / "Rayman2Fix.log").find("RUNTIME-HUD:") ==
+                  std::string::npos &&
+              contents(root / "Rayman2Fix_installer.log").find(
+                  "LAUNCH-PRETEST:") != std::string::npos,
+              "next game launch clears only the dedicated runtime log");
         check(fs::exists(root / "Rayman2Fix" / "Rayman2Fix.ini"),
               "bootstrap initialization must create INI when absent");
         check(contents(root / "Rayman2Fix" / "Rayman2Fix.ini").find("Force4x3=0") != std::string::npos &&

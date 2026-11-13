@@ -297,8 +297,8 @@ void log_line(const char* message) {
     wchar_t path[MAX_PATH]{};
     const DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
     if (!n || n >= MAX_PATH) return;
-    // The loaded game is ...\Rayman2Fix\rayman2.exe; parent log sits one
-    // level up beside Rayman2Fix.exe. Use append-only, no extra log file.
+    // The loaded game is ...\Rayman2Fix\rayman2.exe; its dedicated
+    // runtime log sits one level up beside the launcher (append-only).
     wchar_t* last = wcsrchr(path, L'\\');
     if (!last) return;
     *last = L'\0'; // Remove rayman2.exe

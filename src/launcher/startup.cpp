@@ -51,7 +51,8 @@ Startup::Startup(const fs::path& executable) {
     root_ = fs::absolute(executable).parent_path();
     game_dir_ = root_ / "Rayman2Fix";
     ini_path_ = game_dir_ / "Rayman2Fix.ini";
-    log_path_ = root_ / "Rayman2Fix.log";
+    log_path_ = root_ / "Rayman2Fix_installer.log";
+    runtime_log_path_ = root_ / "Rayman2Fix.log";
 }
 
 #ifdef _WIN32
@@ -288,14 +289,16 @@ void Startup::initialize() {
         // Prevent a stale log from looking like the latest run.
         std::error_code ignored;
         fs::remove(log_path_, ignored);
+        fs::remove(runtime_log_path_, ignored);
         return;
     }
-    // Exactly one diagnostic file beside the launcher. Clear it each run.
+    // The installer log is reset each launcher run; an earlier game log is
+    // retained unless another verified game session actually starts.
     log_stream_.open(log_path_, std::ios::binary | std::ios::trunc);
-    if (!log_stream_) throw std::runtime_error("cannot create Rayman2Fix.log");
+    if (!log_stream_) throw std::runtime_error("cannot create Rayman2Fix_installer.log");
     log(std::string("Rayman2Fix ") + RAYMAN2FIX_VERSION + "-bootstrap commit=" + RAYMAN2FIX_BUILD_COMMIT);
     log(std::string("START: local_time=") + when);
-    log("LAYOUT: launcher=Rayman2Fix.exe install=Rayman2Fix/ config=Rayman2Fix/Rayman2Fix.ini log=Rayman2Fix.log");
+    log("LAYOUT: launcher=Rayman2Fix.exe install=Rayman2Fix/ config=Rayman2Fix/Rayman2Fix.ini installer_log=Rayman2Fix_installer.log runtime_log=Rayman2Fix.log");
     log("CONFIG: Debug.Log=" +
         std::string(debug == "1" ? "1" : "invalid or missing (default 1)"));
     const auto display = option("Graphics", "Resolution");
@@ -321,17 +324,14 @@ void Startup::initialize() {
     log("INSTALL: no verified CD edition profile, no playable installation");
 }
 
-void Startup::suspend_logging_for_child() {
-    if (!logging_enabled_ || !log_stream_.is_open()) return;
-    log_stream_.flush();
-    if (!log_stream_) throw std::runtime_error("cannot flush launcher log before game");
-    log_stream_.close();
-}
-
-void Startup::resume_logging_after_child() {
-    if (!logging_enabled_ || log_stream_.is_open()) return;
-    log_stream_.open(log_path_, std::ios::binary | std::ios::app);
-    if (!log_stream_) throw std::runtime_error("cannot resume launcher log after game");
+void Startup::prepare_runtime_log() {
+    if (!logging_enabled_) return;
+    std::ofstream out(runtime_log_path_, std::ios::binary | std::ios::trunc);
+    if (!out) throw std::runtime_error("cannot create Rayman2Fix.log");
+    out << "RUNTIME-SESSION: Rayman2Fix.dll and GameFrame diagnostics; "
+           "installer=Rayman2Fix_installer.log\n";
+    out.close();
+    if (!out) throw std::runtime_error("cannot initialize Rayman2Fix.log");
 }
 
 void Startup::log(const std::string& line) {

@@ -1,3 +1,23 @@
+## Current log separation — 13 November 2026
+
+The one `[Debug] Log=1` option enables two **independent** files beside
+`Rayman2Fix.exe`:
+
+- `Rayman2Fix_installer.log`: installer/launcher, CD extraction and
+  verification, INI settings, DLL deployment, process start, game exit
+  status and injection results. Reset on every launcher invocation.
+- `Rayman2Fix.log`: injected DLL, Glide, Hor+, HUD, text and cinematic
+  diagnostics. Reset **only before a verified game launch**, so a
+  launcher-only invocation cannot erase the previous runtime trace.
+
+`Log=0` suppresses both and removes stale copies. Neither log creates
+rotated backups. Because they write separate files, the installer no
+longer pauses its log stream while the game is running. Historical
+`Rayman2Fix(yyyymmdd-hhmmss).log` samples documented below were captured
+**before this split** and included both sources.
+
+---
+
 ## 12 Nov 2026: text starts AFTER the 90-second diagnostics
 
 The owner's Wine log `Rayman2Fix(20261112-182646).log`

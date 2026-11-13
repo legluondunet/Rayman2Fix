@@ -86,11 +86,12 @@ jobs:
           if (!(Test-Path build/Release/Rayman2Fix/Rayman2Fix.ini)) {
             throw "Expected persistent Rayman2Fix.ini alongside launcher"
           }
-          if (!(Test-Path build/Release/Rayman2Fix.log)) {
-            throw "Expected single launcher-side log"
+          if (!(Test-Path build/Release/Rayman2Fix_installer.log) -or
+              (Test-Path build/Release/Rayman2Fix.log)) {
+            throw "Expected installer log only before game launch"
           }
-          if (!(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'SYS-OS:')) {
-            throw "Expected system inventory in the launcher log"
+          if (!(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern 'SYS-OS:')) {
+            throw "Expected system inventory in the installer log"
           }
           $ini = 'build/Release/Rayman2Fix/Rayman2Fix.ini'
           $initial = (Get-Content $ini | Where-Object {
@@ -105,17 +106,20 @@ jobs:
               $initial[7] -ne 'SkipCinematics=0') {
             throw "Bootstrap INI must contain disabled optional 4:3 and cinematic skip"
           }
-          # Exercise Win32 CRLF and UTF-8 BOM parsing, plus log opt-out.
+          # Win32 CRLF and UTF-8 BOM parsing plus both-log opt-out.
+          [IO.File]::WriteAllText('build/Release/Rayman2Fix.log', 'old runtime', [Text.Encoding]::ASCII)
           [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=0`r`n", [Text.UTF8Encoding]::new($true))
           & ./build/Release/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 2 -or (Test-Path build/Release/Rayman2Fix.log)) {
-            throw "Log=0 must prevent log creation (and remove stale log)"
+          if ($LASTEXITCODE -ne 2 -or (Test-Path build/Release/Rayman2Fix_installer.log) -or
+              (Test-Path build/Release/Rayman2Fix.log)) {
+            throw "Log=0 must remove BOTH log files"
           }
           [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=1`r`n", [Text.UTF8Encoding]::new($true))
           & ./build/Release/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 2 -or !(Test-Path build/Release/Rayman2Fix.log) -or
-              !(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'CONFIG: Debug.Log=1')) {
-            throw "Log=1 must generate correctly configured log"
+          if ($LASTEXITCODE -ne 2 -or !(Test-Path build/Release/Rayman2Fix_installer.log) -or
+              (Test-Path build/Release/Rayman2Fix.log) -or
+              !(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern 'CONFIG: Debug.Log=1')) {
+            throw "Log=1 must create installer log without launching game"
           }
           # PowerShell propagates the last nonzero native exit code even
           # after all expected-error assertions have passed.
@@ -252,7 +256,7 @@ jobs:
           }
           Write-Host 'Single glide2x.dll.bak rotation and legacy cleanup: PASS'
           Remove-Item package-smoke -Recurse -Force
-          if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix.dll,glide2x.dll) {
+          if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix_installer.log,Rayman2Fix.dll,glide2x.dll) {
             throw 'One-file build must never include generated INI, logs or DLL sidecars'
           }
           $global:LASTEXITCODE = 0
@@ -284,16 +288,20 @@ jobs:
           ./build/rayman2fix_cli || result=$?
           test "$result" -eq 2
           test -f build/Rayman2Fix/Rayman2Fix.ini
-          test -f build/Rayman2Fix.log
-          grep -q 'SYS-INFO: END' build/Rayman2Fix.log
+          test -f build/Rayman2Fix_installer.log
+          test ! -e build/Rayman2Fix.log
+          grep -q 'SYS-INFO: END' build/Rayman2Fix_installer.log
           test "$(grep -v '^;' build/Rayman2Fix/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nResolution=Desktop\nFPSLimit=60\nForce4x3=0\n[Features]\nSkipCinematics=0')" || exit 1
+          printf 'old game log\n' > build/Rayman2Fix.log
           printf '[Debug]\r\nLog=0\r\n' > build/Rayman2Fix/Rayman2Fix.ini
           result=0
           ./build/rayman2fix_cli || result=$?
           test "$result" -eq 2
           test ! -e build/Rayman2Fix.log
+          test ! -e build/Rayman2Fix_installer.log
           printf '[Debug]\r\nLog=1\r\n' > build/Rayman2Fix/Rayman2Fix.ini
           result=0
           ./build/rayman2fix_cli || result=$?
           test "$result" -eq 2
-          grep -q 'CONFIG: Debug.Log=1' build/Rayman2Fix.log
+          test ! -e build/Rayman2Fix.log
+          grep -q 'CONFIG: Debug.Log=1' build/Rayman2Fix_installer.log
