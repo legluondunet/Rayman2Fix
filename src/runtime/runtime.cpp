@@ -484,12 +484,95 @@ AudioSequenceContext inspect_audio_sequence_context(DWORD argument) {
     out.same_handle=unsigned(argument!=0u && argument==handle);
     return out;
 }
+// The original-CD 0x453F90 resolver does NOT compare a loaded resource
+// record's Id (+0) with its bank/index lookup key. Recover its provenance
+// instead by finding the exact record address inside the loaded 92-byte
+// resource table of a descriptor on the native bank registry linked list.
+// This is a *bounded*, *read-only*, research-build-only snapshot. A failure,
+// cycle, ambiguous overlap or traversal cap yields UNKNOWN, never a bank ID.
+struct AudioNativeBankOrigin {
+    int bank_id=-1;
+    int resource_index=-1;
+    unsigned candidates=0;
+    unsigned list_complete=0;
+    unsigned nodes_scanned=0;
+};
+AudioNativeBankOrigin inspect_audio_native_bank_origin(
+    std::uintptr_t resource_address) {
+    AudioNativeBankOrigin out{};
+    auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!module || resource_address<0x10000u)return out;
+    const auto safe_read=[&](std::uintptr_t address,void* buffer,SIZE_T bytes) {
+        SIZE_T read=0;
+        return address>=0x10000u &&
+            ReadProcessMemory(GetCurrentProcess(),
+                reinterpret_cast<const void*>(address),buffer,bytes,&read)!=0 &&
+            read==bytes;
+    };
+    // Native 0x4538C0 reads first node at [0x514D50], compares [node+4]
+    // with bank ID, then follows [node+0x3C]. Each node is 0x48 bytes
+    // (0x4538E2). The bank-head pointer is at [node+0x24].
+    constexpr std::uintptr_t kBankListRva=0x114D50; // VA 0x514D50
+    constexpr unsigned kMaxBankNodes=512;
+    constexpr std::uintptr_t kNativeResourceStride=92;
+    DWORD node=0;
+    if(!safe_read(reinterpret_cast<std::uintptr_t>(module)+kBankListRva,
+                  &node,sizeof(node)))return out;
+    DWORD visited[kMaxBankNodes]{};
+    for(unsigned i=0;i<kMaxBankNodes;++i) {
+        if(node==0u) {
+            out.list_complete=1u;
+            break;
+        }
+        if(node<0x10000u)return out;
+        for(unsigned k=0;k<i;++k)
+            if(visited[k]==node)return out; // cycle: fail closed
+        visited[i]=node;
+        DWORD descriptor[16]{};
+        if(!safe_read(node,descriptor,sizeof(descriptor)))return out;
+        ++out.nodes_scanned;
+        // ACP_Ray2 SND_BANK_Loaded=1. Ignore incomplete/transitioning
+        // banks: no claim about the presence of their resources.
+        const DWORD state=descriptor[8];
+        const DWORD head_ptr=descriptor[9];
+        if(state==1u && head_ptr>=0x10000u) {
+            DWORD head[5]{};
+            if(!safe_read(head_ptr,head,sizeof(head)))return out;
+            // Native 0x453F90 checks [bank_head+0x10] count and uses
+            // [bank_head+0x0C] first resource pointer + index*92.
+            const std::uintptr_t first=head[3];
+            const DWORD count=head[4];
+            if(first>=0x10000u && count<=0x10000u &&
+               resource_address>=first) {
+                const std::uintptr_t difference=resource_address-first;
+                if(difference%kNativeResourceStride==0u &&
+                   difference/kNativeResourceStride<count) {
+                    ++out.candidates;
+                    if(out.candidates==1u && descriptor[1]<=0xFFFFu) {
+                        out.bank_id=static_cast<int>(descriptor[1]);
+                        out.resource_index=static_cast<int>(
+                            difference/kNativeResourceStride);
+                    }
+                }
+            }
+        }
+        node=descriptor[15];
+    }
+    // Complete traversal and exactly one matching loaded bank are both
+    // required; no provenance is asserted from an unbounded/cyclic list.
+    if(out.list_complete==0u || out.candidates!=1u) {
+        out.bank_id=-1;
+        out.resource_index=-1;
+    }
+    return out;
+}
+
 // Read-only, source-backed link: a SND_E_TR_Theme=11 outer sound
 // record's driver handle is the singleton controller address 0x4B95B8.
 // Its +0x30 field is an *inner RECORD POINTER*; that record owns the
 // native SXD driver handle. Neither an isolated SXD handle nor a fixed
 // sound-table slot is sufficient to prove Theme ownership.
-// The upper 16 bits of SND_tdstBlockResourceMem.Id select a BNM bank.
+// Resource.Id upper/lower halves are *not* authenticated bank/index keys.
 struct AudioThemeOwnerContext {
     unsigned outer_candidates=0;
     int outer_slot=-1;
@@ -503,6 +586,8 @@ struct AudioThemeOwnerContext {
     unsigned inner_active=0;
     unsigned inner_transition=0;
     unsigned theme_owned_driver=0;
+    AudioNativeBankOrigin outer_bank_provenance{};
+    AudioNativeBankOrigin inner_bank_provenance{};
 };
 AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
     AudioThemeOwnerContext out{};
@@ -526,6 +611,7 @@ AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
         reinterpret_cast<std::uintptr_t>(module)+kControllerRva);
     // A matching outer record must be active and point to an actual
     // SND_tdstBlockResourceMem of resource type 11 (Theme).
+    std::uintptr_t outer_descriptor_address=0;
     for(unsigned i=0;i<64u;++i) {
         if(table[i].words[0]!=singleton || table[i].words[5]==0u)
             continue;
@@ -538,8 +624,11 @@ AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
         ++out.outer_candidates;
         if(out.outer_candidates==1u) {
             out.outer_slot=static_cast<int>(i);
+            // These are the UNVERIFIED halves of the record's Id field,
+            // *not* the original loaded bank ID and table index.
             out.theme_bank=static_cast<int>(header[0]>>16);
             out.theme_resource=static_cast<int>(header[0]&0xFFFFu);
+            outer_descriptor_address=descriptor;
         }
     }
     if(out.outer_candidates!=1u) {
@@ -548,6 +637,8 @@ AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
         out.theme_resource=-1;
         return out; // ambiguous or absent Theme: never claim ownership
     }
+    out.outer_bank_provenance=inspect_audio_native_bank_origin(
+        outer_descriptor_address);
     if(active==0u)return out;
     const auto ref=decode_audio_nested_record_ref(nested_ptr,module);
     out.inner_ref_class=ref.pointer_class;
@@ -570,6 +661,7 @@ AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
        inner_header[1]!=1u)return out; // SXD sample, not MIDI
     out.inner_bank=static_cast<int>(inner_header[0]>>16);
     out.inner_resource=static_cast<int>(inner_header[0]&0xFFFFu);
+    out.inner_bank_provenance=inspect_audio_native_bank_origin(inner_desc);
     out.theme_owned_driver=unsigned(
         argument!=0u && argument==inner_handle &&
         out.inner_driver_matches==1u);
@@ -587,7 +679,8 @@ struct AudioSoundContext {
     unsigned descriptor_volume_byte=256;
     unsigned play_volume_byte=256;
     // ACP_Ray2 SND_tdstBlockResourceMem: Id/eType/eStorage/ucVolume.
-    // The first DWORD is a PACKED RESOURCE ID, never a pointer.
+    // The first DWORD is a native resource record Id, never a pointer;
+    // its two halves need not equal the owning bank and table index.
     int descriptor_bank_group=-1;
     int descriptor_record_index=-1;
     int play_bank_group=-1;
@@ -923,15 +1016,23 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         in_game_menu_at_call,engine_paused_at_call);
     log_line(line);
     if((slot==2u || slot==3u || slot==11u) && event<8u) {
-        char ownership[344]{};
+        char ownership[768]{};
         std::snprintf(ownership,sizeof(ownership),
-            "RUNTIME-AUDIO-THEME-OWNER: channel=%s sample=%u outer_candidates=%u outer_slot=%d theme_bank=%d theme_resource=%d inner_slot=%d inner_ref_class=%u inner_bank=%d inner_resource=%d inner_active=%u inner_transition=%u inner_handle_matches=%u theme_owned_driver=%u (read-only; no music bypass)",
+            "RUNTIME-AUDIO-THEME-OWNER: channel=%s sample=%u outer_candidates=%u outer_slot=%d theme_bank=%d theme_resource=%d inner_slot=%d inner_ref_class=%u inner_bank=%d inner_resource=%d inner_active=%u inner_transition=%u inner_handle_matches=%u theme_owned_driver=%u outer_native_bank=%d outer_native_index=%d outer_bank_candidates=%u outer_bank_list_complete=%u inner_native_bank=%d inner_native_index=%d inner_bank_candidates=%u inner_bank_list_complete=%u (Id halves NOT bank provenance; read-only; no music bypass)",
             kAudioSlots[slot].name,event+1u,theme.outer_candidates,
             theme.outer_slot,theme.theme_bank,theme.theme_resource,
             theme.inner_slot,theme.inner_ref_class,theme.inner_bank,
             theme.inner_resource,
             theme.inner_active,theme.inner_transition,
-            theme.inner_driver_matches,theme.theme_owned_driver);
+            theme.inner_driver_matches,theme.theme_owned_driver,
+            theme.outer_bank_provenance.bank_id,
+            theme.outer_bank_provenance.resource_index,
+            theme.outer_bank_provenance.candidates,
+            theme.outer_bank_provenance.list_complete,
+            theme.inner_bank_provenance.bank_id,
+            theme.inner_bank_provenance.resource_index,
+            theme.inner_bank_provenance.candidates,
+            theme.inner_bank_provenance.list_complete);
         log_line(ownership);
     }
     if(event<2u && slot<4u) {
