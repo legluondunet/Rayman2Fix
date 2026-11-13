@@ -500,8 +500,15 @@ struct AudioNativeBankOrigin {
 AudioNativeBankOrigin inspect_audio_native_bank_origin(
     std::uintptr_t resource_address) {
     AudioNativeBankOrigin out{};
+    // Every early return must clear a provisional bank identity;
+    // only exhaustive unique traversal may publish an actual bank ID.
+    const auto fail_closed=[&]() {
+        out.bank_id=-1;
+        out.resource_index=-1;
+        return out;
+    };
     auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
-    if(!module || resource_address<0x10000u)return out;
+    if(!module || resource_address<0x10000u)return fail_closed();
     const auto safe_read=[&](std::uintptr_t address,void* buffer,SIZE_T bytes) {
         SIZE_T read=0;
         return address>=0x10000u &&
@@ -517,19 +524,19 @@ AudioNativeBankOrigin inspect_audio_native_bank_origin(
     constexpr std::uintptr_t kNativeResourceStride=92;
     DWORD node=0;
     if(!safe_read(reinterpret_cast<std::uintptr_t>(module)+kBankListRva,
-                  &node,sizeof(node)))return out;
+                  &node,sizeof(node)))return fail_closed();
     DWORD visited[kMaxBankNodes]{};
     for(unsigned i=0;i<kMaxBankNodes;++i) {
         if(node==0u) {
             out.list_complete=1u;
             break;
         }
-        if(node<0x10000u)return out;
+        if(node<0x10000u)return fail_closed();
         for(unsigned k=0;k<i;++k)
-            if(visited[k]==node)return out; // cycle: fail closed
+            if(visited[k]==node)return fail_closed(); // cycle: fail closed
         visited[i]=node;
         DWORD descriptor[16]{};
-        if(!safe_read(node,descriptor,sizeof(descriptor)))return out;
+        if(!safe_read(node,descriptor,sizeof(descriptor)))return fail_closed();
         ++out.nodes_scanned;
         // ACP_Ray2 SND_BANK_Loaded=1. Ignore incomplete/transitioning
         // banks: no claim about the presence of their resources.
@@ -539,15 +546,15 @@ AudioNativeBankOrigin inspect_audio_native_bank_origin(
             // An invalid loaded bank invalidates the entire scan. We
             // must not assert unique bank provenance if another loaded
             // node could have contained a matching resource record.
-            if(head_ptr<0x10000u)return out;
+            if(head_ptr<0x10000u)return fail_closed();
             DWORD head[5]{};
-            if(!safe_read(head_ptr,head,sizeof(head)))return out;
+            if(!safe_read(head_ptr,head,sizeof(head)))return fail_closed();
             // Native 0x453F90 checks [bank_head+0x10] count and uses
             // [bank_head+0x0C] first resource pointer + index*92.
             const std::uintptr_t first=head[3];
             const DWORD count=head[4];
             if(count>0x10000u || (count!=0u && first<0x10000u))
-                return out;
+                return fail_closed();
             if(count!=0u && resource_address>=first) {
                 const std::uintptr_t difference=resource_address-first;
                 if(difference%kNativeResourceStride==0u &&
