@@ -1,3 +1,25 @@
+## 13 November 2026 — disabled deep probes in normal builds
+
+The regular Windows x86 DLL now uses
+`RAYMAN2FIX_RESEARCH_PROBES=0` (default). The original
+`Learn_10` script and scene observer is not called on every
+camera-adjusted frame; the **read-only** extra dispatcher hook at
+`0x4710C0` is not installed; first lower-frame/glyph studies and
+repeated long HUD geometry snapshots are inactive. The native
+**rendering corrections themselves remain untouched**: camera
+Hor+, the approved source-stage text correction, native 2D HUD
+centering, driver callback reinstallation, and optional
+`jail_20` shortcut are still enabled. Normal runtime diagnostics
+still contain essential success/failure information.
+
+To run the research observer locally, explicitly configure
+`-DRAYMAN2FIX_RESEARCH_PROBES=ON`. That option exists only at
+CMake build time and does not add an INI setting. CI checks the
+release-default guards. Actual Wine/Windows on-screen validation
+remains necessary; CI cannot prove visuals.
+
+---
+
 ## Current log separation — 13 November 2026
 
 The one `[Debug] Log=1` option enables two **independent** files beside

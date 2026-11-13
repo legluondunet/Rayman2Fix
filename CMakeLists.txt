@@ -61,8 +61,14 @@ target_compile_definitions(Rayman2Fix PRIVATE
   RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}"
 )
 
-# Rayman 2 itself is 32-bit. This DLL is intentionally only a benign,
-# loadable placeholder until per-build injection/hooks are verified.
+# Preserve the read-only Learn_10 reverse-engineering probes for explicitly
+# requested developer builds, but exclude their per-frame memory scans and
+# extra native script detours from normal Windows/Wine releases.
+# No additional user-facing INI option is needed.
+option(RAYMAN2FIX_RESEARCH_PROBES
+  "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
+
+# Rayman 2 itself is 32-bit; runtime builds are Windows x86 only.
 if(WIN32)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
     message(FATAL_ERROR "Rayman2Fix runtime must be compiled for 32-bit Windows")
@@ -70,6 +76,9 @@ if(WIN32)
   add_library(Rayman2FixRuntime SHARED src/runtime/runtime.cpp)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME Rayman2Fix)
   target_compile_definitions(Rayman2FixRuntime PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+  if(RAYMAN2FIX_RESEARCH_PROBES)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
+  endif()
   target_include_directories(Rayman2FixRuntime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
   # Package the project's own x86 DLL inside Rayman2Fix.exe as RCDATA.

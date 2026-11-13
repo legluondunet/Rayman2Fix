@@ -22,6 +22,14 @@ class Learn10SafeFallback(unittest.TestCase):
         ):
             self.assertNotIn(dangerous, block)
         self.assertIn("skip disabled after visual regression",block)
+        # The research observer is source-retained but MUST NOT be
+        # executed for ordinary release builds. This test is intentionally
+        # structural so the same safety policy applies on Linux CI.
+        self.assertIn("#define RAYMAN2FIX_RESEARCH_PROBES 0", source)
+        self.assertIn("#if RAYMAN2FIX_RESEARCH_PROBES\n    // This is exclusively the disabled Learn_10 research observer.", source)
+        self.assertIn("#if RAYMAN2FIX_RESEARCH_PROBES\n        // Read-only hook at VA 0x4710C0", source)
+        self.assertIn("if(kResearchProbes && first && frame_relative_reports<4)", source)
+        self.assertIn("if (!kResearchProbes) return;", source)
         self.assertIn('log_natural_intro_snapshot("handover",',block)
         self.assertIn('log_natural_intro_snapshot("during",',block)
         self.assertIn("24500, 25000, 25500",source)

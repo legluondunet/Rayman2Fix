@@ -12,6 +12,20 @@ Ray2Fix and does not contain code copied from that project.
 > Windows/Wine/Proton is still being tested; no broad game compatibility
 > is claimed.
 
+## Release diagnostics and research-only probes
+
+Ordinary builds keep `[Debug] Log=1` for concise renderer/HUD/FOV,
+installation and game errors, with separate
+`Rayman2Fix_installer.log` and `Rayman2Fix.log`.
+The exhaustive reverse-engineering probes for the original `Learn_10`
+director and native superimposed-script dispatcher, plus frequent detailed
+HUD snapshots, are disabled in release builds. They previously observed
+the engine on the render thread and are not needed by the validated
+widescreen or 4:3 fixes. For a local research build only, configure
+CMake with `-DRAYMAN2FIX_RESEARCH_PROBES=ON`; this is a **build-time**
+switch, not an INI setting. The unsafe `Learn_10` cinematic skip remains
+disabled in both modes. The real `jail_20` opt-in skip is unaffected.
+
 ## Second introduction skip (opt-in, experimental)
 
 Set `[Features] SkipCinematics=1` in `Rayman2Fix.ini` to enable the

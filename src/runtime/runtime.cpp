@@ -30,7 +30,15 @@
 #error Rayman2Fix camera runtime requires Windows x86
 #endif
 
+#ifndef RAYMAN2FIX_RESEARCH_PROBES
+#define RAYMAN2FIX_RESEARCH_PROBES 0
+#endif
+#if RAYMAN2FIX_RESEARCH_PROBES != 0 && RAYMAN2FIX_RESEARCH_PROBES != 1
+#error RAYMAN2FIX_RESEARCH_PROBES must be 0 or 1
+#endif
+
 namespace {
+constexpr bool kResearchProbes=RAYMAN2FIX_RESEARCH_PROBES != 0;
 constexpr DWORD kConfigMagic = 0x32584652; // "RFX2" in little endian
 constexpr DWORD kOriginalTimestamp = 0x3807B68B;
 // Verified by the owner's CD runtime byte fingerprint (12 November 2026):
@@ -1349,7 +1357,11 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // Camera adjustment executes on the game's own render/main thread.
     // Use it only as a safe tick to request a *deferred* native transition.
     poll_second_intro_skip();
+#if RAYMAN2FIX_RESEARCH_PROBES
+    // This is exclusively the disabled Learn_10 research observer.
+    // Never invoke it from an ordinary release camera callback.
     poll_learn_intro_skip();
+#endif
 }
 Native2DProducer classify_native_2d_producer(const void* retaddr) {
     // Literal *return* addresses after the verified game callsites:
@@ -1379,6 +1391,7 @@ Native2DProducer classify_native_2d_producer(const void* retaddr) {
 void record_bottom_2d_geometry(unsigned route,
                                 float xmin,float ymin,
                                 float xmax,float ymax) {
+    if (!kResearchProbes) return;
     // We need actual caption/continue-arrow inputs, not the first
     // unrelated top-of-screen HUD glyph or image. Geometry only.
     // These diagnostic screen bands NEVER control rendering behavior.
@@ -1432,6 +1445,7 @@ void record_bottom_2d_geometry(unsigned route,
 }
 void probe_native_glyph_after_frame(float xmin,float ymin,
                                     float xmax,float ymax) {
+    if (!kResearchProbes) return;
     if(g_native_bottom_2d[2].calls.load(
            std::memory_order_relaxed)==0) return;
     const unsigned band=r2fix::native_glyph_y_band(ymin,ymax);
@@ -2589,7 +2603,7 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
     for (unsigned iteration = 0;; ++iteration) {
         const DWORD first=g_first_lower_frame_tick.load(
             std::memory_order_acquire);
-        if(first && frame_relative_reports<4) {
+        if(kResearchProbes && first && frame_relative_reports<4) {
             const DWORD elapsed=GetTickCount()-first;
             if(elapsed>=kAfterFrameProbeMs[frame_relative_reports]) {
                 const char* labels[]={"plus2s","plus5s","plus10s","plus20s"};
@@ -2606,7 +2620,7 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
         // actually overlapping the frame, not to frame creation.
         const DWORD first_glyph=g_first_frame_overlap_glyph_tick.load(
             std::memory_order_acquire);
-        if(first_glyph && glyph_relative_reports<3) {
+        if(kResearchProbes && first_glyph && glyph_relative_reports<3) {
             const DWORD elapsed=GetTickCount()-first_glyph;
             if(elapsed>=kAfterFrameProbeMs[glyph_relative_reports]) {
                 const DWORD frame_tick=g_first_lower_frame_tick.load(
@@ -2635,8 +2649,9 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                          g_color_sprite_original,
                          "RUNTIME-HUD: centered 4:3 colored sprites enabled",
                          color_logged);
-        if (iteration == 10 || iteration == 80 || iteration == 120 ||
-            iteration == 150 || iteration == 170 || iteration == 180) {
+        if (kResearchProbes &&
+            (iteration == 10 || iteration == 80 || iteration == 120 ||
+             iteration == 150 || iteration == 170 || iteration == 180)) {
             // No raw addresses or personal data; useful if callbacks never
             // become available, or become available but never execute.
             char status[160]{};
@@ -2835,6 +2850,9 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
+    if (g_log) log_line(kResearchProbes ?
+        "RUNTIME-CONFIG: research_probes=1 (read-only experimental trace build)" :
+        "RUNTIME-CONFIG: research_probes=0 (standard release instrumentation)");
     if(settings->skip_cinematics>1u)return 5;
     g_skip_cinematics=settings->skip_cinematics!=0;
     // This hook is also used for the targeted intro-skip poll on 4:3.
@@ -2850,7 +2868,10 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         // UI; the downstream driver callback monitor still handles
         // screen sprites submitted through other engine paths.
         if(g_hud_scale<0.9999f)install_native_2d_percent_hook();
+#if RAYMAN2FIX_RESEARCH_PROBES
+        // Read-only hook at VA 0x4710C0 is not part of the actual fix.
         if(g_hud_scale<0.9999f)install_superimposed_proc_probe();
+#endif
         initialize_native_intro_skip();
         start_hud_monitor();
     }
