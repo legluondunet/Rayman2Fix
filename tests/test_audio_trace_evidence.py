@@ -50,6 +50,7 @@ class TraceEvidenceTests(unittest.TestCase):
         self.assertEqual(len(result["owned_stops_at_nested_depth"]), 1)
         roots = result["theme_controller_resources_observed"]
         self.assertEqual(roots, [{
+            "session": 1,
             "outer_resource": [73, 48],
             "observed_inner_resources": [[73, 50], [73, 51]],
             "inner_resource_changed": True
@@ -58,6 +59,52 @@ class TraceEvidenceTests(unittest.TestCase):
         self.assertTrue(result["esc_key_down_does_not_prove_ESC_menu"])
         self.assertTrue(result["focus_loss_not_proven_when_missing"])
         self.assertNotIn("KEEP_PRIVATE", str(result))
+
+    def test_appended_runs_cannot_pair_identical_ids_from_different_sessions(self):
+        data = "\n".join((
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
+            trace("PauseTransitionSxd", 1, 1000),
+            owner("PauseTransitionSxd", 1, inner=50),
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
+            trace("PauseTransitionSxd", 1, 1001),
+            owner("PauseTransitionSxd", 1, inner=51),
+        ))
+        result = M.summarize(data)
+        self.assertEqual(result["explicit_sessions_detected"], 2)
+        self.assertEqual(result["events_sampled"], 2)
+        self.assertEqual(result["ownership_records_validated"], 2)
+        self.assertEqual(result["close_same_driver_event_pairs"], [])
+        roots = result["theme_controller_resources_observed"]
+        self.assertEqual([x["session"] for x in roots], [1, 2])
+        self.assertEqual([x["inner_resource_changed"] for x in roots],
+                         [False, False])
+        self.assertEqual([x["observed_inner_resources"] for x in roots],
+                         [[[73, 50]], [[73, 51]]])
+
+    def test_missing_owner_in_first_run_is_not_filled_from_second_run(self):
+        result = M.summarize("\n".join((
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
+            trace("PauseTransitionSxd", 1, 100),
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
+            owner("PauseTransitionSxd", 1),  # No matching event in THIS run.
+        )))
+        self.assertEqual(result["explicit_sessions_detected"], 2)
+        self.assertEqual(result["events_sampled"], 1)
+        self.assertEqual(result["ownership_records_validated"], 0)
+        self.assertEqual(result["ownership_lines_unmatched"], 1)
+
+    def test_unmarked_prefix_does_not_share_owner_with_header_run(self):
+        result = M.summarize("\n".join((
+            trace("PauseTransitionSxd", 1, 100),
+            owner("PauseTransitionSxd", 1),
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
+            trace("PauseTransitionSxd", 1, 101),
+            owner("PauseTransitionSxd", 1),
+        )))
+        self.assertEqual(result["unmarked_prefix_events"], 1)
+        self.assertEqual(result["explicit_sessions_detected"], 1)
+        self.assertEqual(len(result["theme_controller_resources_observed"]), 2)
+        self.assertEqual(result["close_same_driver_event_pairs"], [])
 
     def test_pre_driver_menu_snapshots_are_observations_not_esc_proof(self):
         events = [
