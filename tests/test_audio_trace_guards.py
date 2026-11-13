@@ -96,6 +96,22 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("argument==handle",section)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
+    def test_transition_play_to_pause_correlation_is_research_only(self):
+        # _SND_fn_lPlayTransitionExSxd@20 has FIVE stdcall arguments.
+        # Its driver handle may or may not be music: never suppress it.
+        self.assertIn("kTransitionPlayExRva=0xB86F0",self.runtime)
+        self.assertIn("using AudioPlayTransitionExFn=DWORD (__stdcall*)("
+                      "DWORD,DWORD,DWORD,DWORD,DWORD);",self.runtime)
+        self.assertIn("audio_play_transition_ex(DWORD a,DWORD b,DWORD c,DWORD d,DWORD e)",self.runtime)
+        self.assertIn("original(a,b,c,d,e)",self.runtime)
+        self.assertIn("return result;",self.runtime)
+        self.assertIn("transition_last_play_match=%u",self.runtime)
+        self.assertIn("arg==last_play",self.runtime)
+        self.assertIn("event<16u",self.runtime)
+        self.assertIn("InterlockedCompareExchangePointer(play_slot,hook,current)==current",self.runtime)
+        self.assertIn("not music-identified",self.runtime)
+        self.assertNotIn("MusicInPauseMenu",self.config)
+
     def test_exact_owner_cd_slots_are_named_and_bounded(self):
         expected={
             "PauseSxd":"0xB8664", "ResumeSxd":"0xB8668",
