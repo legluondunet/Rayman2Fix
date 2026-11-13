@@ -56,6 +56,15 @@ class NativePauseInvariants(unittest.TestCase):
         self.assertTrue(sound.native_resume())  # Focus gained; ESC open
         self.assertEqual((sound.depth, sound.pause_mark), (2, 0))
 
+    def test_first_pause_at_depth_zero_leaves_zero_mark(self):
+        # 0 is a special native value: the first pause at depth 0
+        # writes 0, and the next nested pause may dispatch once again.
+        sound = NativeSingleSoundModel(depth=0, pause_mark=0)
+        self.assertTrue(sound.native_pause())
+        self.assertEqual((sound.depth, sound.pause_mark), (1, 0))
+        self.assertTrue(sound.native_pause())
+        self.assertEqual((sound.depth, sound.pause_mark), (2, 1))
+
     def test_nonparticipating_records_still_increment_global_depth(self):
         sound = NativeSingleSoundModel(depth=1, pause_mark=0, ignored=True)
         self.assertFalse(sound.native_pause())
