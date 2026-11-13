@@ -193,6 +193,11 @@ def summarize(text: str) -> dict:
                 list(e["owner"]["inner_native"])
                 if e["owner"]["inner_native"] is not None else None),
             "global_depth": e["depth"],
+            "native_menu_flag_at_call": e["ui_in_game_menu_at_call"],
+            "engine_pause_flag_at_call": e["ui_engine_paused_at_call"],
+            "foreground_at_call": e["foreground"],
+            "audio_origin": e["origin"],
+            "menu_flag_zero_is_not_a_resume_or_stop_reason_proof": True,
         }
         for e in qualified
         if e["event"] == "StopTransitionSxd" and e["depth"] > 1
@@ -217,6 +222,12 @@ def summarize(text: str) -> dict:
         "in_game_menu_flag_cannot_distinguish_ESC_from_F1": True,
         "events_sampled": len(events),
         "events_by_kind": dict(sorted(Counter(e["event"] for e in events).items())),
+        "observed_transition_counts": {
+            "pause": sum(e["event"] == "PauseTransitionSxd" for e in events),
+            "resume": sum(e["event"] == "ResumeTransitionSxd" for e in events),
+            "stop": sum(e["event"] == "StopTransitionSxd" for e in events),
+        },
+        "zero_recorded_resume_is_not_proof_of_no_native_resume": True,
         "generic_script_driver_ui_snapshots": [
             {
                 "session": e["session"],
