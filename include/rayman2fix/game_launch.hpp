@@ -37,6 +37,7 @@ struct ChildDisplayOptions {
     bool enable_fov = false;
     std::uint32_t fps_limit = 60; // 0 = unlimited; applies to Glide grBufferSwap
     bool log_enabled = true;
+    bool skip_executable_precheck = false; // only explicit --launch-no-verify
 };
 
 // An external PMv2 activation manifest does not change the user's
@@ -53,6 +54,6 @@ ChildProcessResult run_child_process(
 
 // After a successful automatic installation/verification, try launching the
 // supported game edition. Return 2 if blocked, 1 for OS/game error.
-int launch_verified_game(Startup& startup);
+int launch_verified_game(Startup& startup, bool verify = true);
 
 } // namespace r2fix
