@@ -72,7 +72,7 @@ class AudioStaticInspectorTests(unittest.TestCase):
     def test_resource_resolver_keeps_byte_verified_bounds(self):
         src = SCRIPT.read_text(encoding="utf-8")
         for fragment in ("group_high16", "index_low16",
-                         "group_registry_lookup", "registry_next_link",
+                         "sound_bank_registry_lookup", "bank_next_link",
                          "index_stride_92", "type11_nested_resolve_first",
                          "type11_nested_resolve_second",
                          "type11_nested_stride24"):
@@ -102,6 +102,47 @@ class AudioStaticInspectorTests(unittest.TestCase):
         self.assertIn("pe.call_target(0x450811)", src)
         self.assertIn('"archive_identity_still_unproven": True', src)
 
+    def test_named_bank_and_theme_resource_layout(self):
+        src = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('result["resource_type11"]', src)
+        self.assertIn('"resource_type": "SND_E_TR_Theme"', src)
+        self.assertIn('"enum_value": 11', src)
+        self.assertIn('result["sound_bank_and_resource_layout"]', src)
+        self.assertIn('"bank_list_global": "0x00514D50"', src)
+        self.assertIn('"bank_id_offset": 4', src)
+        self.assertIn('"bank_filename_offset": 12', src)
+        self.assertIn('"bank_data_pointer_offset": 36', src)
+        self.assertIn('"bank_next_pointer_offset": 60', src)
+        self.assertIn('"resource_record_bytes": 92', src)
+        self.assertIn('"theme_disk_parts_count_offset": 36', src)
+        self.assertIn('"theme_disk_outro_offset": 40', src)
+        self.assertIn('"SND_E_TR_Theme": 11', src)
+        self.assertIn("0x4538E2", src)
+        self.assertIn("0x45985A", src)
+        self.assertIn("0x45987F", src)
+
+    def test_modified_reference_manifest_is_paths_not_audio(self):
+        paths = (
+            b"DATA\\WORLD\\SOUND\\MM01.APM\\0"
+            b"DATA\\WORLD\\SOUND\\MM10.APM\\0"
+            b"DATA\\WORLD\\SOUND\\JAILMUS.APM\\0"
+            b"DATA\\WORLD\\SOUND\\MAIN TITLE.APM\\0"
+            b"DATA\\WORLD\\SOUND\\BNK_0.BNM\\0"
+            b"DATA\\WORLD\\SOUND\\MM01.APM\\0"
+        )
+        # Python bytes escapes are kept literal here intentionally:
+        # replace the textual '\\0' markers with NUL for the fixture.
+        fixture = paths.replace(b"\\0", bytes([0]))
+        info = M.summarize_gog_sound_manifest(fixture)
+        self.assertEqual(info["apm_unique"], 4)
+        self.assertEqual(info["bnm_unique"], 1)
+        self.assertFalse(info["bnk_0_to_404_complete"])
+        self.assertFalse(info["main_menu_mm01_to_mm10_present"])
+        self.assertTrue(info["intro_jailmus_present"])
+        self.assertTrue(info["main_title_present"])
+        self.assertTrue(info["contains_paths_not_sound_bytes"])
+        self.assertFalse(info["applies_to_original_cd"])
+
     def test_unknown_binary_never_invents_structural_matches(self):
         with tempfile.TemporaryDirectory() as d:
             fn = Path(d) / "synthetic.exe"
@@ -110,7 +151,7 @@ class AudioStaticInspectorTests(unittest.TestCase):
             self.assertFalse(result["known_reference_only"])
             self.assertTrue(result["not_approved_cd_proof"])
             self.assertIn("address_map_failure", result)
-            self.assertNotIn("event_type11", result)
+            self.assertNotIn("resource_type11", result)
 
 
 if __name__ == "__main__":
