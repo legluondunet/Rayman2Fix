@@ -193,9 +193,11 @@ skip-by-size.
 
 ```text
 Rayman2Fix.exe                        automatic install / verify / launch
-Rayman2Fix.exe --install-only         install / verify, but never launch
+Rayman2Fix.exe --install-only         install / verify / update recognized fixes; no game launch
 Rayman2Fix.exe --launch-no-verify     attempt direct game launch, no checks or repair
 Rayman2Fix.exe --verify              verify local CD receipt, sizes and SHA-256
+Rayman2Fix.exe --inspect image.iso    create Rayman2Fix_inspect.log
+Rayman2Fix.exe --inspect image.cue [track.bin|track.img]
 Rayman2Fix.exe --version             display version
 Rayman2Fix.exe --help                display CLI help (also -h)
 Rayman2Fix.exe --verbose             print detailed diagnostics to console
@@ -207,9 +209,13 @@ the launcher detects an existing installation or exactly one neighboring
 `.iso`/`.cue` image, safely stages files under `Rayman2Fix/`, verifies
 them, and attempts to launch the approved game. `--install-only` uses
 the **same installation and verification logic** but finishes without
-starting the game. The old diagnostic `--inspect` and `--extract`
-commands are intentionally no longer accepted; no duplicate
-`DiscContent/` extraction path is exposed.
+starting the game. `--inspect` is the one supported *read-only* disc
+diagnostic: use it with an ISO/CUE (optionally a separate BIN/IMG track)
+to generate `Rayman2Fix_inspect.log` beside the launcher for reporting
+an unsupported edition. It does not install, run, or modify game files.
+The old `--extract` command remains removed; no duplicate
+`DiscContent/` extraction path is exposed. Images passed directly
+without `--inspect` are refused.
 
 The installer displays progress with ordinary flushed text lines, so it
 remains readable in Windows cmd/PowerShell, Wine and redirected output.
