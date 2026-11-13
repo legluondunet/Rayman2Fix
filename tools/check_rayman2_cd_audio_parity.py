@@ -68,6 +68,57 @@ ANCHOR_BYTES = (
     ("bank_filename_literal", 0x4A252C, b"bnk_%d.BNM\x00"),
 )
 
+# These are GENERIC SCRIPT VM OPCODES, not menu or keyboard events.
+# 0x471E40 reads [esi-8] and subtracts 0x1AA. The three consecutive
+# entries of the 8-byte VM opcode table point to the same dispatcher.
+# The script interpreter's opcode pointer lookup is at 0x482690.
+SCRIPT_OPCODE_TABLE_VA = 0x4A43E0
+SCRIPT_AUDIO_OPCODE_IDS = (0x1AA, 0x1AB, 0x1AC)
+SCRIPT_DISPATCHER_VA = 0x471E40
+SCRIPT_MACHINE_ANCHORS = (
+    ("vm_opcode_ptr_lookup", 0x482690,
+     bytes.fromhex("8B 44 24 04 8B 04 C5 E0 43 4A 00 C3")),
+    ("script_reads_opcode_from_bytecode", 0x471E40,
+     bytes.fromhex("56 8B 74 24 0C 8B 46 F8")),
+    ("script_subtracts_opcode_1aa", 0x471E48,
+     bytes.fromhex("2D AA 01 00 00 74 21 48 74 15 48 75 20")),
+    ("script_other_audio_opcode", 0x471E55,
+     bytes.fromhex("A1 8C F7 4F 00 50 E8 20 12 FE FF")),
+)
+SCRIPT_OPCODE_BRANCHES = (
+    ("generic_script_pause", 0x1AA, 0x471E70, 0x4536D0),
+    ("generic_script_resume", 0x1AB, 0x471E67, 0x453700),
+    ("generic_script_other_audio", 0x1AC, 0x471E5B, 0x453080),
+)
+
+
+def verify_script_opcode_dispatch(pe: "PE32") -> dict:
+    """Verify the VM table and three branches; cannot prove menu identity."""
+    anchors = all(pe.at(va, len(b)) == b for _, va, b in SCRIPT_MACHINE_ANCHORS)
+    entries = [
+        struct.unpack("<I", pe.at(SCRIPT_OPCODE_TABLE_VA + opcode*8, 4))[0]
+        for opcode in SCRIPT_AUDIO_OPCODE_IDS
+    ]
+    flags = [
+        struct.unpack("<I", pe.at(SCRIPT_OPCODE_TABLE_VA + opcode*8+4, 4))[0]
+        for opcode in SCRIPT_AUDIO_OPCODE_IDS
+    ]
+    branches = all(pe.call_target(site) == target
+                   for _, _opcode, site, target in SCRIPT_OPCODE_BRANCHES)
+    return {
+        "verified_native_dispatcher": anchors and
+            entries == [SCRIPT_DISPATCHER_VA]*3 and flags == [0]*3
+            and branches,
+        "opcodes": list(SCRIPT_AUDIO_OPCODE_IDS),
+        "shared_native_handler_va": f"0x{SCRIPT_DISPATCHER_VA:08X}",
+        "script_opcode_table_base_va": f"0x{SCRIPT_OPCODE_TABLE_VA:08X}",
+        "script_origin_alone_proves_esc_menu": False,
+        "script_origin_alone_proves_f1_menu": False,
+        "script_origin_alone_proves_gameplay_state": False,
+        "script_caller_or_menu_ui_state_observation_needed": True,
+    }
+
+
 # Exhaustive bytewise E8-rel32 *candidates* in .text for selected known
 # original-CD targets. These are not a complete control-flow graph: indirect
 # calls and instruction decoding still require separate analysis.
@@ -280,6 +331,12 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
         and cd.call_target(0x459AEC) == 0x458220
         and ref.call_target(0x459AEC) == 0x458220
     ) if check_anchors else False
+    script_opcode = {
+        "cd": verify_script_opcode_dispatch(cd),
+        "reference": verify_script_opcode_dispatch(ref),
+    } if check_anchors else {}
+    script_opcode_verified = bool(check_anchors and
+        all(x["verified_native_dispatcher"] for x in script_opcode.values()))
     rdata_identical = cd.section(".rdata") == ref.section(".rdata")
     verified_windows = all(w["identical"] for w in windows)
     verified_native_anchors = (
@@ -287,6 +344,7 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             call_sites + byte_anchors + dispatcher_pointers + transaction_ops)
         and all(x["confirmed_bytewise_both"] for x in direct_call_candidates)
         and transaction_xrefs_verified and callback_registration_verified
+        and script_opcode_verified
     ) if check_anchors else False
     # A caller may disable native anchors for synthetic PE parser tests only.
     # That MUST NOT accidentally yield a full original-CD audio-path proof.
@@ -299,6 +357,14 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             "rdata_raw_bytes": len(cd.section(".rdata")),
             "regions": windows, "call_sites": call_sites, "opcode_anchors": byte_anchors,
             "resource_dispatcher_pointers": dispatcher_pointers,
+            "script_vm_audio_opcode_dispatch": {
+                "verified_both": script_opcode_verified,
+                "opcode_ids": list(SCRIPT_AUDIO_OPCODE_IDS),
+                "generic_script_pause_va": "0x00471E70",
+                "generic_script_resume_va": "0x00471E67",
+                "does_not_prove_ESC_menu": True,
+                "does_not_prove_F1_menu": True,
+            },
             "direct_call_candidate_audit": {
                 "targets": direct_call_candidates,
                 "indirect_calls_not_enumerated": True,
