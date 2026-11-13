@@ -216,20 +216,33 @@ class TraceEvidenceTests(unittest.TestCase):
                             for w in windows))
         self.assertTrue(all(w["exact_change_time_not_observed"] for w in windows))
 
-    def test_menu_flag_bounds_ignore_unknown_and_never_bridge_sessions(self):
+    def test_unknown_snapshot_breaks_continuity_and_sessions_stay_isolated(self):
         observations = [
             {"session": 1, "ms": 5, "value": 0, "source": "poll"},
             {"session": 1, "ms": 6, "value": -1, "source": "call"},
             {"session": 2, "ms": 5, "value": 1, "source": "poll"},
             {"session": 1, "ms": 7, "value": 1, "source": "call"},
+            {"session": 1, "ms": 8, "value": 0, "source": "poll"},
         ]
         windows, skipped=M.bracket_observed_menu_flag_changes(observations)
         self.assertEqual(skipped,0)
         self.assertEqual(len(windows),1)
         self.assertEqual(windows[0]["session"],1)
+        self.assertEqual(windows[0]["observed_change"],"1-to-0")
         self.assertEqual((windows[0]["earliest_bound_ms"],
-                          windows[0]["latest_bound_ms"]), (5,7))
+                          windows[0]["latest_bound_ms"]), (7,8))
         self.assertTrue(windows[0]["not_proof_of_ESC_or_F1_menu"])
+
+    def test_old_trace_without_ui_fields_cannot_invent_change_bounds(self):
+        summary=M.summarize("\n".join((
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
+            "RUNTIME-AUDIO-UI-STATE: t_ms=5 in_game_menu=0 "
+            "engine_paused=0 foreground=1",
+            trace("PauseTransitionSxd", 1, 6), # old schema2 lacks UI fields
+            "RUNTIME-AUDIO-UI-STATE: t_ms=7 in_game_menu=1 "
+            "engine_paused=0 foreground=1",
+        )))
+        self.assertEqual(summary["observed_native_menu_flag_change_windows"], [])
 
     def test_timestamp_reset_does_not_create_false_menu_flag_interval(self):
         observations = [
