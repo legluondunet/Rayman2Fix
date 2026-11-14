@@ -258,3 +258,63 @@ occurs before actor confirmation, but it will not solve the unavoidable
 stream-retirement problem by itself. A *real* driver-specific audit of
 the exact installed SXD binary and lifecycle contract is still needed
 before the risky experiment can be enabled.
+
+## First confirmed opening-window results and full ESC-lifetime trace (14 November, 18:55)
+
+Owner uploaded `Rayman2Fix(20261114-185515).log` from the
+`3009c84f` passive instrumentation, with 11 script-origin ESC Pause
+candidates. All 11 emitted `RUNTIME-ESC-PREDRIVER-GATE` and
+`RUNTIME-ESC-PREDRIVER-WINDOW` lines. All 11 windows reported
+
+```text
+stop_during_wrapper=0 stop_after_wrapper=0
+play_during_wrapper=0 play_after_wrapper=0
+menu_known=1 esc_actor_confirmed=1
+```
+
+including six original controller mismatches (Theme `9:12` vs active
+`9:5` / SXD `9:6`) and five later valid controller matches (inner
+SXD `9:7`, `9:9`, or `9:10`). All Pause callbacks remained
+unmodified: two same-handle slot-2 calls per source wrapper with
+original depth `1 -> 2`. Ten original source Resume wrappers were
+sampled, also two same-handle slot-3 calls each with depth
+`2 -> 1` and no mixed native forwarding. Three changes of SXD
+resource during an ESC menu still caused the normal `phase=6`
+native passthrough. No audio-listening report accompanies that log.
+
+**Interpretation:** the measured *short* interval, from the script
+Pause wrapper to the first observed native menu tick, has no tracked
+original PlayTransitionEx / SXD Stop callbacks. This **does not** prove
+the stream stays stable over a full menu, that the backend cannot
+change tracks internally, or that withheld physical Pauses can
+be recovered.
+
+To investigate the longer interval without a driver experiment, the
+standard opt-in runtime now emits a bounded read-only
+`RUNTIME-ESC-PREDRIVER-LIFETIME` beside the original Resume trace:
+
+- `paired=1` only when the native script Resume can be matched to
+  one sampled script Pause on the **same Win32 thread** and coordinator
+  generation, with **no overlapping script-origin Pause**;
+- `elapsed_ms` measures from after the original Pause wrapper until
+  after the original Resume wrapper;
+- `play_between` / `stop_between` count all observed native
+  PlayTransitionEx / SXD Stop callbacks from *just before* the Pause
+  wrapper until *just before* the paired Resume wrapper;
+- `play_during_resume` / `stop_during_resume` count tracked callbacks
+  during the original script Resume wrapper itself.
+
+If `paired=0` because of a cross-thread Resume, an intervening
+Pause, or a changed generation, **all printed zero deltas are invalid
+and must not be interpreted as a quiet session**. Event counts
+are global: a nonzero count might be SFX, while a zero count still
+cannot exclude an internal SXD change. Instrumentation is limited to
+the first 16 Pause and 16 Resume script wrappers, keeps all native
+audio forwarded under the existing coordinator policy, and outputs
+logs from the render thread after audio decisions rather than from
+the native callback.
+
+No driver state machine modification, new compensating commands,
+time delays, or risky intercepts were introduced by the lifetime
+observer. `pre_driver_pause::Policy` remains completely disconnected
+from production.
