@@ -79,7 +79,16 @@ public:
     }
     Dispatch menu_tick(bool known, bool menu_open, bool foreground,
                        bool owner_same) noexcept {
-        if(phase_==Phase::idle || phase_==Phase::quarantined)return {};
+        if(phase_==Phase::idle)return {};
+        if(phase_==Phase::quarantined) {
+            // An unexpectedly terminated ESC compensation must not poison
+            // every subsequent menu for the same level. Once the *native*
+            // script-resume wrapper has returned and the game has exited
+            // its menu, retire this generation. Only the native game owns
+            // its music at this point; no synthetic driver calls are made.
+            if(known && !menu_open && native_script_exit_seen_)clear();
+            return {};
+        }
         if(!known || !owner_same) {
             quarantine();
             return {};
@@ -175,9 +184,22 @@ public:
     // goes to zero. Count the actual suppressed native resume calls.
     void end_script_resume() noexcept {
         if(phase_==Phase::audible_menu || phase_==Phase::muted_focus) {
-            if(ignored_resumes_!=2) {quarantine();return;}
+            if(ignored_resumes_!=2) {
+                quarantine();
+                // The game has ALREADY exited through its own script
+                // Resume wrapper. Injecting a fresh safety Pause here
+                // could leave the level soundtrack muted indefinitely.
+                // In this exit-only case, defer to its native callbacks.
+                native_script_exit_seen_=true;
+                physical_paused_=true; // no new synthetic safety Pause
+                return;
+            }
             if(phase_==Phase::muted_focus)
                 phase_=Phase::closing_unfocused;
+        } else if(phase_==Phase::quarantined) {
+            // The original script resumes were forwarded in quarantine.
+            native_script_exit_seen_=true;
+            physical_paused_=true;
         }
     }
     // Any matching Stop wins over synthetic resume, including a Stop while
@@ -240,6 +262,7 @@ private:
         menu_open_=false;
         compensated_=false;
         physical_paused_=true;
+        native_script_exit_seen_=false;
     }
     Phase phase_=Phase::idle;
     Identity identity_{};
@@ -248,5 +271,6 @@ private:
     bool menu_open_=false;
     bool compensated_=false;
     bool physical_paused_=true;
+    bool native_script_exit_seen_=false;
 };
 } // namespace r2fix::esc_proto
