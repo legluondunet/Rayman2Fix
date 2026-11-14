@@ -63,3 +63,65 @@ Type 1 also calls lock/unlock helpers at `0x6860` and `0x6880`; this makes bypas
 Static-only tools: `sha256sum`, `file`, `objdump -p`, and `objdump -d -Mintel --start-address=... --stop-address=...`. Disassembly image base `0x10000000`; to examine an RVA add the image base. Exact original binary SHA-256 above is a **per-version guard**. Do not reuse these RVAs for any other DLL without a byte-identical hash check.
 
 No original file was modified, repackaged, or committed. This document contains only derived technical analysis.
+
+## Source-confirmed ESC tag=4 and exact ADPCM indirection table (owner, 14 November 21:17)
+
+Owner Windows runtime file `Rayman2Fix(20261114-211741).log`
+reported **11/11** qualified ESC Pause wrappers with
+`transition_type_post_pause=4`, including the first **six**
+Theme controller reference mismatch cases and five later matched
+menu openings. Ten matching script Resume wrappers completed;
+all ten had original depth `2→1` and exact two native slot-3
+callbacks, six fully forwarded and four fully suppressed after
+the existing successful synthetic compensation. There was one
+`phase=6` SXD resource quarantine `9:8→9:9` in the last,
+unclosed menu. None of these figures is an audible result.
+
+The type tag was read **after** the game script's original Pause
+wrapper completed: the evidence consistently points toward
+ADPCM dispatch (type 4), but is not an atomic proof of the
+pre-Pause type or an independently validated physical voice.
+
+Additional original `wavmwbvr.dll` instruction audit confirms
+that the type-4 delegated operations read a contiguous
+12-byte function-pointer table:
+
+| Native dispatcher | Type-4 wrapper | Actual pointer slot RVA | Stub RVA if missing |
+| --- | --- | --- | --- |
+| `StopTransitionSxd 0xC790` | `0x3C30` | `0x26A98` | `0x3C50` |
+| `PauseTransitionSxd 0xC7E0` | `0x3C60` | `0x26A9C` | `0x3C80` |
+| `ResumeTransitionSxd 0xC830` | `0x3C90` | `0x26AA0` | `0x3CB0` |
+
+The table values are populated with dynamically resolved
+`_SND_fn_vStopTransitionSxdADPCM@4`,
+`_SND_fn_vPauseTransitionSxdADPCM@4`, and
+`_SND_fn_vResumeTransitionSxdADPCM@4` pointers.
+A fallback stub is installed if a function is absent.
+Neither `[DLL_Adpcm] Default=APMPW` nor the name
+`WAVMWbvr.dll` establishes the identity of the actual
+secondary module containing those function pointers.
+
+The standard Windows x86 runtime now emits exactly one
+`RUNTIME-AUDIO-ADPCM-DELEGATE` record per Stop/Pause/Resume
+target, after the first source-confirmed `type=4` opening
+and **after** the normal audio compensation action. It
+checks loaded module owner `WAVMWbvr.dll`, original
+PauseTransition function offset `0xC7E0`, original PE
+timestamp `0x38076FB4`, image size `0x87000`, and the
+verified `8B 4C 24 04 8B 01 48` entry prefix before
+reading the three original indirection slots. These are
+conservative **version fingerprints** rather than a full
+SHA-256 image check.
+
+Each target logs `status=resolved` with **module basename
+and callback RVA**, `status=fallback` for its known stub,
+or an explicit unknown/unresolved status. No raw address or
+game path appears in the log, no secondary DLL is loaded,
+and no function pointer is called. This is a diagnostic,
+not permission to suppress physical native Pauses. If
+runtime version checks fail, **no slot offset is read**.
+
+The next high-confidence input is a normal owner log from
+that build. The actual resolved ADPCM DLL can then be
+identified and, if necessary, studied through its own
+hash-locked original bytes. Keep PR #10 draft.
