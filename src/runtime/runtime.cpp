@@ -680,6 +680,15 @@ struct AudioThemeOwnerContext {
     // 4 readable non-Theme data, 5 unreadable/unmapped reference.
     // These values never authorize audio and contain no raw pointers.
     int native_theme_player_ref_class=-1;
+    // Classify the *alternative* native Theme descriptor by its original
+    // loaded bank, never by the untrusted Id halves. Research-only,
+    // sampled on the first rejected/accepted ESC after physical callbacks.
+    // -1 means not verified / not applicable, not proof of a match.
+    int alternative_ref_bank=-1;
+    int alternative_ref_index=-1;
+    int alternative_ref_same_bank=-1;
+    unsigned alternative_ref_complete=0;
+    unsigned alternative_ref_candidates=0;
     AudioNativeBankOrigin outer_bank_provenance{};
     AudioNativeBankOrigin inner_bank_provenance{};
 };
@@ -783,9 +792,26 @@ AudioThemeOwnerContext inspect_audio_theme_owner(
                                           std::uintptr_t(current_theme_key)),
                                       header,sizeof(header)))
                             out.native_theme_player_ref_class=5;
-                        else if(header[1]==11u)
+                        else if(header[1]==11u) {
                             out.native_theme_player_ref_class=3;
-                        else
+                            // Read-only provenance; one bounded walk of the
+                            // originally loaded BNM list, never a bypass.
+                            const auto alternative=inspect_audio_native_bank_origin(
+                                std::uintptr_t(current_theme_key));
+                            out.alternative_ref_bank=alternative.bank_id;
+                            out.alternative_ref_index=alternative.resource_index;
+                            out.alternative_ref_complete=alternative.list_complete;
+                            out.alternative_ref_candidates=alternative.candidates;
+                            if(alternative.list_complete==1u &&
+                               alternative.candidates==1u &&
+                               alternative.bank_id>=0 &&
+                               out.outer_bank_provenance.list_complete==1u &&
+                               out.outer_bank_provenance.candidates==1u &&
+                               out.outer_bank_provenance.bank_id>=0)
+                                out.alternative_ref_same_bank=int(
+                                    alternative.bank_id==
+                                    out.outer_bank_provenance.bank_id);
+                        } else
                             out.native_theme_player_ref_class=4;
                     }
                 }
@@ -1444,12 +1470,14 @@ void proto_log_owner_rejection(DWORD handle,DWORD elapsed_ms,
     if(!g_log)return;
     const DWORD before=GetTickCount();
     const auto owner=inspect_audio_theme_owner(handle,true);
-    char line[480]{};
+    char line[660]{};
     std::snprintf(line,sizeof(line),
         "RUNTIME-ESC-OWNER-DIAG: event=%s pending_ms=%lu owner_scan_ms=%lu "
         "outer_candidates=%u inner_active=%u inner_transition=%u "
         "inner_driver_matches=%u theme_owned_driver=%u "
         "native_player_ref_match=%d native_player_ref_class=%d "
+        "alt_ref_bank=%d alt_ref_index=%d alt_ref_same_bank=%d "
+        "alt_ref_complete=%u alt_ref_candidates=%u "
         "outer_bank_complete=%u "
         "outer_bank_candidates=%u outer_bank=%d outer_index=%d "
         "inner_bank_complete=%u inner_bank_candidates=%u "
@@ -1460,6 +1488,11 @@ void proto_log_owner_rejection(DWORD handle,DWORD elapsed_ms,
         owner.inner_driver_matches,owner.theme_owned_driver,
         owner.native_theme_player_ref_matches_outer,
         owner.native_theme_player_ref_class,
+        owner.alternative_ref_bank,
+        owner.alternative_ref_index,
+        owner.alternative_ref_same_bank,
+        owner.alternative_ref_complete,
+        owner.alternative_ref_candidates,
         owner.outer_bank_provenance.list_complete,
         owner.outer_bank_provenance.candidates,
         owner.outer_bank_provenance.bank_id,
