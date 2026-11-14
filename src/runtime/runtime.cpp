@@ -1118,7 +1118,7 @@ AudioMenuActorSnapshot inspect_audio_menu_actor_readonly() {
     constexpr std::uintptr_t kDynamicWorldRva=0x100FD0;
     constexpr std::uintptr_t kInactiveWorldRva=0x100FC4;
     constexpr unsigned kMaxTypeNodes=4096;
-    constexpr unsigned kMaxActorNodes=4096;
+    static constexpr unsigned kMaxActorNodes=4096; // static so MSVC treats the lambda array bound as constant
     constexpr char kMenuPersonalType[]="YAM_GenMenuMap_I1";
     const auto base=reinterpret_cast<std::uintptr_t>(module);
     DWORD anchor[3]{};
