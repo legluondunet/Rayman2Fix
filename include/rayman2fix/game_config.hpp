@@ -28,6 +28,11 @@ std::pair<std::uint32_t, std::uint32_t> configured_render_resolution(
 // Only user-triggered jail_20 skip is supported; Learn_10 remains safe.
 bool configured_skip_cinematics(const std::filesystem::path& rayman2fix_ini);
 
+// Preserve the owner's requested opt-in default for ESC-menu music.
+// The original in-level soundtrack continues during the pause menu only
+// when [Features] MusicInPauseMenu=1; the default is 0.
+bool configured_music_in_pause_menu(const std::filesystem::path& rayman2fix_ini);
+
 // Add missing new options to existing INIs without discarding user settings.
 void ensure_rayman2fix_ini_options(const std::filesystem::path& rayman2fix_ini);
 
