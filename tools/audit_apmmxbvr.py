@@ -25,6 +25,27 @@ EXPECTED_EXPORTS = {
 }
 
 
+# Only the original user-supplied 1999 DLL with this full-file hash
+# supports the following source-independent byte-level conclusions.
+# All other PE files remain structural export-only results.
+OWNER_ORIGINAL_SHA256 = "ab2d7cc613fea6dd8b039e76f00a6f5d15c7ed37f2b93e0be7a86dbc6a0ee4cf"
+OWNER_STATIC_SIGNATURES = {
+    # Three stdcall one-argument wrappers into the original ADPCM internals.
+    0x54C0: bytes.fromhex("8b 44 24 04 50 e8 76 de ff ff 83 c4 04 c2 04 00"),
+    0x54D0: bytes.fromhex("8b 44 24 04 50 e8 a6 de ff ff 83 c4 04 c2 04 00"),
+    0x54E0: bytes.fromhex("8b 44 24 04 50 e8 d6 de ff ff 83 c4 04 c2 04 00"),
+    # Valid ADPCM record: Pause sets +0x1c to 1, Resume to 0.
+    0x1EF0: bytes.fromhex("c7 46 1c 01 00 00 00"),
+    0x1F30: bytes.fromhex("c7 46 1c 00 00 00 00"),
+    # Mixer starts at per-record cursor +0x2c and tests +0x1c.
+    0x1967: bytes.fromhex("be 04 68 0e 10"),
+    0x196C: bytes.fromhex("8b 46 f0 85 c0 0f 85 ca 01 00 00"),
+    0x1938: bytes.fromhex("f3 ab"),  # zeroing the mix accumulator
+    0x1B4B: bytes.fromhex("81 c6 e4 00 00 00"),  # +0xe4 record stride
+    # Original Stop invalidates the handle so stale Resume is unsafe.
+    0x1655: bytes.fromhex("c7 06 00 00 00 00"),
+}
+
 class PEFormatError(ValueError):
     """Malformed or unsupported PE layout; never guess missing bytes."""
 
@@ -141,6 +162,13 @@ def audit_bytes(data: bytes, *, expected_sha256: str | None = None) -> dict:
         raise PEFormatError("SHA-256 mismatch: this is not the selected reference DLL")
     pe = PE32(data)
     exports = pe.exports()
+    owner_exact_hash = digest == OWNER_ORIGINAL_SHA256
+    if owner_exact_hash:
+        for rva, opcode in OWNER_STATIC_SIGNATURES.items():
+            if pe.read_rva(rva, len(opcode)) != opcode:
+                raise PEFormatError(
+                    f"original owner DLL byte signature mismatch at RVA 0x{rva:x}"
+                )
     functions = []
     good = True
     for name, required_rva in EXPECTED_EXPORTS.items():
@@ -167,6 +195,18 @@ def audit_bytes(data: bytes, *, expected_sha256: str | None = None) -> dict:
         "pe_timestamp_utc": datetime.fromtimestamp(pe.timestamp, timezone.utc).isoformat(),
         "image_base": pe.image_base, "image_size": pe.image_size,
         "export_count": len(exports), "matches_owner_runtime": good,
+        "owner_original_sha256_matches": owner_exact_hash,
+        "owner_static_pause_contract": (
+            {
+                "adpcm_pause_flag_offset": "0x1c",
+                "pause_value": 1,
+                "resume_value": 0,
+                "mixer_skips_paused_record": True,
+                "record_stride_bytes": 228,
+                "stop_invalidates_handle": True,
+                "warning": "Do not infer physical voice ownership, global pause depth or safe Pause suppression.",
+            } if owner_exact_hash else None
+        ),
         "functions": functions,
         "evidence_limit": "Export/RVA identity only; function behavior and pause state are NOT inferred.",
     }
@@ -193,6 +233,12 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"Original binary: {ns.dll.name} ({report['file_bytes']} bytes)")
         print(f"SHA-256: {report['sha256']}")
+        if report["owner_original_sha256_matches"]:
+            print("Owner's exact original 1999 ADPCM DLL: opcode signatures verified")
+            print("Per-record pause flag +0x1c: Pause=1, Resume=0; mixer skips paused records")
+            print("Stop invalidates the original handle; deferred Resume cannot be presumed safe")
+        else:
+            print("Owner's exact 1999 hash does not match: exports only, no pause-contract claims")
         print(f"PE32 x86: timestamp={report['pe_timestamp_utc']} image_base=0x{report['image_base']:08x} image_size=0x{report['image_size']:x}")
         for item in report["functions"]:
             rva = item["observed_rva"]
@@ -201,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {item['name']}: {val}, owner runtime 0x{item['expected_runtime_rva']:04x}: {status}")
             if item["first_24_bytes"]:
                 print(f"    first 24 bytes: {item['first_24_bytes']}")
-        print("Export/RVA identity only; no Pause/Resume driver-state conclusions.")
+        print("Static byte evidence only; does not authorize any native Pause suppression.")
     return 0 if report["matches_owner_runtime"] else 1
 
 
