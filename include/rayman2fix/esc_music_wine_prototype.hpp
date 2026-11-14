@@ -39,21 +39,6 @@ struct Identity {
     }
 };
 
-// The current Theme's native descriptor reference can still be changing
-// on the first ESC opening. Observe it for one bounded existing pending
-// interval, without touching the driver or relaxing the owner identity.
-// A future valid reference may authorize normal compensation; timeout or
-// loss of focus/menu leaves the game's native pause intact.
-constexpr std::uint32_t kLiveThemeVerifyWindowMs=1500u;
-constexpr bool retry_live_theme_identity(Phase phase, bool menu_known,
-                                         bool menu_open, bool actor_valid,
-                                         bool foreground, bool owner_valid,
-                                         std::uint32_t elapsed_ms) noexcept {
-    return phase==Phase::pending_menu && menu_known && menu_open &&
-           actor_valid && foreground && !owner_valid &&
-           elapsed_ms<kLiveThemeVerifyWindowMs;
-}
-
 // This policy assumes the game's original paired Theme/SXD calls have
 // already reached the real driver. A matching *experimental* resume batch
 // starts only AFTER native AI_g_bInGameMenu rises, never from Escape key alone.
@@ -95,21 +80,12 @@ public:
     Dispatch menu_tick(bool known, bool menu_open, bool foreground,
                        bool owner_same) noexcept {
         if(phase_==Phase::idle || phase_==Phase::quarantined)return {};
-        if(!known) {
-            quarantine();
-            return {};
-        }
-        // The original script-driven two-pause pair can complete before
-        // the native ESC menu and Theme-player pointer finish their own
-        // transitions. Do not reject a provisional candidate just because
-        // the live Theme ref is not yet stable BEFORE the menu flag rises.
-        // No driver Resume is possible in that pending state.
-        if(phase_==Phase::pending_menu && !menu_open)return {};
-        if(!owner_same) {
+        if(!known || !owner_same) {
             quarantine();
             return {};
         }
         if(phase_==Phase::pending_menu) {
+            if(!menu_open)return {}; // native callbacks precede UI flag rise
             if(!foreground || observed_pauses_!=2) {
                 quarantine();
                 return {};
@@ -192,10 +168,6 @@ public:
     // The game may resume script audio *before* the visible menu flag
     // goes to zero. Count the actual suppressed native resume calls.
     void end_script_resume() noexcept {
-        // ESC closed during pending verification: discard this provisional
-        // candidate immediately. There has been no compensating Resume,
-        // so the original game remains the sole owner of its audio state.
-        if(phase_==Phase::pending_menu) {clear();return;}
         if(phase_==Phase::audible_menu || phase_==Phase::muted_focus) {
             if(ignored_resumes_!=2) {quarantine();return;}
             if(phase_==Phase::muted_focus)
@@ -245,11 +217,6 @@ public:
                identity_.generation==token && token!=0;
     }
     Phase phase() const noexcept {return phase_;}
-    // The native handle alone is not proof that a resumed sound still
-    // belongs to the original Theme and inner SXD resource.
-    bool identity_matches(const Identity& id) const noexcept {
-        return id.valid() && identity_.valid() && identity_.same(id);
-    }
     std::uint32_t current_handle() const noexcept{return identity_.handle;}
     unsigned native_pause_count() const noexcept{return observed_pauses_;}
     unsigned ignored_resume_count() const noexcept{return ignored_resumes_;}
