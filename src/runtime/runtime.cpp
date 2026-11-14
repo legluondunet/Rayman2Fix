@@ -1324,8 +1324,15 @@ void proto_install_callsites() {
     g_proto_callsites_installed.store(true,std::memory_order_release);
     proto_log("source-hooks-installed","script-and-win32-focus-separated");
 }
+bool proto_esc_menu_actor_open();
 void proto_menu_tick() {
     if(!g_proto_callsites_installed.load(std::memory_order_acquire))return;
+    // The approved game's loaded-bank traversal is bounded but nontrivial;
+    // do not rescan every 16ms on the render thread.
+    static DWORD last_probe=0;
+    const DWORD now=GetTickCount();
+    if(last_probe && DWORD(now-last_probe)<75u)return;
+    last_probe=now;
     proto::Phase phase=proto::Phase::idle;
     DWORD started=0;
     std::uint32_t handle=0;
@@ -1346,11 +1353,19 @@ void proto_menu_tick() {
     }
     BYTE menu=0;
     const bool known=proto_game_read(0xB9BC8,menu);
-    const bool current=proto_identity(handle,generation).valid();
+    // The generic menu byte is NOT ESC-specific. This is a second
+    // independent observation of the live actor YAM_GenMenuMap_I1
+    // whose appearance at ESC was confirmed in the owner's Nov 14 log.
+    // Only inspect it once on the pending->menu-open transition.
+    const bool actor_ok=!(phase==proto::Phase::pending_menu &&
+                          known && menu!=0) ||
+                         proto_esc_menu_actor_open();
+    const bool current=actor_ok &&
+        proto_identity(handle,generation).valid();
     proto::Dispatch action{};
     {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
-        action=g_proto.menu_tick(known,menu!=0,
+        action=g_proto.menu_tick(known && actor_ok,menu!=0,
                                  game_window_is_foreground(),current);
     }
     proto_dispatch(action);
@@ -1626,6 +1641,14 @@ AudioMenuActorSnapshot inspect_audio_menu_actor_readonly() {
     }
     return out;
 }
+#if RAYMAN2FIX_ESC_MUSIC_PROTO
+bool proto_esc_menu_actor_open() {
+    const auto snapshot=inspect_audio_menu_actor_readonly();
+    return snapshot.type_found==1 &&
+           snapshot.dynamic_actor==1 &&
+           snapshot.inactive_actor==0;
+}
+#endif
 
 void poll_audio_pause_trace() {
     if(!g_log || InterlockedCompareExchange(&g_audio_poll_guard,1,0)!=0)
