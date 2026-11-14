@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import hashlib
 import struct
 import sys
 import tempfile
@@ -107,6 +108,37 @@ class APMMXReadOnlyAuditTests(unittest.TestCase):
             path.write_bytes(synthetic_pe(wrong_rva=True))
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(audit.main([str(path)]), 1)
+
+    def test_synthetic_pe_cannot_claim_1999_owner_pause_semantics(self):
+        result = audit.audit_bytes(synthetic_pe())
+        self.assertFalse(result["owner_original_sha256_matches"])
+        self.assertIsNone(result["owner_static_pause_contract"])
+        self.assertEqual(len(audit.OWNER_ORIGINAL_SHA256), 64)
+        self.assertIn(0x196C, audit.OWNER_STATIC_SIGNATURES)
+        self.assertIn(0x1EF0, audit.OWNER_STATIC_SIGNATURES)
+        self.assertIn(0x1F30, audit.OWNER_STATIC_SIGNATURES)
+        self.assertIn(0x1655, audit.OWNER_STATIC_SIGNATURES)
+
+    def test_original_bytes_are_not_claimed_without_exact_opcode_contract(self):
+        # Falsify the "owner hash" reference *only in the synthetic test*
+        # so both branches can be exercised without shipping the game DLL.
+        from unittest.mock import patch
+        data = synthetic_pe()
+        with patch.object(audit, "OWNER_ORIGINAL_SHA256",
+                          hashlib.sha256(data).hexdigest()):
+            with patch.object(audit, "OWNER_STATIC_SIGNATURES",
+                              {0x54C0: b"\\x90\\x90\\x90"}):
+                result = audit.audit_bytes(data)
+                self.assertTrue(result["owner_original_sha256_matches"])
+                contract = result["owner_static_pause_contract"]
+                self.assertEqual(contract["adpcm_pause_flag_offset"], "0x1c")
+                self.assertEqual(contract["pause_value"], 1)
+                self.assertEqual(contract["resume_value"], 0)
+                self.assertTrue(contract["stop_invalidates_handle"])
+            with patch.object(audit, "OWNER_STATIC_SIGNATURES",
+                              {0x54C0: b"\\xCC\\xCC"}):
+                with self.assertRaisesRegex(audit.PEFormatError, "signature mismatch"):
+                    audit.audit_bytes(data)
 
     def test_unknown_export_set_does_not_match_expected_owner_addresses(self):
         # No game binaries are embedded in this synthetic negative case.
