@@ -82,7 +82,11 @@ if(WIN32)
   endif()
   add_library(Rayman2FixRuntime SHARED src/runtime/runtime.cpp)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME Rayman2Fix)
-  target_compile_definitions(Rayman2FixRuntime PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+  # Build the lightweight native Theme/SXD ESC feature in every standard
+  # Windows/Wine runtime; it remains disabled until [Features] opts in.
+  # No research trace or prototype environment variable is required.
+  target_compile_definitions(Rayman2FixRuntime PRIVATE
+    WIN32_LEAN_AND_MEAN NOMINMAX RAYMAN2FIX_ESC_MUSIC_FEATURE=1)
   if(RAYMAN2FIX_RESEARCH_PROBES)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
   endif()
