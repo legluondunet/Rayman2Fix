@@ -15,20 +15,21 @@
 using namespace r2fix::esc_music;
 namespace {
 constexpr Generation kMusic{9,5,9,7,812};
-constexpr Proof kAll{true,true,true,true,true};
+constexpr Proof kAll{true,true,true,true,true,true};
 Shadow fresh() {
     Shadow s;
     CHECK(s.attach(kMusic,kAll));
     return s;
 }
 void gates() {
-    for(unsigned n=0;n<5;++n) {
+    for(unsigned n=0;n<6;++n) {
         Proof p=kAll;
         if(n==0)p.current_level_music=false;
         if(n==1)p.esc_lifetime=false;
         if(n==2)p.mixer_adapter=false;
-        if(n==3)p.focus_known=false;
-        if(n==4)p.foreground=false;
+        if(n==3)p.initial_driver_playing=false;
+        if(n==4)p.focus_known=false;
+        if(n==5)p.foreground=false;
         Shadow s;
         CHECK(!s.attach(kMusic,p));
         CHECK(s.callback(kMusic,Kind::pause,Route::theme,Cause::esc)==Action::forward_native);
