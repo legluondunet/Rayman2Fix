@@ -86,7 +86,9 @@ class AudioTraceGuardTests(unittest.TestCase):
         tick=self.runtime[start:end]
         self.assertIn("proto_game_read(0xB9BC8,menu_quick)",tick)
         self.assertIn("menu_quick==0u",tick)
-        self.assertIn("proto_identity(handle,generation).valid()",tick)
+        self.assertIn("proto_identity(handle,generation)",tick)
+        self.assertIn("g_proto.owner_same(live)",tick)
+        self.assertIn("current=actor_ok && g_proto.owner_same(live)",tick)
         self.assertIn("proto_esc_menu_actor_open()",tick)
         self.assertIn("RUNTIME-ESC-PERF:",tick)
         self.assertIn('"RUNTIME-ESC-PERF: t_ms=%lu pending_ms=%lu',tick)
@@ -546,7 +548,11 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("proto_identity(handle,generation,false)",self.runtime)
         self.assertIn("bool require_current_theme=true",self.runtime)
         self.assertIn("owner.native_theme_player_ref_matches_outer!=1",self.runtime)
-        self.assertIn("proto_identity(handle,generation).valid()",self.runtime)
+        self.assertIn("proto_identity(handle,generation)",self.runtime)
+        self.assertIn("g_proto.owner_same(live)",self.runtime)
+        self.assertIn("live.same_dispatch(action)",self.runtime)
+        self.assertIn('proto_log("driver-command-rejected",',self.runtime)
+        self.assertIn("!action.native_theme_key || !action.native_inner_key",self.runtime)
         # The scoped prototype source replaces broken return-stack inference
         # only when all four experimental source detours are installed.
         self.assertIn('audio_origin="game-script-pause"',self.runtime)
