@@ -91,3 +91,48 @@ APM backend is sensitive to missing a pair, and how focus/Stop events
 interleave with script callbacks. A separate build-time and runtime opt-in,
 real-driver dry-run checks and listening tests on both Wine and Windows are
 required. Do not replace the validated regular launcher with this model.
+
+## Paired native Resume observation (14 November 2026, passive only)
+
+The owner's fresh Windows-native run `Rayman2Fix(20261114-172750).log`
+captured **ten** qualified script Pause wrappers. Every one contained
+exactly two `PauseTransitionSxd` callbacks with the same native handle,
+no unrelated driver slot, and original depth bookkeeping `1 -> 2`.
+Five first-menu candidates were rejected due to the verified alternate
+native Theme reference `9:12` while the active outer/inner resources were
+`9:5` / `9:6`; the five later candidates requested compensation after
+the active inner moved to `9:7` or later. A stream change triggered a
+`phase=6` native-passthrough quarantine. The owner confirmed the **level
+music resumed on every menu exit and never vanished during gameplay**.
+These facts make the current safety rollback a useful stable baseline.
+
+The next uncertainty is the **native script Resume pair**, especially for
+menus rejected at the controller-identity gate. An independent, bounded
+read-only `RUNTIME-ESC-PREDRIVER-RESUME` report now records, for at most
+the first 16 source-identified script Resume wrappers:
+
+- `callbacks`, `transition_resumes`, `other_slots`,
+  `different_handles` and first four driver slot IDs;
+- `native_forwarded` / `native_suppressed` for slot 3. These are
+  observations of the **existing** coordinator's decisions, not controls;
+- original global pause depth before/after the unchanged native wrapper
+  and coordinator phase before/after exit.
+
+The tiny thread-local observer counts at the native callback boundary;
+it never scans banks or logs there. A pending snapshot is written **after**
+the original script Resume returns. Disk output is postponed to the next
+render tick, after normal audio compensation, even if the coordinator has
+already returned to idle. No Pause, Resume or Stop implementation, argument,
+handle, call count, authorization guard, or INI default was changed.
+
+An additional owner run should test an early first ESC and several
+subsequent exits (preferably two while `9:6` is still playing, then two
+after `9:7`), with `MusicInPauseMenu=1` and `Log=1`.
+For early rejected menus expect native Resume calls to be **forwarded**;
+for stable compensated menus the existing paired Resume suppression is
+expected. These are predictions to compare against real logs, not asserted
+results. If the report shows unexpected slots, mixed handles, missing
+pairs, or incompatible depth bookkeeping, a physical pre-driver suppression
+experiment remains prohibited. Even matching Resume pairs are not enough
+to solve the stream-handoff `impossible_replay` blocker in the research
+model. Keep this mode diagnostic-only and the PR draft.
