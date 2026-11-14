@@ -469,5 +469,17 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn('audio_origin="windows-activation-pause"',self.runtime)
         self.assertIn('audio_origin="windows-activation-resume"',self.runtime)
 
+    def test_focus_loss_diagnostic_uses_real_win32_source_callers(self):
+        # Camera/UI callbacks can stop running while Wine is Alt+Tabbed,
+        # and GetForegroundWindow() can be stale or map the Wine desktop.
+        # Record verified native Win32 activation source events instead.
+        self.assertIn("void proto_focus_trace(",self.runtime)
+        self.assertIn("RUNTIME-ESC-FOCUS: t_ms=",self.runtime)
+        self.assertIn('proto_focus_trace("native-focus-pause",d)',self.runtime)
+        self.assertIn('proto_focus_trace("native-focus-resume",d)',self.runtime)
+        self.assertIn("GetActiveWindow()!=nullptr",self.runtime)
+        # Diagnostic must not become a new driver authorization source.
+        self.assertIn("proto_dispatch(d);",self.runtime)
+
 if __name__=="__main__":
     unittest.main()
