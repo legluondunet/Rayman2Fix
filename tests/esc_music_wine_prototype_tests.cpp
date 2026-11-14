@@ -54,9 +54,18 @@ void intro_theme_reference_watch_is_bounded_and_read_only() {
 
     ThemeRefWatchPolicy bounded;
     ThemeRefWatchInput changing{};
-    for(unsigned i=0;i<ThemeRefWatchPolicy::kMaxEvents;++i) {
+    // 24 early intro resource changes must not exhaust the diagnostics.
+    // The first ESC and audio transition may occur at 70-95s.
+    for(unsigned i=0;i<24u;++i) {
         changing.inner_descriptor_ref=i+1;
-        CHECK(bounded.observe(changing,i*40));
+        CHECK(bounded.observe(changing,i*50u));
+    }
+    changing.inner_descriptor_ref=25u;
+    CHECK(bounded.observe(changing,95000u));
+    CHECK(bounded.events()==25u);
+    for(unsigned i=25u;i<ThemeRefWatchPolicy::kMaxEvents;++i) {
+        changing.inner_descriptor_ref=i+1;
+        CHECK(bounded.observe(changing,95000u+(i-24u)*40u));
     }
     CHECK(bounded.events()==ThemeRefWatchPolicy::kMaxEvents);
     changing.inner_descriptor_ref=999;
