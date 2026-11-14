@@ -158,7 +158,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("out.state_class=active==0u ? 1u : (active==1u ? 2u : 3u)", self.runtime)
         self.assertIn("if(active==0u || !read_word(", self.runtime)
         self.assertNotIn("active!=1u ||", self.runtime)
-        self.assertNotIn("MusicInPauseMenu", self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_theme_resource_and_nested_sxd_owner_is_bounded_and_read_only(self):
         # SND_E_TR_Theme controller handle comes from 0x459B3A and the
@@ -396,7 +396,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("out.match_count!=1u", self.runtime)
         self.assertIn("safe_read(reinterpret_cast<const void*>(desc_addr)", self.runtime)
         self.assertIn("got==sizeof(words)", self.runtime)
-        self.assertNotIn("MusicInPauseMenu", self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_descriptor_is_resource_id_not_pointer(self):
         # Source: ACP_Ray2 SND_tdstBlockResourceMem, matched by 0x453F90.
@@ -419,7 +419,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("BYTE old_bytes[16]{},new_bytes[16]{}", self.runtime)
         self.assertNotIn("desc_head_pair_readable=%u", self.runtime)
         self.assertNotIn("desc_head_contents_match=%u", self.runtime)
-        self.assertNotIn("MusicInPauseMenu", self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_exact_owner_cd_slots_are_named_and_bounded(self):
         expected={
