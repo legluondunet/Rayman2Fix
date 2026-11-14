@@ -1371,13 +1371,6 @@ struct ProtoPreDriverReport {
     // established by static analysis of owner's hash-pinned DLL.
     // It is NOT a physical voice ID and never authorizes audio calls.
     int transition_type_post_pause=-1;
-    // Only for the byte-fingerprinted original WAVMW + APMMX pair;
-    // sampled after original Pause, never inside its native callback.
-    // Unknown stays -1; values have NO effect on driver decisions.
-    int adpcm_voice_sampled=0;
-    int adpcm_voice_index=-1;
-    int adpcm_voice_pause=-1;
-    int adpcm_voice_other_gate=-1;
     // Source-scoped snapshots, captured outside the native driver callbacks.
     // Play/Stop counts include OTHER sounds: any delta disproves a totally
     // quiet interval, but zero alone does not prove the SXD stream is stable.
@@ -1613,7 +1606,7 @@ int proto_read_transition_type_post_wrapper(DWORD object_ref) {
 // [transition+4] and passing that ADPCM handle to APMMXbvr.dll. The
 // owner-supplied APMMXbvr.dll checks [handle] against its 0xE4-stride
 // live record pool and writes [record+0x1C]=1 for Pause. This is a
-// bounded *post-original-call* snapshot only, NOT a stream identity
+// bounded *post-compensation* snapshot only, NOT a stream identity
 // credential. Never retain raw pointers, guess a different DLL
 // version, or let this observation gate audio calls.
 struct ProtoAdpcmVoiceSnapshot {
@@ -1622,7 +1615,7 @@ struct ProtoAdpcmVoiceSnapshot {
     int pause=-1;
     int other_gate=-1;
 };
-ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_post_pause(DWORD ref) {
+ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {
     ProtoAdpcmVoiceSnapshot out{};
     if(ref<0x10000u || ref==0xffffffffu)return out;
     const auto* wav=reinterpret_cast<const BYTE*>(
@@ -1715,7 +1708,6 @@ void __cdecl proto_script_pause() {
     unsigned native_stop_before=0,native_stop_after=0;
     unsigned native_play_before=0,native_play_after=0;
     int transition_type_post_pause=-1;
-    ProtoAdpcmVoiceSnapshot adpcm_voice{};
     if(g_proto_enabled.load(std::memory_order_acquire)) {
         BYTE menu=0;
         DWORD depth=0;
@@ -1758,9 +1750,6 @@ void __cdecl proto_script_pause() {
            g_proto_predriver_probe.other_handle_count==0u)
             transition_type_post_pause=proto_read_transition_type_post_wrapper(
                 g_proto_predriver_probe.first_handle);
-        if(transition_type_post_pause==4)
-            adpcm_voice=proto_sample_adpcm_voice_post_pause(
-                g_proto_predriver_probe.first_handle);
         depth_after_ok=proto_read_depth(depth_after);
         native_stop_after=g_proto_native_stop_calls.load(std::memory_order_acquire);
         native_play_after=g_transition_play_calls.load(std::memory_order_acquire);
@@ -1782,14 +1771,6 @@ void __cdecl proto_script_pause() {
             g_proto_predriver_report.native_play_after=native_play_after;
             g_proto_predriver_report.transition_type_post_pause=
                 transition_type_post_pause;
-            g_proto_predriver_report.adpcm_voice_sampled=
-                adpcm_voice.sampled;
-            g_proto_predriver_report.adpcm_voice_index=
-                adpcm_voice.voice_index;
-            g_proto_predriver_report.adpcm_voice_pause=
-                adpcm_voice.pause;
-            g_proto_predriver_report.adpcm_voice_other_gate=
-                adpcm_voice.other_gate;
         }
         if(adopted && predriver_trace) {
             const bool overlap=g_proto_esc_lifetime_start.valid;
@@ -2372,6 +2353,15 @@ void proto_menu_tick() {
     }
     if(report.ready && g_log) {
         const auto& probe=report.probe;
+        // Run the nontrivial read-only check AFTER current native audio
+        // compensation, never in the original wrapper's critical path.
+        // Early rejected menus have not been compensated; accepted
+        // menus may already be resumed at this observation point.
+        const auto adpcm_voice=
+            report.transition_type_post_pause==4 &&
+            probe.pause_count==2u && probe.other_handle_count==0u ?
+            proto_sample_adpcm_voice_after_dispatch(probe.first_handle) :
+            ProtoAdpcmVoiceSnapshot{};
         const auto owner=inspect_audio_theme_owner(probe.first_handle,true);
         // Use the source-verified opening snapshot as the baseline;
         // watch-only sampling could otherwise miss the first menu interval.
@@ -2401,18 +2391,19 @@ void proto_menu_tick() {
             owner.inner_bank_provenance.resource_index,
             report.transition_type_post_pause);
         log_line(line);
-        // Snapshot captured immediately after original native Pause,
-        // BEFORE compensation, so it can show a real ADPCM pause gate
-        // even if this menu later receives our validated native Resume.
-        char adpcm_line[315]{};
+        // The snapshot is from AFTER existing native audio dispatch.
+        // Early rejected menus may retain Pause=1, while compensated
+        // menus may show Pause=0; this is diagnostic only.
+        char adpcm_line[330]{};
         std::snprintf(adpcm_line,sizeof(adpcm_line),
             "RUNTIME-ESC-ADPCM-VOICE: t_ms=%lu sampled=%d voice_index=%d "
             "paused=%d other_gate=%d transition_type=%d "
-            "(original 1999 WAVMW/APMMX only; post-wrapper read-only; "
+            "snapshot=post-dispatch "
+            "(original 1999 WAVMW/APMMX only; post-compensation read-only; "
             "no raw pointers; no audio authorization)",
             static_cast<unsigned long>(report.t_ms),
-            report.adpcm_voice_sampled,report.adpcm_voice_index,
-            report.adpcm_voice_pause,report.adpcm_voice_other_gate,
+            adpcm_voice.sampled,adpcm_voice.voice_index,
+            adpcm_voice.pause,adpcm_voice.other_gate,
             report.transition_type_post_pause);
         log_line(adpcm_line);
         // Read-only source-window audit. Snapshot the global native Play
