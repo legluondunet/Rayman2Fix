@@ -42,6 +42,38 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("RAYMAN2FIX_ESC_MUSIC_FEATURE=1",self.cmake)
         self.assertIn("RUNTIME-ESC-MUSIC: enabled=1",self.runtime)
 
+    def test_predriver_feasibility_is_passive_and_logs_after_audio_dispatch(self):
+        self.assertIn("struct ProtoPreDriverProbe",self.runtime)
+        self.assertIn("RUNTIME-ESC-PREDRIVER-GATE:",self.runtime)
+        callback=self.runtime.split(
+            "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1].split(
+            "void __stdcall audio_pause_sxd(",1)[0]
+        self.assertIn("probe.active && g_proto_origin==proto::Origin::script_pause",callback)
+        self.assertIn("if(original && forwarded)original(arg);",callback)
+        self.assertIn("slot==2u",callback)
+        # The preview is not an audio interception mode: never defer,
+        # drop, replay, or synthesize driver calls based on its counters.
+        wrapper=self.runtime.split("void __cdecl proto_script_pause() {",1)[1].split(
+            "void __cdecl proto_script_resume() {",1)[0]
+        self.assertIn("proto_call_original(0x536D0)",wrapper)
+        self.assertIn("g_proto_predriver_report.ready=true",wrapper)
+        self.assertNotIn('RUNTIME-ESC-PREDRIVER-GATE:',wrapper)
+        tick=self.runtime.split("void proto_menu_tick() {",1)[1].split(
+            "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
+        self.assertLess(tick.index("proto_dispatch(action);"),
+                        tick.index("RUNTIME-ESC-PREDRIVER-GATE:"))
+        self.assertLess(tick.index("proto_deferred_safety();"),
+                        tick.index("RUNTIME-ESC-PREDRIVER-GATE:"))
+        self.assertIn("report=g_proto_predriver_report;",tick)
+        self.assertIn("g_proto_predriver_report.ready=false;",tick)
+        cmake=(ROOT/"CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("esc_pre_driver_pause_tests",cmake)
+        policy=(ROOT/"include/rayman2fix/esc_pre_driver_pause_policy.hpp").read_text(
+            encoding="utf-8")
+        self.assertIn("class Policy",policy)
+        self.assertIn("kMenuConfirmationDeadlineMs=100u",policy)
+        self.assertNotIn("windows.h",policy.lower())
+
     def test_intro_theme_controller_watcher_is_change_triggered_and_bounded(self):
         self.assertIn("void proto_theme_transition_watch_tick()",self.runtime)
         start=self.runtime.index("void proto_theme_transition_watch_tick()")
