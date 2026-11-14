@@ -233,7 +233,7 @@ ChildProcessResult run_child_process(
             reinterpret_cast<std::uintptr_t>(process.handle),
             raw.dwProcessId, working_directory / "Rayman2Fix.dll",
             display.output_width, display.output_height, display.log_enabled,
-            display.skip_cinematics);
+            display.skip_cinematics, display.music_in_pause_menu);
     }
 
     if (display.borderless) {
@@ -301,6 +301,8 @@ int launch_verified_game(Startup& startup, bool verify) {
     display.output_height = content.second;
     display.skip_cinematics = !unchecked_without_ini &&
         configured_skip_cinematics(startup.ini_path());
+    display.music_in_pause_menu = !unchecked_without_ini &&
+        configured_music_in_pause_menu(startup.ini_path());
     display.enable_fov = true;
     display.fps_limit = unchecked_without_ini
         ? 60u : configured_fps_limit(startup.ini_path());
