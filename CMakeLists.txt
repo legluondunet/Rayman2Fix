@@ -69,6 +69,11 @@ option(RAYMAN2FIX_RESEARCH_PROBES
   "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
 option(RAYMAN2FIX_AUDIO_TRACE
   "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
+option(RAYMAN2FIX_ESC_MUSIC_PROTO
+  "Build explicit opt-in, experimental native ESC music compensation for Wine testing" OFF)
+if(RAYMAN2FIX_ESC_MUSIC_PROTO AND NOT RAYMAN2FIX_AUDIO_TRACE)
+  message(FATAL_ERROR "ESC audio prototype requires RAYMAN2FIX_AUDIO_TRACE=ON")
+endif()
 
 # Rayman 2 itself is 32-bit; runtime builds are Windows x86 only.
 if(WIN32)
@@ -83,6 +88,9 @@ if(WIN32)
   endif()
   if(RAYMAN2FIX_AUDIO_TRACE)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_AUDIO_TRACE=1)
+  endif()
+  if(RAYMAN2FIX_ESC_MUSIC_PROTO)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_ESC_MUSIC_PROTO=1)
   endif()
   target_include_directories(Rayman2FixRuntime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -225,6 +233,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME esc-music-mixer-adapter-contract
     COMMAND esc_music_mixer_bridge_tests)
+  add_executable(esc_music_wine_prototype_tests
+    tests/esc_music_wine_prototype_tests.cpp)
+  target_include_directories(esc_music_wine_prototype_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-music-wine-prototype-policy
+    COMMAND esc_music_wine_prototype_tests)
 
   add_executable(fov_math_tests tests/fov_math_tests.cpp)
   target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
