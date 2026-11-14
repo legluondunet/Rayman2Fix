@@ -66,7 +66,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("arg_zero=",section)
         self.assertIn("esc_down=%u",section)
         self.assertNotIn("f1_down=",section)
-        self.assertNotIn("VK_F1",self.runtime)
+        self.assertNotIn("VK_F1",section)  # F1 is observed only by the separate research UI probe
         self.assertIn("sound_slot=",section)
         self.assertIn("sound_matches=",section)
         self.assertIn("audio_origin=%s",section)
