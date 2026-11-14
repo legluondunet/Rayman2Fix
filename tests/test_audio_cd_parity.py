@@ -248,6 +248,21 @@ class ParityTests(unittest.TestCase):
                 (0x403B7F,bytes.fromhex("A3 C4 0F 50 00")),
         })
 
+    def test_native_theme_player_active_and_current_key_proven_by_cd_code(self):
+        anchors = {
+            name: (address, raw)
+            for name, address, raw in MOD.ANCHOR_BYTES
+            if name.startswith("native_theme_player_")
+        }
+        self.assertEqual(anchors, {
+            "native_theme_player_active_global": (
+                0x459760, bytes.fromhex("A1 B8 95 4B 00 85 C0")),
+            "native_theme_player_current_key": (
+                0x459770, bytes.fromhex("8B 0D CC 95 4B 00")),
+            "native_theme_player_key_equality": (
+                0x45997B, bytes.fromhex("3B 1D CC 95 4B 00")),
+        })
+
     def test_inverse_loaded_bank_lookup_has_original_cd_code_anchors(self):
         anchors = {
             name: (address, raw)
