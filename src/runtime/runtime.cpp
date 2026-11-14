@@ -598,6 +598,10 @@ struct AudioThemeOwnerContext {
     unsigned inner_active=0;
     unsigned inner_transition=0;
     unsigned theme_owned_driver=0;
+    // Native 0x459760 reads active Theme player at 0x4B95B8, and
+    // 0x45997B compares the current Theme lookup key at 0x4B95CC.
+    // -1 unknown; 0 player key differs; 1 exact native bank/index key.
+    int native_theme_player_key_matches_outer=-1;
     AudioNativeBankOrigin outer_bank_provenance{};
     AudioNativeBankOrigin inner_bank_provenance{};
 };
@@ -651,6 +655,20 @@ AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
     }
     out.outer_bank_provenance=inspect_audio_native_bank_origin(
         outer_descriptor_address);
+    if(active==1u &&
+       out.outer_bank_provenance.bank_id>=0 &&
+       out.outer_bank_provenance.resource_index>=0) {
+        constexpr std::uintptr_t kThemePlayerCurrentKeyRva=0xB95CC;
+        DWORD current_theme_key=0;
+        if(safe_read(module+kThemePlayerCurrentKeyRva,
+                     &current_theme_key,sizeof(current_theme_key))) {
+            const DWORD expected_key=
+                (DWORD(out.outer_bank_provenance.bank_id)<<16) |
+                DWORD(out.outer_bank_provenance.resource_index);
+            out.native_theme_player_key_matches_outer=
+                int(current_theme_key==expected_key);
+        }
+    }
     if(active==0u)return out;
     const auto ref=decode_audio_nested_record_ref(nested_ptr,module);
     out.inner_ref_class=ref.pointer_class;
@@ -1030,7 +1048,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     if((slot==2u || slot==3u || slot==11u) && event<8u) {
         char ownership[768]{};
         std::snprintf(ownership,sizeof(ownership),
-            "RUNTIME-AUDIO-THEME-OWNER: channel=%s sample=%u outer_candidates=%u outer_slot=%d theme_bank=%d theme_resource=%d inner_slot=%d inner_ref_class=%u inner_bank=%d inner_resource=%d inner_active=%u inner_transition=%u inner_handle_matches=%u theme_owned_driver=%u outer_native_bank=%d outer_native_index=%d outer_bank_candidates=%u outer_bank_list_complete=%u inner_native_bank=%d inner_native_index=%d inner_bank_candidates=%u inner_bank_list_complete=%u outer_bank_nodes=%u inner_bank_nodes=%u (Id halves NOT bank provenance) (read-only; no music bypass)",
+            "RUNTIME-AUDIO-THEME-OWNER: channel=%s sample=%u outer_candidates=%u outer_slot=%d theme_bank=%d theme_resource=%d inner_slot=%d inner_ref_class=%u inner_bank=%d inner_resource=%d inner_active=%u inner_transition=%u inner_handle_matches=%u theme_owned_driver=%u outer_native_bank=%d outer_native_index=%d outer_bank_candidates=%u outer_bank_list_complete=%u inner_native_bank=%d inner_native_index=%d inner_bank_candidates=%u inner_bank_list_complete=%u outer_bank_nodes=%u inner_bank_nodes=%u native_theme_player_key_matches_outer=%d (Id halves NOT bank provenance) (read-only; no music bypass)",
             kAudioSlots[slot].name,event+1u,theme.outer_candidates,
             theme.outer_slot,theme.theme_bank,theme.theme_resource,
             theme.inner_slot,theme.inner_ref_class,theme.inner_bank,
@@ -1046,7 +1064,8 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
             theme.inner_bank_provenance.candidates,
             theme.inner_bank_provenance.list_complete,
             theme.outer_bank_provenance.nodes_scanned,
-            theme.inner_bank_provenance.nodes_scanned);
+            theme.inner_bank_provenance.nodes_scanned,
+            theme.native_theme_player_key_matches_outer);
         log_line(ownership);
     }
     if(event<2u && slot<4u) {
