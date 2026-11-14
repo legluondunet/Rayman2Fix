@@ -1,3 +1,537 @@
+## 13 November 2026 — paired native callsite provenance
+
+The first 4 KiB extension on the shared research branch revealed
+that mere RVA candidates from the stack must not automatically
+be classified as live call frames. The verified CD wrappers
+leave 0x4536F2 (global pause) and 0x453722 (global resume)
+directly below the caller's own return site. Provenance now
+requires an **adjacent** [wrapper return, caller return] pair:
+the script's 0x471E75/0x471E6C or the window activation
+handler's 0x401CA1/0x401CEE. Precisely one matching pair
+permits a diagnostic label; zero yields `unknown`, and
+multiple pairs yield `ambiguous`. This is conservative
+observational evidence, *not* a menu-state permission.
+
+In the first two events for each of the four pause/resume
+channels, the bounded callstack diagnostic includes
+`wrapper_returns` and `paired_callers` counts, alongside
+up to four code RVA candidates; raw stack addresses are not
+logged or shared. The same 1,024-DWORD (~4 KiB) read limit
+and read-only audio forwarding remain in effect. Other
+display/HUD and sound hooks are unaffected.
+
+---
+
+## 13 November 2026 — callstack provenance probe after Wine 06:23 log
+
+The owner's 170-line `Rayman2Fix(20261113-062347).log`
+contains three ESC pause cycles. Native global audio depth changes
+1→2 at 39923 ms, 2→1 at 55923 ms, 1→2 at 66423 ms,
+2→1 at 71423 ms, and 1→2 at 73923 ms. Transition
+slot 1 receives each PauseTransitionSxd and matching
+ResumeTransitionSxd when the original game exits pause.
+
+All 73 sampled driver events recorded `audio_origin=unknown`,
+which shows the 96-DWORD stack window could not classify any
+native caller. Do not claim script-origin classification is
+validated. Some generic SXD callbacks have `sound_matches=2`,
+meaning driver handles may be shared across game sound records;
+they cannot identify unique music tracks.
+
+The research DLL now bounds the stack snapshot to 1,024 DWORDs
+(4 KiB), never beyond the current committed region, and logs
+up to four *candidate* executable-code RVAs in separate
+`RUNTIME-AUDIO-CALLSTACK` lines for the first two events in
+each pause/resume channel. This reveals whether likely return
+addresses are visible at all. It still does not validate a
+call frame, alter the original audio driver call, install a
+native menu patch, or introduce a functional INI feature.
+
+---
+
+## 13 November 2026 — original native audio pause call-path classification
+
+The owner's `Rayman2Fix(20261113-024221).log` conclusively
+shows a **complete** ESC pause/resume cycle:
+`PauseTransitionSxd` slot 1 twice at 77812 ms,
+`global_pause_depth` 1→2 at 78145 ms,
+`ResumeTransitionSxd` slot 1 twice at 84878–84879 ms,
+then `global_pause_depth` 2→1 at 85145 ms,
+all while `foreground=1`. A second ESC pause is visible
+at 87411 ms, with 1→2 at 87645 ms; this second menu
+was not exited via an observed native resume before the log ended.
+This confirms the original engine's correct paired unpause behavior.
+It **does not prove** the recurring native transition slot 1 is
+the soundtrack rather than an ambience/transition effect.
+
+The approved PC CD original has two call routes into the common
+native sound pause dispatcher. The script operation 426 returns
+from the `call` at 0x471E70 to 0x471E75; script operation 427
+returns from 0x471E67 to 0x471E6C. The Windows activation
+handler's corresponding return sites are 0x401CA1 and 0x401CEE.
+For the **research DLL only**, the sound callback snapshots
+at most 96 stack DWORDs from the current committed stack region
+(using `ReadProcessMemory` and `VirtualQuery`) and reports a
+source category when a verified return address is present.
+Multiple conflicting matches result in `ambiguous`; none in
+`unknown`. No pointer, return address or game text is logged.
+This research-only provenance check does not patch the game or
+change audio calls. It will help distinguish script-issued ESC
+pauses from activation loss. Script provenance alone is NOT
+equivalent to a proven menu-state discriminator.
+
+---
+
+## 13 November 2026 — nested native pause counter and shared sound handles
+
+After the owner-provided `Rayman2Fix(20261113-021629).log`, the
+experimental audio diagnostic now emits `RUNTIME-AUDIO-STATE`
+only when the native nested sound-pause depth changes. The previous
+sample confirmed the Escape menu issued PauseTransitionSxd for
+`sound_slot=1` and eight PauseSxd calls resolving to sound slots
+`2,3,4,5,9,9,11,11` at `t_ms=82615–82617` while the game had
+focus. No ResumeSxd/ResumeTransitionSxd callbacks were recorded
+before the log ended; later StopTransitionSxd callbacks at 136767ms
+and 141952ms carried `global_pause_depth=2`. This does **not**
+prove a malfunction: the user may not have resumed in-game before
+exiting. The global counter trace will identify actual unpauses.
+
+All sound record observations are captured **before** forwarding
+the original native function; the original still executes as-is.
+`sound_matches` now exposes non-unique driver handles rather
+than implying each matched table index is a unique music or
+sound effect. The feature remains scoped to Escape, with F1
+excluded and no game audio behavior changed.
+
+---
+
+## 13 November 2026 — disabled deep probes in normal builds
+
+The regular Windows x86 DLL now uses
+`RAYMAN2FIX_RESEARCH_PROBES=0` (default). The original
+`Learn_10` script and scene observer is not called on every
+camera-adjusted frame; the **read-only** extra dispatcher hook at
+`0x4710C0` is not installed; first lower-frame/glyph studies and
+repeated long HUD geometry snapshots are inactive. The native
+**rendering corrections themselves remain untouched**: camera
+Hor+, the approved source-stage text correction, native 2D HUD
+centering, driver callback reinstallation, and optional
+`jail_20` shortcut are still enabled. Normal runtime diagnostics
+still contain essential success/failure information.
+
+To run the research observer locally, explicitly configure
+`-DRAYMAN2FIX_RESEARCH_PROBES=ON`. That option exists only at
+CMake build time and does not add an INI setting. CI checks the
+release-default guards. Actual Wine/Windows on-screen validation
+remains necessary; CI cannot prove visuals.
+
+---
+
+## Current log separation — 13 November 2026
+
+The one `[Debug] Log=1` option enables two **independent** files beside
+`Rayman2Fix.exe`:
+
+- `Rayman2Fix_installer.log`: installer/launcher, CD extraction and
+  verification, INI settings, DLL deployment, process start, game exit
+  status and injection results. Reset on every launcher invocation.
+- `Rayman2Fix.log`: injected DLL, Glide, Hor+, HUD, text and cinematic
+  diagnostics. Reset **only before a verified game launch**, so a
+  launcher-only invocation cannot erase the previous runtime trace.
+
+`Log=0` suppresses both and removes stale copies. Neither log creates
+rotated backups. Because they write separate files, the installer no
+longer pauses its log stream while the game is running. Historical
+`Rayman2Fix(yyyymmdd-hhmmss).log` samples documented below were captured
+**before this split** and included both sources.
+
+---
+
+## 12 Nov 2026: text starts AFTER the 90-second diagnostics
+
+The owner's Wine log `Rayman2Fix(20261112-182646).log`
+(`807edc27` PR test merge containing `baff1f8b`)
+ends normally after 116.692 seconds. The first lower native frame
+appears at ~38.7s, x=14..94%, y=80.6..92.4%, but through
+the 90s checkpoint there are **zero** native glyph submissions
+after that frame (all four Y bands remain zero). The fixed +2/+5/+10
+seconds after frame are thus also too early to observe the text.
+**After 90 seconds**, native font quads finally appear. Four
+font quads vertically overlapping the frame are
+x=19.3..32.1%, y=82.5..86.3%; all four are horizontally
+inside the frame. Additional font quads at y=70..75%
+are ABOVE the measured frame and must not be conflated
+with its text. None of this yet establishes the full
+line's right edge or ownership by any specific dialogue.
+
+A valid future observation needs the *entire* rendered text run,
+not just the first four letters. This strictly read-only
+follow-up anchors new +2/+5/+10 second checkpoints to the
+FIRST glyph that actually overlaps the first lower frame.
+It additionally reports x-min/x-max and outside count at
+overlap sample milestones 16,64,256,1024,4096,
+and geometry-only details for the first four glyphs that
+extend horizontally past the original frame bounds.
+It does not alter fonts, glyph quads, 3D/Hor+,
+frame positions, dialog content or state.
+All code paths are shared on Windows and Wine, with no
+scene/level/string-specific correction. The first lower frame
+is an observational reference, NOT positively identified
+as Murfy's text box. PR #2 remains draft.
+
+## Frame-relative caption glyph diagnosis (12 November 2026)
+
+The owner's `Rayman2Fix(20261112-181504).log` test lasts
+93.98 seconds and exits normally. **Crucial correction:** at the
+40s and 60s checkpoints the lower-frame count is ZERO; the
+lower dialogue frame is first observed later, after the fixed
+checkpoints. All earlier conclusions drawn from static 40/60s
+counters saying no dialogue glyphs render are unsound.
+
+After the first lower frame, the native `JFFTXT` hook does
+in fact report fresh font quads in all four Y bands, including
+`y=70..75` and `y=80..85` in previous baseline tests. The
+frame itself is `x=14..94 %, y=80.6..92.4 %`, and the first
+post-frame `x=14.7..18.9 %, y=70..75 %` glyph is **ABOVE** the
+frame, not proof that it belongs to the dialogue. The font's
+actual ownership is unresolved. The established native 2D transform
+corrects both frame and glyph X with the same affine map; that
+cannot change their relative spacing.
+
+New strictly read-only measurements use the first lower frame's
+native original percent geometry as a reference (a DIAGNOSTIC,
+not a claim it is always a Murfy frame). The code counts and
+bounds glyph quads whose original percent Y actually overlaps
+the frame, and counts those originally outside the frame's
+horizontal span. Four bounded samples and frame-relative
+checkpoints at +2s/+5s/+10s are logged, even if the game
+exits before the previous 60s or planned 75/90s checkpoints.
+Additional 75,85,90s wall-clock checkpoints cover longer
+initial cinematic paths. This works under the same Windows/Wine
+code path without changing any rendered vertices, FOV,
+font sizes, UI art, game state, input, or saves.
+
+If original glyph X extends beyond the frame after the same
+transform is applied, a simple 4:3 viewport squeeze CANNOT
+by itself solve the relative overflow. Only after establishing
+the original engine text-layout path should the code be changed
+universally, not by a fixed Murfy-specific offset.
+
+## 12 Nov 2026: inspect *actual* sprite callsites and font vertical bands
+
+The owner Wine log `Rayman2Fix(20261112-180313).log` is stable
+(65.9s, exit 0, 1920x1080 under Wine-staging 11.17).
+At the 60s checkpoint, the native lower glyph counter is 1477,
+unchanged since 40s, even though lower frame/image counts grow from
+0/0 to 482/694. The overall glyph count grows from 15711 to
+19403. That establishes only that **no new glyph in the narrowly
+defined lower Y>=72% range** was observed, not that all dialogue
+text bypasses GLI native fonts: the text might use another Y range.
+
+The last-adjusted-camera probe is **not reliable sprite ownership**.
+At 60s it records 3513 `world` camera adjustments and just
+10 `screen-world` adjustments; 28988 post-frame plain sprite
+draws happen with last-adjusted role `world`, none with
+`screen-world`. This can be a stale render-thread camera hint,
+not proof that the sprite is 3D world geometry. Do not scale
+world sprites or conclude that the dialogue is on the world camera.
+
+This follow-up is **read-only** and replaces inference with better
+measurements:
+1. Count native glyphs after the FIRST lower 2D frame in four
+   vertical percent bands (y center <30, 30..60, 60..72, >=72).
+   Bound samples to two geometry-only entries per band (eight lines).
+   First frame is an imperfect proxy for the later dialogue,
+   not a privileged scene identifier.
+2. For non-native `plain` Glide submissions after that frame,
+   fingerprint the return address in the approved game PE by
+   image-relative CODE RVA (eight unique caller slots); count
+   submissions and lower-screen geometry per caller, plus
+   external-module/overflow totals. Sample at most two lower
+   quads per RVA. ASLR is handled; raw process addresses,
+   text, textures, memory and game variables are never logged.
+
+These are only hypotheses about rendering topology, not automatic
+classification of text/arrow. They never move or hide geometry and
+retain one Windows/Wine source path and current Hor+ world camera.
+CI tests check bounds and vertical buckets; visual verification is
+still required. Keep PR #2 draft, no `Learn_10` skip.
+
+## Read-only camera correlation, not a sprite-specific fix
+
+Owner Wine log `Rayman2Fix(20261112-174120).log` (test binary
+`53ca8686`, GitHub's PR test merge of `3f737849`) confirms the
+UV quads remain large screen rectangles: before the first bottom frame,
+`x=0..1024,y=34..618` and afterwards
+`x=0..1024,y=0..768`, reciprocal-Z=0. All 1,301 UV
+submissions in the trace are finite and near the internal canvas;
+**none** falls into the lower-screen `y_min>=540,y_max<=850`
+heuristic. This does not prove whether the arrow uses UV.
+
+A stronger clue is that the native lower 2D glyph counter is
+**6020 at both 40s and 60s** even as the first dialogue-frame
+and screen-image submissions begin and each reaches >1,000.
+The text drawn during that later period may therefore use a different
+rendering route, such as screen-world or world-projected geometry.
+The total glyph counter continues to grow from 20,797 to 21,331,
+so native font rendering overall is active; only the bottom-screen
+subset is unchanged. Correlation is not positive identification of
+dialogue text.
+
+Next test is strictly read-only: classify calls to the SHA-locked
+native camera adjust hook as world/screen-world/unknown by comparing
+the engine's already validated original screen-camera pointer.
+Remember the **last adjusted camera on the same render thread** and
+correlate it with subsequent *unrouted plain* Glide quads, only
+after a lower native frame is first observed. Report bounded
+after-frame lower-screen samples and 40/60s counts for each role.
+Camera-adjust callback time/last-on-thread is a diagnostic hint,
+NOT guaranteed sprite ownership: renderer passes may be deferred,
+and callbacks may run on other threads. Do not scale a vertex based
+on this hint. No user-visible drawing, story logic, save state,
+font geometry, UV content or pointer data changes.
+
+## Follow-up: diagnose UV coordinate system without movement (12 Nov 2026)
+
+The owner's Wine trace `Rayman2Fix(20261112-172957).log` ran
+normally for ~64s. At 60s the existing new telemetry counted
+76,887 unrouted plain sprites and 1,032 unrouted UV sprites.
+The UV callback was definitely invoked, but none of the unrouted UV
+quads satisfied our *diagnostic* lower-screen pixel window
+(y=540..850). This is **not** evidence that UV sprites are absent
+from the offending dialogue: they may be in another space,
+outside the viewport, or represent unrelated world geometry.
+
+This strictly read-only follow-up records up to four real UV quad
+bounds (X/Y and reciprocal-Z ranges) before, and up to four after,
+the **first lower-screen native frame** is encountered. At
+40/60s, it counts valid and canvas-near UV quads in each phase.
+This lower-frame marker is not assumed to belong to any particular
+scene or dialogue. Geometry is not filtered before the UV sample,
+other than finite/sanity validation. No texture contents, text,
+process addresses, glyph contents or game state are read.
+
+This probes whether the previous `lower=0` result was simply
+a coordinate-space mismatch. Do not modify UV vertices from these
+measurements alone, and do not infer that a positional match proves
+that a quad is Murfy's text/blue arrow. World 3D and screen-world
+rendering remain untouched; PR #2 stays unmerged.
+
+## Read-only trace: non-native lower-screen sprites (12 Nov 2026)
+
+The Wine log `Rayman2Fix(20261112-163833).log` pairs incoming
+native percent coordinates with actual downstream Glide vertices:
+glyphs (35.30..39.50% -> 399.1..431.4 px), the bottom image
+(4..14% -> 158.7..235.5 px), and the dialogue frame
+(14..94% -> 235.5..849.9 px). The corrected glyph and frame
+use the same 1024x768 viewport and a shared 4:3 horizontal
+transform. Consequently, these tracked native 2D quads alone do
+not explain the user's visually unchanged text and blue arrow.
+Do not keep modifying font width, offsets, or the panel on this basis.
+
+This build measures the *other* Glide sprite callbacks,
+outside the verified native 2D entry. At 40/60 seconds,
+`RUNTIME-HUD-UNROUTED` reports plain/UV/colored submission counts
+and lower-screen geometry grouped by horizontal third. Up to
+two sanitized samples per kind/region (18 total) show downstream
+quad X/Y, reciprocal-Z range and whether the established 2D-quad
+heuristic would accept it. Samples start only after 25s when the
+intro normally hands over. Source text, raw pointers, texture names,
+and scene variables are not logged. An unknown UV quad with
+reciprocal-Z=0 was seen in an earlier probe, but its membership in
+the dialogue/arrow is *not* established.
+
+**No geometry or renderer change.** The unknown submissions could
+be world sprites; neither screen position nor reciprocal-Z alone
+permits us to rescale them. Wait for a Wine trace establishing the
+route and geometry of the misplaced content before making a
+universal correction. Keep PR #2 draft and Learn_10 skip disabled.
+
+## Driver-space geometry trace paired with native 2D inputs
+
+The same read-only diagnostic build also records up to three first
+lower-screen GLI driver quads per native source route, including the
+upstream **original** and **mapped** percent X coordinates and the
+actual downstream sprite **vertex** X/Y coordinates. Native GLI
+calls are synchronous and use a thread-local context that is restored
+after each call; its existing 4:3 transformation and double-scaling
+bypass are unchanged. The new `RUNTIME-HUD-DRIVER` lines help
+determine whether a mismatch comes from the original game descriptor,
+the universal percent mapping or the downstream driver.
+Original source text, texture names, game pointers and save data
+are never logged. No drawn geometry is changed.
+
+## 12 November 2026: compare actual lower-screen geometry
+
+The latest owner-supplied Wine-staging 11.17 log
+`Rayman2Fix(20261112-161949).log` shows a successful 1920x1080
+session, natural Learn_10 intro exit, and no crash. The three
+verified callsite categories use **the SAME 1024x768 native
+viewport**, and the common 2D percentage hook is definitely active.
+
+At t60 seconds, original native source counts are:
+- `glyph=38263` (JFFTXT font quads),
+- `image=2277` (normal and clipped screen images),
+- `frame=783` (GLI_vDisplayFrame rectangles).
+The frame belonging to the original dialogue appears at native
+`x=14.00..94.00, y=80.60..92.40`.
+However the first sampled glyph/image entries after t25s were
+at `y=7.0..11.5` and `y=8.5..11.5`, i.e. TOP-SCREEN HUD, **not
+the dialogue or blue continuation arrow**. These samples cannot
+tell us why the dialogue content still overflows the frame.
+
+**Next bounded, read-only test:** sample up to four lower-screen
+(`y_min>=72, y_max<=105`) original native rects per producer,
+and at 40/60-second checkpoints aggregate their ORIGINAL X
+extrema independently for font glyphs, images and panels.
+The first items belong to general bottom-screen UI and are not
+automatically identified as Murfy or arrow. No strings, fonts,
+textures, pointers, personal data or save state are logged.
+Most importantly, **this patch does not change any projection,
+sprite/triangle geometry or runtime game state**. The owner already
+confirmed no visual improvement in the last build and need not
+send a duplicate screenshot. By comparing bottom text/image
+positions against the actual native panel before scaling, we can
+determine whether the layout discrepancy is present in original
+input coordinates or is introduced downstream.
+
+Only then choose a universal 4:3 UI architecture; do not
+prematurely shrink all fonts or apply a special-case Learn_10
+offset. Keep PR #2 draft/unmerged. NOMOVIES work stays paused.
+
+## Additional screen-image branches verified in native disassembly
+
+The original screen-image pass also calls the same GLI 2D percent
+entry on three clipped-image paths (call VAs 0x4606DF, 0x460743,
+0x46076D). The initial classifier counted only the direct
+0x460653 path and mislabeled these as "other". All three additional
+callsite return addresses are now included in the image counter.
+No renderer or artwork changes.
+
+## 2026-11-12: render-path diagnostics after user confirms unchanged image
+
+Owner explicitly confirms **no visual improvement** under Wine
+11.17 at 1920×1080 with the upstream native 2D transform (`02cc2e1`).
+Do not ask for a second identical screenshot or claim visual success.
+The latest Wine trace verifies the common hook is active and that
+all 45,682 intercepted calls at the 60-second checkpoint invoke a
+downstream colored (42,212) or plain (3,470) callback and bypass
+double-scaling correctly. This *only* proves hook activity.
+
+**Critical conceptual limitation:** the upstream entry is shared
+by both native font glyphs and background panels. A shared affine
+transform leaves any existing *relative* displacement between the
+glyphs and panel invariant. It does not, by itself, prove a correct
+layout. In addition, the same input coordinate percentages may map
+to different native viewports. This must be measured, not guessed.
+
+Direct original-binary disassembly (approved original SHA256
+`7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`)
+at `GLI_vDraw2DSpriteWithPercent` (VA 0x429670)
+confirms it reads the first argument's native viewport HEIGHT at
+`+0x08` and WIDTH at `+0x0C`, and receives x/y arguments in
+percent coordinates. The same exact function has three **known,
+independent** calling routes, identified by fixed call-return RVA:
+- `0x664D9` from `JFFTXT_vDrawString` (font glyphs)
+- `0x60658` from the screen-image renderer's direct path
+- `0x606E4`, `0x60748`, `0x60772` from its three clipped-fragment
+  drawing paths (the same native screen-image function); all four
+  are classified as UI pictures
+- `0x2987B` from `GLI_vDisplayFrame` (black/background frames)
+Other native entry callers remain classified as "other".
+
+A **read-only diagnostic follow-up** classifies at most these
+return-address categories, counts their calls at the existing 5/40/60s
+checkpoints and prints one bounded geometry-only sample per category
+before and after t25s (eight samples total). Each sample includes
+native viewport WIDTH/HEIGHT and the original incoming x/y percent
+coordinates. No text, pointers, strings, textures, input or save
+data are logged. Nothing is scaled differently in this follow-up.
+The new trace should tell whether the SAME input viewport and space
+are used for fonts, background frames and images; this is the crucial
+missing evidence for an **engine-level universal** fix, not a special
+case for one dialogue.
+
+The former native 2D transform remains as before (visual failure is
+known), but this diagnostic adds no further rendering changes.
+PR #2 remains draft/unmerged; NOMOVIES exploration remains paused.
+
+## 2026-11-12 native 2D geometry correction at the single shared entry
+
+The latest user log `Rayman2Fix(20261112-103304).log` is from
+Windows 11 1920×1200 (16:10), internal rendering 1024×768.
+It proves the 4:3 screen-world viewport correction executes with
+`native_width=1024 projected_width=853 projected_x=85 height=768`.
+The 3D Hor+ camera and all three HUD sprite callbacks are installed.
+The additional `GLI_DRV_vSendSingleTrianglesToClip_` diagnostic
+was installed but saw **zero triangles** over 91 seconds at 5, 40
+and 60 seconds. The first rejected UV quad had `invz=0`; this
+does not identify the actual Murfy text/continuation arrow.
+The user screenshot still shows text overflow on the left and the
+blue continuation arrow outside the right of the properly centered
+black text frame.
+
+**Independent native-code verification from the exact SHA256-approved
+original Rayman2.exe**:
+- All screen font glyphs call `GLI_vDraw2DSpriteWithPercent`
+  at VA **0x429670** from `JFFTXT_vDrawString` VA **0x4664D4**.
+- `GLI_vDisplayFrame`, the native panel/frame renderer, also calls
+  the same VA from **0x429876**.
+- The screen-image rendering path, used for original UI pictures and
+  potentially the continue arrow, calls the same VA from **0x460653**.
+- The native function multiplies X/Y inputs by the float **0.01**
+  constant at VA **0x49C618**, then by the native viewport dimensions.
+  Its input is **percent space 0..100**, not 1000 text units or
+  projected 1024×768 vertex coordinates.
+- The verified 7-byte prologue at this VA is
+  `83 EC 50 8B 44 24 54` (two complete instructions).
+  Therefore a separate, authenticated x86 detour is possible without
+  modifying game files.
+
+The new code moves the global centered 4:3 transform **upstream to this
+shared native 2D geometry entry**, before fonts, arrows, and frames can
+diverge to separate driver paths. It transforms only horizontal
+percent coordinates as
+`x'=50+(x-50)*((4/3)/output_aspect)`, retaining Y, font size,
+dialogue strings, texture coordinates, driver mode and game logic.
+For 16:10, input X=[0,100] maps to [8.333,91.667]; for 16:9,
+X=[0,100] maps to [12.5,87.5]. The existing GLI driver sprite
+callbacks **must bypass their own 4:3 correction synchronously**
+during a call from the native 2D entry, so each element is transformed
+**exactly once**, never twice. Sprite callbacks reached from other
+engine paths retain the current validated 4:3 behavior.
+
+Removes the now-proven-unused triangle diagnostic and short-lived
+lower-screen samples; retains only bounded counts of native 2D calls
+and downstream passes at 5, 40 and 60 seconds to confirm execution.
+This architecture does not special-case Learn_10, Murfy, any string,
+position, language, font, resolution, or picture. It also does not
+affect the panoramic gameplay camera.
+
+**Status:** new candidate must be compiled and visually tested on
+both Windows/Wine; do NOT conclude the text and blue arrow are fixed
+until a new screenshot confirms them inside the original black
+frame at 16:10 and another monitor aspect. Keep PR #2 draft and
+NOMOVIES research paused.
+
+## 2026-11-12 GLI viewport field order: corrected after Windows 11 test
+
+The Windows 11 1920x1200 screenshot and log `Rayman2Fix(20261112-095637).log`
+showed an incorrect `native_width=768 height=1024`. At VA 0x4206BC
+the *real* original Rayman 2 binary stores viewport width at offset
++0x0C; at 0x4206BF it stores height at +0x08. The initial patch
+incorrectly reversed these fields, so it compressed 768 vertical pixels
+instead of 1024 horizontal pixels. The original source viewport is
+not modified; only a temporary 0x70-byte viewport copy is changed
+before the original projection routine. The corrected code has named
+native offsets and byte-level tests guaranteeing only native WIDTH
+(+0x0C) and horizontal origin (+0x58) change.
+
+At 1920x1200 (16:10), expect native_width=1024 height=768,
+projected_width=853 projected_x=85; at 1920x1080 (16:9), expect
+projected_width=768 projected_x=128. No level-specific text, arrow,
+font or HUD box changes were added. Visual verification is still needed.
+
 # Bootstrap validation
 
 Build the x86 Windows `Rayman2Fix.exe`, which **embeds** the project's
@@ -31,12 +565,17 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - Modify/remove one installed game file (including a same-size modification):
   SHA-256 verification and default launch must report the mismatch and
   leave the user's files untouched.
-- Fresh RAYMAN2 installs must omit exactly six root-only entries:
+- Fresh RAYMAN2 installs must omit exactly eight root-only entries:
   `00000001.tmp`, `0000040c.016`, `0000040c.256`, `secdrv.sys`,
-  `rayman2.icd`, `dxplayerx.dll`, including their SHA-256 receipt
-  entries. Same-named files under `data/` are preserved.
+  `rayman2.icd`, `clcd32.dll`, `clokspl.exe`, `drvmgt.dll`,
+  including their SHA-256 receipt entries. Same-named files under `data/`
+  are preserved.
+- The misspelled root-level names `dxplayerx.dll` and `dplayerx.dll`
+  must NOT be excluded if encountered in synthetic test media.
+  The real `directx/dplayx.dll` belongs to the already excluded `directx/`
+  installer tree, not to the root-only protection auxiliary list.
 - Existing installs recorded by older builds must migrate without the
-  original CD: remove those six files and receipt entries, tolerate an
+  original CD: remove those eight files and receipt entries, tolerate an
   already-deleted obsolete file, preserve remaining SHA-256 hashes and
   the user INI, then verify normally.
 
@@ -165,6 +704,84 @@ camera fields at offsets `0x64`/`0x68`. No game exe bytes are modified
 on disk. Unlike the main launcher, this game runtime has not yet been
 validated by real visual screenshots; in particular **HUD overlays may
 still require their own aspect correction**.
+
+## Screen-world interface camera versus panoramic world camera
+
+Rayman 2 has TWO 3D rendering passes. The gameplay camera uses Hor+;
+the original game's **screen-world overlay** draws UI actors, including
+conversation glyphs, through its own camera and viewport.
+
+Disassembly of the exact owner-approved patched executable shows:
+- `0x4052C0` creates the original screen camera whose pointer is
+  stored at **0x50054C** and sets alphaX=**1.5**, alphaY=**0.75**.
+- `0x405180` configures the dedicated 100×100 / 1000-unit viewport
+  at **0x5004D4** and renders through that same screen camera.
+- The game's `0x422AB0` camera-adjustment path is called through
+  `0x4228D0` for both overlay and ordinary gameplay cameras.
+
+Earlier code erroneously applied the gameplay Hor+ formula to ALL
+cameras. At 16:9 that changes the screen camera's alphaX from its
+native 1.5 to ~1.259, plausibly magnifying the glyph geometry. The
+user's Wine screenshots confirm that JFFTXT font-descriptor scaling
+does **not** solve the overflowing speech text.
+
+**Universal correction:** consult the ORIGINAL engine-owned camera
+pointer slot (VA 0x50054C) during the SHA/PE-approved camera detour.
+When the camera equals that original UI camera, preserve BOTH original
+FOV angles; for other gameplay cameras continue Hor+ unchanged.
+This is a renderer-level rule, not a level, language, font, string,
+coordinate, or resolution exception. The 2D HUD/sprite callbacks
+still use the centered 4:3 canvas. Remove the entire former
+`JFFTXT_vDrawString` interception and all Learn_10-specific font
+heuristics/tests, without touching original dialogue assets/saves.
+
+**Screen-world viewport projection correction (17:37 Wine screenshot):**
+The screen camera was correctly recognized and excluded from Hor+,
+but the projected text and blue arrow still spill outside the already
+centered 4:3 black dialogue box. Investigation of the exact approved
+Rayman2.exe disassembly shows the viewport used by this pass still
+covers 100% of the internal 1024-pixel horizontal image.
+
+The native GLI functions `0x420660` and `0x422AB0` expose
+viewport width/height in the 0x70-byte struct at +0x08/+0x0C and
+origins at +0x58/+0x5C; `0x420A80` copies that structure onto the
+stack for camera projection. The runtime now supplies the original
+projection function with a second temporary copy **only for the
+engine-owned screen-world UI camera**. It scales viewport width by
+`(4/3) / output_aspect`, and offsets its left edge by half of the
+removed width, preserving height, vertical position and native FOV.
+
+For 1920x1080 with 1024x768 internal output, the expected viewport
+projected geometry is width **768**, left **128**, height **768**.
+This matches the same global horizontal 4:3 centering used by the
+existing HUD sprite callbacks. Other cameras, 3D panoramas, text
+assets, save games and the original viewport storage are untouched.
+The correction applies to every level and aspect, never to named
+dialogues, font sizes or individual arrow sprites.
+
+**The next owner log must contain** `RUNTIME-VIEWPORT:
+screen-world 4:3 centered native_width=1024 native_x=0
+projected_width=768 projected_x=128 height=768`. If the engine
+returns different values, the patch logs the actual viewport geometry
+or safely retains the native projection; the visual result must
+still be checked against the Dreamcast screenshot.
+
+**Visual validation required on Windows and Wine:**
+- Verify the log says `RUNTIME-FOV: native 4:3 screen-world camera
+  preserved`, ideally alphaX≈1.500 and alphaY≈0.750.
+- Verify `RUNTIME-FOV: Hor+ enabled for world cameras` and that the
+  playable 3D world still uses monitor-wide FOV.
+- Compare the original Murfy dialogue and tutorial panels in Learn_10
+  with the supplied 4:3 Dreamcast reference.
+- Also test other levels, UI text, menus and at least one other aspect
+  ratio if practical. The layout must not rely on level-specific
+  tweaks or grow any text box to cover overflow.
+- There should be NO `RUNTIME-DIALOGUE:` log entries because the
+  experimental JFFTXT detour is removed.
+
+CI and pure policy unit tests cannot confirm on-screen correctness;
+keep draft PR #2 unmerged until screenshots are validated.
+The Learn_10 movie skip is still disabled; NOMOVIES work remains paused.
 
 ## Manual checks
 

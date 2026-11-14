@@ -14,11 +14,22 @@ class Startup;
 void synchronize_rayman2_ubi_ini(const std::filesystem::path& game_dir,
                                 Startup& startup);
 
-// Only user-maintained setting: output display resolution. Glide2 always
+// User-maintained setting: output display resolution. Glide2 always
 // runs a stable 4:3 internal rendering mode (1024x768); the wrapper is
 // responsible for native output pixels, independently of the game mode.
 std::pair<std::uint32_t, std::uint32_t> configured_output_resolution(
     const std::filesystem::path& rayman2fix_ini);
+
+// 4:3 output is centered inside the physical canvas by GameFrame.
+bool configured_force_4_3(const std::filesystem::path& rayman2fix_ini);
+std::pair<std::uint32_t, std::uint32_t> configured_render_resolution(
+    const std::filesystem::path& rayman2fix_ini);
+
+// Only user-triggered jail_20 skip is supported; Learn_10 remains safe.
+bool configured_skip_cinematics(const std::filesystem::path& rayman2fix_ini);
+
+// Add missing new options to existing INIs without discarding user settings.
+void ensure_rayman2fix_ini_options(const std::filesystem::path& rayman2fix_ini);
 
 // 60 FPS by default; 0 means unlimited, otherwise accept 15..240 FPS.
 std::uint32_t configured_fps_limit(

@@ -45,6 +45,10 @@ jobs:
           Set-Content -Path $def -Value $converted -Encoding ascii
           python tools/gameframe/apply_fps_limit.py third_party/game-frame
           if ($LASTEXITCODE -ne 0) { throw 'Pinned GameFrame FPS patch failed' }
+          python tools/gameframe/apply_render_probe.py third_party/game-frame
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned GameFrame color-path diagnostic patch failed' }
+          python tools/gameframe/apply_loading_image_fix.py third_party/game-frame
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned GameFrame loading image correction failed' }
           $env:RUSTFLAGS = "-C link-arg=/DEF:$def"
           cargo build -p glide --release --target i686-pc-windows-msvc --manifest-path $manifest
           if ($LASTEXITCODE -ne 0) { throw 'GameFrame x86 compilation failed' }
@@ -82,33 +86,40 @@ jobs:
           if (!(Test-Path build/Release/Rayman2Fix/Rayman2Fix.ini)) {
             throw "Expected persistent Rayman2Fix.ini alongside launcher"
           }
-          if (!(Test-Path build/Release/Rayman2Fix.log)) {
-            throw "Expected single launcher-side log"
+          if (!(Test-Path build/Release/Rayman2Fix_installer.log) -or
+              (Test-Path build/Release/Rayman2Fix.log)) {
+            throw "Expected installer log only before game launch"
           }
-          if (!(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'SYS-OS:')) {
-            throw "Expected system inventory in the launcher log"
+          if (!(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern 'SYS-OS:')) {
+            throw "Expected system inventory in the installer log"
           }
           $ini = 'build/Release/Rayman2Fix/Rayman2Fix.ini'
           $initial = (Get-Content $ini | Where-Object {
             $_.Trim() -and !$_.Trim().StartsWith(';')
           })
-          if ($initial.Count -ne 5 -or $initial[0] -ne '[Debug]' -or
+          if ($initial.Count -ne 8 -or $initial[0] -ne '[Debug]' -or
               $initial[1] -ne 'Log=1' -or $initial[2] -ne '[Graphics]' -or
               $initial[3] -ne 'Resolution=Desktop' -or
-              $initial[4] -ne 'FPSLimit=60') {
-            throw "Bootstrap INI must contain Debug.Log, Graphics.Resolution and Graphics.FPSLimit"
+              $initial[4] -ne 'FPSLimit=60' -or
+              $initial[5] -ne 'Force4x3=0' -or
+              $initial[6] -ne '[Features]' -or
+              $initial[7] -ne 'SkipCinematics=0') {
+            throw "Bootstrap INI must contain disabled optional 4:3 and cinematic skip"
           }
-          # Exercise Win32 CRLF and UTF-8 BOM parsing, plus log opt-out.
+          # Win32 CRLF and UTF-8 BOM parsing plus both-log opt-out.
+          [IO.File]::WriteAllText('build/Release/Rayman2Fix.log', 'old runtime', [Text.Encoding]::ASCII)
           [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=0`r`n", [Text.UTF8Encoding]::new($true))
           & ./build/Release/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 2 -or (Test-Path build/Release/Rayman2Fix.log)) {
-            throw "Log=0 must prevent log creation (and remove stale log)"
+          if ($LASTEXITCODE -ne 2 -or (Test-Path build/Release/Rayman2Fix_installer.log) -or
+              (Test-Path build/Release/Rayman2Fix.log)) {
+            throw "Log=0 must remove BOTH log files"
           }
           [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=1`r`n", [Text.UTF8Encoding]::new($true))
           & ./build/Release/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 2 -or !(Test-Path build/Release/Rayman2Fix.log) -or
-              !(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'CONFIG: Debug.Log=1')) {
-            throw "Log=1 must generate correctly configured log"
+          if ($LASTEXITCODE -ne 2 -or !(Test-Path build/Release/Rayman2Fix_installer.log) -or
+              (Test-Path build/Release/Rayman2Fix.log) -or
+              !(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern 'CONFIG: Debug.Log=1')) {
+            throw "Log=1 must create installer log without launching game"
           }
           # PowerShell propagates the last nonzero native exit code even
           # after all expected-error assertions have passed.
@@ -199,14 +210,53 @@ jobs:
           if ($replacement -cne $glide) {
             throw 'GameFrame Glide replacement did not match the bundled SHA256'
           }
-          & ./package-smoke/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 2) { throw 'Idempotent GameFrame upgrade failed' }
-          if (Test-Path 'package-smoke/Rayman2Fix/glide2x.dll.bak.1') {
-            throw 'Already-correct GameFrame DLL must not generate another backup'
+          # Replacing a modified renderer AGAIN must overwrite the single
+          # preceding .bak, not generate .bak.1... .bak.30, and clean the
+          # legacy files created by older Rayman2Fix releases.
+          $glideDest = 'package-smoke/Rayman2Fix/glide2x.dll'
+          [IO.File]::WriteAllText(
+            (Resolve-Path $glideDest), 'second-legacy-glide', [Text.Encoding]::ASCII)
+          1..30 | ForEach-Object {
+            [IO.File]::WriteAllText("$glideDest.bak.$_", "old-version-$_", [Text.Encoding]::ASCII)
           }
-          Write-Host 'GameFrame Glide restore/backup smoke test: PASS'
+          # The .bak.notes sentinel is deliberately not a managed resource.
+          # It also makes the no-media fixture fail closed in automatic
+          # installation (exit 1), AFTER renderer deployment/cleanup.
+          [IO.File]::WriteAllText("$glideDest.bak.notes", 'keep-me', [Text.Encoding]::ASCII)
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 1 -or
+              (Get-Content -Raw $backup) -ne 'second-legacy-glide' -or
+              @(Get-ChildItem 'package-smoke/Rayman2Fix' -File -Filter 'glide2x.dll.bak*').Count -ne 2 -or
+              !(Test-Path "$glideDest.bak.notes")) {
+            throw 'Replacing Glide must rotate only .bak and remove old numeric backups'
+          }
+          if ((Get-FileHash $glideDest -Algorithm SHA256).Hash.ToLowerInvariant() -cne $glide) {
+            throw 'Glide rotation failed to reinstall the verified GameFrame renderer'
+          }
+
+          # No-op launches preserve the latest .bak and never create numbers.
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 1 -or
+              (Get-Content -Raw $backup) -ne 'second-legacy-glide' -or
+              @(1..30 | Where-Object { Test-Path "$glideDest.bak.$_" }).Count -ne 0 -or
+              (Test-Path "$glideDest.bak.previous")) {
+            throw 'Unchanged pinned Glide must not produce numbered backups'
+          }
+          # Recover from old installations that have only numbered backups.
+          Remove-Item $backup
+          [IO.File]::WriteAllText("$glideDest.bak.1", 'legacy-one', [Text.Encoding]::ASCII)
+          [IO.File]::WriteAllText("$glideDest.bak.30", 'legacy-thirty', [Text.Encoding]::ASCII)
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 1 -or
+              (Get-Content -Raw $backup) -ne 'legacy-thirty' -or
+              (Test-Path "$glideDest.bak.1") -or
+              (Test-Path "$glideDest.bak.30") -or
+              !(Test-Path "$glideDest.bak.notes")) {
+            throw 'Legacy numbered Glide backups must collapse to newest .bak'
+          }
+          Write-Host 'Single glide2x.dll.bak rotation and legacy cleanup: PASS'
           Remove-Item package-smoke -Recurse -Force
-          if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix.dll,glide2x.dll) {
+          if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix_installer.log,Rayman2Fix.dll,glide2x.dll) {
             throw 'One-file build must never include generated INI, logs or DLL sidecars'
           }
           $global:LASTEXITCODE = 0
@@ -217,6 +267,79 @@ jobs:
           path: package/
           if-no-files-found: error
           retention-days: 30
+      - name: Verify standard x86 runtime has no audio research hooks
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          binary=Path('build/Release/Rayman2Fix.dll').read_bytes()
+          if b'RUNTIME-AUDIO-TRACE: enabled=1' in binary:
+              raise SystemExit('Normal DLL unexpectedly contains experimental audio tracer')
+          print('Standard DLL excludes audio tracer: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Standard DLL included research probes' }
+      - name: Build separate research-only audio trace launcher
+        shell: pwsh
+        run: |
+          # Reuse the pinned already-built GameFrame resources. No original
+          # Rayman 2 executable, ISO, soundtrack or private patch in artifacts.
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=OFF -DRAYMAN2FIX_AUDIO_TRACE=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Audio trace CMake configure failed' }
+          cmake --build build --config Release --target Rayman2Fix --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Audio trace Windows x86 build failed' }
+          @'
+          from pathlib import Path
+          binary=Path('build/Release/Rayman2Fix.dll').read_bytes()
+          if b'RUNTIME-AUDIO-TRACE: enabled=1' not in binary:
+              raise SystemExit('Research DLL missing distinctive audio trace marker')
+          print('Research DLL includes audio tracer: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Audio research instrumentation not linked' }
+          New-Item -Path audio-trace -ItemType Directory -Force | Out-Null
+          Copy-Item build/Release/Rayman2Fix.exe audio-trace/Rayman2Fix.exe
+          if (!(Test-Path audio-trace/Rayman2Fix.exe)) { throw 'Audio trace launcher not produced' }
+          $global:LASTEXITCODE = 0
+      - name: Verify the research EXE deploys the exact corrected DLL
+        shell: pwsh
+        run: |
+          # Checking the DLL on disk before packaging is not enough:
+          # Rayman2Fix.exe must embed THAT DLL and install it at launch.
+          New-Item -ItemType Directory -Path research-package-smoke -Force | Out-Null
+          Copy-Item audio-trace/Rayman2Fix.exe research-package-smoke/Rayman2Fix.exe
+          & ./research-package-smoke/Rayman2Fix.exe --verify 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 2) {
+            throw 'No-media research launcher did not refuse missing installation as expected'
+          }
+          $deployed = 'research-package-smoke/Rayman2Fix/Rayman2Fix.dll'
+          if (!(Test-Path $deployed)) {
+            throw 'Research launcher did not deploy its embedded DLL'
+          }
+          $builtHash = (Get-FileHash build/Release/Rayman2Fix.dll -Algorithm SHA256).Hash
+          $embeddedHash = (Get-FileHash $deployed -Algorithm SHA256).Hash
+          if ($embeddedHash -ne $builtHash) {
+            throw 'STALE EMBEDDED DLL: research launcher differs from compiled runtime'
+          }
+          @'
+          from pathlib import Path
+          data=Path('research-package-smoke/Rayman2Fix/Rayman2Fix.dll').read_bytes()
+          for marker in (
+              b'RUNTIME-AUDIO-TRACE: enabled=1 schema=2 inner_record_ref=checked-pointer',
+              b'sequence_ref_class=%u',
+              b'inner_ref_class=%u',
+          ):
+              if marker not in data:
+                  raise SystemExit(f'Research DLL missing corrected trace field: {marker!r}')
+          print('Embedded research DLL exact-match and schema 2: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Embedded corrected audio trace marker check failed' }
+          $global:LASTEXITCODE = 0
+      - name: Upload optional sound-pause research build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rayman2Fix-Windows-x86-audio-trace
+          path: audio-trace/
+          if-no-files-found: error
+          retention-days: 30
 
   linux-tests:
     runs-on: ubuntu-latest
@@ -224,6 +347,30 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test pinned GameFrame limiter source integration
         run: python3 -m unittest discover -s tests -p 'test_fps_limit_patch.py'
+      - name: Verify Learn_10 safe fallback
+        run: python3 -m unittest discover -s tests -p 'test_learn10_readonly.py'
+      - name: Verify audio research trace stays out of normal builds
+        run: python3 -m unittest discover -s tests -p 'test_audio_trace_guards.py'
+      - name: Verify standalone PE32 audio inspector with synthetic fixtures
+        run: python3 -m unittest discover -s tests -p 'test_audio_static_inspector.py'
+      - name: Verify offline owner-scoped audio trace evidence parser
+        run: python3 -m unittest discover -s tests -p 'test_audio_trace_evidence.py'
+      - name: Verify native sound bank inverse lookup fails closed on uncertain data
+        run: python3 -m unittest discover -s tests -p 'test_audio_bank_origin_model.py'
+      - name: Verify original-CD audio parity parser with synthetic PE files
+        run: python3 -m unittest discover -s tests -p 'test_audio_cd_parity.py'
+      - name: Verify dual Theme and SXD native pause routing with synthetic model
+        run: python3 -m unittest discover -s tests -p 'test_audio_dual_dispatch_model.py'
+      - name: Check minimal native ESC music model and mandatory nested-pause counterexample
+        run: python3 -m unittest discover -s tests -p 'test_esc_music_record_experiment.py'
+      - name: Verify ESC music shadow reconciler with 4096 mixed native pause sequences
+        run: python3 -m unittest discover -s tests -p 'test_esc_music_shadow_reconciler.py'
+      - name: Verify native audio pause invariants against synthetic model
+        run: python3 -m unittest discover -s tests -p 'test_audio_pause_invariants.py'
+      - name: Verify offline BNM candidate metadata with synthetic banks
+        run: python3 -m unittest discover -s tests -p 'test_audio_bnm_inspector.py'
+      - name: Verify proposed ESC Theme focus-policy invariants
+        run: python3 -m unittest discover -s tests -p 'test_audio_pause_policy_model.py'
       - name: Configure
         run: cmake -S . -B build -DBUILD_TESTING=ON
       - name: Build
@@ -236,16 +383,20 @@ jobs:
           ./build/rayman2fix_cli || result=$?
           test "$result" -eq 2
           test -f build/Rayman2Fix/Rayman2Fix.ini
-          test -f build/Rayman2Fix.log
-          grep -q 'SYS-INFO: END' build/Rayman2Fix.log
-          test "$(grep -v '^;' build/Rayman2Fix/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nResolution=Desktop\nFPSLimit=60')" || exit 1
+          test -f build/Rayman2Fix_installer.log
+          test ! -e build/Rayman2Fix.log
+          grep -q 'SYS-INFO: END' build/Rayman2Fix_installer.log
+          test "$(grep -v '^;' build/Rayman2Fix/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nResolution=Desktop\nFPSLimit=60\nForce4x3=0\n[Features]\nSkipCinematics=0')" || exit 1
+          printf 'old game log\n' > build/Rayman2Fix.log
           printf '[Debug]\r\nLog=0\r\n' > build/Rayman2Fix/Rayman2Fix.ini
           result=0
           ./build/rayman2fix_cli || result=$?
           test "$result" -eq 2
           test ! -e build/Rayman2Fix.log
+          test ! -e build/Rayman2Fix_installer.log
           printf '[Debug]\r\nLog=1\r\n' > build/Rayman2Fix/Rayman2Fix.ini
           result=0
           ./build/rayman2fix_cli || result=$?
           test "$result" -eq 2
-          grep -q 'CONFIG: Debug.Log=1' build/Rayman2Fix.log
+          test ! -e build/Rayman2Fix.log
+          grep -q 'CONFIG: Debug.Log=1' build/Rayman2Fix_installer.log

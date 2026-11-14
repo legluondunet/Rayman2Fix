@@ -2,6 +2,10 @@
 #include "rayman2fix/sha256.hpp"
 
 #include <filesystem>
+#include <algorithm>
+#include <cctype>
+#include <vector>
+#include <utility>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -39,61 +43,115 @@ Resource get_resource(int id) {
     if (!bytes || !length) throw std::runtime_error("empty embedded GameFrame resource");
     return {bytes, length};
 }
+// Pre-single-backup builds created glide2x.dll.bak.1, .bak.2 ...
+// and likewise for the bundled license. Only touch the exact .bak.NUMBER
+// pattern for the requested, launcher-managed destination, never generic
+// DLLs or unrelated user files. Keep the newest numbered backup if there
+// is no .bak yet; otherwise retain the existing .bak.
+void prune_numbered_backups(const fs::path& dest) {
+    fs::path backup=dest; backup+=".bak";
+    if(fs::is_symlink(backup) ||
+       (fs::exists(backup) && !fs::is_regular_file(backup)))
+        throw std::runtime_error("unsafe GameFrame .bak destination");
+    const std::string prefix=dest.filename().u8string()+".bak.";
+    std::vector<std::pair<unsigned long,fs::path>> legacy;
+    for(const auto& entry:fs::directory_iterator(dest.parent_path())) {
+        const auto name=entry.path().filename().u8string();
+        if(name.rfind(prefix,0)!=0)continue;
+        const auto suffix=name.substr(prefix.size());
+        if(suffix.empty() || suffix.size()>10u ||
+           !std::all_of(suffix.begin(),suffix.end(),[](unsigned char ch){
+               return ch>='0' && ch<='9';
+           }))continue;
+        if(entry.is_symlink() || !entry.is_regular_file())
+            throw std::runtime_error("unsafe legacy GameFrame .bak.NUMBER file");
+        legacy.emplace_back(std::stoul(suffix),entry.path());
+    }
+    if(legacy.empty())return;
+    if(!fs::exists(backup)) {
+        const auto newest=std::max_element(legacy.begin(),legacy.end(),
+            [](const auto& a,const auto& b){return a.first<b.first;});
+        fs::rename(newest->second,backup);
+    }
+    for(const auto& [id,path]:legacy) {
+        (void)id;
+        if(fs::exists(path)) {
+            fs::permissions(path,fs::perms::owner_write,fs::perm_options::add);
+            fs::remove(path);
+        }
+    }
+}
+
 void write_and_replace(const fs::path& dest, const Resource& payload,
                        const std::string& expected_hash) {
-    if (fs::is_symlink(dest))
+    if(fs::is_symlink(dest))
         throw std::runtime_error("GameFrame destination is a symlink");
-    if (fs::exists(dest) && !fs::is_regular_file(dest))
+    if(fs::exists(dest) && !fs::is_regular_file(dest))
         throw std::runtime_error("GameFrame destination is not a regular file");
-    if (fs::is_regular_file(dest) && fs::file_size(dest) == payload.size &&
-        sha256_file(dest) == expected_hash)
+    // Even if the current DLL matches, migrate old .bak.1/.bak.2 files
+    // left by earlier releases. Never create a backup on a no-op update.
+    if(fs::is_regular_file(dest) && fs::file_size(dest)==payload.size &&
+       sha256_file(dest)==expected_hash) {
+        prune_numbered_backups(dest);
         return;
+    }
 
-    fs::path pending = dest; pending += ".installing";
-    if (fs::exists(pending) || fs::is_symlink(pending))
-        throw std::runtime_error("existing GameFrame installation staging file");
+    fs::path pending=dest; pending+=".installing";
+    fs::path backup=dest; backup+=".bak";
+    fs::path prior=dest; prior+=".bak.previous";
+    if(fs::exists(pending) || fs::is_symlink(pending) ||
+       fs::exists(prior) || fs::is_symlink(prior))
+        throw std::runtime_error("unfinished GameFrame backup/staging rotation");
+    if(fs::is_symlink(backup) ||
+       (fs::exists(backup) && !fs::is_regular_file(backup)))
+        throw std::runtime_error("unsafe GameFrame .bak file");
+    // Never expose an unverified DLL as the active game renderer.
     {
-        std::ofstream output(pending, std::ios::binary | std::ios::trunc);
-        if (!output) throw std::runtime_error("cannot stage GameFrame library");
+        std::ofstream output(pending,std::ios::binary|std::ios::trunc);
+        if(!output)throw std::runtime_error("cannot stage GameFrame library");
         output.write(reinterpret_cast<const char*>(payload.data),
                      static_cast<std::streamsize>(payload.size));
         output.close();
-        if (!output) throw std::runtime_error("error writing GameFrame library");
+        if(!output)throw std::runtime_error("error writing GameFrame library");
     }
-    if (sha256_file(pending) != expected_hash) {
+    if(sha256_file(pending)!=expected_hash) {
         fs::remove(pending);
-        throw std::runtime_error("embedded GameFrame library SHA256 mismatch");
+        throw std::runtime_error("embedded GameFrame SHA256 mismatch");
     }
-    fs::permissions(pending, fs::perms::owner_write, fs::perm_options::add);
+    fs::permissions(pending,fs::perms::owner_write,fs::perm_options::add);
 
-    fs::path backup;
-    if (fs::exists(dest)) {
-        // Preserve the first original as .bak; choose a unique numbered
-        // backup when it already exists. Never silently overwrite backups.
-        auto candidate = dest; candidate += ".bak";
-        if (!fs::exists(candidate)) backup = candidate;
-        else {
-            for (unsigned i = 1; i <= 1000; ++i) {
-                candidate = dest;
-                candidate += ".bak." + std::to_string(i);
-                if (!fs::exists(candidate)) { backup = candidate; break; }
-            }
-        }
-        if (backup.empty()) {
-            fs::remove(pending);
-            throw std::runtime_error("too many GameFrame backup files");
-        }
-        try { fs::rename(dest, backup); }
-        catch (...) { fs::remove(pending); throw; }
-    }
+    bool moved_prior=false,backed_up_current=false,published=false;
     try {
-        fs::rename(pending, dest);
-    } catch (...) {
+        if(fs::exists(dest)) {
+            if(fs::exists(backup)) {
+                fs::rename(backup,prior);
+                moved_prior=true;
+            }
+            fs::rename(dest,backup);
+            backed_up_current=true;
+        }
+        fs::rename(pending,dest);
+        published=true;
+    }catch(...) {
         std::error_code ignored;
-        if (!backup.empty()) fs::rename(backup, dest, ignored);
-        fs::remove(pending, ignored);
+        // If publishing fails, restore the previously working DLL and its
+        // preceding backup, rather than losing either of them.
+        if(backed_up_current) {
+            if(published)fs::remove(dest,ignored);
+            if(!fs::exists(dest))fs::rename(backup,dest,ignored);
+        }
+        if(moved_prior && !fs::exists(backup))
+            fs::rename(prior,backup,ignored);
+        fs::remove(pending,ignored);
         throw;
     }
+    // The new renderer is verified and published. Keep exactly the DLL it
+    // replaced in .bak; only then discard the older .bak.previous.
+    if(moved_prior) {
+        fs::permissions(prior,fs::perms::owner_write,fs::perm_options::add);
+        fs::remove(prior);
+    }
+    prune_numbered_backups(dest);
 }
 #endif
 }
