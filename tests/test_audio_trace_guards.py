@@ -53,7 +53,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("g_audio_last_ingame_menu.exchange(",section)
         self.assertIn("g_audio_last_engine_pause.exchange(",section)
         self.assertIn("RUNTIME-AUDIO-UI-STATE: t_ms=",section)
-        self.assertIn("not ESC/F1 proof",section)
+        self.assertIn("not ESC visibility proof",section)
         self.assertNotIn("WriteProcessMemory(",section)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
@@ -218,18 +218,19 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("InterlockedCompareExchangePointer(", section)
         self.assertNotIn("MusicInPauseMenu",section)
 
-    def test_actor_sample_only_in_audio_research_and_only_on_ui_or_f1_edges(self):
+    def test_actor_sample_only_in_audio_research_on_native_ui_changes(self):
         poll=self.runtime.split("void poll_audio_pause_trace() {",1)[1]
         poll=poll.split("using AudioHook=",1)[0] if "using AudioHook=" in poll else poll
-        self.assertIn("const int f1=int((GetAsyncKeyState(VK_F1)&0x8000)!=0)",poll)
         self.assertIn("old_menu!=static_cast<int>(in_game_menu)",poll)
-        self.assertIn("old_f1!=f1",poll)
+        self.assertIn("old_engine!=static_cast<int>(engine_paused)",poll)
         self.assertIn("inspect_audio_menu_actor_readonly()",poll)
         self.assertIn("RUNTIME-AUDIO-MENU-ACTOR:",poll)
-        self.assertIn("actor candidate not proof of ESC/F1",poll)
-        self.assertLess(poll.index("const int old_f1="),
+        self.assertIn("actor candidate not proof of visible ESC menu",poll)
+        self.assertIn("esc_down=%u",poll)
+        self.assertLess(poll.index("old_menu!=static_cast<int>(in_game_menu)"),
                         poll.index("inspect_audio_menu_actor_readonly()"))
-        self.assertIn("g_audio_last_f1_down{-1}",self.runtime)
+        self.assertNotIn("VK_F1",self.runtime)
+        self.assertNotIn("f1_down=",self.runtime)
         # Scoped by #if RAYMAN2FIX_AUDIO_TRACE and follows existing checks.
         before=self.runtime.split(
             "AudioMenuActorSnapshot inspect_audio_menu_actor_readonly()",1)[0]
