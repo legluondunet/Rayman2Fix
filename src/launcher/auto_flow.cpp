@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -415,6 +416,30 @@ void publish_installation(const fs::path& game_dir, const fs::path& staging) {
     }
 }
 
+// Discover only byte-for-byte approved owner-supplied complete EXEs placed
+// BESIDE Rayman2Fix.exe (never in the extracted game directory). Accept any
+// filename ending in .exe, including Rayman2(4).exe from a browser download;
+// filename alone is NOT trusted. Reject multiple matching candidates rather
+// than selecting arbitrarily, and never inspect symlinks.
+std::optional<fs::path> find_approved_unprotected_executable(
+    const fs::path& launcher_root) {
+    std::optional<fs::path> candidate;
+    for (const auto& entry : fs::directory_iterator(launcher_root)) {
+        if (!entry.is_regular_file() || entry.is_symlink() ||
+            upper(entry.path().extension().u8string()) != ".EXE" ||
+            entry.file_size() != kApprovedUnprotectedExeSize)
+            continue;
+        if (sha256_file(entry.path()) != kApprovedUnprotectedExeSha256)
+            continue;
+        if (candidate)
+            throw std::runtime_error(
+                "multiple approved unprotected game EXEs beside Rayman2Fix.exe; "
+                "keep only one (original CD files are not modified)");
+        candidate = entry.path();
+    }
+    return candidate;
+}
+
 // Patch bytes are intentionally not bundled until we obtain the ORIGINAL
 // retail executable and generate an edition-specific minimal delta.
 // On a supported build, commit the new EXE with its original preserved under
@@ -424,9 +449,32 @@ void patch_executable_if_supported(const fs::path& game_root, Startup& startup) 
         startup.log("EXE-PATCH: installed patch marker present; original preserved as rayman2.exe.bak");
         return;
     }
+    // Only the one hash-locked protected CD executable may be replaced.
+    // Never accept a random GOG/third-party EXE based on its filename.
+    const auto exe = game_root / "rayman2.exe";
+    const bool source_supported=exists_file(exe) &&
+        fs::file_size(exe)==kApprovedProtectedExeSize &&
+        sha256_file(exe)==kApprovedProtectedExeSha256;
+    if (!source_supported) {
+        startup.log("EXE-PATCH: protected CD source is not the approved hash; preserved");
+        return;
+    }
+    if (const auto owner_exe=find_approved_unprotected_executable(startup.root())) {
+        const ExePatchHeader pair{
+            kApprovedProtectedExeSize,kApprovedUnprotectedExeSize,
+            kApprovedProtectedExeSha256,kApprovedUnprotectedExeSha256};
+        const auto applied=install_exe_replacement_from_file(
+            game_root,*owner_exe,pair);
+        startup.log("EXE-PATCH: used adjacent owner-provided EXE=" +
+            owner_exe->filename().u8string() +
+            " source_sha256=" + applied.original_sha256 +
+            " target_sha256=" + applied.patched_sha256 +
+            " backup=rayman2.exe.bak; adjacent source preserved");
+        return;
+    }
     const auto patch = available_exe_patch(startup.root());
     if (patch.empty()) {
-        startup.log("EXE-PATCH: no embedded or local delta; original CD executable unchanged (no .bak yet)");
+        startup.log("EXE-PATCH: no approved adjacent unprotected EXE or local delta; protected CD executable unchanged (no .bak yet)");
         return;
     }
     const auto header = inspect_exe_patch(patch);
@@ -438,12 +486,7 @@ void patch_executable_if_supported(const fs::path& game_root, Startup& startup) 
     }
     // If the CD image/edition is unrecognized, *do not* patch or rename the
     // user's original executable; keep it intact for later investigation.
-    const auto exe = game_root / "rayman2.exe";
-    if (!exists_file(exe) || fs::file_size(exe) != header.original_size ||
-        sha256_file(exe) != header.original_sha256) {
-        startup.log("EXE-PATCH: source hash not supported by bundled patch; original kept");
-        return;
-    }
+    // Exact original hash has already been validated above.
     const auto applied = install_exe_replacement(game_root, patch);
     startup.log("EXE-PATCH: applied source_sha256=" + applied.original_sha256 +
                 " target_sha256=" + applied.patched_sha256 +
