@@ -405,7 +405,7 @@ audio behavior has been attempted.
 The two original owner-supplied DLLs now provide enough verified
 structure for a *read-only snapshot* of the specific ADPCM
 record referenced by a source-identified ESC Pause
-**after the game's unmodified original wrapper returns**.
+**after the game's unmodified original wrapper and the existing native audio compensation are finished**.
 
 The standard opt-in `MusicInPauseMenu` runtime adds
 `RUNTIME-ESC-ADPCM-VOICE`, with four deliberately narrow
@@ -413,7 +413,7 @@ fields:
 
 - `sampled=1` means **all** original version guards,
   pointer-chain checks and record-live-count checks passed
-  in one bounded post-wrapper snapshot. `sampled=0`
+  in one bounded post-dispatch snapshot. `sampled=0`
   means **unknown**, not an absent sound or an unpaused
   sound.
 - `voice_index` is the *temporary ordinal* of the
@@ -422,11 +422,13 @@ fields:
   or a WinMM voice handle. Its value must not be cached
   or compared across a Stop/compaction.
 - `paused=0|1|2` is the record's actual `+0x1C` state
-  as observed after the original Pause wrapper: unpaused,
+  as observed after the current menu's original and compensated
+  Pause/Resume decisions: unpaused,
   paused or unexpected other value. `-1` means unknown.
-  It is measured before any synthetic Resume compensation,
-  even though the line is **printed later**, after audio
-  decisions.
+  It is measured after any existing synthetic Resume compensation,
+  rather than delaying the audible recovery. The
+  separately logged `transition_type_post_pause` still comes
+  from immediately after the original wrapper.
 - `other_gate=0|1` is the record's separate mixer
   exclusion field at `+0xDC`: zero or nonzero.
   A zero `paused` flag alone does not establish audible
@@ -436,7 +438,11 @@ The snapshot is admitted **only** after precisely two
 source-identified original slot-2 callbacks with an
 identical transition-object argument and a post-wrapper
 type `4`; the pre-existing first-16 ESC-source budget
-applies. No new memory reads occur inside audio callbacks.
+applies. These reads happen in the menu tick AFTER
+`proto_dispatch(action)` and `proto_deferred_safety()`,
+never inside the original script wrapper or any
+audio callback. This ordering is critical: the observer
+must not extend the brief opening silence.
 
 Strict positive checks:
 
@@ -475,10 +481,16 @@ stability across an asynchronous Stop or pool compaction.
 This specifically tests the unanswered early-menu case:
 when `RUNTIME-ESC-PREDRIVER-GATE native_ref_class=3`
 (`9:12` mismatched with the active `9:5` Theme), does
-the separately source-verified original paused transition
-also have a valid live ADPCM record with `paused=1`?
-If yes, the native Pause reaches an actual eligible
-record even under the higher-level Theme pointer mismatch.
+the separately source-verified original transition
+still have a valid live ADPCM record with `paused=1`
+**after the normal menu decision** (which rejected
+synthetic compensation)? If yes, the original Pause
+left a particular live record in the mixer-muted state
+despite the higher-level Theme pointer mismatch.
+When the owner is verified and compensation is accepted,
+the later post-dispatch snapshot may instead show
+`paused=0`; this is an outcome snapshot and not a
+before/after atomic trace.
 It does **not**, by itself, prove that suppressing the
 pause is safe (other sounds, Stop/compaction, focus,
 script depth and Resume debt remain independent).
