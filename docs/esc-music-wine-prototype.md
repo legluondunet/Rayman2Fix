@@ -199,10 +199,12 @@ release, not as proof of a crash or regression. The next logged
 scene transition completes, and the trace contains no explicit fatal
 error.
 
-The test does **not** demonstrate Alt+Tab: every sampled foreground
-state was 1. Native Windows and alternate audio backends are untested.
-Keep opt-in build-only functionality gated, PR #9 in draft, and the
-normal release build unchanged until those compatibility checks pass.
+All sampled Win32 `GetForegroundWindow` process-owner flags were 1
+in this first r3 log. This **only** means the recorder did not capture
+a foreign foreground process, not that a user did not perform Alt+Tab.
+Native Windows and alternate audio backends are untested. Keep opt-in
+build-only functionality gated, PR #9 in draft, and the normal release
+build unchanged until those compatibility checks pass.
 
 
 ## Owner Wine trace — 14 November 2026, 10:56 (r3 repeat test)
@@ -224,14 +226,26 @@ belongs to the next loaded soundtrack. Neither native stop is suppressed.
 This is a useful scene-transition/stop result, not a proof that every
 level transition or focus reentry works.
 
-Separately, the engine pause byte temporarily rises to 1 between
-`t_ms=52.513s` and `65.079s` while `in_game_menu=1`, but all
-sampled foreground flags still equal 1. This **does not**
-establish a real Alt+Tab/focus-loss test, so do not mark that case
-as covered or infer its audible behavior.
+The owner explicitly confirms an **actual Alt+Tab while the ESC menu
+was open** during this test. This is an executed user test, not a
+hypothetical case. The engine pause byte rises to 1 at `t_ms=52.513s`
+then falls to 0 at `t_ms=65.079s`, while `in_game_menu=1` throughout,
+consistent with that focus-loss and return. However, all recorder
+samples of `GetForegroundWindow` show the game's Win32 process as
+foreground. This exposes a **visibility blind spot in the recorder**:
+foreground was only sampled during game callbacks/flag transitions,
+which can stall during Alt+Tab under Wine, and the PID-based Win32
+foreground test may not reflect the Linux compositor's focus.
+Do **not** turn missing `foreground=0` samples into a claim that the
+owner never Alt+Tabbed. The available trace does not by itself prove
+that physical music stopped on focus loss; the owner feedback and
+better event-level instrumentation must answer that separately.
 
 The expected r3 adapter path now repeats across two independent Wine
 logs, but this source observes callbacks rather than sound output.
-Music continuity is supported by the owner's qualitative feedback
-and still requires native Windows and true focus-loss checks before
-an enabled-by-default production release.
+Music continuity is supported by the owner's qualitative feedback.
+The owner **has** performed a real focus-loss test, but its callback-
+level logs still cannot establish the music's physical focus behavior.
+Instrument source-specific focus callbacks before making audio-policy
+changes; native Windows verification is also outstanding before an
+enabled-by-default production release.
