@@ -2582,9 +2582,14 @@ void poll_audio_pause_trace() {
                 log_line(line);
                 log_audio_driver_module(i,current);
 #else
-                // One compact status event; the driver call ABI is kept
-                // unchanged and we do not sample descriptor payloads.
+                // The original thunk's owning module is stronger evidence
+                // than the Snd_Cpa.ini default: the CPA loader can choose a
+                // tested fallback. Reuse the research-only FROM_ADDRESS probe
+                // solely at installation, never in an audio callback. It
+                // reports basename+RVA, never a user's filesystem path,
+                // and changes no native call/ABI or driver configuration.
                 proto_log("driver-hook-installed",kAudioSlots[i].name);
+                log_audio_driver_module(i,current);
 #endif
             }
         }
