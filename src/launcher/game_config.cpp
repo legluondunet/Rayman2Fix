@@ -237,6 +237,9 @@ bool configured_force_4_3(const fs::path& ini) {
 bool configured_skip_cinematics(const fs::path& ini) {
     return read_ini_flag(ini,"Features","SkipCinematics");
 }
+bool configured_music_in_pause_menu(const fs::path& ini) {
+    return read_ini_flag(ini,"Features","MusicInPauseMenu");
+}
 std::pair<std::uint32_t,std::uint32_t> configured_render_resolution(
         const fs::path& ini) {
     const auto physical=configured_output_resolution(ini);
@@ -267,7 +270,7 @@ std::uint32_t configured_fps_limit(const fs::path& ini) {
 void ensure_rayman2fix_ini_options(const fs::path& ini) {
     const auto raw=lines_of(ini);
     std::string current;
-    bool graphics=false,features=false,force=false,skip=false;
+    bool graphics=false,features=false,force=false,skip=false,music=false;
     for(const auto& text:raw) {
         std::string next;
         if(section(text,next)) {
@@ -283,11 +286,12 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         const auto key=upper(trim(t.substr(0,p)));
         if(current=="GRAPHICS" && key=="FORCE4X3")force=true;
         if(current=="FEATURES" && key=="SKIPCINEMATICS")skip=true;
+        if(current=="FEATURES" && key=="MUSICINPAUSEMENU")music=true;
     }
-    if(force && skip)return;
+    if(force && skip && music)return;
     std::vector<std::string> output;
     std::string active;
-    bool added_force=false,added_skip=false;
+    bool added_force=false,added_skip=false,added_music=false;
     const auto inject=[&]() {
         if(active=="GRAPHICS" && !force && !added_force) {
             output.emplace_back("; 1 = centered 4:3 picture with black sidebars");
@@ -299,6 +303,12 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
             output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
             output.emplace_back("SkipCinematics=0");
             added_skip=true;
+        }
+        if(active=="FEATURES" && !music && !added_music) {
+            output.emplace_back("; 1 = continue the current level music in the ESC menu");
+            output.emplace_back("; Default 0 (opt in); original SFX and level changes are native");
+            output.emplace_back("MusicInPauseMenu=0");
+            added_music=true;
         }
     };
     for(const auto& text:raw) {
@@ -324,6 +334,9 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 only");
         output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
         output.emplace_back("SkipCinematics=0");
+        output.emplace_back("; 1 = continue the current level music in the ESC menu");
+        output.emplace_back("; Default 0 (opt in); original SFX and level changes are native");
+        output.emplace_back("MusicInPauseMenu=0");
     }
     // Retain original BOM, comments, unrelated keys and EOL type.
     std::ifstream old(ini,std::ios::binary);
