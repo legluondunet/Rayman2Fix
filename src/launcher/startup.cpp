@@ -234,8 +234,12 @@ void Startup::initialize(bool provision_files) {
         if (!ini) throw std::runtime_error("failed writing Rayman2Fix.ini");
     }
 
-    // Preserve user values; add new opt-in options to older config files.
-    ensure_rayman2fix_ini_options(ini_path_);
+    // --launch-no-verify is intentionally side-effect-free for installed
+    // game files/config: never create or migrate an INI in unchecked mode.
+    // In particular, an absent Rayman2Fix/ directory must still reach
+    // CreateProcessW and return the genuine operating-system error.
+    if (provision_files)
+        ensure_rayman2fix_ini_options(ini_path_);
 
     // Parse the only supported option before opening a log file.
     // Log=0 is an opt-out; never create a diagnostic log in that mode.
