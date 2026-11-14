@@ -29,7 +29,7 @@ class AudioTraceGuardTests(unittest.TestCase):
 
     def test_hook_is_compiled_out_of_normal_approved_camera_path(self):
         self.assertRegex(self.runtime,
-            r'#if RAYMAN2FIX_AUDIO_TRACE\s+poll_audio_pause_trace\(\);\s+#endif')
+            r'#if RAYMAN2FIX_AUDIO_TRACE\s+poll_audio_pause_trace\(\);\s+(?:#if RAYMAN2FIX_ESC_MUSIC_PROTO\s+proto_menu_tick\(\);\s+#endif\s+)?#endif')
         self.assertIn("#if RAYMAN2FIX_AUDIO_TRACE\nusing AudioPauseFn",self.runtime)
         self.assertIn('if(!g_log || InterlockedCompareExchange(',self.runtime)
         self.assertIn("if(n<=kAudioSlotCount)",self.runtime)
@@ -434,6 +434,52 @@ class AudioTraceGuardTests(unittest.TestCase):
             self.assertIn('{"'+name+'",'+rva+'}',self.runtime)
         self.assertIn("TimeDateStamp!=kOriginalTimestamp",self.runtime)
         self.assertIn("kAudioSlotCount=14",self.runtime)
+
+
+    def test_native_current_theme_reference_does_not_use_serialized_bank_key(self):
+        # Old packed bank:index comparison is only a diagnostic. The
+        # original 0x45997B compares a descriptor pointer instead.
+        self.assertIn("native_theme_player_ref_matches_outer",self.runtime)
+        self.assertIn("static_cast<DWORD>(outer_descriptor_address)",self.runtime)
+        self.assertIn("owner.native_theme_player_ref_matches_outer!=1",self.runtime)
+        self.assertIn("native_theme_player_ref_matches_outer=%d",self.runtime)
+        self.assertIn("proto_esc_menu_actor_open()",self.runtime)
+        self.assertIn("snapshot.dynamic_actor==1",self.runtime)
+        self.assertIn("snapshot.inactive_actor==0",self.runtime)
+        self.assertIn("DWORD(now-last_probe)<75u",self.runtime)
+
+
+    def test_wine_esc_probe_allows_nested_depth_but_never_unverified_resume(self):
+        # The first 2026-11-14 menu was entered at depth 1; later real
+        # menu entries happened at depth 2. The original strict ==1 gate
+        # rejected them, independent of whether their Theme was valid.
+        self.assertIn("depth>=1u && depth<=8u",self.runtime)
+        self.assertNotIn("proto_read_depth(depth) && depth==1",self.runtime)
+        # A candidate may have a unique Theme owner while the native player
+        # pointer is still transitional, but only exact player pointer
+        # matches may cause an actual physical driver Resume.
+        self.assertIn("proto_identity(handle,generation,false)",self.runtime)
+        self.assertIn("bool require_current_theme=true",self.runtime)
+        self.assertIn("owner.native_theme_player_ref_matches_outer!=1",self.runtime)
+        self.assertIn("proto_identity(handle,generation).valid()",self.runtime)
+        # The scoped prototype source replaces broken return-stack inference
+        # only when all four experimental source detours are installed.
+        self.assertIn('audio_origin="game-script-pause"',self.runtime)
+        self.assertIn('audio_origin="game-script-resume"',self.runtime)
+        self.assertIn('audio_origin="windows-activation-pause"',self.runtime)
+        self.assertIn('audio_origin="windows-activation-resume"',self.runtime)
+
+    def test_focus_loss_diagnostic_uses_real_win32_source_callers(self):
+        # Camera/UI callbacks can stop running while Wine is Alt+Tabbed,
+        # and GetForegroundWindow() can be stale or map the Wine desktop.
+        # Record verified native Win32 activation source events instead.
+        self.assertIn("void proto_focus_trace(",self.runtime)
+        self.assertIn("RUNTIME-ESC-FOCUS: t_ms=",self.runtime)
+        self.assertIn('proto_focus_trace("native-focus-pause",d)',self.runtime)
+        self.assertIn('proto_focus_trace("native-focus-resume",d)',self.runtime)
+        self.assertIn("GetActiveWindow()!=nullptr",self.runtime)
+        # Diagnostic must not become a new driver authorization source.
+        self.assertIn("proto_dispatch(d);",self.runtime)
 
 if __name__=="__main__":
     unittest.main()
