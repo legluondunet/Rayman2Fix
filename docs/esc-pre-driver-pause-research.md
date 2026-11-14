@@ -559,3 +559,23 @@ they distinguish configured candidate plugins from the
 actual code module implementing the original native
 Pause/Resume/Stop callback addresses. No audio path is
 changed by this research.
+
+## Interpreting the first standard-backend audit (no engine changes)
+
+Apply this conservative decision table to the owner's next ordinary
+`Rayman2Fix.log`:
+
+| Observed evidence | Supported inference | What remains unknown |
+| --- | --- | --- |
+| `RUNTIME-AUDIO-CONFIG status=present` | The installed original CPA config was read successfully | It may specify tests/fallbacks, and does not prove the selected output plugin |
+| `sxd_unconditional=WAVa1` or similar | That value was configured by the original sound INI | Whether that plugin actually loaded or was later replaced |
+| `RUNTIME-AUDIO-DRIVER channel=PauseTransitionSxd module=WAVMWBVR.dll` (illustrative, not seen yet) | The captured original Pause callback PC lies inside the loaded module of that basename | Its exact bytes/version, runtime voice identity and internal Pause debt semantics |
+| All four Pause/Resume/Stop callbacks have the same module basename | The callbacks are implemented inside the same loaded PE module according to their original function-pointer addresses | Whether that module owns a single or several distinct physical streams/voices |
+| Different modules, `rayman2.exe`, or `module=unknown` | Hook table source or plugin dispatch needs further inspection | Which downstream driver is actually responsible; do not assume a plugin name |
+| `RUNTIME-ESC-SXD-LIFETIME changes>0` with `play_between=stop_between=0` | The nested logical resource changed without a tracked original Play/Stop call | Whether the driver recycled a handle or simply sequenced Theme parts |
+
+This table prevents promoting either a configuration default or a
+sampled Theme-part key into proof of physical driver ownership.
+No `RUNTIME-AUDIO-` trace is an authorization to skip native
+Pause/Resume, alter `snd_cpa.ini`, use an unrelated audio DLL, or
+re-enable the unproven source-scoped pre-driver prototype.
