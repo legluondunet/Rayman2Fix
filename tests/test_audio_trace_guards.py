@@ -315,6 +315,53 @@ class AudioTraceGuardTests(unittest.TestCase):
                         tick.index("transition_type_post_pause=%d"))
         self.assertNotIn("proto_read_transition_type_post_wrapper(",tick)
 
+    def test_hash_guided_adpcm_delegate_resolution_is_passive_and_post_dispatch(self):
+        # The owner-observed Transition type=4 is ADPCM, whose original
+        # exported Pause/Resume/Stop thunks point to separately loaded DLL
+        # callbacks. The diagnostic reads the original indirection table
+        # only with the exact 1999 PE version and opcode fingerprint.
+        bridge=self.runtime.split(
+            "void log_adpcm_delegate_origins_readonly() {",1)[1].split(
+            "// Owner's exact CD executable",1)[0]
+        for token in (
+            "g_audio_original[2u].load(",
+            "GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS",
+            "GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT",
+            'L"WAVMWbvr.dll"', "CompareStringOrdinal(",
+            "origin!=reinterpret_cast<std::uintptr_t>(base)+0xC7E0u",
+            "nt.FileHeader.TimeDateStamp!=0x38076FB4u",
+            "nt.OptionalHeader.SizeOfImage!=0x87000u",
+            "expected_pause[7]", "std::memcmp(",
+            "0x26A98u,0x26A9Cu,0x26AA0u",
+            "0x3C50u,0x3C80u,0x3CB0u",
+            '"stop","pause","resume"',
+            "status=unresolved", "status=fallback",
+            "status=resolved", "callback_rva=0x%08X",
+            "ReadProcessMemory(", "executable_page(",
+        ):
+            self.assertIn(token,bridge)
+        for banned in ("LoadLibrary", "GetProcAddress(", "VirtualProtect(",
+                       "WriteProcessMemory(", "InterlockedCompareExchangePointer(",
+                       "original(", "fn(", "Sleep(", "proto_dispatch("):
+            self.assertNotIn(banned,bridge)
+        # Nothing in native callbacks reads these indirect pointers.
+        callback=self.runtime.split(
+            "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1].split(
+            "void __stdcall audio_pause_sxd(",1)[0]
+        self.assertNotIn("log_adpcm_delegate_origins_readonly()",callback)
+        self.assertNotIn("0x26A9C",callback)
+
+        tick=self.runtime.split(
+            "void proto_menu_tick() {",1)[1].split(
+            "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
+        self.assertIn("report.transition_type_post_pause==4",tick)
+        self.assertIn("static bool adpcm_targets_logged=false",tick)
+        self.assertEqual(tick.count("log_adpcm_delegate_origins_readonly();"),1)
+        self.assertLess(tick.index("proto_dispatch(action);"),
+                        tick.index("log_adpcm_delegate_origins_readonly();"))
+        self.assertLess(tick.index("proto_deferred_safety();"),
+                        tick.index("log_adpcm_delegate_origins_readonly();"))
+
     def test_intro_theme_controller_watcher_is_change_triggered_and_bounded(self):
         self.assertIn("void proto_theme_transition_watch_tick()",self.runtime)
         start=self.runtime.index("void proto_theme_transition_watch_tick()")
