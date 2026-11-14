@@ -18,6 +18,7 @@ FIELD = re.compile(r"(?:^|\s)([A-Za-z_][A-Za-z_0-9]*)=([^\s]+)")
 TRACE = "RUNTIME-AUDIO-TRACE: event="
 OWNER = "RUNTIME-AUDIO-THEME-OWNER: channel="
 UI_STATE = "RUNTIME-AUDIO-UI-STATE:"
+MENU_ACTOR = "RUNTIME-AUDIO-MENU-ACTOR:"
 
 
 def fields(line: str) -> dict[str, str]:
@@ -90,6 +91,7 @@ def summarize(text: str) -> dict:
     by_event_sample: dict[tuple[int, str, int], dict] = {}
     unmatched_owners = 0
     ui_states: list[dict] = []
+    menu_actor_snapshots: list[dict] = []
     menu_flag_observations: list[dict] = []
     schema2 = False
     session = 0  # 0 means data before any explicit session header
@@ -129,6 +131,38 @@ def summarize(text: str) -> dict:
                 "value": obj["ui_in_game_menu_at_call"],
                 "source": "before-sampled-audio-driver-call",
             })
+        elif MENU_ACTOR in line:
+            data = fields(line.split(MENU_ACTOR, 1)[1])
+            menu = number(data, "in_game_menu")
+            engine = number(data, "engine_paused")
+            f1 = number(data, "f1_down")
+            esc = number(data, "esc_down")
+            candidate = number(data, "personal_type_found")
+            active = number(data, "dynamic_actor")
+            inactive = number(data, "inactive_actor")
+            ms = number(data, "t_ms")
+            if (ms >= 0 and menu in (0, 1) and engine in (0, 1)
+                    and f1 in (0, 1) and esc in (0, 1)
+                    and candidate in (-1, 0, 1)
+                    and active in (-1, 0, 1)
+                    and inactive in (-1, 0, 1)):
+                menu_actor_snapshots.append({
+                    "session": session,
+                    "time_ms": ms,
+                    "native_menu_flag": menu,
+                    "native_engine_pause_flag": engine,
+                    "f1_key_down_at_sample": f1,
+                    "esc_key_down_at_sample": esc,
+                    "candidate_personal_type_registered": candidate,
+                    "candidate_actor_in_active_world": active,
+                    "candidate_actor_in_inactive_world": inactive,
+                    "registry_nodes_checked": number(data, "type_nodes"),
+                    "active_world_nodes_checked": number(data, "dynamic_nodes"),
+                    "inactive_world_nodes_checked": number(data, "inactive_nodes"),
+                    "name_only_candidate_not_ESC_UI_proof": True,
+                    "f1_key_sample_not_F1_menu_proof": True,
+                    "unknown_or_missing_actor_not_proof_of_absence": True,
+                })
         elif UI_STATE in line:
             data = fields(line.split(UI_STATE, 1)[1])
             menu, engine = number(data, "in_game_menu"), number(data, "engine_paused")
@@ -278,6 +312,9 @@ def summarize(text: str) -> dict:
         "explicit_sessions_detected": session,
         "unmarked_prefix_events": unmarked_prefix_events,
         "native_ui_state_samples": ui_states,
+        "menu_actor_readonly_snapshots": menu_actor_snapshots,
+        "menu_actor_candidate_cannot_distinguish_ESC_from_F1": True,
+        "older_logs_lacking_actor_snapshots_are_not_negative_evidence": True,
         "observed_native_menu_flag_change_windows": menu_windows,
         "unusable_nonmonotonic_menu_timestamp_pairs": menu_nonmonotonic,
         "menu_windows_are_not_confirmed_ESC_UI_lifetimes": True,
