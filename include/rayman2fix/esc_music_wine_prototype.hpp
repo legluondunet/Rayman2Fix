@@ -201,6 +201,12 @@ public:
         return phase_!=Phase::idle && phase_!=Phase::quarantined &&
                identity_.generation==token && token!=0;
     }
+    // A quarantined generation may receive ONE last safety *pause*
+    // (never a resume), provided native Stop has not retired it.
+    bool safety_current(std::uint64_t token) const noexcept {
+        return phase_==Phase::quarantined && compensated_ &&
+               identity_.generation==token && token!=0;
+    }
     Phase phase() const noexcept {return phase_;}
     std::uint32_t current_handle() const noexcept{return identity_.handle;}
     unsigned native_pause_count() const noexcept{return observed_pauses_;}
