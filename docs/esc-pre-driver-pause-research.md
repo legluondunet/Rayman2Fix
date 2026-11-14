@@ -579,3 +579,60 @@ sampled Theme-part key into proof of physical driver ownership.
 No `RUNTIME-AUDIO-` trace is an authorization to skip native
 Pause/Resume, alter `snd_cpa.ini`, use an unrelated audio DLL, or
 re-enable the unproven source-scoped pre-driver prototype.
+
+## Verified original SXD output DLL on owner's Windows install (14 November, 20:19)
+
+An ordinary owner's native Windows run with the new standard
+instrumentation, `Rayman2Fix(20261114-201946).log`,
+now supplies the missing **actual original native callback module**:
+
+```text
+RUNTIME-AUDIO-CONFIG: status=present
+    sxd_unconditional=None sxd_default=WAVPW
+    sxd_file0=WAVMW sxd_file1=unset adpcm_default=APMPW
+RUNTIME-AUDIO-DRIVER: channel=PauseTransitionSxd
+    module=WAVMWbvr.dll callback_rva=0x0000C7E0
+RUNTIME-AUDIO-DRIVER: channel=ResumeTransitionSxd
+    module=WAVMWbvr.dll callback_rva=0x0000C830
+RUNTIME-AUDIO-DRIVER: channel=StopSxd
+    module=WAVMWbvr.dll callback_rva=0x0000B920
+RUNTIME-AUDIO-DRIVER: channel=StopTransitionSxd
+    module=WAVMWbvr.dll callback_rva=0x0000C790
+```
+
+**The validated observation is loaded original callback ownership**,
+not proof of what the backend does internally. The configured
+`[DLL_Sxd] Default=WAVPW` does not match the module actually
+providing these four callbacks (`WAVMWbvr.dll`, corresponding
+to `File0=WAVMW`). This may reflect CPA capability testing or a
+fallback; we have not yet disassembled the owner's installed DLL
+to establish the exact selection logic.
+
+Nine original script Pause wrappers and eight complete source-matched
+script Resume wrappers were observed, with two native slot-2 calls
+at depth `1→2` per opening, two native slot-3 calls at depth
+`2→1` per observed exit, and no mixed Resume suppression.
+The first five strict reference mismatches are forwarded normally.
+Four subsequent openings request compensated resume batches;
+one changes the nested SXD logical resource `9:7→9:8`
+during the menu and quarantines with `phase=6`;
+both original Resumes were forwarded. Two later complete
+stable compensated menus suppress exactly their two paired
+original Resumes. The ninth open menu has no matching
+script Resume in this log and must not be classified.
+
+**Next static target:** the exact file
+`Rayman2Fix/dll/WAVMWbvr.dll` from this owner's tested retail
+CD installation. Hash first, then read-only PE imports/exports,
+and static control flow around RVAs
+`0xC7E0`, `0xC830`, `0xB920`, `0xC790`.
+Inspect driver state transitions, refcounted pause semantics,
+Stop/Resume ordering, and any WinMM waveOut delegation.
+Do not replace or modify the original DLL, and do not import
+offsets from a GOG, Steam or other CPA game copy without a
+byte-identical hash comparison.
+
+Physical pre-driver interception remains disabled, even for
+early `9:12` controller-reference mismatches. The fact that
+two callbacks have the same module/handle is not enough to
+prove rollback from a withheld Pause.
