@@ -8,7 +8,8 @@
 namespace r2fix::esc_proto {
 
 enum class Phase : std::uint8_t {
-    idle, pending_menu, audible_menu, muted_focus, closing_unfocused, quarantined
+    idle, pending_menu, audible_menu, muted_focus, closing_unfocused,
+    closing_recovered, quarantined
 };
 enum class Origin : std::uint8_t {
     unknown, script_pause, script_resume, focus_pause, focus_resume
@@ -55,6 +56,8 @@ public:
         observed_pauses_=0;
         ignored_resumes_=0;
         menu_open_=false;
+        compensated_=false;
+        physical_paused_=true;
         return true;
     }
     void observe_native_pause(const Identity& id, bool verified_current_theme) noexcept {
@@ -89,6 +92,8 @@ public:
             }
             menu_open_=true;
             phase_=Phase::audible_menu;
+            compensated_=true;
+            physical_paused_=false;
             return make(Command::resume);
         }
         if(menu_open_ && !menu_open && ignored_resumes_!=2) {
@@ -100,16 +105,18 @@ public:
         menu_open_=menu_open;
         if(phase_==Phase::audible_menu && !foreground) {
             phase_=Phase::muted_focus;
+            physical_paused_=true;
             return make(Command::pause);
         }
         if(phase_==Phase::muted_focus && foreground && menu_open_) {
             phase_=Phase::audible_menu;
+            physical_paused_=false;
             return make(Command::resume);
         }
         if(phase_==Phase::closing_unfocused && foreground && !menu_open_) {
-            const Dispatch result=make(Command::resume);
-            clear();
-            return result;
+            phase_=Phase::closing_recovered;
+            physical_paused_=false;
+            return make(Command::resume);
         }
         if(phase_==Phase::audible_menu && !menu_open_ && ignored_resumes_==2)
             clear();
@@ -118,6 +125,7 @@ public:
     Dispatch focus_pause() noexcept {
         if(phase_==Phase::audible_menu) {
             phase_=Phase::muted_focus;
+            physical_paused_=true;
             return make(Command::pause);
         }
         return {};
@@ -125,21 +133,24 @@ public:
     Dispatch focus_resume() noexcept {
         if(phase_==Phase::muted_focus && menu_open_) {
             phase_=Phase::audible_menu;
+            physical_paused_=false;
             return make(Command::resume);
         }
         if(phase_==Phase::closing_unfocused && !menu_open_) {
-            const Dispatch result=make(Command::resume);
-            clear();
-            return result;
+            phase_=Phase::closing_recovered;
+            physical_paused_=false;
+            return make(Command::resume);
         }
         return {};
     }
     // Return false only for the same live music stream while our physical
     // compensation is in charge. All other native sounds pass through.
     bool native_resume(std::uint32_t handle, Origin source) noexcept {
-        if(handle!=identity_.handle ||
-           (phase_!=Phase::audible_menu && phase_!=Phase::muted_focus &&
-            phase_!=Phase::closing_unfocused))return true;
+        if(handle!=identity_.handle)return true;
+        if(phase_==Phase::quarantined)return !compensated_;
+        if(phase_!=Phase::audible_menu && phase_!=Phase::muted_focus &&
+           phase_!=Phase::closing_unfocused && phase_!=Phase::closing_recovered)
+            return true;
         if(source==Origin::script_resume && menu_open_) {
             if(ignored_resumes_>=2) {
                 quarantine();
@@ -173,6 +184,19 @@ public:
     void quarantine() noexcept {
         if(phase_!=Phase::idle)phase_=Phase::quarantined;
     }
+    // After uncertainty, restore physical silence on the ORIGINAL game
+    // thread, never recursively from an APM callback. Do not synthesize a
+    // resume again until native Stop retires the generation.
+    Dispatch take_safety_pause() noexcept {
+        if(phase_!=Phase::quarantined || !compensated_ ||
+           physical_paused_ || !identity_.valid())return {};
+        physical_paused_=true;
+        return make(Command::pause);
+    }
+    void complete_focus_recovery(std::uint64_t token) noexcept {
+        if(phase_==Phase::closing_recovered && identity_.generation==token)
+            clear();
+    }
     bool current(std::uint64_t token) const noexcept {
         return phase_!=Phase::idle && phase_!=Phase::quarantined &&
                identity_.generation==token && token!=0;
@@ -193,11 +217,15 @@ private:
         observed_pauses_=0;
         ignored_resumes_=0;
         menu_open_=false;
+        compensated_=false;
+        physical_paused_=true;
     }
     Phase phase_=Phase::idle;
     Identity identity_{};
     unsigned observed_pauses_=0;
     unsigned ignored_resumes_=0;
     bool menu_open_=false;
+    bool compensated_=false;
+    bool physical_paused_=true;
 };
 } // namespace r2fix::esc_proto
