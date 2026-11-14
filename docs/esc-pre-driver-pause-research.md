@@ -474,7 +474,7 @@ two separate, strictly read-only diagnostics:
    read function and prints only ASCII-normalized values:
    `sxd_unconditional`, `sxd_default`,
    `sxd_file0`, `sxd_file1` and `adpcm_default`.
-   Missing INI is reported, not repaired. This is the
+   Unavailable, unreadable or linked INI is reported, not repaired. This is the
    **configured candidate list**, not proof of selection.
 2. `RUNTIME-AUDIO-DRIVER` for each *actually hooked*
    original native PauseTransitionSxd, ResumeTransitionSxd,
