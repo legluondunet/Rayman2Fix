@@ -97,14 +97,15 @@ jobs:
           $initial = (Get-Content $ini | Where-Object {
             $_.Trim() -and !$_.Trim().StartsWith(';')
           })
-          if ($initial.Count -ne 8 -or $initial[0] -ne '[Debug]' -or
+          if ($initial.Count -ne 9 -or $initial[0] -ne '[Debug]' -or
               $initial[1] -ne 'Log=1' -or $initial[2] -ne '[Graphics]' -or
               $initial[3] -ne 'Resolution=Desktop' -or
               $initial[4] -ne 'FPSLimit=60' -or
               $initial[5] -ne 'Force4x3=0' -or
               $initial[6] -ne '[Features]' -or
-              $initial[7] -ne 'SkipCinematics=0') {
-            throw "Bootstrap INI must contain disabled optional 4:3 and cinematic skip"
+              $initial[7] -ne 'SkipCinematics=0' -or
+              $initial[8] -ne 'MusicInPauseMenu=0') {
+            throw "Bootstrap INI must contain disabled 4:3, cinematic skip and ESC music"
           }
           # Win32 CRLF and UTF-8 BOM parsing plus both-log opt-out.
           [IO.File]::WriteAllText('build/Release/Rayman2Fix.log', 'old runtime', [Text.Encoding]::ASCII)
@@ -315,7 +316,11 @@ jobs:
           binary=Path('build/Release/Rayman2Fix.dll').read_bytes()
           if b'RUNTIME-AUDIO-TRACE: enabled=1' in binary:
               raise SystemExit('Normal DLL unexpectedly contains experimental audio tracer')
-          print('Standard DLL excludes audio tracer: PASS')
+          if b'RUNTIME-ESC-MUSIC: enabled=1' not in binary:
+              raise SystemExit('Standard DLL missing INI-controlled ESC music feature')
+          if b'RUNTIME-AUDIO-CALLSTACK:' in binary:
+              raise SystemExit('Standard DLL unexpectedly contains research callstack sampler')
+          print('Standard DLL includes ESC feature but excludes research audio tracer: PASS')
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Standard DLL included research probes' }
       - name: Build separate research-only audio trace launcher
