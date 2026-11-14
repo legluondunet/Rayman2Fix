@@ -405,6 +405,50 @@ bool writable_audio_slot(const void* addr) {
         default:return false;
     }
 }
+// Identify which original sound-driver module owns each callback in the
+// research build. Module basename and RVA only: no user/game paths or raw
+// process addresses, no DLL loading, no GetProcAddress, no game writes.
+// An APMmxSVR/APMP5SVR distinction matters before we can prove the
+// physical pause/resume callback cardinality.
+void log_audio_driver_module(unsigned slot,const void* current) {
+    if(!g_log || slot>=kAudioSlotCount || !current)return;
+    HMODULE h=nullptr;
+    if(!GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(current),&h) || !h) {
+        char msg[170]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-AUDIO-DRIVER: channel=%s module=unknown callback_rva=unknown (original forwarded; read-only)",
+            kAudioSlots[slot].name);
+        log_line(msg);
+        return;
+    }
+    wchar_t wide[MAX_PATH]{};
+    const DWORD length=GetModuleFileNameW(h,wide,MAX_PATH);
+    char basename[80]{};
+    const wchar_t* beginning=wide;
+    if(length>0 && length<MAX_PATH) {
+        for(DWORD i=0;i<length;++i)
+            if(wide[i]==L'\\' || wide[i]==L'/')beginning=wide+i+1;
+        unsigned index=0;
+        for(const wchar_t* p=beginning;*p && index+1<sizeof(basename);++p)
+            basename[index++]=(*p>=33 && *p<=126)
+                                ? char(*p) : '?';
+        basename[index]='\0';
+    }
+    if(!basename[0])std::snprintf(basename,sizeof(basename),"unknown");
+    const auto address=reinterpret_cast<std::uintptr_t>(current);
+    const auto module_base=reinterpret_cast<std::uintptr_t>(h);
+    const unsigned rva=address>=module_base ?
+        unsigned(address-module_base) : 0xffffffffu;
+    char msg[240]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-AUDIO-DRIVER: channel=%s module=%s callback_rva=0x%08X (module basename only; original forwarded; read-only)",
+        kAudioSlots[slot].name,basename,rva);
+    log_line(msg);
+}
+
 // Owner's exact CD executable, source RVA=0x4580B0: the *global*
 // pause/resume dispatcher walks 64 sound records, 0x20 bytes each,
 // starting at 0x4B8C98. This maps an opaque driver argument back to a
@@ -1339,6 +1383,7 @@ void poll_audio_pause_trace() {
                     "RUNTIME-AUDIO-TRACE: installed=%s slot_rva=0x%06X (calls forwarded; research-only)",
                     kAudioSlots[i].name,unsigned(kAudioSlots[i].rva));
                 log_line(line);
+                log_audio_driver_module(i,current);
             }
         }
     }
