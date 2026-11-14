@@ -105,6 +105,53 @@ int main() {
         require(r2fix::verify_exe_replacement(root, hash, cd_exe.size(), error),
                 "unpatched original again verifies");
 
+        // A complete owner-supplied EXE is discovered separately by
+        // auto_flow, but must use this same safe .bak/marker transaction.
+        // Synthetic bytes only; no copyrighted game binary in tests.
+        const fs::path adjacent=root / "Rayman2(4).exe";
+        write(adjacent, unprotected);
+        const r2fix::ExePatchHeader approved{
+            cd_exe.size(), unprotected.size(),
+            r2fix::sha256_text(cd_exe),r2fix::sha256_text(unprotected)
+        };
+        const auto direct=r2fix::install_exe_replacement_from_file(
+            root,adjacent,approved);
+        require(direct.patched_sha256==approved.patched_sha256,
+                "direct sidecar approved hash persisted");
+        require(read(exe)==unprotected, "owner EXE was installed byte-for-byte");
+        require(read(backup)==cd_exe, "original CD EXE kept once as .bak");
+        require(read(adjacent)==unprotected, "owner-provided source remains adjacent");
+        require(!fs::exists(root/"rayman2.exe.patching"),
+                "direct replacement staging cleaned");
+        require(r2fix::verify_exe_replacement(root,hash,cd_exe.size(),error),
+                "direct replacement is compatible with existing --verify");
+
+        refused=false;
+        try {r2fix::install_exe_replacement_from_file(root,adjacent,approved);}
+        catch(const std::exception&){refused=true;}
+        require(refused && read(backup)==cd_exe,
+                "second direct install never replaces original .bak");
+        // Restore a clean unpatched installation for negative cases.
+        fs::remove(marker);
+        fs::remove(exe);
+        fs::rename(backup,exe);
+        write(adjacent,"TAMPERED");
+        refused=false;
+        try {r2fix::install_exe_replacement_from_file(root,adjacent,approved);}
+        catch(const std::exception&){refused=true;}
+        require(refused && read(exe)==cd_exe && !fs::exists(backup) &&
+                    !fs::exists(marker),
+                "wrong adjacent hash must preserve original and omit marker");
+        write(adjacent,unprotected);
+        write(exe,"NOT RETAIL SOURCE");
+        refused=false;
+        try {r2fix::install_exe_replacement_from_file(root,adjacent,approved);}
+        catch(const std::exception&){refused=true;}
+        require(refused && read(exe)=="NOT RETAIL SOURCE" &&
+                    !fs::exists(backup),
+                "wrong installed original hash prevents direct replacement");
+        write(exe,cd_exe);
+
         write(backup, "USERBACKUP");
         refused = false;
         try { r2fix::install_exe_replacement(root, patch); }
@@ -112,6 +159,12 @@ int main() {
         require(refused && read(backup) == "USERBACKUP" &&
                     read(exe) == cd_exe && !fs::exists(marker),
                 "preexisting .bak must never be overwritten or discarded");
+        refused=false;
+        try {r2fix::install_exe_replacement_from_file(root,adjacent,approved);}
+        catch(const std::exception&){refused=true;}
+        require(refused && read(backup)=="USERBACKUP" &&
+                    read(exe)==cd_exe && !fs::exists(marker),
+                "direct owner-file route preserves unrelated pre-existing .bak");
 
         fs::remove_all(root);
         std::cout << "Original .bak / patched EXE safety tests passed\n";
