@@ -29,7 +29,7 @@ class AudioTraceGuardTests(unittest.TestCase):
 
     def test_hook_is_compiled_out_of_normal_approved_camera_path(self):
         self.assertRegex(self.runtime,
-            r'#if RAYMAN2FIX_AUDIO_TRACE\s+poll_audio_pause_trace\(\);\s+#endif')
+            r'#if RAYMAN2FIX_AUDIO_TRACE\s+poll_audio_pause_trace\(\);\s+(?:#if RAYMAN2FIX_ESC_MUSIC_PROTO\s+proto_menu_tick\(\);\s+#endif\s+)?#endif')
         self.assertIn("#if RAYMAN2FIX_AUDIO_TRACE\nusing AudioPauseFn",self.runtime)
         self.assertIn('if(!g_log || InterlockedCompareExchange(',self.runtime)
         self.assertIn("if(n<=kAudioSlotCount)",self.runtime)
