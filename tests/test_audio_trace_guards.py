@@ -110,6 +110,56 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("PauseTransitionSxd(",wrapper)
         self.assertNotIn("ResumeTransitionSxd(",wrapper)
 
+    def test_native_play_stop_window_audit_is_read_only_and_never_authorizes_audio(self):
+        # The owner observed live SXD generation changes with unchanged
+        # driver handle while ESC was open. Counts alone cannot classify
+        # a specific song, but can falsify a claimed quiet interval.
+        wrapper=self.runtime.split(
+            "void __cdecl proto_script_pause() {",1)[1].split(
+            "void __cdecl proto_script_resume() {",1)[0]
+        for k in ("native_stop_before=g_proto_native_stop_calls.load(",
+                  "native_stop_after=g_proto_native_stop_calls.load(",
+                  "native_play_before=g_transition_play_calls.load(",
+                  "native_play_after=g_transition_play_calls.load("):
+            self.assertIn(k,wrapper)
+        self.assertIn("g_proto_predriver_report.native_stop_before=native_stop_before;",wrapper)
+        self.assertIn("g_proto_predriver_report.native_play_after=native_play_after;",wrapper)
+        self.assertIn("proto_call_original(0x536D0);",wrapper)
+        self.assertNotIn("RUNTIME-ESC-PREDRIVER-WINDOW:",wrapper)
+
+        stop=self.runtime.split(
+            "void proto_record_stop(DWORD handle) {",1)[1].split(
+            "// The original CD's four independent",1)[0]
+        self.assertIn("g_proto_native_stop_calls.fetch_add(",stop)
+        self.assertIn("g_proto.native_stop(handle);",stop)
+        self.assertNotIn("return;",stop)
+        self.assertNotIn("log_line(",stop)
+
+        tick=self.runtime.split(
+            "void proto_menu_tick() {",1)[1].split(
+            "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
+        self.assertIn("RUNTIME-ESC-PREDRIVER-WINDOW:",tick)
+        self.assertIn("stop_during_wrapper=%u stop_after_wrapper=%u",tick)
+        self.assertIn("play_during_wrapper=%u play_after_wrapper=%u",tick)
+        self.assertIn("esc_actor_confirmed=%u",tick)
+        self.assertLess(tick.index("proto_dispatch(action);"),
+                        tick.index("RUNTIME-ESC-PREDRIVER-WINDOW:"))
+        self.assertLess(tick.index("proto_deferred_safety();"),
+                        tick.index("RUNTIME-ESC-PREDRIVER-WINDOW:"))
+        self.assertIn("report.native_stop_after-report.native_stop_before",tick)
+        self.assertIn("stop_tick-report.native_stop_after",tick)
+        self.assertIn("report.native_play_after-report.native_play_before",tick)
+        self.assertIn("play_tick-report.native_play_after",tick)
+
+        callback=self.runtime.split(
+            "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1].split(
+            "void __stdcall audio_pause_sxd(",1)[0]
+        self.assertIn("if(original && forwarded)original(arg);",callback)
+        self.assertNotIn("g_proto_native_stop_calls.fetch_add(",callback)
+        # The research-only policy must remain detached from the game.
+        self.assertNotIn("pre_driver_pause::Policy",self.runtime)
+        self.assertNotIn("RUNTIME-ESC-PREDRIVER-WINDOW:",wrapper)
+
     def test_intro_theme_controller_watcher_is_change_triggered_and_bounded(self):
         self.assertIn("void proto_theme_transition_watch_tick()",self.runtime)
         start=self.runtime.index("void proto_theme_transition_watch_tick()")
