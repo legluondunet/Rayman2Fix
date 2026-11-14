@@ -192,6 +192,50 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("if(original) original(arg);",trace)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
+    def test_menu_actor_read_only_probe_is_bounded_and_fail_closed(self):
+        section=self.runtime.split(
+            "AudioMenuActorSnapshot inspect_audio_menu_actor_readonly()",1)[1]
+        section=section.split("void poll_audio_pause_trace() {",1)[0]
+        self.assertIn("YAM_GenMenuMap_I1", section)
+        self.assertIn("kPersonalTypesRva=0x1013F8", section)
+        self.assertIn("kDynamicWorldRva=0x100FD0", section)
+        self.assertIn("kInactiveWorldRva=0x100FC4", section)
+        self.assertIn("kMaxTypeNodes=4096", section)
+        self.assertIn("kMaxActorNodes=4096", section)
+        self.assertIn("elem[2]!=list_va", section)
+        self.assertIn("if(type_node!=0u)return out;", section)
+        self.assertIn("if(found>1u)return out;", section)
+        self.assertIn("std::memcmp(name,kMenuPersonalType,sizeof(name))", section)
+        self.assertIn("if(seen_type[j]==type_node)return out;", section)
+        self.assertIn("if(seen[j]==child)return -1;", section)
+        self.assertIn("so[6]!=previous || so[7]!=root", section)
+        self.assertIn("if(so[0]==2u)", section)
+        self.assertIn("std::uintptr_t(std_game)+8u", section)
+        self.assertIn("if(out.dynamic_actor<0 || out.inactive_actor<0)", section)
+        self.assertIn("ReadProcessMemory(", section)
+        self.assertNotIn("WriteProcessMemory(", section)
+        self.assertNotIn("VirtualProtect(", section)
+        self.assertNotIn("InterlockedCompareExchangePointer(", section)
+        self.assertNotIn("MusicInPauseMenu",section)
+
+    def test_actor_sample_only_in_audio_research_and_only_on_ui_or_f1_edges(self):
+        poll=self.runtime.split("void poll_audio_pause_trace() {",1)[1]
+        poll=poll.split("using AudioHook=",1)[0] if "using AudioHook=" in poll else poll
+        self.assertIn("const int f1=int((GetAsyncKeyState(VK_F1)&0x8000)!=0)",poll)
+        self.assertIn("old_menu!=static_cast<int>(in_game_menu)",poll)
+        self.assertIn("old_f1!=f1",poll)
+        self.assertIn("inspect_audio_menu_actor_readonly()",poll)
+        self.assertIn("RUNTIME-AUDIO-MENU-ACTOR:",poll)
+        self.assertIn("actor candidate not proof of ESC/F1",poll)
+        self.assertLess(poll.index("const int old_f1="),
+                        poll.index("inspect_audio_menu_actor_readonly()"))
+        self.assertIn("g_audio_last_f1_down{-1}",self.runtime)
+        # Scoped by #if RAYMAN2FIX_AUDIO_TRACE and follows existing checks.
+        before=self.runtime.split(
+            "AudioMenuActorSnapshot inspect_audio_menu_actor_readonly()",1)[0]
+        self.assertIn("#if RAYMAN2FIX_AUDIO_TRACE",before)
+        self.assertNotIn("MusicInPauseMenu",self.config)
+
     def test_native_bank_provenance_scan_is_bounded_and_fail_closed(self):
         # The registry is a source of actual bank ID and table index,
         # unlike arbitrary high/low halves of the record's +0 Id field.
