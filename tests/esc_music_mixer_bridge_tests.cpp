@@ -97,6 +97,60 @@ void partial_failure_requires_stop_and_fresh_generation() {
     CHECK(m.deliver(Generation{9,5,9,7,42},Action::pause,fake)==Delivery::delivered);
     CHECK(hits==4);
 }
+void reentrant_delivery_quarantines_the_generation() {
+    MixerBridge m;
+    CHECK(m.bind(kStream,17,kGood));
+    unsigned outer_calls=0, nested_calls=0;
+    const auto fake=[&](Action action,std::uint32_t handle)->bool {
+        CHECK(action==Action::pause && handle==17);
+        ++outer_calls;
+        // Driver callback re-enters the bridge while pause is unfinished.
+        const auto nested=[&](Action,std::uint32_t)->bool {
+            ++nested_calls;
+            return true;
+        };
+        CHECK(m.deliver(kStream,Action::resume,nested)==Delivery::uncertain);
+        return true;
+    };
+    CHECK(m.deliver(kStream,Action::pause,fake)==Delivery::uncertain);
+    CHECK(m.uncertain());
+    CHECK(outer_calls==1 && nested_calls==0);
+    CHECK(!m.physical_paused()); // incomplete transaction is NOT committed
+    auto must_not_call=[&](Action,std::uint32_t)->bool {
+        ++nested_calls;
+        return true;
+    };
+    CHECK(m.deliver(kStream,Action::resume,must_not_call)==Delivery::uncertain);
+    CHECK(nested_calls==0);
+    CHECK(m.retire(kStream));
+    CHECK(m.bind(Generation{9,5,9,7,42},17,kGood));
+}
+void stop_inside_driver_callback_aborts_remaining_calls() {
+    MixerBridge m;
+    CHECK(m.bind(kStream,17,kGood)); // double-delivery contract
+    unsigned calls=0;
+    const auto fake=[&](Action,std::uint32_t handle)->bool {
+        CHECK(handle==17);
+        ++calls;
+        // Native Stop must be forwarded immediately. Retiring the logical
+        // owner mid-callback must prevent a second pause on handle 0.
+        CHECK(m.retire(kStream));
+        CHECK(!m.bind(Generation{9,5,9,7,42},19,kGood));
+        return true;
+    };
+    CHECK(m.deliver(kStream,Action::pause,fake)==Delivery::uncertain);
+    CHECK(calls==1 && !m.bound());
+    CHECK(m.bind(Generation{9,5,9,7,42},19,kGood));
+    unsigned new_calls=0;
+    const auto next=[&](Action,std::uint32_t handle)->bool {
+        CHECK(handle==19);
+        ++new_calls;
+        return true;
+    };
+    CHECK(m.deliver(Generation{9,5,9,7,42},Action::pause,next)
+          ==Delivery::delivered);
+    CHECK(new_calls==2);
+}
 void integration_with_shadow_and_fake_native_driver() {
     Shadow policy;
     constexpr Proof state_proof{true,true,true,true,true,true};
@@ -147,6 +201,8 @@ void integration_with_shadow_and_fake_native_driver() {
 int main() {
     proof_gates();exact_cardinality();one_call_contract();
     partial_failure_requires_stop_and_fresh_generation();
+    reentrant_delivery_quarantines_the_generation();
+    stop_inside_driver_callback_aborts_remaining_calls();
     integration_with_shadow_and_fake_native_driver();
     std::cout<<"ESC mixer bridge fake calls: proof gates, duplication, stop, failure OK\n";
 }
