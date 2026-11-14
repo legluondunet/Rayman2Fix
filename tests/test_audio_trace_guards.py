@@ -464,7 +464,11 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("proto_identity(handle,generation,false)",self.runtime)
         self.assertIn("bool require_current_theme=true",self.runtime)
         self.assertIn("owner.native_theme_player_ref_matches_outer!=1",self.runtime)
-        self.assertIn("proto_identity(handle,generation).valid()",self.runtime)
+        self.assertIn("g_proto.identity_matches(live_identity)",self.runtime)
+        self.assertIn("proto::retry_live_theme_identity(",self.runtime)
+        self.assertIn("await-live-theme-ref-native-audio-unchanged",self.runtime)
+        self.assertIn("live-theme-ref-timeout-native-audio-unchanged",self.runtime)
+        self.assertIn("const auto live_identity=proto_identity(action.handle,action.generation);",self.runtime)
         # The scoped prototype source replaces broken return-stack inference
         # only when all four experimental source detours are installed.
         self.assertIn('audio_origin="game-script-pause"',self.runtime)
