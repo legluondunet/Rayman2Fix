@@ -712,6 +712,40 @@ There are **52 sampled native audio-driver calls**: 16 `StopSxd`, 16 `PauseSxd`,
 A new [synthetic test](../tests/test_audio_trace_evidence.py) reconstructs the two trajectories and four bounded flag transitions without checking any proprietary file into GitHub. It asserts preservation of unique loaded-bank provenance, valid paired native driver events, the independent engine-pause pulses, the 2-depth stop, and the explicit **unknown ESC/F1 attribution**. The owner has not yet supplied a confirmed F1-only cycle or a controlled Alt-Tab-in-menu sample. No runtime audio behavior or INI setting has been changed; PR #2 stays draft.
 
 
+## Read-only candidate actor probe for in-game ESC versus F1
+
+The original-CD native menu byte `AI_g_bInGameMenu` at `0x4B9BC8` **does change after the audio pause callbacks**, as the two owner logs show, and the game also has a separate independent engine-clock pause flag. Therefore a new **research-build-only** `RUNTIME-AUDIO-MENU-ACTOR` line samples an additional **candidate**: the engine actor personal type named `YAM_GenMenuMap_I1`. This name is independently used by [Rayman2AP's `MOD_CheckVariables`](https://github.com/Aeltumn/Rayman2AP/blob/main/src/mod.c) when `AI_g_bInGameMenu` is true; the mod then looks for a menu-specific reflex. It is not an authenticated instance name from the owner's original French CD data. The [original Rayman 2 manual](https://raymanpc.com/wiki/images/0/02/R2UKPCManual.pdf) documents that **ESC accesses the in-game menu** whereas **F1 accesses Knowledge of the World/Murfy**. These documented actions differ, but the exact internal behaviour of F1 **is still unverified**.
+
+**No game function is called and no actor is modified:** the new `inspect_audio_menu_actor_readonly()` follows the *data structures* described by [ACP_Ray2's HIE object lookup](https://github.com/raytools/ACP_Ray2/blob/master/src/HIE/HIE_Ext.c), [type declarations](https://github.com/raytools/ACP_Ray2/blob/master/src/GAM/GAM_ObjType.h), [HIE layout](https://github.com/raytools/ACP_Ray2/blob/master/src/HIE/HIE.h) and [standard-game object fields](https://github.com/raytools/ACP_Ray2/blob/master/src/GAM/GAM_StdGame.h). Those sources are corroborating reverse-engineering references, not original-CD asset authentication. This implementation independently reads the real original-CD addresses:
+
+| Native structure | Game VA | Research read |
+|---|---|---|
+| Personal-type list anchor (third of three 12-byte anchors) | `0x5013F8` | first/last/count, bounded to 4096 types |
+| Personal-type element | variable | next +0, parent +8, name pointer +12 |
+| Active dynamic world root global | `0x500FD0` | root's direct children only |
+| Inactive dynamic world root global | `0x500FC4` | root's direct children only |
+| `HIE_tdstSuperObject` direct child | variable | object type +0, linked actor +4, next sibling +20, previous +24, parent +28 |
+| Actor and `GAM_tdstStandardGame` | variable | standard-game pointer `actor+4`, personal type index `standard+8` |
+
+The actual CD code at `0x403C90` writes the personal-list anchor address `0x5013F8`; `0x407B04` uses its head; `0x407B0D` advances by `next+0`; `0x407B16` reads the element's name at `+12`. The original CD also references the two dynamic-world globals at `0x403B75` and `0x403B7F`. These **six exact instruction anchors** are byte-identical in the owner's original-CD PE and the nonapproved reference and are now pinned by the [CD parity audit](../tools/check_rayman2_cd_audio_parity.py) and [synthetic anchor tests](../tests/test_audio_cd_parity.py). These byte anchors support reading **structural addresses**, not the existence of the actor in the owner's installed level.
+
+**Fail-closed behaviour:** the monitor checks 32-bit pointer bounds, read lengths, parent and predecessor links, duplicate names, cycles and maximum counts of 4096 registry elements / 4096 children per world. It does not recursively inspect scene sectors, inspect or modify AI scripts, read all actor names, publish pointers or change F1 behaviour. Any invalid type list yields `personal_type_found=-1`; any incomplete world tree yields `dynamic_actor=-1 inactive_actor=-1`. `0` means a bounded list was inspected and that candidate was not found *in that snapshot only*; it is never a permanent claim. The inspector is performed only on an initial **500 ms UI poll** or a subsequent change in menu flag, engine pause flag or the **observed F1 key state**. Short F1 presses may be missed, and keyboard sampling is not menu identity proof.
+
+The new log line stores only `t_ms`, `in_game_menu`, `engine_paused`, `f1_down`, `esc_down`, the three **tri-state** candidate fields, and counts of inspected nodes:
+
+```text
+RUNTIME-AUDIO-MENU-ACTOR: t_ms=... in_game_menu=... engine_paused=...
+f1_down=... esc_down=... personal_type_found=-1|0|1
+dynamic_actor=-1|0|1 inactive_actor=-1|0|1
+type_nodes=... dynamic_nodes=... inactive_nodes=...
+(read-only; actor candidate not proof of ESC/F1)
+```
+
+The [offline trace analyzer](../tools/analyze_rayman2_audio_trace.py) records these as `menu_actor_readonly_snapshots` but **never converts presence into a confirmed ESC menu** or absence into proof of an F1-only state. [Fixture tests](../tests/test_audio_trace_evidence.py) exercise the new schema, legacy logs and invalid states, while [static runtime guards](../tests/test_audio_trace_guards.py) prohibit code-path writes and make sure F1 does not enter audio callbacks. The ordinary non-research DLL has this entire diagnostic **compiled out**. It neither pauses nor resumes the soundtrack and does not expose `MusicInPauseMenu`.
+
+**Outstanding validation:** we have not seen any genuine `RUNTIME-AUDIO-MENU-ACTOR` data under Wine, nor checked a controlled **F1-hold** and **ESC-open/close** sequence to establish whether the candidate is exclusive to ESC. Even a positive actor observation would be only one further signal; a future working feature must also satisfy bank-verified audible music identity, native pause-mark/focus semantics and stop-safe generation ownership.
+
+
 ## Safety requirements before a functional `MusicInPauseMenu` option
 
 - Prove a **music resource identity** independently of driver pointer, table index, SXD transport, default volume or descriptor equality.
