@@ -41,6 +41,30 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("RAYMAN2FIX_ESC_MUSIC_FEATURE=1",self.cmake)
         self.assertIn("RUNTIME-ESC-MUSIC: enabled=1",self.runtime)
 
+    def test_esc_transition_latency_and_first_rejection_are_observable_without_bypass(self):
+        # The approved paired driver calls and strict current-player check
+        # remain unchanged. A menu opening should not wait behind an
+        # unnecessary 75ms poll or a synchronous verdict file write.
+        start=self.runtime.index("void proto_menu_tick() {")
+        end=self.runtime.index("void audio_trace_forward(",start)
+        tick=self.runtime[start:end]
+        self.assertIn("proto_game_read(0xB9BC8,menu_quick)",tick)
+        self.assertIn("menu_quick==0u",tick)
+        self.assertIn("proto_identity(handle,generation).valid()",tick)
+        self.assertIn("proto_esc_menu_actor_open()",tick)
+        self.assertIn("RUNTIME-ESC-PERF:",tick)
+        self.assertIn("RUNTIME-ESC-OWNER-DIAG:",self.runtime)
+        self.assertIn("native_player_ref_match=%d",self.runtime)
+        self.assertIn("outer_bank_complete=%u",self.runtime)
+        self.assertIn("inner_bank_complete=%u",self.runtime)
+        self.assertLess(tick.index("proto_dispatch(action);"),
+                        tick.index('proto_log("menu-verdict"'))
+        self.assertIn("proto_deferred_safety();",tick)
+        self.assertIn("first_owner_rejection_logged",tick)
+        self.assertNotIn("await-live-theme-ref",tick)
+        # No guessing from the keyboard alone, no new synthetic calls:
+        self.assertIn("paired-calls=2",self.runtime)
+
     def test_menu_and_engine_pause_probe_is_read_only_and_research_only(self):
         # A future optional observation must distinguish the native menu
         # boolean from the engine pause flag. Neither proves ESC vs F1.
