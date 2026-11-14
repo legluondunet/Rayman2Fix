@@ -16,6 +16,16 @@ ExePatchHeader install_exe_replacement(
     const std::filesystem::path& game_root,
     const std::vector<unsigned char>& patch);
 
+// Installs an owner-supplied adjacent *complete unprotected EXE* rather than
+// reconstructing one from a delta. The caller must supply an independently
+// allowlisted source/target SHA-256 pair. Recheck both files, stage and
+// rehash the copy before any rename, preserve the original .bak and write
+// the same verified patch marker as the delta route. Never move the sidecar.
+ExePatchHeader install_exe_replacement_from_file(
+    const std::filesystem::path& game_root,
+    const std::filesystem::path& owner_executable,
+    const ExePatchHeader& approved_pair);
+
 // Verify the PATCH receipt and both executables against their own SHA-256.
 // If a patch receipt is absent, reject an unexplained rayman2.exe.bak.
 // If patched, expected_cd_hash/size must match the backup, not the new EXE.
