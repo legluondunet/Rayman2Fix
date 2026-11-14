@@ -1226,6 +1226,31 @@ void __cdecl proto_script_resume() {
     }
     proto_deferred_safety();
 }
+// Focus is a Win32/Wine activation event, not necessarily visible to
+// GetForegroundWindow() on the game's render thread. The renderer can be
+// suspended until the window is already foreground again. Record the
+// actual guarded, source-specific activation caller whenever it happens.
+// Diagnostics only: never use this sample to authorize physical audio.
+void proto_focus_trace(const char* event,proto::Dispatch action) {
+    if(!g_proto_enabled.load(std::memory_order_acquire) || !g_log)return;
+    BYTE engine=0,menu=0;
+    DWORD depth=0;
+    const bool engine_known=proto_game_read(0x100640,engine);
+    const bool menu_known=proto_game_read(0xB9BC8,menu);
+    const bool depth_known=proto_read_depth(depth);
+    const char* command=action.command==proto::Command::pause ? "pause" :
+        action.command==proto::Command::resume ? "resume" : "none";
+    char line[320]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-ESC-FOCUS: t_ms=%lu event=%s win32_foreground_pid_matches=%u win32_thread_active=%u engine_paused=%d in_game_menu=%d pause_depth=%d dispatch=%s (source-hook event; Win32 foreground may miss host Alt+Tab)",
+        static_cast<unsigned long>(GetTickCount()-
+            g_audio_origin.load(std::memory_order_acquire)),
+        event,unsigned(game_window_is_foreground()),
+        unsigned(GetActiveWindow()!=nullptr),
+        engine_known ? int(engine) : -1,menu_known ? int(menu) : -1,
+        depth_known ? int(depth) : -1,command);
+    log_line(line);
+}
 void __cdecl proto_focus_pause() {
     {
         ProtoScope scope(proto::Origin::focus_pause);
@@ -1236,6 +1261,7 @@ void __cdecl proto_focus_pause() {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
         d=g_proto.focus_pause();
     }
+    proto_focus_trace("native-focus-pause",d);
     proto_dispatch(d);
     proto_deferred_safety();
 }
@@ -1249,6 +1275,7 @@ void __cdecl proto_focus_resume() {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
         d=g_proto.focus_resume();
     }
+    proto_focus_trace("native-focus-resume",d);
     proto_dispatch(d);
     proto_deferred_safety();
 }
