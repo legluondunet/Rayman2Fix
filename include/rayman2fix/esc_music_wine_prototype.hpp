@@ -147,7 +147,11 @@ public:
     // compensation is in charge. All other native sounds pass through.
     bool native_resume(std::uint32_t handle, Origin source) noexcept {
         if(handle!=identity_.handle)return true;
-        if(phase_==Phase::quarantined)return !compensated_;
+        // Quarantine must NEVER swallow the game's native Resume forever.
+        // After an unknown event we stop all synthetic resumes, but leave
+        // the original driver in charge of restoring level audio. Blocking
+        // every subsequent Resume here could permanently mute gameplay.
+        if(phase_==Phase::quarantined)return true;
         if(phase_!=Phase::audible_menu && phase_!=Phase::muted_focus &&
            phase_!=Phase::closing_unfocused && phase_!=Phase::closing_recovered)
             return true;
@@ -160,10 +164,12 @@ public:
             return false;
         }
         if(source==Origin::focus_resume)return false;
-        // Unknown owners are never allowed to unmute the compensated
-        // stream when the game may be inactive or a pause is still held.
+        // Unknown provenance invalidates our compensation. The native
+        // game call must pass through, otherwise a lost Resume may leave
+        // the original level soundtrack permanently paused. Quarantine
+        // still forbids additional synthetic Resume batches.
         quarantine();
-        return false;
+        return true;
     }
     // The game may resume script audio *before* the visible menu flag
     // goes to zero. Count the actual suppressed native resume calls.
