@@ -149,8 +149,9 @@ int main() {
         check(fs::exists(root / "Rayman2Fix" / "Rayman2Fix.ini"),
               "bootstrap initialization must create INI when absent");
         check(contents(root / "Rayman2Fix" / "Rayman2Fix.ini").find("Force4x3=0") != std::string::npos &&
-              contents(root / "Rayman2Fix" / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos,
-              "bootstrap provides two disabled options");
+              contents(root / "Rayman2Fix" / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos &&
+              contents(root / "Rayman2Fix" / "Rayman2Fix.ini").find("MusicInPauseMenu=0") != std::string::npos,
+              "bootstrap provides ESC music disabled by default");
         write(root / "Rayman2Fix" / "Rayman2Fix.dll", "BOOTSTRAP");
         write(root / "Rayman2Fix" / "Rayman2Fix.ini",
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\n");
@@ -176,10 +177,11 @@ int main() {
         write(user_ini,
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n");
         write(user_ini, "[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
-                        "[Features]\nSkipCinematics=1\n");
+                        "[Features]\nSkipCinematics=1\nMusicInPauseMenu=1\n");
         check(r2fix::configured_force_4_3(user_ini) &&
-              r2fix::configured_skip_cinematics(user_ini),
-              "4:3 and cinematic skip opt-in recognized");
+              r2fix::configured_skip_cinematics(user_ini) &&
+              r2fix::configured_music_in_pause_menu(user_ini),
+              "4:3, cinematic skip and music opt-in recognized");
         check(r2fix::configured_render_resolution(user_ini) ==
               std::make_pair(1440u,1080u),"1920x1080: 4:3 content area 1440x1080");
         write(user_ini, "[Graphics]\nResolution=1280x800\nForce4x3=1\n");
@@ -188,6 +190,14 @@ int main() {
         write(user_ini, "[Graphics]\nResolution=1920x1080\nForce4x3=0\n");
         check(r2fix::configured_render_resolution(user_ini) ==
               std::make_pair(1920u,1080u),"default wide unchanged");
+        check(r2fix::configured_music_in_pause_menu(user_ini)==false,
+              "MusicInPauseMenu defaults to 0 when absent");
+        write(user_ini,"[Features]\nMusicInPauseMenu=1\n");
+        check(r2fix::configured_music_in_pause_menu(user_ini),
+              "MusicInPauseMenu=1 activates original soundtrack preservation");
+        write(user_ini,"[Features]\nMusicInPauseMenu=0\n");
+        check(!r2fix::configured_music_in_pause_menu(user_ini),
+              "MusicInPauseMenu=0 disables feature");
         for(const auto* bad:{"2","yes",""}) {
             write(user_ini,std::string("[Graphics]\nForce4x3=")+bad+"\n");
             bool refused=false;
@@ -199,6 +209,11 @@ int main() {
             try{(void)r2fix::configured_skip_cinematics(user_ini);}
             catch(const std::exception&){refused=true;}
             check(refused,"invalid cinematic flag rejected");
+            write(user_ini,std::string("[Features]\nMusicInPauseMenu=")+bad+"\n");
+            refused=false;
+            try{(void)r2fix::configured_music_in_pause_menu(user_ini);}
+            catch(const std::exception&){refused=true;}
+            check(refused,"invalid MusicInPauseMenu flag rejected");
         }
         const std::string bom="\xef\xbb\xbf";
         write(user_ini,bom+"[Debug]\r\nLog=0\r\n"
@@ -212,7 +227,8 @@ int main() {
               migrated.find("; comment\r\n")!=std::string::npos &&
               migrated.find("Force4x3=0\r\n")!=std::string::npos &&
               migrated.find("[Features]\r\n")!=std::string::npos &&
-              migrated.find("SkipCinematics=0\r\n")!=std::string::npos,
+              migrated.find("SkipCinematics=0\r\n")!=std::string::npos &&
+              migrated.find("MusicInPauseMenu=0\r\n")!=std::string::npos,
               "existing INI migration retains BOM, CRLF, custom values");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
         check(contents(user_ini)==migrated,"migration is idempotent");

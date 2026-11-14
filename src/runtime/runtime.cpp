@@ -18,7 +18,7 @@
 #include "rayman2fix/intro_gate_timeline.hpp"
 #include "rayman2fix/intro_integer_reader.hpp"
 #include <mutex>
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
 #include "rayman2fix/esc_music_wine_prototype.hpp"
 #endif
 #include <atomic>
@@ -45,6 +45,19 @@
 #endif
 #ifndef RAYMAN2FIX_AUDIO_TRACE
 #define RAYMAN2FIX_AUDIO_TRACE 0
+#endif
+#ifndef RAYMAN2FIX_ESC_MUSIC_FEATURE
+#define RAYMAN2FIX_ESC_MUSIC_FEATURE 0
+#endif
+#if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
+#define RAYMAN2FIX_ESC_MUSIC_ACTIVE 1
+#else
+#define RAYMAN2FIX_ESC_MUSIC_ACTIVE 0
+#endif
+#if RAYMAN2FIX_AUDIO_TRACE || RAYMAN2FIX_ESC_MUSIC_ACTIVE
+#define RAYMAN2FIX_AUDIO_HOOKS 1
+#else
+#define RAYMAN2FIX_AUDIO_HOOKS 0
 #endif
 #if RAYMAN2FIX_AUDIO_TRACE != 0 && RAYMAN2FIX_AUDIO_TRACE != 1
 #error RAYMAN2FIX_AUDIO_TRACE must be 0 or 1
@@ -311,6 +324,7 @@ struct RuntimeOptions {
     DWORD output_height;
     DWORD logging;
     DWORD skip_cinematics;
+    DWORD music_in_pause_menu;
 };
 
 bool valid_angle(float v) {
@@ -346,11 +360,11 @@ bool game_window_is_foreground() {
            pid == GetCurrentProcessId();
 }
 
-// Research-only audio pause/resume trace for the owner's exact 1999 CD build.
-// No sound call is suppressed, delayed or modified. The native sound DLL is
-// loaded dynamically after the game starts, so sample its *existing* resolved
-// function slots on the regular camera callback. Never hook these in release.
-#if RAYMAN2FIX_AUDIO_TRACE
+// Dedicated native SXD hook infrastructure for the approved 1999 CD build.
+// Production hooks only the four required Theme/SXD pause/resume/stop
+// functions; the legacy research tracer is separately gated at build time.
+// Driver pointers are captured after native audio initialization.
+#if RAYMAN2FIX_AUDIO_HOOKS
 using AudioPauseFn=void (__stdcall*)(DWORD);
 constexpr unsigned kAudioSlotCount=14;
 struct AudioSlot {
@@ -1037,8 +1051,8 @@ DWORD __stdcall audio_play_transition_ex(DWORD a,DWORD b,DWORD c,DWORD d,DWORD e
     return result;
 }
 
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
-// An explicitly opted-in research build ONLY. The game keeps ownership of
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+// Verified, opt-in original Theme/SXD music continuation policy. The game keeps ownership of
 // the pause depth and both sound-record marks. Rebalancing the observed
 // paired Theme/SXD driver callbacks is deliberately experimental, not a
 // confirmed contract for every APM backend.
@@ -1068,7 +1082,11 @@ void proto_log(const char* action,const char* reason="none") {
         phase=unsigned(g_proto.phase());
     }
     std::snprintf(msg,sizeof(msg),
+#if RAYMAN2FIX_ESC_MUSIC_PROTO
         "RUNTIME-ESC-PROTOTYPE: event=%s phase=%u detail=%s (experimental; original soundtrack only)",
+#else
+        "RUNTIME-ESC-MUSIC: event=%s phase=%u detail=%s (native Theme/SXD)",
+#endif
         action,phase,reason);
     log_line(msg);
 }
@@ -1431,11 +1449,12 @@ void proto_menu_tick() {
     proto_dispatch(action);
     proto_deferred_safety();
 }
-#endif // RAYMAN2FIX_ESC_MUSIC_PROTO
+#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE
 
 void audio_trace_forward(unsigned slot,DWORD arg) {
     const auto original=reinterpret_cast<AudioPauseFn>(
         g_audio_original[slot].load(std::memory_order_acquire));
+#if RAYMAN2FIX_AUDIO_TRACE
     // Count and bound diagnostics BEFORE the native driver call. Crucially,
     // do not scan 64 sound records for every sound event after budget
     // exhaustion: this research tracer must stay cheap during gameplay.
@@ -1484,7 +1503,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
             preview ? &scanned_words : nullptr,
             preview ? &wrapper_returns : nullptr,
             preview ? &confirmed_pairs : nullptr);
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
         // The experimental source detours insert a DLL frame, so
         // return-address-based origin parsing can report "unknown".
         // Restore the proven source from the scoped, per-thread wrapper
@@ -1505,7 +1524,8 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         }
 #endif
     }
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#endif // research-only per-call sound diagnostics
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
     bool forwarded=true;
     if(g_proto_enabled.load(std::memory_order_acquire) &&
        g_proto_callsites_installed.load(std::memory_order_acquire)) {
@@ -1524,6 +1544,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
 #else
     if(original) original(arg);
 #endif
+#if RAYMAN2FIX_AUDIO_TRACE
     if(!sampled)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
     char line[1024]{};
@@ -1578,6 +1599,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
             code_rva_preview[0] ? code_rva_preview : "none");
         log_line(stack_line);
     }
+#endif // research-only driver trace
 }
 void __stdcall audio_pause_sxd(DWORD a){audio_trace_forward(0,a);}
 void __stdcall audio_resume_sxd(DWORD a){audio_trace_forward(1,a);}
@@ -1721,7 +1743,7 @@ AudioMenuActorSnapshot inspect_audio_menu_actor_readonly() {
     }
     return out;
 }
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
 bool proto_esc_menu_actor_open() {
     const auto snapshot=inspect_audio_menu_actor_readonly();
     return snapshot.type_found==1 &&
@@ -1731,11 +1753,24 @@ bool proto_esc_menu_actor_open() {
 #endif
 
 void poll_audio_pause_trace() {
-    if(!g_log || InterlockedCompareExchange(&g_audio_poll_guard,1,0)!=0)
+    // Normal runtime installs no audio hooks at all when the feature
+    // is disabled. Research tracing remains an explicit build-only mode.
+#if RAYMAN2FIX_AUDIO_TRACE
+    if(!g_log)return;
+#else
+    if(!g_proto_enabled.load(std::memory_order_acquire))return;
+#endif
+    if(InterlockedCompareExchange(&g_audio_poll_guard,1,0)!=0)
         return;
     const DWORD now=GetTickCount();
     const DWORD last=g_audio_last_poll.load(std::memory_order_relaxed);
-    if(last && DWORD(now-last)<500u) {
+    if(last && DWORD(now-last)<
+#if RAYMAN2FIX_AUDIO_TRACE
+       500u
+#else
+       125u
+#endif
+       ) {
         InterlockedExchange(&g_audio_poll_guard,0);
         return;
     }
@@ -1755,6 +1790,7 @@ void poll_audio_pause_trace() {
        pe->OptionalHeader.SizeOfImage<0xB8840) {
         InterlockedExchange(&g_audio_poll_guard,0);return;
     }
+#if RAYMAN2FIX_AUDIO_TRACE
     // Independently inspect the original game's MENU flag and ENGINE pause
     // flag. 0x4B9BC8 is ACP_Ray2 AI_g_bInGameMenu, set by VM opcode 0x1F8.
     // 0x500640 belongs to GAM engine timer pause/unpause, not the ESC menu.
@@ -1825,9 +1861,14 @@ void poll_audio_pause_trace() {
             log_line(msg);
         }
     }
+#endif // researcher-only UI and nested pause samples
     const auto begin=reinterpret_cast<std::uintptr_t>(module);
     const auto end=begin+pe->OptionalHeader.SizeOfImage;
     for(unsigned i=0;i<kAudioSlotCount;++i) {
+#if !RAYMAN2FIX_AUDIO_TRACE
+        // No MIDI/CD/volume hooks in the production game.
+        if(i!=2u && i!=3u && i!=10u && i!=11u)continue;
+#endif
         auto* ptr=reinterpret_cast<PVOID volatile*>(module+kAudioSlots[i].rva);
         if(!writable_audio_slot(const_cast<const void*>(
               reinterpret_cast<volatile void*>(ptr))))continue;
@@ -1842,16 +1883,23 @@ void poll_audio_pause_trace() {
         if(InterlockedCompareExchangePointer(ptr,hook,current)==current) {
             const unsigned n=g_audio_hooks_installed.fetch_add(
                 1u,std::memory_order_relaxed)+1u;
-            if(n<=kAudioSlotCount) {
+            if(n<=kAudioSlotCount && g_log) {
+#if RAYMAN2FIX_AUDIO_TRACE
                 char line[140]{};
                 std::snprintf(line,sizeof(line),
                     "RUNTIME-AUDIO-TRACE: installed=%s slot_rva=0x%06X (calls forwarded; research-only)",
                     kAudioSlots[i].name,unsigned(kAudioSlots[i].rva));
                 log_line(line);
                 log_audio_driver_module(i,current);
+#else
+                // One compact status event; the driver call ABI is kept
+                // unchanged and we do not sample descriptor payloads.
+                proto_log("driver-hook-installed",kAudioSlots[i].name);
+#endif
             }
         }
     }
+#if RAYMAN2FIX_AUDIO_TRACE
     // Hook the five-argument transition playback API independently from
     // the one-argument pause/stop table: mixing their signatures would
     // corrupt the x86 stdcall stack.
@@ -1871,12 +1919,13 @@ void poll_audio_pause_trace() {
                          "(five args/result forwarded unchanged; research-only)");
         }
     }
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#endif // research-only PlayTransitionExSxd hook
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
     proto_install_callsites();
 #endif
     InterlockedExchange(&g_audio_poll_guard,0);
 }
-#endif // RAYMAN2FIX_AUDIO_TRACE
+#endif // RAYMAN2FIX_AUDIO_HOOKS
 
 
 
@@ -2906,9 +2955,9 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // Camera adjustment executes on the game's own render/main thread.
     // Use it only as a safe tick to request a *deferred* native transition.
     poll_second_intro_skip();
-#if RAYMAN2FIX_AUDIO_TRACE
+#if RAYMAN2FIX_AUDIO_HOOKS
     poll_audio_pause_trace();
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
     proto_menu_tick();
 #endif
 #endif
@@ -4405,6 +4454,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
+    if(settings->music_in_pause_menu>1u)return 5;
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
 #if RAYMAN2FIX_ESC_MUSIC_PROTO
     wchar_t proto_flag[8]{};
     const DWORD flag_size=GetEnvironmentVariableW(
@@ -4413,12 +4464,19 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_proto_enabled.store(explicit_opt_in && g_log,std::memory_order_release);
     if(g_proto_enabled.load(std::memory_order_acquire))
         log_line("RUNTIME-ESC-PROTOTYPE: enabled=1 experiment=paired-SXD "
-                 "ESC+UI-transition+Theme-player; NOT validated music identity; "
-                 "preserve original game files");
+                 "ESC+UI-transition+Theme-player; preserve original game files");
+#else
+    g_proto_enabled.store(settings->music_in_pause_menu==1u,
+                          std::memory_order_release);
+    if(g_proto_enabled.load(std::memory_order_acquire))
+        log_line("RUNTIME-ESC-MUSIC: enabled=1 source=Features.MusicInPauseMenu "
+                 "mode=native-Theme-SXD (original game music and native Stop)");
 #endif
+#endif
+#if RAYMAN2FIX_AUDIO_HOOKS
+    g_audio_origin.store(GetTickCount(),std::memory_order_release);
 #if RAYMAN2FIX_AUDIO_TRACE
     if (g_log) {
-        g_audio_origin.store(GetTickCount(),std::memory_order_release);
 #if RAYMAN2FIX_ESC_MUSIC_PROTO
         log_line(g_proto_enabled.load(std::memory_order_acquire) ?
             "RUNTIME-AUDIO-TRACE: enabled=1 schema=2 prototype=1 "
@@ -4430,6 +4488,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
 #endif
     }
 #endif
+#endif // RAYMAN2FIX_AUDIO_HOOKS
     if (g_log) log_line(kResearchProbes ?
         "RUNTIME-CONFIG: research_probes=1 (read-only experimental trace build)" :
         "RUNTIME-CONFIG: research_probes=0 (standard release instrumentation)");
