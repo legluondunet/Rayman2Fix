@@ -74,6 +74,42 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("kMenuConfirmationDeadlineMs=100u",policy)
         self.assertNotIn("windows.h",policy.lower())
 
+    def test_predriver_resume_probe_does_not_change_native_driver_policy(self):
+        callback=self.runtime.split(
+            "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1].split(
+            "void __stdcall audio_pause_sxd(",1)[0]
+        # The probe records original callback order, including callbacks
+        # that the independently tested music coordinator already suppresses.
+        self.assertIn("resume_probe.active && g_proto_origin==proto::Origin::script_resume",callback)
+        self.assertIn("resume_probe.first_slots[resume_probe.callback_count]=slot",callback)
+        self.assertIn("if(slot==3u)",callback)
+        self.assertIn("if(original && forwarded)original(arg);",callback)
+        self.assertIn("++resume_probe.forwarded_count",callback)
+        self.assertIn("++resume_probe.suppressed_count",callback)
+        self.assertLess(callback.index("if(original && forwarded)original(arg);"),
+                        callback.index("if(resume_probe.active && g_proto_origin==proto::Origin::script_resume &&"))
+        wrapper=self.runtime.split(
+            "void __cdecl proto_script_resume() {",1)[1].split(
+            "void proto_flush_predriver_resume_report() {",1)[0]
+        self.assertIn("proto_call_original(0x53700);",wrapper)
+        self.assertIn("g_proto.end_script_resume();",wrapper)
+        self.assertIn("g_proto_predriver_resume_report.ready=true;",wrapper)
+        self.assertNotIn("log_line(",wrapper)
+        self.assertNotIn("RUNTIME-ESC-PREDRIVER-RESUME:",wrapper)
+        flush=self.runtime.split(
+            "void proto_flush_predriver_resume_report() {",1)[1].split(
+            "// Focus is a Win32",1)[0]
+        self.assertIn("RUNTIME-ESC-PREDRIVER-RESUME:",flush)
+        self.assertIn("g_proto_predriver_resume_report.ready=false;",flush)
+        self.assertIn("native_forwarded=%u native_suppressed=%u",flush)
+        # The normal render tick flushes after audio compensation even
+        # if script Resume reset the music state machine to idle.
+        self.assertIn("proto_menu_tick();",self.runtime)
+        self.assertIn("proto_theme_transition_watch_tick();\n    proto_flush_predriver_resume_report();",self.runtime)
+        self.assertIn("sample<16u",wrapper)
+        self.assertNotIn("PauseTransitionSxd(",wrapper)
+        self.assertNotIn("ResumeTransitionSxd(",wrapper)
+
     def test_intro_theme_controller_watcher_is_change_triggered_and_bounded(self):
         self.assertIn("void proto_theme_transition_watch_tick()",self.runtime)
         start=self.runtime.index("void proto_theme_transition_watch_tick()")
