@@ -485,7 +485,7 @@ jobs:
           test -f build/Rayman2Fix_installer.log
           test ! -e build/Rayman2Fix.log
           grep -q 'SYS-INFO: END' build/Rayman2Fix_installer.log
-          test "$(grep -v '^;' build/Rayman2Fix/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nResolution=Desktop\nFPSLimit=60\nForce4x3=0\n[Features]\nSkipCinematics=0')" || exit 1
+          test "$(grep -v '^;' build/Rayman2Fix/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nResolution=Desktop\nFPSLimit=60\nForce4x3=0\n[Features]\nSkipCinematics=0\nMusicInPauseMenu=0')" || exit 1
           printf 'old game log\n' > build/Rayman2Fix.log
           printf '[Debug]\r\nLog=0\r\n' > build/Rayman2Fix/Rayman2Fix.ini
           result=0
