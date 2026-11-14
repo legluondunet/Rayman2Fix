@@ -39,6 +39,21 @@ struct Identity {
     }
 };
 
+// The current Theme's native descriptor reference can still be changing
+// on the first ESC opening. Observe it for one bounded existing pending
+// interval, without touching the driver or relaxing the owner identity.
+// A future valid reference may authorize normal compensation; timeout or
+// loss of focus/menu leaves the game's native pause intact.
+constexpr std::uint32_t kLiveThemeVerifyWindowMs=1500u;
+constexpr bool retry_live_theme_identity(Phase phase, bool menu_known,
+                                         bool menu_open, bool actor_valid,
+                                         bool foreground, bool owner_valid,
+                                         std::uint32_t elapsed_ms) noexcept {
+    return phase==Phase::pending_menu && menu_known && menu_open &&
+           actor_valid && foreground && !owner_valid &&
+           elapsed_ms<kLiveThemeVerifyWindowMs;
+}
+
 // This policy assumes the game's original paired Theme/SXD calls have
 // already reached the real driver. A matching *experimental* resume batch
 // starts only AFTER native AI_g_bInGameMenu rises, never from Escape key alone.
@@ -217,6 +232,11 @@ public:
                identity_.generation==token && token!=0;
     }
     Phase phase() const noexcept {return phase_;}
+    // The native handle alone is not proof that a resumed sound still
+    // belongs to the original Theme and inner SXD resource.
+    bool identity_matches(const Identity& id) const noexcept {
+        return id.valid() && identity_.valid() && identity_.same(id);
+    }
     std::uint32_t current_handle() const noexcept{return identity_.handle;}
     unsigned native_pause_count() const noexcept{return observed_pauses_;}
     unsigned ignored_resume_count() const noexcept{return ignored_resumes_;}
