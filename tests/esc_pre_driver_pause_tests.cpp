@@ -123,6 +123,46 @@ void actor_rejected_or_focus_requires_original_driver() {
     CHECK(!other.suppress_current);
     CHECK(q.state()==State::original_passthrough);
 }
+void lost_focus_before_actor_seen_replays_original_immediately() {
+    Policy p;
+    CHECK(p.begin(true,true,true));
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    p.end_script_pause();
+    // During an Alt+Tab transition the ESC actor may never be observed.
+    // This must not wait for the 100ms menu deadline; both original
+    // native pauses must be replayed before further driver activity.
+    const auto rollback=p.menu_observation(false,false,false,true,1);
+    CHECK(!rollback.suppress_current);
+    CHECK(rollback.replay_held_pauses==2);
+    CHECK(!rollback.impossible_replay);
+    CHECK(p.state()==State::original_passthrough);
+    CHECK(!p.script_resume(kOriginal,true).suppress_current);
+}
+void stream_change_and_focus_loss_never_replay_stale_pauses() {
+    Policy p;
+    CHECK(p.begin(true,true,true));
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    p.end_script_pause();
+    // If the old stream has vanished, a replay to a recycled driver
+    // handle could mute a different song. No stale physical driver call.
+    const auto rollback=p.menu_observation(false,false,false,false,1);
+    CHECK(rollback.replay_held_pauses==0);
+    CHECK(rollback.impossible_replay);
+    CHECK(p.state()==State::original_passthrough);
+    CHECK(!p.script_resume(kAltInner,true).suppress_current);
+    p.reset();
+    CHECK(p.begin(true,true,true)); // later genuine session can rearm
+    CHECK(p.script_pause(kAltInner,true).suppress_current);
+    CHECK(p.script_pause(kAltInner,true).suppress_current);
+    p.end_script_pause();
+    CHECK(!p.menu_observation(true,true,true,true,1).impossible_replay);
+    CHECK(p.state()==State::menu_committed);
+    CHECK(p.script_resume(kAltInner,true).suppress_current);
+    CHECK(p.script_resume(kAltInner,true).suppress_current);
+    CHECK(p.state()==State::retired);
+}
 void moving_track_cannot_receive_stale_rollback_or_resume() {
     Policy p;
     CHECK(p.begin(true,true,true));
@@ -169,6 +209,8 @@ int main() {
     third_callback_requires_replay_before_current();
     menu_not_verified_rolls_back_at_deadline_not_completes();
     actor_rejected_or_focus_requires_original_driver();
+    lost_focus_before_actor_seen_replays_original_immediately();
+    stream_change_and_focus_loss_never_replay_stale_pauses();
     moving_track_cannot_receive_stale_rollback_or_resume();
     verified_9_12_to_9_5_mismatch_needs_no_player_pointer_bypass();
     std::cout<<"pre-driver ESC model: pair, rollback, provenance, focus, Stop OK\n";
