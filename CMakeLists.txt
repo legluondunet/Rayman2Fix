@@ -211,6 +211,13 @@ if(BUILD_TESTING)
   target_link_libraries(game_launch_tests PRIVATE rayman2_patch)
   add_test(NAME game-launch-preflight COMMAND game_launch_tests)
 
+  # Pure C++17 research-only ESC music shadow core, no Win32 or game
+  # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
+  add_executable(esc_music_shadow_cpp_tests tests/esc_music_shadow_cpp_tests.cpp)
+  target_include_directories(esc_music_shadow_cpp_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-music-shadow-state-machine COMMAND esc_music_shadow_cpp_tests)
+
   add_executable(fov_math_tests tests/fov_math_tests.cpp)
   target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME widescreen-hor-plus-math COMMAND fov_math_tests)
