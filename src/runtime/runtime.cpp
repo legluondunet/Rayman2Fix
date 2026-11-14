@@ -656,6 +656,10 @@ struct AudioThemeOwnerContext {
     // 0x45997B compares the current Theme lookup key at 0x4B95CC.
     // -1 unknown; 0 player key differs; 1 exact native bank/index key.
     int native_theme_player_key_matches_outer=-1;
+    // Native 0x45997B compares controller+0x14 to a Theme descriptor
+    // POINTER, not to the origin-bank/index of the serialized resource.
+    // -1=unknown, 0=other descriptor, 1=matching current Theme pointer.
+    int native_theme_player_ref_matches_outer=-1;
     AudioNativeBankOrigin outer_bank_provenance{};
     AudioNativeBankOrigin inner_bank_provenance{};
 };
@@ -721,6 +725,13 @@ AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
                 DWORD(out.outer_bank_provenance.resource_index);
             out.native_theme_player_key_matches_outer=
                 int(current_theme_key==expected_key);
+            // 0x457F21 passes the original Theme resource descriptor to
+            // 0x459950; 0x45997B compares that same incoming pointer with
+            // [0x4B95CC]. Protect against pointer reuse by validating
+            // the active type-11 record and loaded BNM origin each time.
+            out.native_theme_player_ref_matches_outer=
+                int(current_theme_key==
+                    static_cast<DWORD>(outer_descriptor_address));
         }
     }
     if(active==0u)return out;
@@ -1081,7 +1092,7 @@ proto::Identity proto_identity(DWORD handle,std::uint64_t generation) {
     if(!handle || handle==0xffffffffu || !generation)return id;
     const auto owner=inspect_audio_theme_owner(handle);
     if(owner.theme_owned_driver!=1u ||
-       owner.native_theme_player_key_matches_outer!=1 ||
+       owner.native_theme_player_ref_matches_outer!=1 ||
        owner.outer_bank_provenance.list_complete!=1u ||
        owner.inner_bank_provenance.list_complete!=1u ||
        owner.outer_bank_provenance.candidates!=1u ||
@@ -1442,7 +1453,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     if((slot==2u || slot==3u || slot==11u) && event<8u) {
         char ownership[768]{};
         std::snprintf(ownership,sizeof(ownership),
-            "RUNTIME-AUDIO-THEME-OWNER: channel=%s sample=%u outer_candidates=%u outer_slot=%d theme_bank=%d theme_resource=%d inner_slot=%d inner_ref_class=%u inner_bank=%d inner_resource=%d inner_active=%u inner_transition=%u inner_handle_matches=%u theme_owned_driver=%u outer_native_bank=%d outer_native_index=%d outer_bank_candidates=%u outer_bank_list_complete=%u inner_native_bank=%d inner_native_index=%d inner_bank_candidates=%u inner_bank_list_complete=%u outer_bank_nodes=%u inner_bank_nodes=%u native_theme_player_key_matches_outer=%d (Id halves NOT bank provenance) (read-only; no music bypass)",
+            "RUNTIME-AUDIO-THEME-OWNER: channel=%s sample=%u outer_candidates=%u outer_slot=%d theme_bank=%d theme_resource=%d inner_slot=%d inner_ref_class=%u inner_bank=%d inner_resource=%d inner_active=%u inner_transition=%u inner_handle_matches=%u theme_owned_driver=%u outer_native_bank=%d outer_native_index=%d outer_bank_candidates=%u outer_bank_list_complete=%u inner_native_bank=%d inner_native_index=%d inner_bank_candidates=%u inner_bank_list_complete=%u outer_bank_nodes=%u inner_bank_nodes=%u native_theme_player_key_matches_outer=%d native_theme_player_ref_matches_outer=%d (Id halves NOT bank provenance) (read-only; no music bypass)",
             kAudioSlots[slot].name,event+1u,theme.outer_candidates,
             theme.outer_slot,theme.theme_bank,theme.theme_resource,
             theme.inner_slot,theme.inner_ref_class,theme.inner_bank,
@@ -1459,7 +1470,8 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
             theme.inner_bank_provenance.list_complete,
             theme.outer_bank_provenance.nodes_scanned,
             theme.inner_bank_provenance.nodes_scanned,
-            theme.native_theme_player_key_matches_outer);
+            theme.native_theme_player_key_matches_outer,
+            theme.native_theme_player_ref_matches_outer);
         log_line(ownership);
     }
     if(event<2u && slot<4u) {
