@@ -371,8 +371,11 @@ void log_cpa_sound_configuration() {
     wcscpy_s(end+1,MAX_PATH-static_cast<std::size_t>(end+1-path),filename);
     const DWORD attributes=GetFileAttributesW(path);
     if(attributes==INVALID_FILE_ATTRIBUTES ||
-       (attributes&FILE_ATTRIBUTE_DIRECTORY)!=0u) {
-        log_line("RUNTIME-AUDIO-CONFIG: status=missing (no audio settings changed)");
+       (attributes&FILE_ATTRIBUTE_DIRECTORY)!=0u ||
+       (attributes&FILE_ATTRIBUTE_REPARSE_POINT)!=0u) {
+        // Unavailable is deliberately broader than missing: permissions,
+        // junctions and links are not automatically trusted or followed.
+        log_line("RUNTIME-AUDIO-CONFIG: status=unavailable (no audio settings changed)");
         return;
     }
     // Strict ASCII field normalization: no path, quoted line, or injected
