@@ -1204,7 +1204,16 @@ void __cdecl proto_script_pause() {
             g_proto.quarantine(); // independent nested script pause
     }
     proto_deferred_safety();
-    if(adopted)proto_log("script-pause-observed","await-native-menu-flag");
+    if(adopted) {
+        bool pending=false;
+        {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            pending=g_proto.phase()==proto::Phase::pending_menu;
+        }
+        proto_log("script-pause-observed",pending ?
+            "paired-theme-candidate-ready" :
+            "provisional-owner-rejected-native-audio-unchanged");
+    }
 }
 void __cdecl proto_script_resume() {
     {
@@ -1381,6 +1390,16 @@ void proto_menu_tick() {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
         action=g_proto.menu_tick(known && actor_ok,menu!=0,
                                  game_window_is_foreground(),current);
+    }
+    // One bounded verdict per actual pending -> menu-open observation.
+    // This diagnostic is never used to authorize a native call.
+    if(phase==proto::Phase::pending_menu && known && menu!=0) {
+        proto_log("menu-verdict",
+            !actor_ok ? "escape-menu-actor-not-verified" :
+            !current ? "live-theme-ref-not-verified" :
+            action.command==proto::Command::resume ?
+                "paired-native-resume-requested" :
+                "candidate-rejected-native-audio-unchanged");
     }
     proto_dispatch(action);
     proto_deferred_safety();
