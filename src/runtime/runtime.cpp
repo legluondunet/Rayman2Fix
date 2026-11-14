@@ -1126,7 +1126,7 @@ AudioMenuActorSnapshot inspect_audio_menu_actor_readonly() {
        anchor[2]==0u || anchor[2]>kMaxTypeNodes ||
        anchor[0]<0x10000u)return out;
     const auto list_va=base+kPersonalTypesRva;
-    DWORD type_node=anchor[0],type_index=0,found_index=0;
+    DWORD type_node=anchor[0],found_index=0;
     unsigned found=0;
     DWORD seen_type[kMaxTypeNodes]{};
     for(DWORD i=0;i<anchor[2];++i) {
@@ -1148,9 +1148,7 @@ AudioMenuActorSnapshot inspect_audio_menu_actor_readonly() {
             }
         } else return out;
         type_node=elem[0];
-        type_index=i;
     }
-    (void)type_index;
     if(type_node!=0u)return out; // incomplete/changed list
     if(found==0u) {
         out.type_found=0; // scanned registry, but no candidate name
@@ -1168,6 +1166,7 @@ AudioMenuActorSnapshot inspect_audio_menu_actor_readonly() {
         DWORD child=0;
         if(!read(std::uintptr_t(root)+8u,&child,sizeof(child)))return -1;
         DWORD seen[kMaxActorNodes]{};
+        DWORD previous=0;
         unsigned matches=0;
         for(unsigned i=0;i<kMaxActorNodes;++i) {
             if(child==0u)return matches ? 1 : 0; // complete traversal
@@ -1175,8 +1174,9 @@ AudioMenuActorSnapshot inspect_audio_menu_actor_readonly() {
             for(unsigned j=0;j<i;++j)
                 if(seen[j]==child)return -1;
             seen[i]=child;
-            DWORD so[6]{}; // type, linked, first,last,count,next
-            if(!read(child,so,sizeof(so)))return -1;
+            DWORD so[8]{}; // type,linked,children[3],next,prev,father
+            if(!read(child,so,sizeof(so)) ||
+               so[6]!=previous || so[7]!=root)return -1;
             ++*scanned;
             if(so[0]==2u) { // HIE_C_Type_Actor
                 if(so[1]<0x10000u)return -1;
@@ -1187,6 +1187,7 @@ AudioMenuActorSnapshot inspect_audio_menu_actor_readonly() {
                          &personal,sizeof(personal)))return -1;
                 if(personal==found_index)++matches;
             }
+            previous=child;
             child=so[5];
         }
         return -1; // traversal cap reached
