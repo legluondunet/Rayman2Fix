@@ -190,3 +190,59 @@ do not establish a physical voice lifetime. No
 additional gameplay test is required merely to
 identify the module, and no original DLL is
 modified or committed.
+
+## Offline ADPCM DLL PE32 audit tool — awaiting owner's exact binary
+
+The exact `Rayman2Fix/dll/APMMXbvr.dll` file has **not yet been
+provided**. External sources such as
+https://github.com/Synthesis/ray2get and public Steam file
+manifests confirm that an APMmxBVR decoder is distributed with
+some Rayman 2 PC editions, but **neither source verifies the
+owner's DLL bytes or the implementation of native Pause/Resume**.
+
+Research support added to PR #10:
+
+- `tools/audit_apmmxbvr.py` is a standard-library-only,
+  **read-only**, Windows/Linux-compatible PE32 x86 inspector.
+  It never loads, runs, replaces, copies, or writes the input
+  DLL. It prints SHA-256, size, PE timestamp, image base,
+  and the first 24 on-disk bytes of the following named
+  exports (if present), with strict RVA bounds.
+- Required reference from the actual owner's native log:
+  `_SND_fn_vStopTransitionSxdADPCM@4 = 0x54C0`,
+  `_SND_fn_vPauseTransitionSxdADPCM@4 = 0x54D0`,
+  `_SND_fn_vResumeTransitionSxdADPCM@4 = 0x54E0`.
+  A different, absent, unreadable, or forwarded export
+  explicitly fails validation rather than silently adopting
+  addresses from another edition. This is *structural*
+  export/RVA validation, not a proof of equivalent semantics.
+- The optional `--expected-sha256` argument is a full-file
+  hash guard for repeating analyses **after** a known owner's
+  original file hash has been recorded. There is no guessed
+  reference hash built into the script.
+- Seven unit tests in `tests/test_audit_apmmxbvr.py` create
+  synthetic PE32 bytes in temporary storage, validate
+  correct/incorrect exports and bad headers, and verify
+  JSON output and nonzero exit codes. No copyrighted
+  game binary is committed or loaded by CI.
+
+Run from the repository root:
+
+```sh
+python tools/audit_apmmxbvr.py "Rayman2Fix/dll/APMMXbvr.dll"
+python tools/audit_apmmxbvr.py "Rayman2Fix/dll/APMMXbvr.dll" --json
+```
+
+Exit status: `0` means all **three exported RVAs** match the
+owner's runtime log, `1` means the image is parsable but
+does not establish that identity, and `2` means invalid
+PE, I/O failure, or explicit SHA-256 mismatch. The output
+does not establish pause counters, voice ownership, backend
+queue state, stream-retirement behavior, or audio correctness.
+
+Once the owner supplies this **exact** original DLL, hash it,
+verify exported RVAs, then statically disassemble the three
+confirmed functions and their callees. If the file does not
+match, investigate that discrepancy rather than overriding
+validation or importing a random online DLL. No runtime
+patch or new audio hook is part of this tool.
