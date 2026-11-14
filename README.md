@@ -24,6 +24,16 @@ or unrelated options. Only the approved original CD executable is hooked.
 `--launch-no-verify` bypasses runtime provisioning and must not be
 used when updating the embedded DLL.
 
+To identify the original CPA sound backend without changing game files,
+enable `[Debug] Log=1` for one normal launch. `Rayman2Fix.log`
+now distinguishes the **configured** `dll/snd_cpa.ini`
+`[DLL_Sxd]` candidates (`RUNTIME-AUDIO-CONFIG`) from the actual
+**loaded module owning the original Pause/Resume/Stop callbacks**
+(`RUNTIME-AUDIO-DRIVER`). The latter reports only a DLL basename
+and callback RVA, not a local filesystem path. Driver configuration,
+native callbacks and audio behavior are not changed by these observations.
+A configured `Default` is not proof of which driver was loaded.
+
 The separate `docs/esc-music-wine-prototype.md` records the now-completed
 research and the initial Wine validation; experimental audio tracers remain
 available only in explicitly requested research builds.
