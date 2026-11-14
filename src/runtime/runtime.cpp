@@ -1371,6 +1371,13 @@ struct ProtoPreDriverReport {
     // established by static analysis of owner's hash-pinned DLL.
     // It is NOT a physical voice ID and never authorizes audio calls.
     int transition_type_post_pause=-1;
+    // Only for the byte-fingerprinted original WAVMW + APMMX pair;
+    // sampled after original Pause, never inside its native callback.
+    // Unknown stays -1; values have NO effect on driver decisions.
+    int adpcm_voice_sampled=0;
+    int adpcm_voice_index=-1;
+    int adpcm_voice_pause=-1;
+    int adpcm_voice_other_gate=-1;
     // Source-scoped snapshots, captured outside the native driver callbacks.
     // Play/Stop counts include OTHER sounds: any delta disproves a totally
     // quiet interval, but zero alone does not prove the SXD stream is stable.
@@ -1602,6 +1609,105 @@ int proto_read_transition_type_post_wrapper(DWORD object_ref) {
     if(!ok)return -1;
     return (type==1u || type==2u || type==4u) ? int(type) : 0;
 }
+// Actual owner-supplied WAVMWbvr.dll dispatches type 4 by reading
+// [transition+4] and passing that ADPCM handle to APMMXbvr.dll. The
+// owner-supplied APMMXbvr.dll checks [handle] against its 0xE4-stride
+// live record pool and writes [record+0x1C]=1 for Pause. This is a
+// bounded *post-original-call* snapshot only, NOT a stream identity
+// credential. Never retain raw pointers, guess a different DLL
+// version, or let this observation gate audio calls.
+struct ProtoAdpcmVoiceSnapshot {
+    int sampled=0;
+    int voice_index=-1;
+    int pause=-1;
+    int other_gate=-1;
+};
+ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_post_pause(DWORD ref) {
+    ProtoAdpcmVoiceSnapshot out{};
+    if(ref<0x10000u || ref==0xffffffffu)return out;
+    const auto* wav=reinterpret_cast<const BYTE*>(
+        GetModuleHandleW(L"WAVMWbvr.dll"));
+    const auto* apm=reinterpret_cast<const BYTE*>(
+        GetModuleHandleW(L"APMMXbvr.dll"));
+    if(!wav || !apm)return out;
+    const auto original=g_audio_original[2u].load(std::memory_order_acquire);
+    if(reinterpret_cast<std::uintptr_t>(original)!=
+       reinterpret_cast<std::uintptr_t>(wav)+0xC7E0u)return out;
+    const auto read=[&](const void* ptr,void* dest,SIZE_T length) {
+        SIZE_T got=0;
+        return ReadProcessMemory(GetCurrentProcess(),ptr,dest,length,&got)!=0 &&
+            got==length;
+    };
+    const auto verified_pe=[&](const BYTE* module,DWORD time,DWORD size) {
+        IMAGE_DOS_HEADER dos{};
+        if(!read(module,&dos,sizeof(dos)) ||
+           dos.e_magic!=IMAGE_DOS_SIGNATURE ||
+           dos.e_lfanew<=0 || dos.e_lfanew>=0x1000)return false;
+        IMAGE_NT_HEADERS32 nt{};
+        return read(module+dos.e_lfanew,&nt,sizeof(nt)) &&
+            nt.Signature==IMAGE_NT_SIGNATURE &&
+            nt.FileHeader.Machine==IMAGE_FILE_MACHINE_I386 &&
+            nt.FileHeader.TimeDateStamp==time &&
+            nt.OptionalHeader.Magic==IMAGE_NT_OPTIONAL_HDR32_MAGIC &&
+            nt.OptionalHeader.SizeOfImage==size;
+    };
+    if(!verified_pe(wav,0x38076FB4u,0x87000u) ||
+       !verified_pe(apm,0x38076F98u,0xEE000u))return out;
+    constexpr BYTE wav_prefix[]{0x8B,0x4C,0x24,0x04,0x8B,0x01,0x48};
+    constexpr BYTE apm_prefix[]{
+        0x8B,0x44,0x24,0x04,0x50,0xE8,0xA6,0xDE,0xFF,0xFF,
+        0x83,0xC4,0x04,0xC2,0x04,0x00
+    };
+    BYTE wav_actual[sizeof(wav_prefix)]{};
+    BYTE apm_actual[sizeof(apm_prefix)]{};
+    if(!read(wav+0xC7E0u,wav_actual,sizeof(wav_actual)) ||
+       std::memcmp(wav_actual,wav_prefix,sizeof(wav_prefix))!=0 ||
+       !read(apm+0x54D0u,apm_actual,sizeof(apm_actual)) ||
+       std::memcmp(apm_actual,apm_prefix,sizeof(apm_prefix))!=0)return out;
+    // Verify that the actual WAVMW type-4 pause pointer is bound to
+    // this particular APMMX module, not a substitute loaded by the game.
+    DWORD delegate=0;
+    if(!read(wav+0x26A9Cu,&delegate,sizeof(delegate)) ||
+       std::uintptr_t(delegate)!=
+           reinterpret_cast<std::uintptr_t>(apm)+0x54D0u)return out;
+    DWORD transition[2]{};
+    if(!read(reinterpret_cast<const void*>(std::uintptr_t(ref)),
+             transition,sizeof(transition)) ||
+       transition[0]!=4u || transition[1]<0x10000u ||
+       transition[1]==0xffffffffu)return out;
+    const DWORD handle=transition[1]; // never retained outside this call
+    DWORD record=0;
+    DWORD count=0;
+    if(!read(reinterpret_cast<const void*>(std::uintptr_t(handle)),
+             &record,sizeof(record)) ||
+       !read(apm+0x24EC4u,&count,sizeof(count)) ||
+       !count || count>30u)return out;
+    constexpr std::uintptr_t pool_rva=0xE67D8u;
+    constexpr std::uintptr_t record_stride=0xE4u;
+    const std::uintptr_t pool=
+        reinterpret_cast<std::uintptr_t>(apm)+pool_rva;
+    if(std::uintptr_t(record)<pool ||
+       std::uintptr_t(record)>=pool+std::uintptr_t(count)*record_stride ||
+       (std::uintptr_t(record)-pool)%record_stride!=0u)return out;
+    const auto record_address=std::uintptr_t(record);
+    DWORD recorded_handle=0,pause=0,other=0,record_after=0,count_after=0;
+    if(!read(reinterpret_cast<const void*>(record_address+0xD4u),
+             &recorded_handle,sizeof(recorded_handle)) ||
+       recorded_handle!=handle ||
+       !read(reinterpret_cast<const void*>(record_address+0x1Cu),
+             &pause,sizeof(pause)) ||
+       !read(reinterpret_cast<const void*>(record_address+0xDCu),
+             &other,sizeof(other)) ||
+       !read(reinterpret_cast<const void*>(std::uintptr_t(handle)),
+             &record_after,sizeof(record_after)) ||
+       !read(apm+0x24EC4u,&count_after,sizeof(count_after)) ||
+       record_after!=record || count_after!=count)return out;
+    out.sampled=1;
+    out.voice_index=int((record_address-pool)/record_stride);
+    out.pause=pause==0u ? 0 : (pause==1u ? 1 : 2);
+    out.other_gate=other==0u ? 0 : 1;
+    return out;
+}
 void __cdecl proto_script_pause() {
     bool adopted=false;
     DWORD depth_before=0,depth_after=0;
@@ -1609,6 +1715,7 @@ void __cdecl proto_script_pause() {
     unsigned native_stop_before=0,native_stop_after=0;
     unsigned native_play_before=0,native_play_after=0;
     int transition_type_post_pause=-1;
+    ProtoAdpcmVoiceSnapshot adpcm_voice{};
     if(g_proto_enabled.load(std::memory_order_acquire)) {
         BYTE menu=0;
         DWORD depth=0;
@@ -1651,6 +1758,9 @@ void __cdecl proto_script_pause() {
            g_proto_predriver_probe.other_handle_count==0u)
             transition_type_post_pause=proto_read_transition_type_post_wrapper(
                 g_proto_predriver_probe.first_handle);
+        if(transition_type_post_pause==4)
+            adpcm_voice=proto_sample_adpcm_voice_post_pause(
+                g_proto_predriver_probe.first_handle);
         depth_after_ok=proto_read_depth(depth_after);
         native_stop_after=g_proto_native_stop_calls.load(std::memory_order_acquire);
         native_play_after=g_transition_play_calls.load(std::memory_order_acquire);
@@ -1672,6 +1782,14 @@ void __cdecl proto_script_pause() {
             g_proto_predriver_report.native_play_after=native_play_after;
             g_proto_predriver_report.transition_type_post_pause=
                 transition_type_post_pause;
+            g_proto_predriver_report.adpcm_voice_sampled=
+                adpcm_voice.sampled;
+            g_proto_predriver_report.adpcm_voice_index=
+                adpcm_voice.voice_index;
+            g_proto_predriver_report.adpcm_voice_pause=
+                adpcm_voice.pause;
+            g_proto_predriver_report.adpcm_voice_other_gate=
+                adpcm_voice.other_gate;
         }
         if(adopted && predriver_trace) {
             const bool overlap=g_proto_esc_lifetime_start.valid;
@@ -2283,6 +2401,20 @@ void proto_menu_tick() {
             owner.inner_bank_provenance.resource_index,
             report.transition_type_post_pause);
         log_line(line);
+        // Snapshot captured immediately after original native Pause,
+        // BEFORE compensation, so it can show a real ADPCM pause gate
+        // even if this menu later receives our validated native Resume.
+        char adpcm_line[315]{};
+        std::snprintf(adpcm_line,sizeof(adpcm_line),
+            "RUNTIME-ESC-ADPCM-VOICE: t_ms=%lu sampled=%d voice_index=%d "
+            "paused=%d other_gate=%d transition_type=%d "
+            "(original 1999 WAVMW/APMMX only; post-wrapper read-only; "
+            "no raw pointers; no audio authorization)",
+            static_cast<unsigned long>(report.t_ms),
+            report.adpcm_voice_sampled,report.adpcm_voice_index,
+            report.adpcm_voice_pause,report.adpcm_voice_other_gate,
+            report.transition_type_post_pause);
+        log_line(adpcm_line);
         // Read-only source-window audit. Snapshot the global native Play
         // and Stop call counts before/after the script wrapper and at the
         // subsequent menu tick, AFTER all existing audio decisions.
