@@ -1504,9 +1504,13 @@ void proto_log_owner_rejection(DWORD handle,DWORD elapsed_ms,
     log_line(line);
 }
 // Observe early Theme controller and SXD ownership changes on the game's
-// render thread. Poll only cheap native fields every 40ms. Full bank/record
-// provenance is resolved *only* after a change, for at most 24 events in
-// the first 120 seconds. No audio driver call, patch or mutable game state.
+// render thread. Every 40ms, sample cheap original controller fields and
+// the 64 small native sound records. Track both Theme and SXD DESCRIPTOR
+// references: the nested record pointer can remain constant while its
+// active resource changes. Ignore menu-only toggles to preserve the
+// 24-event budget for actual music transitions in the first 120 seconds.
+// Full bank provenance runs *only* on a music-state change.
+// No audio driver call, patch or mutable game state.
 void proto_theme_transition_watch_tick() {
     if(!g_proto_callsites_installed.load(std::memory_order_acquire) ||
        !g_proto_enabled.load(std::memory_order_acquire) || !g_log)return;
@@ -1528,11 +1532,35 @@ void proto_theme_transition_watch_tick() {
     DWORD controller_words[6]{}; // +0x00 active, +0x0C state, +0x14 Theme ref
     DWORD nested=0;
     BYTE menu=0;
+    // One small read of the original 64 x 32 byte sound-record table.
+    // A Theme or SXD descriptor may change *within* the same record:
+    // controller pointer and nested record pointer alone missed this
+    // transition in the owner's 14:30 Wine endurance trace.
+    struct NativeSoundRecord { DWORD words[8]; };
+    NativeSoundRecord records[64]{};
     if(!read_native(0xB95B8,controller_words,sizeof(controller_words)) ||
        !read_native(0xB95E8,&nested,sizeof(nested)) ||
+       !read_native(0xB8C98,records,sizeof(records)) ||
        !proto_game_read(0xB9BC8,menu))return;
+    const DWORD singleton=static_cast<DWORD>(
+        reinterpret_cast<std::uintptr_t>(module)+0xB95B8);
+    DWORD outer_descriptor=0;
+    unsigned outer_matches=0;
+    for(const auto& record:records) {
+        if(record.words[0]!=singleton || record.words[5]==0u)continue;
+        ++outer_matches;
+        if(outer_matches==1u)outer_descriptor=record.words[1];
+    }
+    if(outer_matches!=1u)outer_descriptor=0;
+    DWORD inner_descriptor=0;
+    const auto ref=decode_audio_nested_record_ref(nested,module);
+    if(ref.table_index>=0) {
+        const auto& record=records[ref.table_index];
+        if(record.words[5]!=0u)inner_descriptor=record.words[1];
+    }
     const proto::ThemeRefWatchInput snapshot{
-        controller_words[0],controller_words[5],nested,menu
+        controller_words[0],controller_words[3],controller_words[5],
+        nested,outer_descriptor,inner_descriptor,menu
     };
     if(!watch.observe(snapshot,DWORD(now-origin)))return;
 
@@ -1640,8 +1668,10 @@ void proto_menu_tick() {
         if(g_log) {
             char timing[190]{};
             std::snprintf(timing,sizeof(timing),
-                "RUNTIME-ESC-PERF: pending_ms=%lu verify_ms=%lu dispatch_ms=%lu "
-                "compensated=%u (timings captured before verdict log)",
+                "RUNTIME-ESC-PERF: t_ms=%lu pending_ms=%lu verify_ms=%lu "
+                "dispatch_ms=%lu compensated=%u (timings captured before verdict log)",
+                static_cast<unsigned long>(now-
+                    g_audio_origin.load(std::memory_order_acquire)),
                 static_cast<unsigned long>(now-started),
                 static_cast<unsigned long>(verify_ms),
                 static_cast<unsigned long>(dispatch_ms),
