@@ -129,6 +129,10 @@ void first_esc_late_owner_verification() {
     y.reset();
     CHECK(y.phase()==Phase::idle);
     CHECK(y.native_resume(123,Origin::script_resume));
+    auto closed=pending();
+    closed.end_script_resume(); // ESC closed before live identity settled
+    CHECK(closed.phase()==Phase::idle);
+    CHECK(closed.native_resume(123,Origin::script_resume));
 }
 void distinct_sfx() {
     auto x=pending();
