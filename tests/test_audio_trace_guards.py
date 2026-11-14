@@ -266,6 +266,55 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("VirtualProtect(",flush)
         self.assertNotIn("pre_driver_pause::Policy",self.runtime)
 
+    def test_transition_object_type_probe_is_post_native_bounded_and_passive(self):
+        # The owner's SHA-pinned WAVMWbvr PE has a tagged transition
+        # object, not a proven physical waveOut voice handle. Test the
+        # 1/2/4 categorization without *any* memory read in audio callbacks.
+        helper=self.runtime.split(
+            "int proto_read_transition_type_post_wrapper(DWORD object_ref) {",1)[1].split(
+            "void __cdecl proto_script_pause() {",1)[0]
+        for token in (
+            "if(object_ref<0x10000u || object_ref==0xffffffffu)return -1;",
+            "ReadProcessMemory(", "GetCurrentProcess()",
+            "read==sizeof(type)", "type==1u || type==2u || type==4u",
+            "return -1", ": 0;",
+        ):
+            self.assertIn(token,helper)
+        self.assertNotIn("log_line(",helper)
+        self.assertNotIn("VirtualProtect(",helper)
+        self.assertNotIn("WriteProcessMemory(",helper)
+        self.assertNotIn("proto_dispatch(",helper)
+        self.assertNotIn("fn(",helper)
+
+        callback=self.runtime.split(
+            "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1].split(
+            "void __stdcall audio_pause_sxd(",1)[0]
+        self.assertNotIn("proto_read_transition_type_post_wrapper(",callback)
+
+        pause=self.runtime.split(
+            "void __cdecl proto_script_pause() {",1)[1].split(
+            "void __cdecl proto_script_resume() {",1)[0]
+        self.assertIn("transition_type_post_pause=-1;",pause)
+        self.assertIn("proto_call_original(0x536D0);",pause)
+        self.assertIn("g_proto_predriver_probe.active=false;",pause)
+        self.assertIn("g_proto_predriver_probe.pause_count==2u",pause)
+        self.assertIn("g_proto_predriver_probe.other_handle_count==0u",pause)
+        self.assertIn("transition_type_post_pause=proto_read_transition_type_post_wrapper(",pause)
+        self.assertLess(pause.index("proto_call_original(0x536D0);"),
+                        pause.index("transition_type_post_pause=proto_read_transition_type_post_wrapper("))
+        self.assertNotIn("log_line(",pause)
+        self.assertNotIn("VirtualProtect(",pause)
+        self.assertIn("if(predriver_trace)",pause)  # max 16 sampled sources
+
+        tick=self.runtime.split(
+            "void proto_menu_tick() {",1)[1].split(
+            "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
+        self.assertIn("transition_type_post_pause=%d",tick)
+        self.assertIn("report.transition_type_post_pause",tick)
+        self.assertLess(tick.index("proto_dispatch(action);"),
+                        tick.index("transition_type_post_pause=%d"))
+        self.assertNotIn("proto_read_transition_type_post_wrapper(",tick)
+
     def test_intro_theme_controller_watcher_is_change_triggered_and_bounded(self):
         self.assertIn("void proto_theme_transition_watch_tick()",self.runtime)
         start=self.runtime.index("void proto_theme_transition_watch_tick()")
