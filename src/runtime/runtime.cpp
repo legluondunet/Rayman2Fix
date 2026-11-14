@@ -1397,7 +1397,10 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     if(g_proto_enabled.load(std::memory_order_acquire) &&
        g_proto_callsites_installed.load(std::memory_order_acquire)) {
         if(slot==3u)forwarded=proto_allow_resume(arg);
-        if(slot==11u)proto_record_stop(arg);
+        // A live SXD part may be stopped via either the generic or
+        // transition-specific native entry. Stop always takes precedence
+        // over experimental menu compensation.
+        if(slot==10u || slot==11u)proto_record_stop(arg);
     }
     if(original && forwarded)original(arg);
     if(g_proto_enabled.load(std::memory_order_acquire) &&
