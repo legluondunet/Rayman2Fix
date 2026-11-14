@@ -15,6 +15,41 @@ Coordinator pending() {
     CHECK(x.phase()==Phase::pending_menu && x.native_pause_count()==2);
     return x;
 }
+void intro_theme_reference_watch_is_bounded_and_read_only() {
+    // The first ESC can see controller Theme bank 9:12 while the active
+    // outer Theme is 9:5 and the SXD still uses 9:6. Watch raw controller
+    // references *without* inventing an audio resume from these samples.
+    ThemeRefWatchPolicy watch;
+    ThemeRefWatchInput before{1,0x004a1000,0x004b1000,0};
+    CHECK(watch.observe(before,0));
+    CHECK(!watch.observe(before,40)); // no change, no diagnostic I/O
+    ThemeRefWatchInput first_menu=before;
+    first_menu.menu_flag=1;
+    CHECK(watch.observe(first_menu,50)); // first ESC menu opened
+    CHECK(!watch.observe(first_menu,90));
+    ThemeRefWatchInput closed=first_menu;
+    closed.menu_flag=0;
+    CHECK(watch.observe(closed,100));
+    ThemeRefWatchInput settled=closed;
+    settled.player_ref=0x004a2000; // native Theme ref handoff
+    settled.nested_record_ref=0x004b2000; // inner SXD transition
+    CHECK(watch.observe(settled,120));
+    CHECK(watch.events()==4);
+    CHECK(!watch.observe(settled,121));
+    ThemeRefWatchInput late=settled;
+    late.menu_flag=1;
+    CHECK(!watch.observe(late,ThemeRefWatchPolicy::kWindowMs+1));
+
+    ThemeRefWatchPolicy bounded;
+    ThemeRefWatchInput changing{};
+    for(unsigned i=0;i<ThemeRefWatchPolicy::kMaxEvents;++i) {
+        changing.player_ref=i+1;
+        CHECK(bounded.observe(changing,i*40));
+    }
+    CHECK(bounded.events()==ThemeRefWatchPolicy::kMaxEvents);
+    changing.player_ref=999;
+    CHECK(!bounded.observe(changing,ThemeRefWatchPolicy::kMaxEvents*40));
+}
 void strict_gates() {
     Coordinator x;
     CHECK(!x.begin_script_pause(false,true,true));
@@ -142,6 +177,7 @@ void distinct_sfx() {
     CHECK(x.phase()==Phase::quarantined);
 }
 int main() {
+    intro_theme_reference_watch_is_bounded_and_read_only();
     strict_gates();menu_open_close();focus_during_esc();
     stop_and_unknown();uncertainty_restores_silence();
     quarantine_never_permanently_mutes_gameplay();distinct_sfx();
