@@ -63,6 +63,7 @@ public:
         esc_open_=false;
         quarantined_=false;
         logical_paused_=false;
+        deferred_pause_=false;
         other_depth_=0;
         callback_counts_={};
         return true;
@@ -102,7 +103,10 @@ public:
     Action unknown() noexcept {
         if(!active_) return Action::forward_native;
         quarantined_=true;
-        (void)reconcile(); // Never produce an artificial resume afterwards.
+        // Unknown origins can be detected INSIDE an APM callback. Do not
+        // recursively call the driver from that same callback. Expose
+        // the necessary safety pause as a deferred logical request.
+        if(reconcile()==Action::pause)deferred_pause_=true;
         return Action::hold_unknown;
     }
     Action callback(const Generation& g, Kind kind, Route route,
@@ -138,10 +142,18 @@ public:
         focus_known_=false;
         quarantined_=false;
         logical_paused_=false;
+        deferred_pause_=false;
         other_depth_=0;
         callback_counts_={};
         return Action::forward_stop;
     }
+
+    Action take_deferred_pause() noexcept {
+        if(!active_ || !deferred_pause_)return Action::none;
+        deferred_pause_=false;
+        return Action::pause;
+    }
+    bool has_deferred_pause() const noexcept { return deferred_pause_; }
 
     bool active() const noexcept { return active_; }
     bool logical_paused() const noexcept { return logical_paused_; }
@@ -169,6 +181,7 @@ private:
     bool esc_open_=false;
     bool quarantined_=false;
     bool logical_paused_=false;
+    bool deferred_pause_=false;
     std::uint32_t other_depth_=0;
     std::array<std::array<std::uint32_t,2>,2> callback_counts_{};
 };
