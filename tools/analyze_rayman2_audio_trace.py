@@ -50,8 +50,8 @@ def bracket_observed_menu_flag_changes(
     """Consecutive 0/1 snapshots bound *observations*, not true UI events.
 
     A VM script may set this flag before/after a sound driver call. Polling
-    and sample caps mean intermediate flips can be missed. F1 versus ESC is
-    never inferred. A timestamp reset within one session invalidates an
+    and sample caps mean intermediate flips can be missed. Actual ESC menu
+    visibility is not inferred from keyboard state alone. A timestamp reset within one session invalidates an
     interval; header-defined sessions never bridge.
     """
     prior_by_session: dict[int, dict] = {}
@@ -135,14 +135,13 @@ def summarize(text: str) -> dict:
             data = fields(line.split(MENU_ACTOR, 1)[1])
             menu = number(data, "in_game_menu")
             engine = number(data, "engine_paused")
-            f1 = number(data, "f1_down")
             esc = number(data, "esc_down")
             candidate = number(data, "personal_type_found")
             active = number(data, "dynamic_actor")
             inactive = number(data, "inactive_actor")
             ms = number(data, "t_ms")
             if (ms >= 0 and menu in (0, 1) and engine in (0, 1)
-                    and f1 in (0, 1) and esc in (0, 1)
+                    and esc in (0, 1)
                     and candidate in (-1, 0, 1)
                     and active in (-1, 0, 1)
                     and inactive in (-1, 0, 1)):
@@ -151,7 +150,6 @@ def summarize(text: str) -> dict:
                     "time_ms": ms,
                     "native_menu_flag": menu,
                     "native_engine_pause_flag": engine,
-                    "f1_key_down_at_sample": f1,
                     "esc_key_down_at_sample": esc,
                     "candidate_personal_type_registered": candidate,
                     "candidate_actor_in_active_world": active,
@@ -160,7 +158,6 @@ def summarize(text: str) -> dict:
                     "active_world_nodes_checked": number(data, "dynamic_nodes"),
                     "inactive_world_nodes_checked": number(data, "inactive_nodes"),
                     "name_only_candidate_not_ESC_UI_proof": True,
-                    "f1_key_sample_not_F1_menu_proof": True,
                     "unknown_or_missing_actor_not_proof_of_absence": True,
                 })
         elif UI_STATE in line:
@@ -313,7 +310,7 @@ def summarize(text: str) -> dict:
         "unmarked_prefix_events": unmarked_prefix_events,
         "native_ui_state_samples": ui_states,
         "menu_actor_readonly_snapshots": menu_actor_snapshots,
-        "menu_actor_candidate_cannot_distinguish_ESC_from_F1": True,
+        "menu_actor_candidate_not_sufficient_to_prove_ESC_visibility": True,
         "older_logs_lacking_actor_snapshots_are_not_negative_evidence": True,
         "observed_native_menu_flag_change_windows": menu_windows,
         "unusable_nonmonotonic_menu_timestamp_pairs": menu_nonmonotonic,
