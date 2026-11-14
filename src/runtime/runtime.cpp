@@ -674,10 +674,17 @@ struct AudioThemeOwnerContext {
     // POINTER, not to the origin-bank/index of the serialized resource.
     // -1=unknown, 0=other descriptor, 1=matching current Theme pointer.
     int native_theme_player_ref_matches_outer=-1;
+    // Optional diagnostic classification for the first ESC: -1 not sampled,
+    // 0 native controller ref null, 1 equals current Theme descriptor,
+    // 2 another active Theme record, 3 other readable Theme descriptor,
+    // 4 readable non-Theme data, 5 unreadable/unmapped reference.
+    // These values never authorize audio and contain no raw pointers.
+    int native_theme_player_ref_class=-1;
     AudioNativeBankOrigin outer_bank_provenance{};
     AudioNativeBankOrigin inner_bank_provenance{};
 };
-AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
+AudioThemeOwnerContext inspect_audio_theme_owner(
+    DWORD argument,bool classify_native_ref=false) {
     AudioThemeOwnerContext out{};
     auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
     if(!module)return out;
@@ -746,6 +753,43 @@ AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
             out.native_theme_player_ref_matches_outer=
                 int(current_theme_key==
                     static_cast<DWORD>(outer_descriptor_address));
+            if(classify_native_ref) {
+                if(current_theme_key==0u)
+                    out.native_theme_player_ref_class=0;
+                else if(current_theme_key==outer_descriptor_address)
+                    out.native_theme_player_ref_class=1;
+                else {
+                    // Check if the native current player refers to a
+                    // *different active* Theme descriptor in this snapshot.
+                    // No call to the native player, no pointer written.
+                    int other_active_theme=0;
+                    for(const auto& entry:table) {
+                        if(entry.words[1]!=current_theme_key ||
+                           entry.words[5]==0u)continue;
+                        DWORD header[2]{};
+                        if(safe_read(reinterpret_cast<const void*>(
+                                         std::uintptr_t(current_theme_key)),
+                                     header,sizeof(header)) &&
+                           header[1]==11u) {
+                            other_active_theme=1;
+                            break;
+                        }
+                    }
+                    if(other_active_theme)
+                        out.native_theme_player_ref_class=2;
+                    else {
+                        DWORD header[2]{};
+                        if(!safe_read(reinterpret_cast<const void*>(
+                                          std::uintptr_t(current_theme_key)),
+                                      header,sizeof(header)))
+                            out.native_theme_player_ref_class=5;
+                        else if(header[1]==11u)
+                            out.native_theme_player_ref_class=3;
+                        else
+                            out.native_theme_player_ref_class=4;
+                    }
+                }
+            }
         }
     }
     if(active==0u)return out;
@@ -1395,24 +1439,27 @@ void proto_install_callsites() {
 bool proto_esc_menu_actor_open();
 // One-time, bounded diagnostic for a rejected first music-owner verdict.
 // No raw driver pointers are emitted; this never changes authorization.
-void proto_log_owner_rejection(DWORD handle,DWORD elapsed_ms) {
+void proto_log_owner_rejection(DWORD handle,DWORD elapsed_ms,
+                               const char* event="rejected") {
     if(!g_log)return;
     const DWORD before=GetTickCount();
-    const auto owner=inspect_audio_theme_owner(handle);
-    char line[440]{};
+    const auto owner=inspect_audio_theme_owner(handle,true);
+    char line[480]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-ESC-OWNER-DIAG: pending_ms=%lu owner_scan_ms=%lu "
+        "RUNTIME-ESC-OWNER-DIAG: event=%s pending_ms=%lu owner_scan_ms=%lu "
         "outer_candidates=%u inner_active=%u inner_transition=%u "
         "inner_driver_matches=%u theme_owned_driver=%u "
-        "native_player_ref_match=%d outer_bank_complete=%u "
+        "native_player_ref_match=%d native_player_ref_class=%d "
+        "outer_bank_complete=%u "
         "outer_bank_candidates=%u outer_bank=%d outer_index=%d "
         "inner_bank_complete=%u inner_bank_candidates=%u "
         "inner_bank=%d inner_index=%d (bounded read-only; no raw pointers)",
-        static_cast<unsigned long>(elapsed_ms),
+        event,static_cast<unsigned long>(elapsed_ms),
         static_cast<unsigned long>(GetTickCount()-before),
         owner.outer_candidates,owner.inner_active,owner.inner_transition,
         owner.inner_driver_matches,owner.theme_owned_driver,
         owner.native_theme_player_ref_matches_outer,
+        owner.native_theme_player_ref_class,
         owner.outer_bank_provenance.list_complete,
         owner.outer_bank_provenance.candidates,
         owner.outer_bank_provenance.bank_id,
@@ -1509,10 +1556,15 @@ void proto_menu_tick() {
         // ownership gates. Inspect ONE rejected owner after all audio
         // dispatch decisions, to establish the first-ESC root cause.
         static bool first_owner_rejection_logged=false;
+        static bool first_owner_accepted_logged=false;
         if(g_log && actor_ok && !current &&
            !first_owner_rejection_logged) {
             first_owner_rejection_logged=true;
             proto_log_owner_rejection(handle,DWORD(now-started));
+        } else if(g_log && actor_ok && current &&
+                  !first_owner_accepted_logged) {
+            first_owner_accepted_logged=true;
+            proto_log_owner_rejection(handle,DWORD(now-started),"accepted");
         }
     }
 }
