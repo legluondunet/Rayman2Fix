@@ -144,6 +144,48 @@ void uncertainty_restores_silence() {
     x.native_stop(123);
     CHECK(x.phase()==Phase::idle);
 }
+void synthetic_commands_are_bound_to_exact_original_theme_and_sxd() {
+    // Owner's 14:43 Wine log: after ESC compensation, the live inner
+    // track advanced 9:7 -> 9:8 in the *same* Theme and driver handle.
+    // A safety Pause from the previous generation must NOT reach it.
+    auto x=pending();
+    const auto resume=x.menu_tick(true,true,true,true);
+    CHECK(resume.command==Command::resume);
+    CHECK(kMusic.same_dispatch(resume));
+    const Identity inner_advanced{123,0x00090005,0x00090008,77};
+    const Identity other_theme{123,0x0009000c,0x00090007,77};
+    CHECK(!inner_advanced.same_dispatch(resume));
+    CHECK(!other_theme.same_dispatch(resume));
+    CHECK(!x.owner_same(inner_advanced));
+    CHECK(!x.owner_same(other_theme));
+    CHECK(x.owner_same(kMusic));
+
+    // The first moment the original Theme/SXD provenance changes, the
+    // coordinator must stop suppressing or dispatching sound commands.
+    CHECK(!x.menu_tick(true,true,true,x.owner_same(inner_advanced)));
+    CHECK(x.phase()==Phase::quarantined);
+    const auto safety=x.take_safety_pause();
+    CHECK(safety.command==Command::pause);
+    CHECK(kMusic.same_dispatch(safety));
+    CHECK(!inner_advanced.same_dispatch(safety));
+    CHECK(!other_theme.same_dispatch(safety));
+    CHECK(x.native_resume(123,Origin::script_resume));
+    CHECK(!x.focus_resume());
+    CHECK(!x.current(77));
+    x.end_script_resume();
+    CHECK(!x.menu_tick(true,false,true,true));
+    CHECK(x.phase()==Phase::idle);
+
+    // A newly started independent ESC never inherits the stale stream.
+    CHECK(x.begin_script_pause(true,true,true));
+    x.observe_native_pause(inner_advanced,true);
+    x.observe_native_pause(inner_advanced,true);
+    x.end_script_pause();
+    CHECK(x.owner_same(inner_advanced));
+    const auto next=x.menu_tick(true,true,true,true);
+    CHECK(inner_advanced.same_dispatch(next));
+    CHECK(!kMusic.same_dispatch(next));
+}
 void quarantine_never_permanently_mutes_gameplay() {
     // The owner observed eight consecutive ResumeTransitionSxd calls
     // swallowed in phase=quarantined, after which level music never
@@ -193,5 +235,6 @@ int main() {
     strict_gates();menu_open_close();focus_during_esc();
     stop_and_unknown();uncertainty_restores_silence();
     quarantine_never_permanently_mutes_gameplay();distinct_sfx();
+    synthetic_commands_are_bound_to_exact_original_theme_and_sxd();
     std::cout<<"experimental ESC music FSM: strict gates, paired calls, focus, Stop OK\n";
 }
