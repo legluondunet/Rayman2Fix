@@ -13,14 +13,15 @@ using namespace r2fix::esc_music;
 namespace {
 constexpr Generation kStream{9,5,9,7,41};
 constexpr Generation kStale{9,5,9,7,40};
-constexpr MixerProof kGood{true,true,true,true,2,2};
+constexpr MixerProof kGood{true,true,true,true,true,2,2};
 void proof_gates() {
-    for(unsigned n=0;n<4;++n) {
+    for(unsigned n=0;n<5;++n) {
         MixerProof p=kGood;
         if(n==0)p.original_cd_verified=false;
         if(n==1)p.current_music_verified=false;
-        if(n==2)p.mixer_pause_resume_contract_verified=false;
-        if(n==3)p.exact_handle_verified=false;
+        if(n==2)p.initially_playing_verified=false;
+        if(n==3)p.mixer_pause_resume_contract_verified=false;
+        if(n==4)p.exact_handle_verified=false;
         MixerBridge m;
         CHECK(!m.bind(kStream,17,p));
         CHECK(!m.bound());
