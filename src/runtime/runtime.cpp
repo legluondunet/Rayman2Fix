@@ -1051,8 +1051,8 @@ DWORD __stdcall audio_play_transition_ex(DWORD a,DWORD b,DWORD c,DWORD d,DWORD e
     return result;
 }
 
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
-// An explicitly opted-in research build ONLY. The game keeps ownership of
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+// Verified, opt-in original Theme/SXD music continuation policy. The game keeps ownership of
 // the pause depth and both sound-record marks. Rebalancing the observed
 // paired Theme/SXD driver callbacks is deliberately experimental, not a
 // confirmed contract for every APM backend.
@@ -1753,10 +1753,14 @@ bool proto_esc_menu_actor_open() {
 #endif
 
 void poll_audio_pause_trace() {
-    // Feature activation is independent of [Debug] Log and is never
-    // conditional on writing a trace file.
-    if((!g_log && !g_proto_enabled.load(std::memory_order_acquire)) ||
-       InterlockedCompareExchange(&g_audio_poll_guard,1,0)!=0)
+    // Normal runtime installs no audio hooks at all when the feature
+    // is disabled. Research tracing remains an explicit build-only mode.
+#if RAYMAN2FIX_AUDIO_TRACE
+    if(!g_log)return;
+#else
+    if(!g_proto_enabled.load(std::memory_order_acquire))return;
+#endif
+    if(InterlockedCompareExchange(&g_audio_poll_guard,1,0)!=0)
         return;
     const DWORD now=GetTickCount();
     const DWORD last=g_audio_last_poll.load(std::memory_order_relaxed);
