@@ -97,9 +97,56 @@ void partial_failure_requires_stop_and_fresh_generation() {
     CHECK(m.deliver(Generation{9,5,9,7,42},Action::pause,fake)==Delivery::delivered);
     CHECK(hits==4);
 }
+void integration_with_shadow_and_fake_native_driver() {
+    Shadow policy;
+    constexpr Proof state_proof{true,true,true,true,true,true};
+    CHECK(policy.attach(kStream,state_proof));
+    MixerBridge mixer;
+    CHECK(mixer.bind(kStream,17,kGood));
+    unsigned physical_pauses=0,physical_resumes=0;
+    const auto fake=[&](Action action,std::uint32_t handle)->bool {
+        CHECK(handle==17);
+        if(action==Action::pause)++physical_pauses;
+        if(action==Action::resume)++physical_resumes;
+        return true;
+    };
+    CHECK(policy.menu_open(true)==Action::none);
+    CHECK(policy.callback(kStream,Kind::pause,Route::theme,Cause::esc)
+          ==Action::suppress_paired_native);
+    CHECK(policy.callback(kStream,Kind::pause,Route::sxd,Cause::esc)
+          ==Action::suppress_paired_native);
+    CHECK(physical_pauses==0); // ESC keeps the same music playing
+    const Action focus_pause=policy.focus(true,false);
+    CHECK(focus_pause==Action::pause);
+    CHECK(mixer.deliver(kStream,focus_pause,fake)==Delivery::delivered);
+    CHECK(physical_pauses==2 && physical_resumes==0);
+    CHECK(policy.other_pause()==Action::none);
+    CHECK(policy.menu_close(true)==Action::none);
+    CHECK(policy.focus(true,true)==Action::none);
+    CHECK(mixer.physical_paused()); // another native pause still owns silence
+    const Action other_resume=policy.other_resume();
+    CHECK(other_resume==Action::resume);
+    CHECK(mixer.deliver(kStream,other_resume,fake)==Delivery::delivered);
+    CHECK(physical_pauses==2 && physical_resumes==2);
+    // An unknown cause from *inside* a native audio callback must not
+    // recursively invoke a second driver callback: defer physical pause.
+    CHECK(policy.unknown()==Action::hold_unknown);
+    CHECK(policy.has_deferred_pause());
+    const Action deferred=policy.take_deferred_pause();
+    CHECK(deferred==Action::pause);
+    CHECK(mixer.deliver(kStream,deferred,fake)==Delivery::delivered);
+    CHECK(physical_pauses==4 && physical_resumes==2);
+    CHECK(policy.take_deferred_pause()==Action::none);
+    CHECK(policy.stop(kStream)==Action::forward_stop);
+    CHECK(mixer.retire(kStream));
+    CHECK(mixer.deliver(kStream,Action::resume,fake)==Delivery::rejected);
+    CHECK(physical_resumes==2); // Stop never resurrects a dead stream
 }
+}
+
 int main() {
     proof_gates();exact_cardinality();one_call_contract();
     partial_failure_requires_stop_and_fresh_generation();
+    integration_with_shadow_and_fake_native_driver();
     std::cout<<"ESC mixer bridge fake calls: proof gates, duplication, stop, failure OK\n";
 }
