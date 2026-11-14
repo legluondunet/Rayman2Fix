@@ -1183,6 +1183,17 @@ struct ProtoEscLifetimeStart {
     unsigned generation=0;
     unsigned play_before=0;
     unsigned stop_before=0;
+    // Source-paired, sampled *resource provenance*, NOT a driver epoch or
+    // music identity. Filled using snapshots the menu tick and existing
+    // Theme watcher already gathered; never queried in an audio callback.
+    bool sxd_baseline_valid=false;
+    int sxd_first_bank=-1;
+    int sxd_first_index=-1;
+    int sxd_last_bank=-1;
+    int sxd_last_index=-1;
+    unsigned sxd_samples=0;
+    unsigned sxd_changes=0;
+    unsigned sxd_unknown=0;
 };
 ProtoEscLifetimeStart g_proto_esc_lifetime_start{}; // g_proto_mutex
 
@@ -1217,6 +1228,14 @@ struct ProtoPreDriverResumeReport {
     unsigned stop_between=0;
     unsigned play_during_resume=0;
     unsigned stop_during_resume=0;
+    bool sxd_baseline_valid=false;
+    int sxd_first_bank=-1;
+    int sxd_first_index=-1;
+    int sxd_last_bank=-1;
+    int sxd_last_index=-1;
+    unsigned sxd_samples=0;
+    unsigned sxd_changes=0;
+    unsigned sxd_unknown=0;
 };
 ProtoPreDriverResumeReport g_proto_predriver_resume_report{};
 
@@ -1518,6 +1537,22 @@ void __cdecl proto_script_resume() {
                     play_post-play_pre;
                 g_proto_predriver_resume_report.stop_during_resume=
                     stop_post-stop_pre;
+                g_proto_predriver_resume_report.sxd_baseline_valid=
+                    lifetime.sxd_baseline_valid;
+                g_proto_predriver_resume_report.sxd_first_bank=
+                    lifetime.sxd_first_bank;
+                g_proto_predriver_resume_report.sxd_first_index=
+                    lifetime.sxd_first_index;
+                g_proto_predriver_resume_report.sxd_last_bank=
+                    lifetime.sxd_last_bank;
+                g_proto_predriver_resume_report.sxd_last_index=
+                    lifetime.sxd_last_index;
+                g_proto_predriver_resume_report.sxd_samples=
+                    lifetime.sxd_samples;
+                g_proto_predriver_resume_report.sxd_changes=
+                    lifetime.sxd_changes;
+                g_proto_predriver_resume_report.sxd_unknown=
+                    lifetime.sxd_unknown;
             }
         }
     }
@@ -1566,6 +1601,20 @@ void proto_flush_predriver_resume_report() {
         report.play_between,report.stop_between,
         report.play_during_resume,report.stop_during_resume);
     log_line(lifetime_line);
+    char resource_line[430]{};
+    std::snprintf(resource_line,sizeof(resource_line),
+        "RUNTIME-ESC-SXD-LIFETIME: t_ms=%lu paired=%u sampled=%u "
+        "first=%d:%d last=%d:%d samples=%u changes=%u unknown=%u "
+        "play_between=%u stop_between=%u "
+        "(sampled inner-resource provenance, NOT driver lifetime; no audio changes)",
+        static_cast<unsigned long>(report.t_ms),
+        unsigned(report.lifetime_paired),
+        unsigned(report.lifetime_paired && report.sxd_baseline_valid),
+        report.sxd_first_bank,report.sxd_first_index,
+        report.sxd_last_bank,report.sxd_last_index,
+        report.sxd_samples,report.sxd_changes,report.sxd_unknown,
+        report.play_between,report.stop_between);
+    log_line(resource_line);
 }
 // Focus is a Win32/Wine activation event, not necessarily visible to
 // GetForegroundWindow() on the game's render thread. The renderer can be
@@ -1768,6 +1817,39 @@ void proto_log_owner_rejection(DWORD handle,DWORD elapsed_ms,
 // 24-event budget for actual music transitions in the first 120 seconds.
 // Full bank provenance runs *only* on a music-state change.
 // No audio driver call, patch or mutable game state.
+// Only annotate an already sampled source-specific ESC lifetime. The
+// owner provenance was read by other existing diagnostics, outside driver
+// callbacks and after the current compensation decisions. No call here
+// may authorize or veto a Pause, Resume, or Stop.
+void proto_note_sampled_sxd(const AudioThemeOwnerContext& owner,
+                           bool menu_visible) {
+    if(!menu_visible || !g_log)return;
+    const bool known=owner.inner_active==1u &&
+        owner.inner_transition==1u &&
+        owner.inner_bank_provenance.list_complete==1u &&
+        owner.inner_bank_provenance.candidates==1u &&
+        owner.inner_bank_provenance.bank_id>=0 &&
+        owner.inner_bank_provenance.resource_index>=0;
+    const std::lock_guard<std::mutex> lock(g_proto_mutex);
+    auto& sample=g_proto_esc_lifetime_start;
+    if(!sample.valid || sample.overlap)return;
+    if(!known) {
+        ++sample.sxd_unknown;
+        return;
+    }
+    const int bank=owner.inner_bank_provenance.bank_id;
+    const int index=owner.inner_bank_provenance.resource_index;
+    if(!sample.sxd_baseline_valid) {
+        sample.sxd_baseline_valid=true;
+        sample.sxd_first_bank=bank;
+        sample.sxd_first_index=index;
+    } else if(sample.sxd_last_bank!=bank || sample.sxd_last_index!=index) {
+        ++sample.sxd_changes;
+    }
+    sample.sxd_last_bank=bank;
+    sample.sxd_last_index=index;
+    ++sample.sxd_samples;
+}
 void proto_theme_transition_watch_tick() {
     if(!g_proto_callsites_installed.load(std::memory_order_acquire) ||
        !g_proto_enabled.load(std::memory_order_acquire) || !g_log)return;
@@ -1824,6 +1906,9 @@ void proto_theme_transition_watch_tick() {
     // The native descriptor is only classified in this diagnostic branch.
     // Passing 0 deliberately prevents an unproven driver-owner assertion.
     const auto owner=inspect_audio_theme_owner(0,true);
+    // This is a change-triggered sample, not continuous surveillance.
+    // A missing transition cannot be taken as proof that the stream stood still.
+    proto_note_sampled_sxd(owner,menu!=0u);
     char line[600]{};
     std::snprintf(line,sizeof(line),
         "RUNTIME-ESC-THEME-WATCH: seq=%u t_ms=%lu menu=%u active=%lu "
@@ -1933,6 +2018,9 @@ void proto_menu_tick() {
     if(report.ready && g_log) {
         const auto& probe=report.probe;
         const auto owner=inspect_audio_theme_owner(probe.first_handle,true);
+        // Use the source-verified opening snapshot as the baseline;
+        // watch-only sampling could otherwise miss the first menu interval.
+        proto_note_sampled_sxd(owner,known && menu!=0 && actor_ok);
         char line[540]{};
         std::snprintf(line,sizeof(line),
             "RUNTIME-ESC-PREDRIVER-GATE: t_ms=%lu callbacks=%u "
