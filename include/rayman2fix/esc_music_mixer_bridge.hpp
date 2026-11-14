@@ -14,6 +14,7 @@ namespace r2fix::esc_music {
 struct MixerProof {
     bool original_cd_verified=false;
     bool current_music_verified=false;
+    bool initially_playing_verified=false;
     bool mixer_pause_resume_contract_verified=false;
     bool exact_handle_verified=false;
     // Native logs show two Theme/SXD routes. This does not independently
@@ -34,6 +35,7 @@ public:
               const MixerProof& proof) noexcept {
         if(bound_ || !g.valid() || handle==0 || handle==0xffffffffu ||
            !proof.original_cd_verified || !proof.current_music_verified ||
+           !proof.initially_playing_verified ||
            !proof.mixer_pause_resume_contract_verified ||
            !proof.exact_handle_verified ||
            proof.pause_calls==0 || proof.resume_calls==0 ||
