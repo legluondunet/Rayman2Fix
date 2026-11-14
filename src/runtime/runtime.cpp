@@ -1209,7 +1209,8 @@ proto::Identity proto_identity(DWORD handle,std::uint64_t generation,
 // a reused handle. These stdcall functions return void: no success proof.
 void proto_dispatch(proto::Dispatch action) {
     if(!action || !g_proto_enabled.load(std::memory_order_acquire))return;
-    if(action.count!=2 || !action.handle || !action.generation) {
+    if(action.count!=2 || !action.handle || !action.generation ||
+       !action.native_theme_key || !action.native_inner_key) {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
         g_proto.quarantine();
         return;
@@ -1230,9 +1231,18 @@ void proto_dispatch(proto::Dispatch action) {
                  g_proto.safety_current(action.generation));
             if(!authorized || g_proto.current_handle()!=action.handle)return;
         }
-        if(!proto_identity(action.handle,action.generation).valid()) {
-            const std::lock_guard<std::mutex> lock(g_proto_mutex);
-            g_proto.quarantine();
+        const auto live=proto_identity(action.handle,action.generation);
+        // The native player can advance from SXD 9:7 to 9:8 while ESC
+        // remains open, even when the driver handle is unchanged. The
+        // original implementation only tested live.valid(), which could
+        // issue a *synthetic safety Pause* to the new music generation.
+        if(!live.same_dispatch(action)) {
+            {
+                const std::lock_guard<std::mutex> lock(g_proto_mutex);
+                g_proto.quarantine();
+            }
+            proto_log("driver-command-rejected",
+                "theme-or-sxd-stream-changed-native-passthrough");
             return;
         }
         fn(action.handle);
@@ -1642,12 +1652,16 @@ void proto_menu_tick() {
     const bool actor_ok=!(phase==proto::Phase::pending_menu &&
                           known && menu!=0) ||
                          proto_esc_menu_actor_open();
-    const bool current=actor_ok &&
-        proto_identity(handle,generation).valid();
+    const proto::Identity live=actor_ok ?
+        proto_identity(handle,generation) : proto::Identity{};
     const DWORD verify_ms=DWORD(GetTickCount()-verify_start);
     proto::Dispatch action{};
+    bool current=false;
     {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        // Do not confuse "valid live music" with "the SAME music" that
+        // owns our two previously observed PauseTransitionSxd calls.
+        current=actor_ok && g_proto.owner_same(live);
         action=g_proto.menu_tick(known && actor_ok,menu!=0,
                                  game_window_is_foreground(),current);
     }
