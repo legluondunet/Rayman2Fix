@@ -107,12 +107,16 @@ void quarantine_never_permanently_mutes_gameplay() {
     x.end_script_resume(); // one of two expected resumes missing
     CHECK(x.phase()==Phase::quarantined);
     CHECK(!x.focus_resume()); // no synthetic resume on uncertainty
+    CHECK(!x.take_safety_pause()); // script exit must not introduce mute
     for(unsigned i=0;i<8;++i)
         CHECK(x.native_resume(123,Origin::script_resume));
     CHECK(x.native_resume(123,Origin::focus_resume));
     CHECK(!x.current(77)); // no resumed synthetic generation
-    x.native_stop(123);
-    CHECK(x.phase()==Phase::idle);
+    CHECK(!x.menu_tick(true,false,true,true));
+    CHECK(x.phase()==Phase::idle); // re-armed for next ESC in same level
+    CHECK(x.begin_script_pause(true,true,true));
+    CHECK(x.phase()==Phase::pending_menu);
+    x.reset();
     CHECK(x.native_resume(123,Origin::script_resume));
 
     auto y=pending();
@@ -121,7 +125,11 @@ void quarantine_never_permanently_mutes_gameplay() {
     CHECK(y.phase()==Phase::quarantined);
     CHECK(y.native_resume(123,Origin::script_resume));
     CHECK(!y.focus_resume());
-    y.native_stop(123);
+    CHECK(!y.menu_tick(true,false,true,true));
+    CHECK(y.phase()==Phase::quarantined); // no confirmed script close
+    y.end_script_resume();
+    CHECK(!y.take_safety_pause());
+    CHECK(!y.menu_tick(true,false,true,true));
     CHECK(y.phase()==Phase::idle);
 }
 void distinct_sfx() {
