@@ -203,3 +203,35 @@ The test does **not** demonstrate Alt+Tab: every sampled foreground
 state was 1. Native Windows and alternate audio backends are untested.
 Keep opt-in build-only functionality gated, PR #9 in draft, and the
 normal release build unchanged until those compatibility checks pass.
+
+
+## Owner Wine trace — 14 November 2026, 10:56 (r3 repeat test)
+
+`Rayman2Fix(20261114-105615).log` records the same experimental
+build with `prototype=1` and verified source hooks. Across **five**
+script-driven ESC openings there are **five** `paired-theme-candidate-ready`
+events, **five** `paired-native-resume-requested` menu verdicts,
+and **five** `driver-resume-batch paired-calls=2` compensations.
+The four ordinary menu exits emitted **eight**
+`native-resume-suppressed` events, precisely two per completed exit.
+No fatal error appears in the trace.
+
+The final opened menu at about `t_ms=187.595s` has no ordinary native
+resume pair in this recording; instead, the original game forwards a
+legitimate `StopTransitionSxd` at `t_ms=190.365s` and the menu actor
+subsequently leaves the active world. A later native Stop at 193.917s
+belongs to the next loaded soundtrack. Neither native stop is suppressed.
+This is a useful scene-transition/stop result, not a proof that every
+level transition or focus reentry works.
+
+Separately, the engine pause byte temporarily rises to 1 between
+`t_ms=52.513s` and `65.079s` while `in_game_menu=1`, but all
+sampled foreground flags still equal 1. This **does not**
+establish a real Alt+Tab/focus-loss test, so do not mark that case
+as covered or infer its audible behavior.
+
+The expected r3 adapter path now repeats across two independent Wine
+logs, but this source observes callbacks rather than sound output.
+Music continuity is supported by the owner's qualitative feedback
+and still requires native Windows and true focus-loss checks before
+an enabled-by-default production release.
