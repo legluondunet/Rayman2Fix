@@ -92,6 +92,15 @@ ANCHOR_BYTES = (
      bytes.fromhex("A3 D0 0F 50 00")),
     ("menu_inactive_world_global", 0x403B7F,
      bytes.fromhex("A3 C4 0F 50 00")),
+    # Native theme player active flag + current Theme lookup key:
+    # 0x459760 reads active and 0x459770 returns lookup key to caller;
+    # 0x45997B compares current key to the incoming theme reference.
+    ("native_theme_player_active_global", 0x459760,
+     bytes.fromhex("A1 B8 95 4B 00 85 C0")),
+    ("native_theme_player_current_key", 0x459770,
+     bytes.fromhex("8B 0D CC 95 4B 00")),
+    ("native_theme_player_key_equality", 0x45997B,
+     bytes.fromhex("3B 1D CC 95 4B 00")),
     ("loaded_bank_list_head", 0x4538C0, bytes.fromhex("A1 50 4D 51 00")),
     ("loaded_bank_id_field", 0x4538CD, bytes.fromhex("39 48 04")),
     ("loaded_bank_next_field", 0x4538D2, bytes.fromhex("8B 40 3C")),
@@ -559,6 +568,18 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
                 "list_element_name_offset": 12,
                 "actor_live_instance_not_yet_observed": True,
                 "actor_presence_is_not_ESC_exclusivity_proof": True,
+            },
+            "native_theme_player_current_reference": {
+                "code_anchors_verified_both": bool(check_anchors and pinned
+                    and all(x["verified_both"] for x in byte_anchors
+                            if x["name"].startswith("native_theme_player_"))),
+                "active_flag_va": "0x004B95B8",
+                "current_theme_lookup_key_va": "0x004B95CC",
+                "lookup_key_upper16_is_native_bank": True,
+                "lookup_key_lower16_is_native_resource_index": True,
+                "key_equality_can_confirm_current_theme_owner": True,
+                "live_current_theme_equality_not_yet_observed": True,
+                "audible_music_output_not_proved_by_player_active": True,
             },
             "native_loaded_bank_inverse_mapping": {
                 "verified_pinned_cd_and_reference": pinned and
