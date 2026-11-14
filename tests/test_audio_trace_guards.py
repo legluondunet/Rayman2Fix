@@ -11,6 +11,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         cls.runtime=(ROOT/"src/runtime/runtime.cpp").read_text(encoding="utf-8")
         cls.cmake=(ROOT/"CMakeLists.txt").read_text(encoding="utf-8")
         cls.config=(ROOT/"src/launcher/game_config.cpp").read_text(encoding="utf-8")
+        cls.esc_music_header=(ROOT/"include/rayman2fix/esc_music_wine_prototype.hpp").read_text(encoding="utf-8")
 
     def test_compilation_requires_explicit_audio_trace_build(self):
         self.assertRegex(self.cmake,r'option\(RAYMAN2FIX_AUDIO_TRACE\s+[^\n]+\s+OFF\)')
