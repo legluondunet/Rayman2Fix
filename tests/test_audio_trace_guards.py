@@ -55,6 +55,16 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("RUNTIME-ESC-PERF:",tick)
         self.assertIn("RUNTIME-ESC-OWNER-DIAG:",self.runtime)
         self.assertIn("native_player_ref_match=%d",self.runtime)
+        self.assertIn("native_player_ref_class=%d",self.runtime)
+        self.assertIn("native_theme_player_ref_class=0",self.runtime)
+        self.assertIn("native_theme_player_ref_class=1",self.runtime)
+        self.assertIn("native_theme_player_ref_class=2",self.runtime)
+        self.assertIn("native_theme_player_ref_class=3",self.runtime)
+        self.assertIn("native_theme_player_ref_class=4",self.runtime)
+        self.assertIn("native_theme_player_ref_class=5",self.runtime)
+        self.assertIn("classify_native_ref=false",self.runtime)
+        self.assertIn('proto_log_owner_rejection(handle,DWORD(now-started),"accepted")',self.runtime)
+
         self.assertIn("outer_bank_complete=%u",self.runtime)
         self.assertIn("inner_bank_complete=%u",self.runtime)
         self.assertLess(tick.index("proto_dispatch(action);"),
