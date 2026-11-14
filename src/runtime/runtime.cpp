@@ -379,7 +379,6 @@ std::atomic<int> g_audio_last_depth{-1};
 // as ESC-only, and do NOT treat the engine clock pause as a menu flag.
 std::atomic<int> g_audio_last_ingame_menu{-1};
 std::atomic<int> g_audio_last_engine_pause{-1};
-std::atomic<int> g_audio_last_f1_down{-1};
 volatile LONG g_audio_poll_guard=0;
 bool executable_page(const void* addr) {
     MEMORY_BASIC_INFORMATION m{};
@@ -977,7 +976,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     char code_rva_preview[96]{};
     unsigned scanned_words=0,wrapper_returns=0,confirmed_pairs=0;
     // Supplement the coarse UI poll with a BEFORE-driver-call snapshot.
-    // Neither game flag proves an ESC menu, and neither is a F1 detector.
+    // Neither native flag by itself establishes a visible ESC menu.
     int in_game_menu_at_call=-1,engine_paused_at_call=-1;
     if(sampled) {
         auto* game_module=reinterpret_cast<const BYTE*>(
@@ -1011,7 +1010,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
     char line[1024]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_state_class=%u sequence_ref_class=%u sequence_same_handle=%u transition_last_play_match=%u transition_desc_match=%u desc_words_readable=%u desc_words_equal_mask=%u desc_volume=%u play_volume=%u desc_resource_group=%d desc_resource_index=%d play_resource_group=%d play_resource_index=%d desc_resource_id_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u ui_in_game_menu_at_call=%d ui_engine_paused_at_call=%d (read-only origin; forwarded unchanged; UI flags not ESC/F1 proof)",
+        "RUNTIME-AUDIO-TRACE: event=%s sample=%u t_ms=%lu arg_zero=%u sound_slot=%d sound_matches=%u sound_transport=%u sound_transition=%u sound_active=%u sequence_slot=%d sequence_active=%u sequence_state_class=%u sequence_ref_class=%u sequence_same_handle=%u transition_last_play_match=%u transition_desc_match=%u desc_words_readable=%u desc_words_equal_mask=%u desc_volume=%u play_volume=%u desc_resource_group=%d desc_resource_index=%d play_resource_group=%d play_resource_index=%d desc_resource_id_match=%u global_pause_depth=%d audio_origin=%s foreground=%u esc_down=%u ui_in_game_menu_at_call=%d ui_engine_paused_at_call=%d (read-only origin; forwarded unchanged; UI flag alone is not ESC proof)",
         kAudioSlots[slot].name,event+1u,
         static_cast<unsigned long>(GetTickCount()-origin),
         unsigned(arg==0),source.table_index,source.match_count,source.transport,
@@ -1232,8 +1231,8 @@ void poll_audio_pause_trace() {
     // flag. 0x4B9BC8 is ACP_Ray2 AI_g_bInGameMenu, set by VM opcode 0x1F8.
     // 0x500640 belongs to GAM engine timer pause/unpause, not the ESC menu.
     // These original-CD xrefs were verified offline and are not written here.
-    // Read-only, research-build-only, sample-capped; F1 and ESC are NOT
-    // classified by either flag alone.
+    // Read-only, research-build-only, sample-capped. Neither flag alone
+    // determines whether the ESC menu is currently visible.
     if(pe->OptionalHeader.SizeOfImage>0x100641u) {
         BYTE in_game_menu=0, engine_paused=0;
         SIZE_T menu_read=0, engine_read=0;
@@ -1248,15 +1247,11 @@ void poll_audio_pause_trace() {
                 static_cast<int>(in_game_menu),std::memory_order_relaxed);
             const int old_engine=g_audio_last_engine_pause.exchange(
                 static_cast<int>(engine_paused),std::memory_order_relaxed);
-            const int f1=int((GetAsyncKeyState(VK_F1)&0x8000)!=0);
-            const int old_f1=g_audio_last_f1_down.exchange(
-                f1,std::memory_order_relaxed);
             if(old_menu!=static_cast<int>(in_game_menu) ||
-               old_engine!=static_cast<int>(engine_paused) ||
-               old_f1!=f1) {
+               old_engine!=static_cast<int>(engine_paused)) {
                 char msg[236]{};
                 std::snprintf(msg,sizeof(msg),
-                    "RUNTIME-AUDIO-UI-STATE: t_ms=%lu in_game_menu=%u engine_paused=%u prior_menu=%d prior_engine_paused=%d foreground=%u (read-only; generic menu flag, not ESC/F1 proof)",
+                    "RUNTIME-AUDIO-UI-STATE: t_ms=%lu in_game_menu=%u engine_paused=%u prior_menu=%d prior_engine_paused=%d foreground=%u (read-only; generic menu flag, not ESC visibility proof)",
                     static_cast<unsigned long>(now-g_audio_origin.load(
                         std::memory_order_acquire)),
                     unsigned(in_game_menu),unsigned(engine_paused),
@@ -1264,16 +1259,15 @@ void poll_audio_pause_trace() {
                 log_line(msg);
                 // Companion actor probe: the 1999 CD registry/world
                 // structures are observed read-only, with strict bounds.
-                // F1 is an independent UI action; sampling its key edge
-                // does not assume it changes the in-game menu flag.
+                // Research the ESC menu actor on native UI state changes.
                 const auto actor=inspect_audio_menu_actor_readonly();
                 char actor_line[350]{};
                 std::snprintf(actor_line,sizeof(actor_line),
-                    "RUNTIME-AUDIO-MENU-ACTOR: t_ms=%lu in_game_menu=%u engine_paused=%u f1_down=%d esc_down=%u personal_type_found=%d dynamic_actor=%d inactive_actor=%d type_nodes=%u dynamic_nodes=%u inactive_nodes=%u (read-only; actor candidate not proof of ESC/F1)",
+                    "RUNTIME-AUDIO-MENU-ACTOR: t_ms=%lu in_game_menu=%u engine_paused=%u esc_down=%u personal_type_found=%d dynamic_actor=%d inactive_actor=%d type_nodes=%u dynamic_nodes=%u inactive_nodes=%u (read-only; actor candidate not proof of visible ESC menu)",
                     static_cast<unsigned long>(now-g_audio_origin.load(
                         std::memory_order_acquire)),
                     unsigned(in_game_menu),unsigned(engine_paused),
-                    f1,unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0),
+                    unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0),
                     actor.type_found,actor.dynamic_actor,
                     actor.inactive_actor,actor.type_nodes,
                     actor.dynamic_nodes,actor.inactive_nodes);
