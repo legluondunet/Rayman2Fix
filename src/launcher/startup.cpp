@@ -11,6 +11,7 @@
 #include <vector>
 #include <utility>
 #include <cstring>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -200,18 +201,20 @@ void ensure_embedded_runtime(const fs::path& directory) {
 } // namespace
 #endif
 
-void Startup::initialize() {
-    if (fs::exists(game_dir_) && !fs::is_directory(game_dir_))
-        throw std::runtime_error("Rayman2Fix installation path is not a directory");
-    fs::create_directories(game_dir_);
+void Startup::initialize(bool provision_files) {
+    if (provision_files) {
+        if (fs::exists(game_dir_) && !fs::is_directory(game_dir_))
+            throw std::runtime_error("Rayman2Fix installation path is not a directory");
+        fs::create_directories(game_dir_);
 #ifdef _WIN32
-    ensure_embedded_runtime(game_dir_);
-    ensure_gameframe_glide(game_dir_);
+        ensure_embedded_runtime(game_dir_);
+        ensure_gameframe_glide(game_dir_);
 #endif
+    }
 
     // Existing settings belong to the user. No silent regeneration, and no
     // claim that currently unimplemented options actually change the game.
-    if (!fs::exists(ini_path_)) {
+    if (provision_files && !fs::exists(ini_path_)) {
         std::ofstream ini(ini_path_, std::ios::binary | std::ios::out);
         if (!ini) throw std::runtime_error("cannot create Rayman2Fix.ini");
         ini << "[Debug]\n"
@@ -312,16 +315,21 @@ void Startup::initialize() {
     log(std::string("CONFIG: Features.SkipCinematics=") +
         (configured_skip_cinematics(ini_path_) ? "1" : "0"));
 
-    log("RUNTIME: Rayman2Fix.dll=" +
-        std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));
-    if (gameframe_glide_ready(game_dir_))
-        log("RENDERER: GameFrame glide2x.dll=verified sha256=" +
-            gameframe_glide_expected_sha256() +
-            " upstream=f195a074a63cc150673c38becdec696163b0b3d1");
-    else
-        log("RENDERER: GameFrame glide2x.dll=not bundled in this developer build");
-    log("INPUT: SDL3 deferred to second phase; controller support not yet active");
-    log("INSTALL: no verified CD edition profile, no playable installation");
+    if (provision_files) {
+        log("RUNTIME: Rayman2Fix.dll=" +
+            std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));
+        if (gameframe_glide_ready(game_dir_))
+            log("RENDERER: GameFrame glide2x.dll=verified sha256=" +
+                gameframe_glide_expected_sha256() +
+                " upstream=f195a074a63cc150673c38becdec696163b0b3d1");
+        else
+            log("RENDERER: GameFrame glide2x.dll=not bundled in this developer build");
+        log("INPUT: SDL3 deferred to second phase; controller support not yet active");
+        log("INSTALL: no verified CD edition profile, no playable installation");
+    } else {
+        log("STARTUP: --launch-no-verify skips DLL deployment, runtime "
+            "hash checks, installation repair and INI creation");
+    }
 }
 
 void Startup::prepare_runtime_log() {
@@ -335,6 +343,7 @@ void Startup::prepare_runtime_log() {
 }
 
 void Startup::log(const std::string& line) {
+    if (verbose_) std::cout << "[Rayman2Fix] " << line << '\n';
     if (log_stream_) {
         log_stream_ << line << '\n';
         log_stream_.flush();

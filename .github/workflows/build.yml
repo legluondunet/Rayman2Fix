@@ -124,6 +124,46 @@ jobs:
           # PowerShell propagates the last nonzero native exit code even
           # after all expected-error assertions have passed.
           $global:LASTEXITCODE = 0
+      - name: Verify streamlined installer CLI and direct unchecked mode
+        shell: pwsh
+        run: |
+          $exe = './build/Release/Rayman2Fix.exe'
+          $help = (& $exe --help | Out-String)
+          if ($LASTEXITCODE -ne 0 -or !$help.Contains('--install-only') -or
+              !$help.Contains('--launch-no-verify') -or
+              !$help.Contains('--verbose') -or !$help.Contains('--inspect') -or
+              !$help.Contains('-h') -or $help.Contains('--extract')) {
+            throw 'Help must show only supported installer commands'
+          }
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw '--version failed' }
+          & $exe --inspect test.iso
+          if ($LASTEXITCODE -ne 2) { throw 'Missing/unsupported ISO must fail with a log' }
+          if (!(Test-Path build/Release/Rayman2Fix_inspect.log) -or
+              !(Select-String -Path build/Release/Rayman2Fix_inspect.log -Pattern 'INSPECT_RESULT=FAILED')) {
+            throw 'Inspect must create a separate failure report'
+          }
+          & $exe -h
+          if ($LASTEXITCODE -ne 0) { throw '-h must show help' }
+          & $exe --extract test.iso
+          if ($LASTEXITCODE -ne 2) { throw 'Legacy --extract must be refused' }
+          & $exe --install-only --verbose
+          if ($LASTEXITCODE -ne 2) { throw 'No-disc --install-only must refuse safely' }
+          if (!(Select-String -Path build/Release/Rayman2Fix.log -Pattern 'INSTALL-ONLY|COMMAND: name=--install-only')) {
+            throw '--install-only --verbose was not parsed'
+          }
+          # The unchecked command must never create a game directory, INI or
+          # embedded DLL merely to attempt CreateProcessW.
+          New-Item -Path direct-cli-smoke -ItemType Directory -Force | Out-Null
+          Copy-Item $exe direct-cli-smoke/Rayman2Fix.exe
+          & ./direct-cli-smoke/Rayman2Fix.exe --launch-no-verify
+          if ($LASTEXITCODE -ne 1 -or (Test-Path direct-cli-smoke/Rayman2Fix)) {
+            throw '--launch-no-verify must return the OS error without provisioning'
+          }
+          if (!(Select-String -Path direct-cli-smoke/Rayman2Fix.log -Pattern 'LAUNCH-NO-VERIFY: direct CreateProcessW')) {
+            throw '--launch-no-verify must log direct OS launch failure'
+          }
+          $global:LASTEXITCODE = 0
       - name: Stage single executable and verify embedded DLL deployment
         shell: pwsh
         run: |

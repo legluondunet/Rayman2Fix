@@ -56,7 +56,8 @@ using ExtractionCallback = std::function<void(const ExtractionProgress&)>;
 // Never execute any disc-provided installer or game binary.
 class DiscImage {
 public:
-    static DiscImage open(const std::filesystem::path& source);
+    static DiscImage open(const std::filesystem::path& source,
+                          const std::filesystem::path& cue_data_override = {});
     const DiscInfo& info() const noexcept { return info_; }
     // Optional streaming progress callback (file completion and every 1 MiB
     // within larger files). Existing silent callers can omit the callback.
