@@ -29,15 +29,19 @@ unprotected game executable, original backup and installation receipt.
 The code checks exact known original-CD x86 return-site bytes at **four**
 callers, for scripted sound pause/resume and Win32 focus pause/resume.
 No caller is hooked if any expected code bytes differ. The same exact
-real current Theme/SXD driver and native player key must be independently
-found from the live loaded-bank registry. The original script and Win32
+real current Theme/SXD driver, current Theme resource-descriptor reference
+from the native player and unique loaded-bank provenance must be found.
+The previous comparison of that pointer to a synthesized packed bank/index
+was wrong and is retained in diagnostic logs only, never as an enable gate. The original script and Win32
 sound wrappers still run.
 
 During a *candidate* ESC-induced script pause, exactly two identical
 Theme/SXD `PauseTransitionSxd` calls must be observed. The game UI flag
 typically rises **after** those driver calls; no synthetic resume occurs
-until it is subsequently observed open with the game in foreground and
-the same active Theme. The current prototype tentatively balances the
+until it is subsequently observed open with the game in foreground,
+the same active Theme **and** the native `YAM_GenMenuMap_I1` actor present
+in the active game world. The actor check is bounded and performed only at
+that transition. The current prototype tentatively balances the
 original double pause by issuing exactly two callbacks to the **original**
 driver; the installed APM mixer's real callback counting/idempotence has
 **not been authenticated**. On menu close it suppresses exactly two matching
@@ -84,3 +88,37 @@ stop this experiment and relaunch with a **normal nonexperimental build** to
 restore the normal DLL, without deleting music files or overwriting saves.
 Do not merge this prototype or expose `MusicInPauseMenu=1` until a real
 Windows/Wine test validates sound, focus and Stop behavior.
+
+
+## Evidence from owner Wine test — 14 November 2026
+
+The owner-provided `Rayman2Fix(20261114-102144).log` has 243 lines and
+**`prototype=0`**: the x86 experimental DLL was deployed, but the opt-in
+environment variable was **not enabled**. Therefore this run does not test
+continuing music. All native sound calls were forwarded unchanged.
+
+It provides new, independent research evidence: four original script-driven
+Theme/SXD pause pairs (actual loaded outer bank/index **9:5**, inner
+**9:6 → 9:7 → 9:8 → 9:9** as native levels evolve), three complete
+script-driven resume pairs, and a legitimate Theme stop for the fourth.
+When the native `in_game_menu` flag rises, the read-only actor probe
+consistently observes `personal_type_found=1 dynamic_actor=1
+inactive_actor=0` on the loaded level. Initial actor probing before
+game loading yielded unknown, not proof of absence. During the last
+observed menu exit, the actor is no longer in the active dynamic root.
+The generic flag remains insufficient as independent ESC attribution,
+but checking it with the actor plus the native script caller is stronger.
+
+Every sampled old `native_theme_player_key_matches_outer` value is zero.
+The previously assumed format `(loaded_BNM_bank<<16)|resource_index`
+was **not** the native memory value at `0x4B95CC`. The original x86
+`0x45997B` compares the incoming resource-descriptor **reference**
+with `0x4B95CC`, while `0x457F21` delegates the Theme resource to
+`0x459950`. The prototype now additionally compares that native
+reference with its independently verified active outer Theme descriptor
+pointer. This field is called `native_theme_player_ref_matches_outer`;
+it must equal **1** before intervention. If it remains zero, no audio
+suppression/replay is permitted. The old packed bank/index comparison is
+preserved only to understand legacy trace logs. Neither comparison
+alone proves audible music identity; real Wine listening and Alt+Tab
+still need validation.
