@@ -1134,6 +1134,23 @@ std::atomic<DWORD> g_proto_pending_at{0};
 std::mutex g_proto_mutex;
 proto::Coordinator g_proto;
 thread_local proto::Origin g_proto_origin=proto::Origin::unknown;
+// Source-specific feasibility trace for a possible pre-driver ESC bridge.
+// Observational only: gather the ORDER and HANDLE cardinality of the
+// original driver's callback sequence *before* forwarding every call.
+// Do not add bank scanning, logging or memory writes inside the native
+// driver callback. A separate pure-C++ policy models possible deferral.
+struct ProtoPreDriverProbe {
+    bool active=false;
+    unsigned callback_count=0;
+    unsigned pause_count=0;
+    unsigned unrelated_slots=0;
+    unsigned other_handle_count=0;
+    DWORD first_handle=0;
+    unsigned first_slots[4]{99u,99u,99u,99u};
+};
+thread_local ProtoPreDriverProbe g_proto_predriver_probe{};
+std::atomic<unsigned> g_proto_predriver_probe_budget{0};
+
 class ProtoScope {
 public:
     explicit ProtoScope(proto::Origin origin) noexcept : old_(g_proto_origin) {
@@ -1271,6 +1288,8 @@ void proto_call_original(std::uintptr_t rva) {
 }
 void __cdecl proto_script_pause() {
     bool adopted=false;
+    DWORD depth_before=0,depth_after=0;
+    bool depth_before_ok=false,depth_after_ok=false;
     if(g_proto_enabled.load(std::memory_order_acquire)) {
         BYTE menu=0;
         DWORD depth=0;
@@ -1291,9 +1310,51 @@ void __cdecl proto_script_pause() {
             }
         }
     }
+    const unsigned predriver_sample=g_proto_predriver_probe_budget.fetch_add(
+        adopted && g_log ? 1u : 0u,std::memory_order_relaxed);
+    const bool predriver_trace=adopted && g_log && predriver_sample<16u;
+    if(predriver_trace) {
+        depth_before_ok=proto_read_depth(depth_before);
+        g_proto_predriver_probe=ProtoPreDriverProbe{};
+        g_proto_predriver_probe.active=true;
+    }
     {
         ProtoScope scope(proto::Origin::script_pause);
         proto_call_original(0x536D0); // unchanged verified native wrapper
+    }
+    if(predriver_trace) {
+        auto& probe=g_proto_predriver_probe;
+        probe.active=false;
+        depth_after_ok=proto_read_depth(depth_after);
+        // Diagnostic ONLY, after the native pause wrapper has completed.
+        // A live-ref mismatch is informative; it must never authorize a
+        // driver resume or cause suppression on this production path.
+        const auto owner=inspect_audio_theme_owner(probe.first_handle,true);
+        char line[540]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-ESC-PREDRIVER-GATE: t_ms=%lu callbacks=%u "
+            "transition_pauses=%u other_slots=%u different_handles=%u "
+            "slots=%u,%u,%u,%u depth_before=%d depth_after=%d "
+            "owner_driver=%u outer_candidates=%u native_ref_class=%d "
+            "native_ref_match=%d outer_bank=%d outer_index=%d "
+            "inner_bank=%d inner_index=%d "
+            "(script-origin read-only pre-driver order; all native calls forwarded)",
+            static_cast<unsigned long>(GetTickCount()-
+                g_audio_origin.load(std::memory_order_acquire)),
+            probe.callback_count,probe.pause_count,probe.unrelated_slots,
+            probe.other_handle_count,
+            probe.first_slots[0],probe.first_slots[1],
+            probe.first_slots[2],probe.first_slots[3],
+            depth_before_ok ? int(depth_before) : -1,
+            depth_after_ok ? int(depth_after) : -1,
+            owner.theme_owned_driver,owner.outer_candidates,
+            owner.native_theme_player_ref_class,
+            owner.native_theme_player_ref_matches_outer,
+            owner.outer_bank_provenance.bank_id,
+            owner.outer_bank_provenance.resource_index,
+            owner.inner_bank_provenance.bank_id,
+            owner.inner_bank_provenance.resource_index);
+        log_line(line);
     }
     {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
@@ -1711,6 +1772,23 @@ void proto_menu_tick() {
 #endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE
 
 void audio_trace_forward(unsigned slot,DWORD arg) {
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+    // Record the true order BEFORE any native driver operation, on the
+    // game-script source thread only. Nothing is suppressed or deferred.
+    auto& probe=g_proto_predriver_probe;
+    if(probe.active && g_proto_origin==proto::Origin::script_pause) {
+        if(probe.callback_count<4u)
+            probe.first_slots[probe.callback_count]=slot;
+        ++probe.callback_count;
+        if(slot==2u) {
+            if(!probe.pause_count)probe.first_handle=arg;
+            else if(probe.first_handle!=arg)++probe.other_handle_count;
+            ++probe.pause_count;
+        } else {
+            ++probe.unrelated_slots;
+        }
+    }
+#endif
     const auto original=reinterpret_cast<AudioPauseFn>(
         g_audio_original[slot].load(std::memory_order_acquire));
 #if RAYMAN2FIX_AUDIO_TRACE
