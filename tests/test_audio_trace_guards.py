@@ -588,6 +588,42 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertLess(hook.index("log_audio_driver_module(i,current);"),
                         hook.index("// Hook the five-argument transition"))
 
+    def test_standard_native_sxd_backend_is_logged_from_actual_callback_module(self):
+        # A configured Snd_Cpa.ini default is not necessarily the
+        # loaded driver: CPA can choose tested fallbacks. Standard mode
+        # must report the module which actually owns the original
+        # native SXD callbacks (with no LoadLibrary or other side effects).
+        hook=self.runtime.split("void poll_audio_pause_trace() {",1)[1].split(
+            "#endif // RAYMAN2FIX_AUDIO_HOOKS",1)[0]
+        research,standard=hook.split(
+            "#if RAYMAN2FIX_AUDIO_TRACE\n                char line[140]{}",1)[1].split(
+            "#else\n",1)
+        standard=standard.split("#endif",1)[0]
+        self.assertIn('proto_log("driver-hook-installed",kAudioSlots[i].name);',standard)
+        self.assertIn('log_audio_driver_module(i,current);',standard)
+        self.assertLess(standard.index('proto_log("driver-hook-installed"'),
+                        standard.index('log_audio_driver_module(i,current);'))
+        self.assertNotIn("LoadLibrary",standard)
+        self.assertNotIn("GetProcAddress",standard)
+        self.assertNotIn("Sleep(",standard)
+        self.assertNotIn("VirtualProtect",standard)
+
+        callback=self.runtime.split(
+            "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1].split(
+            "void __stdcall audio_pause_sxd(",1)[0]
+        self.assertNotIn("log_audio_driver_module(",callback)
+        probe=self.runtime.split(
+            "void log_audio_driver_module(unsigned slot,const void* current) {",1)[1].split(
+            "// Owner's exact CD executable",1)[0]
+        self.assertIn("GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS",probe)
+        self.assertIn("GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT",probe)
+        self.assertIn("GetModuleFileNameW(h,wide,MAX_PATH)",probe)
+        self.assertIn("basename,rva",probe)
+        self.assertNotIn("GetProcAddress(",probe)
+        self.assertNotIn("LoadLibrary",probe)
+        self.assertNotIn("VirtualProtect(",probe)
+        self.assertNotIn("std::filesystem",probe)
+
     def test_native_bank_provenance_scan_is_bounded_and_fail_closed(self):
         # The registry is a source of actual bank ID and table index,
         # unlike arbitrary high/low halves of the record's +0 Id field.
