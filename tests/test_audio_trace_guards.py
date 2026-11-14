@@ -72,7 +72,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("proto_dispatch(",watcher)
         self.assertNotIn("VirtualProtect(",watcher)
         self.assertIn("proto_menu_tick();\n    // Never defer native ESC compensation behind diagnostic disk I/O.\n    proto_theme_transition_watch_tick();",self.runtime)
-        self.assertIn("static constexpr unsigned kMaxEvents=24u",
+        self.assertIn("static constexpr unsigned kMaxEvents=48u",
                       self.esc_music_header)
         self.assertIn("static constexpr std::uint32_t kWindowMs=120000u",
                       self.esc_music_header)
