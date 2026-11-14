@@ -1503,6 +1503,69 @@ void proto_log_owner_rejection(DWORD handle,DWORD elapsed_ms,
         owner.inner_bank_provenance.resource_index);
     log_line(line);
 }
+// Observe early Theme controller and SXD ownership changes on the game's
+// render thread. Poll only cheap native fields every 40ms. Full bank/record
+// provenance is resolved *only* after a change, for at most 24 events in
+// the first 120 seconds. No audio driver call, patch or mutable game state.
+void proto_theme_transition_watch_tick() {
+    if(!g_proto_callsites_installed.load(std::memory_order_acquire) ||
+       !g_proto_enabled.load(std::memory_order_acquire) || !g_log)return;
+    static proto::ThemeRefWatchPolicy watch;
+    static DWORD last_sample=0;
+    const DWORD now=GetTickCount();
+    const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
+    if(!origin || DWORD(now-origin)>proto::ThemeRefWatchPolicy::kWindowMs)
+        return;
+    if(last_sample && DWORD(now-last_sample)<40u)return;
+    last_sample=now;
+    const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!module)return;
+    const auto read_native=[&](std::uintptr_t rva,void* data,SIZE_T size) {
+        SIZE_T bytes=0;
+        return ReadProcessMemory(GetCurrentProcess(),module+rva,
+                                 data,size,&bytes)!=0 && bytes==size;
+    };
+    DWORD controller_words[6]{}; // +0x00 active, +0x0C state, +0x14 Theme ref
+    DWORD nested=0;
+    BYTE menu=0;
+    if(!read_native(0xB95B8,controller_words,sizeof(controller_words)) ||
+       !read_native(0xB95E8,&nested,sizeof(nested)) ||
+       !proto_game_read(0xB9BC8,menu))return;
+    const proto::ThemeRefWatchInput snapshot{
+        controller_words[0],controller_words[5],nested,menu
+    };
+    if(!watch.observe(snapshot,DWORD(now-origin)))return;
+
+    // The native descriptor is only classified in this diagnostic branch.
+    // Passing 0 deliberately prevents an unproven driver-owner assertion.
+    const auto owner=inspect_audio_theme_owner(0,true);
+    char line[600]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-ESC-THEME-WATCH: seq=%u t_ms=%lu menu=%u active=%lu "
+        "controller_field0c=%lu ref_class=%d ref_match=%d "
+        "outer_candidates=%u outer_bank=%d outer_index=%d "
+        "inner_active=%u inner_transition=%u inner_bank=%d inner_index=%d "
+        "alt_bank=%d alt_index=%d alt_same_bank=%d "
+        "outer_complete=%u inner_complete=%u alt_complete=%u "
+        "(read-only bounded controller-change sample; no raw pointers)",
+        watch.events(),static_cast<unsigned long>(now-origin),
+        unsigned(menu),static_cast<unsigned long>(controller_words[0]),
+        static_cast<unsigned long>(controller_words[3]),
+        owner.native_theme_player_ref_class,
+        owner.native_theme_player_ref_matches_outer,
+        owner.outer_candidates,
+        owner.outer_bank_provenance.bank_id,
+        owner.outer_bank_provenance.resource_index,
+        owner.inner_active,owner.inner_transition,
+        owner.inner_bank_provenance.bank_id,
+        owner.inner_bank_provenance.resource_index,
+        owner.alternative_ref_bank,owner.alternative_ref_index,
+        owner.alternative_ref_same_bank,
+        owner.outer_bank_provenance.list_complete,
+        owner.inner_bank_provenance.list_complete,
+        owner.alternative_ref_complete);
+    log_line(line);
+}
 void proto_menu_tick() {
     if(!g_proto_callsites_installed.load(std::memory_order_acquire))return;
     // The full bank/actor scan is bounded but nontrivial; keep the 75ms
@@ -3111,6 +3174,8 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     poll_audio_pause_trace();
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
     proto_menu_tick();
+    // Never defer native ESC compensation behind diagnostic disk I/O.
+    proto_theme_transition_watch_tick();
 #endif
 #endif
 #if RAYMAN2FIX_RESEARCH_PROBES
