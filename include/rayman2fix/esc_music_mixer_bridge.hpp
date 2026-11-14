@@ -45,6 +45,7 @@ public:
         resume_calls_=proof.resume_calls;
         bound_=true;
         uncertain_=false;
+        physical_paused_=false; // Proof requires newly playing generation.
         return true;
     }
 
@@ -57,6 +58,12 @@ public:
         // handled OUTSIDE this bridge; none can be converted to resume.
         if(action!=Action::pause && action!=Action::resume)
             return Delivery::rejected;
+        // Never send a second physical pause or a bare resume for a
+        // duplicated Theme/SXD route. The shadow core owns transitions;
+        // this independent guard prevents an integration mistake from
+        // sending an extra resume to the underlying APM driver.
+        const bool requesting_pause=action==Action::pause;
+        if(requesting_pause==physical_paused_) return Delivery::ignored;
         const std::uint32_t count=action==Action::pause
                                      ? pause_calls_ : resume_calls_;
         for(std::uint32_t i=0;i<count;++i) {
@@ -67,6 +74,7 @@ public:
                 return Delivery::uncertain;
             }
         }
+        physical_paused_=requesting_pause;
         return Delivery::delivered;
     }
 
@@ -77,10 +85,12 @@ public:
         handle_=0;
         pause_calls_=resume_calls_=0;
         uncertain_=false;
+        physical_paused_=false;
         return true;
     }
     bool bound() const noexcept { return bound_; }
     bool uncertain() const noexcept { return uncertain_; }
+    bool physical_paused() const noexcept { return physical_paused_; }
 
 private:
     Generation owner_{};
@@ -89,6 +99,7 @@ private:
     std::uint32_t resume_calls_=0;
     bool bound_=false;
     bool uncertain_=false;
+    bool physical_paused_=false;
 };
 
 } // namespace r2fix::esc_music
