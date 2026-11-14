@@ -506,3 +506,56 @@ identify the actual backend and restrict further lifecycle
 research to that verified module instead of extrapolating
 from community driver names. No physical pre-driver Pause
 withholding is enabled.
+
+## Theme part sequencing versus physical SXD driver stream lifetime
+
+A public MIT-licensed Rayman 2 CPA type-definition project,
+`raytools/ACP_Ray2`, independently documents the relevant engine
+memory structure:
+
+- `src/SND/SND_Resource.h` defines the original
+  `SND_E_TR_Theme` resource as type **11** (matching the
+  read-only type-11 descriptor guard in our approved-CD observer).
+- `src/SND/SND_Theme.h` defines
+  `SND_tdstTypeThemeMem` as an ordered group of Theme parts
+  and an optional outro. `SND_tdstThemePart` contains its own
+  resource reference, loop boundaries/loop count, transition
+  kind and fade duration. Transition types include
+  **Crossfade**, **AtEndOfPart**, and **Outro**.
+- `src/SND/SND_ResMem.h` separately defines in-memory
+  Sequence, Switch, Split, and Random resources.
+
+MIT project and inspected sources:
+
+- https://github.com/raytools/ACP_Ray2
+- https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Resource.h
+- https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_Theme.h
+- https://github.com/raytools/ACP_Ray2/blob/master/src/SND/SND_ResMem.h
+
+**Interpretation correction:** `RUNTIME-ESC-SXD-LIFETIME`
+`first/last` tracks *nested logical sound resource provenance*.
+The observed `9:8 -> 9:9`, `9:10 -> 9:11`,
+`239:5 -> 239:6` changes can be ordinary movement
+between pieces of a Theme. They are **not evidence by
+themselves** of deallocation, replacement, stopping or
+reinitialization of the physical audio-driver stream.
+The zero native PlayTransitionEx/Stop callback counts are
+fully compatible with such an internal Theme-part scheduler,
+but they cannot prove that this is the only possible path.
+
+Consequently the existing coordinator's conservative
+`phase=6` is currently a valid *logical provenance mismatch*
+check, not proof of a changed physical driver handle.
+Do not replace it with optimistic passthrough, and do not
+assume a deferred physical Pause can be safely replayed or
+discarded merely because the selected resource changed.
+We still need the owner-approved original SXD DLL's real
+Pause/Resume/Stop lifecycle contract before any pre-driver
+interception.
+
+The new standard `RUNTIME-AUDIO-CONFIG` and
+`RUNTIME-AUDIO-DRIVER` lines are the next essential evidence:
+they distinguish configured candidate plugins from the
+actual code module implementing the original native
+Pause/Resume/Stop callback addresses. No audio path is
+changed by this research.
