@@ -1162,6 +1162,33 @@ struct ProtoPreDriverReport {
 // Guarded by g_proto_mutex, never held inside a native driver hook.
 ProtoPreDriverReport g_proto_predriver_report{};
 
+// Read-only companion to the Pause probe. Inspect the ORIGINAL script-resume
+// callback order and actual native forwarding decisions; never decide them
+// using this probe. A separate report survives the transition back to idle.
+struct ProtoPreDriverResumeProbe {
+    bool active=false;
+    unsigned callback_count=0;
+    unsigned resume_count=0;
+    unsigned unrelated_slots=0;
+    unsigned other_handle_count=0;
+    unsigned forwarded_count=0;
+    unsigned suppressed_count=0;
+    DWORD first_handle=0;
+    unsigned first_slots[4]{99u,99u,99u,99u};
+};
+thread_local ProtoPreDriverResumeProbe g_proto_predriver_resume_probe{};
+std::atomic<unsigned> g_proto_predriver_resume_budget{0};
+struct ProtoPreDriverResumeReport {
+    bool ready=false;
+    ProtoPreDriverResumeProbe probe{};
+    DWORD t_ms=0;
+    int depth_before=-1;
+    int depth_after=-1;
+    unsigned phase_before=0;
+    unsigned phase_after=0;
+};
+ProtoPreDriverResumeReport g_proto_predriver_resume_report{};
+
 class ProtoScope {
 public:
     explicit ProtoScope(proto::Origin origin) noexcept : old_(g_proto_origin) {
@@ -1366,15 +1393,80 @@ void __cdecl proto_script_pause() {
     }
 }
 void __cdecl proto_script_resume() {
+    // The game retains its ORIGINAL resume wrapper and native driver calls.
+    // Passive counters must never delay or authorize an audio operation.
+    const bool enabled=g_proto_enabled.load(std::memory_order_acquire);
+    const bool eligible=enabled && g_log &&
+        g_proto_callsites_installed.load(std::memory_order_acquire);
+    const unsigned sample=g_proto_predriver_resume_budget.fetch_add(
+        eligible ? 1u : 0u,std::memory_order_relaxed);
+    const bool trace=eligible && sample<16u;
+    DWORD depth_before=0,depth_after=0;
+    bool depth_before_ok=false,depth_after_ok=false;
+    unsigned phase_before=0;
+    if(trace) {
+        depth_before_ok=proto_read_depth(depth_before);
+        {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            phase_before=unsigned(g_proto.phase());
+        }
+        g_proto_predriver_resume_probe=ProtoPreDriverResumeProbe{};
+        g_proto_predriver_resume_probe.active=true;
+    }
     {
         ProtoScope scope(proto::Origin::script_resume);
-        proto_call_original(0x53700);
+        proto_call_original(0x53700); // original, unmodified native script wrapper
     }
-    if(g_proto_enabled.load(std::memory_order_acquire)) {
+    if(trace) {
+        g_proto_predriver_resume_probe.active=false;
+        depth_after_ok=proto_read_depth(depth_after);
+    }
+    if(enabled) {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
         g_proto.end_script_resume();
+        if(trace) {
+            g_proto_predriver_resume_report.ready=true;
+            g_proto_predriver_resume_report.probe=g_proto_predriver_resume_probe;
+            g_proto_predriver_resume_report.t_ms=DWORD(GetTickCount()-
+                g_audio_origin.load(std::memory_order_acquire));
+            g_proto_predriver_resume_report.depth_before=
+                depth_before_ok ? int(depth_before) : -1;
+            g_proto_predriver_resume_report.depth_after=
+                depth_after_ok ? int(depth_after) : -1;
+            g_proto_predriver_resume_report.phase_before=phase_before;
+            g_proto_predriver_resume_report.phase_after=unsigned(g_proto.phase());
+        }
     }
     proto_deferred_safety();
+}
+// Called ONLY on the render thread, after native menu audio decisions.
+// Unlike proto_menu_tick(), this also flushes when the FSM is already idle.
+void proto_flush_predriver_resume_report() {
+    if(!g_log)return;
+    ProtoPreDriverResumeReport report{};
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        if(!g_proto_predriver_resume_report.ready)return;
+        report=g_proto_predriver_resume_report;
+        g_proto_predriver_resume_report.ready=false;
+    }
+    const auto& probe=report.probe;
+    char line[540]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-ESC-PREDRIVER-RESUME: t_ms=%lu callbacks=%u "
+        "transition_resumes=%u other_slots=%u different_handles=%u "
+        "slots=%u,%u,%u,%u native_forwarded=%u native_suppressed=%u "
+        "depth_before=%d depth_after=%d phase_before=%u phase_after=%u "
+        "(script-origin read-only resume order; existing audio policy unchanged)",
+        static_cast<unsigned long>(report.t_ms),
+        probe.callback_count,probe.resume_count,probe.unrelated_slots,
+        probe.other_handle_count,
+        probe.first_slots[0],probe.first_slots[1],
+        probe.first_slots[2],probe.first_slots[3],
+        probe.forwarded_count,probe.suppressed_count,
+        report.depth_before,report.depth_after,
+        report.phase_before,report.phase_after);
+    log_line(line);
 }
 // Focus is a Win32/Wine activation event, not necessarily visible to
 // GetForegroundWindow() on the game's render thread. The renderer can be
@@ -1817,6 +1909,19 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
             ++probe.unrelated_slots;
         }
     }
+    auto& resume_probe=g_proto_predriver_resume_probe;
+    if(resume_probe.active && g_proto_origin==proto::Origin::script_resume) {
+        if(resume_probe.callback_count<4u)
+            resume_probe.first_slots[resume_probe.callback_count]=slot;
+        ++resume_probe.callback_count;
+        if(slot==3u) {
+            if(!resume_probe.resume_count)resume_probe.first_handle=arg;
+            else if(resume_probe.first_handle!=arg)++resume_probe.other_handle_count;
+            ++resume_probe.resume_count;
+        } else {
+            ++resume_probe.unrelated_slots;
+        }
+    }
 #endif
     const auto original=reinterpret_cast<AudioPauseFn>(
         g_audio_original[slot].load(std::memory_order_acquire));
@@ -1902,6 +2007,11 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         if(slot==10u || slot==11u)proto_record_stop(arg);
     }
     if(original && forwarded)original(arg);
+    if(resume_probe.active && g_proto_origin==proto::Origin::script_resume &&
+       slot==3u) {
+        if(forwarded)++resume_probe.forwarded_count;
+        else ++resume_probe.suppressed_count;
+    }
     if(g_proto_enabled.load(std::memory_order_acquire) &&
        g_proto_callsites_installed.load(std::memory_order_acquire) &&
        slot==2u && g_proto_origin==proto::Origin::script_pause)
@@ -3327,6 +3437,7 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     proto_menu_tick();
     // Never defer native ESC compensation behind diagnostic disk I/O.
     proto_theme_transition_watch_tick();
+    proto_flush_predriver_resume_report(); // after audio decisions; never in hook
 #endif
 #endif
 #if RAYMAN2FIX_RESEARCH_PROBES
