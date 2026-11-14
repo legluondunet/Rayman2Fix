@@ -206,6 +206,13 @@ def summarize(text: str) -> dict:
                 # previous theme_bank/inner_bank are merely halves of Id.
                 "outer_native": native_bank_location(data, "outer"),
                 "inner_native": native_bank_location(data, "inner"),
+                # Cross-check the live engine Theme player's current key:
+                # -1 unknown/old build; 0 different current Theme;
+                # 1 source-backed equality to this loaded Theme bank/index.
+                "native_current_theme_player_matches_outer": (
+                    number(data, "native_theme_player_key_matches_outer")
+                    if number(data, "native_theme_player_key_matches_outer")
+                       in (0, 1) else -1),
                 "bank_provenance_fields_present": (
                     "outer_native_bank" in data and
                     "inner_native_bank" in data),
@@ -356,6 +363,22 @@ def summarize(text: str) -> dict:
             for e in qualified
             if e["owner"]["outer_native"] is not None
             and e["owner"]["inner_native"] is not None
+        ],
+        "current_native_theme_player_matches_loaded_owner_events": [
+            {
+                "session": e["session"],
+                "event": e["event"],
+                "time_ms": e["ms"],
+                "outer_loaded_bank_and_index": list(e["owner"]["outer_native"]),
+                "inner_loaded_bank_and_index": (
+                    list(e["owner"]["inner_native"])
+                    if e["owner"]["inner_native"] else None),
+                "native_player_current_key_matches": True,
+                "does_not_prove_audible_level_music": True,
+            }
+            for e in qualified
+            if e["owner"]["outer_native"] is not None
+            and e["owner"]["native_current_theme_player_matches_outer"] == 1
         ],
         "record_Id_halves_are_not_authenticated_BNM_provenance": True,
         "ownership_lines_unmatched": unmatched_owners,
