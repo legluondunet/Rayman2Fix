@@ -192,6 +192,10 @@ public:
     // The game may resume script audio *before* the visible menu flag
     // goes to zero. Count the actual suppressed native resume calls.
     void end_script_resume() noexcept {
+        // ESC closed during pending verification: discard this provisional
+        // candidate immediately. There has been no compensating Resume,
+        // so the original game remains the sole owner of its audio state.
+        if(phase_==Phase::pending_menu) {clear();return;}
         if(phase_==Phase::audible_menu || phase_==Phase::muted_focus) {
             if(ignored_resumes_!=2) {quarantine();return;}
             if(phase_==Phase::muted_focus)
