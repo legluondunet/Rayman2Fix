@@ -16,38 +16,50 @@ Coordinator pending() {
     return x;
 }
 void intro_theme_reference_watch_is_bounded_and_read_only() {
-    // The first ESC can see controller Theme bank 9:12 while the active
-    // outer Theme is 9:5 and the SXD still uses 9:6. Watch raw controller
-    // references *without* inventing an audio resume from these samples.
+    // Reproduction 2026-11-14 14:30: multiple early ESC presses while
+    // native current Theme ref=bank 9:12, outer Theme=9:5 and SXD=9:6.
+    // A native record's *descriptor* changes without its slot moving.
+    // Treat menu toggles as context only, otherwise 24 events are spent
+    // before the real 9:6 -> 9:7 transition.
     ThemeRefWatchPolicy watch;
-    ThemeRefWatchInput before{1,0x004a1000,0x004b1000,0};
+    ThemeRefWatchInput before{
+        1,1,0x004a1000,0x004b1000,0x004c1000,0x004d1000,0
+    };
     CHECK(watch.observe(before,0));
-    CHECK(!watch.observe(before,40)); // no change, no diagnostic I/O
-    ThemeRefWatchInput first_menu=before;
+    CHECK(!watch.observe(before,40));
+    auto first_menu=before;
     first_menu.menu_flag=1;
-    CHECK(watch.observe(first_menu,50)); // first ESC menu opened
-    CHECK(!watch.observe(first_menu,90));
-    ThemeRefWatchInput closed=first_menu;
-    closed.menu_flag=0;
-    CHECK(watch.observe(closed,100));
-    ThemeRefWatchInput settled=closed;
-    settled.player_ref=0x004a2000; // native Theme ref handoff
-    settled.nested_record_ref=0x004b2000; // inner SXD transition
-    CHECK(watch.observe(settled,120));
+    CHECK(!watch.observe(first_menu,50)); // menu isn't a Theme change
+    first_menu.menu_flag=0;
+    CHECK(!watch.observe(first_menu,100));
+    CHECK(watch.events()==1);
+
+    // In-place outer Theme descriptor replacement, while the nested
+    // sound-table pointer and native player ref are unchanged.
+    auto changed=first_menu;
+    changed.outer_descriptor_ref=0x004c2000;
+    CHECK(watch.observe(changed,120));
+    CHECK(watch.events()==2);
+    auto inner=changed;
+    inner.inner_descriptor_ref=0x004d2000;
+    CHECK(watch.observe(inner,140)); // SXD 9:6 -> 9:7
+    auto state=inner;
+    state.controller_field0c=0;
+    CHECK(watch.observe(state,160)); // transition state -> settled
     CHECK(watch.events()==4);
-    CHECK(!watch.observe(settled,121));
-    ThemeRefWatchInput late=settled;
-    late.menu_flag=1;
-    CHECK(!watch.observe(late,ThemeRefWatchPolicy::kWindowMs+1));
+    CHECK(!watch.observe(state,161));
+    state.menu_flag=1;
+    CHECK(!watch.observe(state,165));
+    CHECK(!watch.observe(state,ThemeRefWatchPolicy::kWindowMs+1));
 
     ThemeRefWatchPolicy bounded;
     ThemeRefWatchInput changing{};
     for(unsigned i=0;i<ThemeRefWatchPolicy::kMaxEvents;++i) {
-        changing.player_ref=i+1;
+        changing.inner_descriptor_ref=i+1;
         CHECK(bounded.observe(changing,i*40));
     }
     CHECK(bounded.events()==ThemeRefWatchPolicy::kMaxEvents);
-    changing.player_ref=999;
+    changing.inner_descriptor_ref=999;
     CHECK(!bounded.observe(changing,ThemeRefWatchPolicy::kMaxEvents*40));
 }
 void strict_gates() {
