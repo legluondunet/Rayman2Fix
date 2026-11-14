@@ -160,4 +160,57 @@ ExePatchHeader install_exe_replacement(
     }
     return info;
 }
+
+ExePatchHeader install_exe_replacement_from_file(
+    const fs::path& root, const fs::path& owner_executable,
+    const ExePatchHeader& info) {
+    const fs::path original = root / "rayman2.exe";
+    const fs::path backup = root / "rayman2.exe.bak";
+    const fs::path staged = root / "rayman2.exe.patching";
+    const fs::path marker = root / kMarker;
+    const fs::path marker_new = root / ".rayman2fix-exe-patch.tsv.new";
+    if (!is_digest(info.original_sha256) || !is_digest(info.patched_sha256) ||
+        !info.original_size || !info.patched_size ||
+        info.original_size > kMaxSize || info.patched_size > kMaxSize)
+        fail("invalid approved original-to-unprotected hash pair");
+    if (!clean_file(original) || !clean_file(owner_executable) ||
+        fs::exists(backup) || fs::is_symlink(backup) ||
+        fs::exists(staged) || fs::is_symlink(staged) ||
+        fs::exists(marker) || fs::is_symlink(marker) ||
+        fs::exists(marker_new) || fs::is_symlink(marker_new))
+        fail("existing/missing files prevent safe owner-EXE replacement");
+    if (!match(original, info.original_size, info.original_sha256))
+        fail("original CD executable does not match approved protected SHA256");
+    if (!match(owner_executable, info.patched_size, info.patched_sha256))
+        fail("adjacent owner executable does not match approved unprotected SHA256");
+
+    // Never rename/remove the user's sidecar. Reverify a staged COPY so
+    // a changed or partial source cannot be installed via a size-only check.
+    bool backup_moved = false;
+    bool staged_moved = false;
+    try {
+        fs::copy_file(owner_executable, staged, fs::copy_options::none);
+        if (!match(staged, info.patched_size, info.patched_sha256))
+            fail("copied unprotected executable failed SHA256 verification");
+        save_marker(marker_new, info);
+        // The installed protected original is preserved exactly once.
+        fs::rename(original, backup);
+        backup_moved = true;
+        fs::rename(staged, original);
+        staged_moved = true;
+        fs::rename(marker_new, marker);
+    } catch (...) {
+        std::error_code ignored;
+        if (backup_moved) {
+            if (staged_moved) fs::remove(original, ignored);
+            // Leave any backup untouched if restoration fails. The
+            // transaction must never overwrite a pre-existing .bak.
+            fs::rename(backup, original, ignored);
+        }
+        fs::remove(staged, ignored);
+        fs::remove(marker_new, ignored);
+        throw;
+    }
+    return info;
+}
 } // namespace r2fix
