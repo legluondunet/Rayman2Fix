@@ -448,5 +448,26 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("snapshot.inactive_actor==0",self.runtime)
         self.assertIn("DWORD(now-last_probe)<75u",self.runtime)
 
+
+    def test_wine_esc_probe_allows_nested_depth_but_never_unverified_resume(self):
+        # The first 2026-11-14 menu was entered at depth 1; later real
+        # menu entries happened at depth 2. The original strict ==1 gate
+        # rejected them, independent of whether their Theme was valid.
+        self.assertIn("depth>=1u && depth<=8u",self.runtime)
+        self.assertNotIn("proto_read_depth(depth) && depth==1",self.runtime)
+        # A candidate may have a unique Theme owner while the native player
+        # pointer is still transitional, but only exact player pointer
+        # matches may cause an actual physical driver Resume.
+        self.assertIn("proto_identity(handle,generation,false)",self.runtime)
+        self.assertIn("bool require_current_theme=true",self.runtime)
+        self.assertIn("owner.native_theme_player_ref_matches_outer!=1",self.runtime)
+        self.assertIn("proto_identity(handle,generation).valid()",self.runtime)
+        # The scoped prototype source replaces broken return-stack inference
+        # only when all four experimental source detours are installed.
+        self.assertIn('audio_origin="game-script-pause"',self.runtime)
+        self.assertIn('audio_origin="game-script-resume"',self.runtime)
+        self.assertIn('audio_origin="windows-activation-pause"',self.runtime)
+        self.assertIn('audio_origin="windows-activation-resume"',self.runtime)
+
 if __name__=="__main__":
     unittest.main()
