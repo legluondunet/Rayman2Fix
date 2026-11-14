@@ -1172,6 +1172,19 @@ struct ProtoPreDriverReport {
 // tick emits disk diagnostics AFTER trying native audio compensation.
 // Guarded by g_proto_mutex, never held inside a native driver hook.
 ProtoPreDriverReport g_proto_predriver_report{};
+// One script-sourced ESC opening is expected before its paired Resume.
+// If another Pause occurs before that Resume, report ambiguous lifetime
+// rather than a misleading zero event count. Never used by audio forwarding.
+struct ProtoEscLifetimeStart {
+    bool valid=false;
+    bool overlap=false;
+    DWORD start_tick=0;
+    DWORD thread_id=0;
+    unsigned generation=0;
+    unsigned play_before=0;
+    unsigned stop_before=0;
+};
+ProtoEscLifetimeStart g_proto_esc_lifetime_start{}; // g_proto_mutex
 
 // Read-only companion to the Pause probe. Inspect the ORIGINAL script-resume
 // callback order and actual native forwarding decisions; never decide them
@@ -1197,6 +1210,13 @@ struct ProtoPreDriverResumeReport {
     int depth_after=-1;
     unsigned phase_before=0;
     unsigned phase_after=0;
+    bool lifetime_paired=false;
+    bool lifetime_overlap=false;
+    DWORD lifetime_elapsed_ms=0;
+    unsigned play_between=0;
+    unsigned stop_between=0;
+    unsigned play_during_resume=0;
+    unsigned stop_during_resume=0;
 };
 ProtoPreDriverResumeReport g_proto_predriver_resume_report{};
 
@@ -1397,6 +1417,20 @@ void __cdecl proto_script_pause() {
             g_proto_predriver_report.native_play_before=native_play_before;
             g_proto_predriver_report.native_play_after=native_play_after;
         }
+        if(adopted && predriver_trace) {
+            const bool overlap=g_proto_esc_lifetime_start.valid;
+            g_proto_esc_lifetime_start={
+                true,overlap,GetTickCount(),GetCurrentThreadId(),
+                g_proto_generation.load(std::memory_order_relaxed),
+                native_play_before,native_stop_before
+            };
+        } else if(g_proto_esc_lifetime_start.valid && !adopted) {
+            // An unexpected script-origin Pause breaks unique pairing.
+            g_proto_esc_lifetime_start.overlap=true;
+        } else if(adopted && !predriver_trace) {
+            // Out-of-budget opening: do not pair it with an older sample.
+            g_proto_esc_lifetime_start={};
+        }
         if(adopted)g_proto.end_script_pause();
         else if(g_proto.phase()==proto::Phase::audible_menu)
             g_proto.quarantine(); // independent nested script pause
@@ -1425,11 +1459,17 @@ void __cdecl proto_script_resume() {
     DWORD depth_before=0,depth_after=0;
     bool depth_before_ok=false,depth_after_ok=false;
     unsigned phase_before=0;
+    unsigned play_pre=0,stop_pre=0,play_post=0,stop_post=0;
+    ProtoEscLifetimeStart lifetime{};
     if(trace) {
         depth_before_ok=proto_read_depth(depth_before);
+        play_pre=g_transition_play_calls.load(std::memory_order_acquire);
+        stop_pre=g_proto_native_stop_calls.load(std::memory_order_acquire);
         {
             const std::lock_guard<std::mutex> lock(g_proto_mutex);
             phase_before=unsigned(g_proto.phase());
+            lifetime=g_proto_esc_lifetime_start;
+            g_proto_esc_lifetime_start={}; // never reuse the opener
         }
         g_proto_predriver_resume_probe=ProtoPreDriverResumeProbe{};
         g_proto_predriver_resume_probe.active=true;
@@ -1441,6 +1481,11 @@ void __cdecl proto_script_resume() {
     if(trace) {
         g_proto_predriver_resume_probe.active=false;
         depth_after_ok=proto_read_depth(depth_after);
+        play_post=g_transition_play_calls.load(std::memory_order_acquire);
+        stop_post=g_proto_native_stop_calls.load(std::memory_order_acquire);
+    } else if(enabled && g_log) {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        g_proto_esc_lifetime_start={}; // exhausted budget: no stale pairing
     }
     if(enabled) {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
@@ -1456,6 +1501,24 @@ void __cdecl proto_script_resume() {
                 depth_after_ok ? int(depth_after) : -1;
             g_proto_predriver_resume_report.phase_before=phase_before;
             g_proto_predriver_resume_report.phase_after=unsigned(g_proto.phase());
+            const bool paired=lifetime.valid && !lifetime.overlap &&
+                lifetime.thread_id==GetCurrentThreadId() &&
+                lifetime.generation==
+                    g_proto_generation.load(std::memory_order_relaxed);
+            g_proto_predriver_resume_report.lifetime_paired=paired;
+            g_proto_predriver_resume_report.lifetime_overlap=lifetime.overlap;
+            if(paired) {
+                g_proto_predriver_resume_report.lifetime_elapsed_ms=
+                    DWORD(GetTickCount()-lifetime.start_tick);
+                g_proto_predriver_resume_report.play_between=
+                    play_pre-lifetime.play_before;
+                g_proto_predriver_resume_report.stop_between=
+                    stop_pre-lifetime.stop_before;
+                g_proto_predriver_resume_report.play_during_resume=
+                    play_post-play_pre;
+                g_proto_predriver_resume_report.stop_during_resume=
+                    stop_post-stop_pre;
+            }
         }
     }
     proto_deferred_safety();
@@ -1488,6 +1551,21 @@ void proto_flush_predriver_resume_report() {
         report.depth_before,report.depth_after,
         report.phase_before,report.phase_after);
     log_line(line);
+    // This interval covers the full native menu lifetime, unlike the
+    // first-tick WINDOW trace. No zero counts may be interpreted when
+    // paired=0 (nested Pause, changed generation, or different thread).
+    char lifetime_line[370]{};
+    std::snprintf(lifetime_line,sizeof(lifetime_line),
+        "RUNTIME-ESC-PREDRIVER-LIFETIME: t_ms=%lu paired=%u overlap=%u "
+        "elapsed_ms=%lu play_between=%u stop_between=%u "
+        "play_during_resume=%u stop_during_resume=%u "
+        "(global observed calls only; unmatched deltas invalid; no audio changes)",
+        static_cast<unsigned long>(report.t_ms),
+        unsigned(report.lifetime_paired),unsigned(report.lifetime_overlap),
+        static_cast<unsigned long>(report.lifetime_elapsed_ms),
+        report.play_between,report.stop_between,
+        report.play_during_resume,report.stop_during_resume);
+    log_line(lifetime_line);
 }
 // Focus is a Win32/Wine activation event, not necessarily visible to
 // GetForegroundWindow() on the game's render thread. The renderer can be
