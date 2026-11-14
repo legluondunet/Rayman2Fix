@@ -45,14 +45,25 @@ struct Identity {
 // It never authorizes, pauses, or resumes any audio.
 struct ThemeRefWatchInput {
     std::uint32_t controller_active=0;
+    std::uint32_t controller_field0c=0;
     std::uint32_t player_ref=0;
     std::uint32_t nested_record_ref=0;
-    std::uint8_t menu_flag=0;
+    // The original 64-entry sound table can change *inside* one stable
+    // record slot. Monitor original native descriptor references so a
+    // transition from outer Theme 9:12 to 9:5 or inner SXD 9:6 to 9:7
+    // is not missed just because nested_record_ref stayed constant.
+    std::uint32_t outer_descriptor_ref=0;
+    std::uint32_t inner_descriptor_ref=0;
+    std::uint8_t menu_flag=0; // sampled for context; never consumes budget
     bool same(const ThemeRefWatchInput& other) const noexcept {
         return controller_active==other.controller_active &&
+               controller_field0c==other.controller_field0c &&
                player_ref==other.player_ref &&
                nested_record_ref==other.nested_record_ref &&
-               menu_flag==other.menu_flag;
+               outer_descriptor_ref==other.outer_descriptor_ref &&
+               inner_descriptor_ref==other.inner_descriptor_ref;
+        // The first implementation treated every ESC menu open/close as
+        // a Theme change and exhausted all 24 events before later handoffs.
     }
 };
 class ThemeRefWatchPolicy {
