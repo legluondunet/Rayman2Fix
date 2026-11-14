@@ -187,3 +187,65 @@ missing-original-Pause case. No build-time opt-in or live hook should
 enable it yet. The normal coordinator already preserves level music
 through safe gameplay exits; its existing `phase=6` native pass-through
 must remain intact. Keep production audio untouched.
+
+## Native Play/Stop interval audit and backend boundary (14 November, follow-up)
+
+The 18:09 owner run showed perfectly paired source-specific Pause and
+Resume callbacks (first 16 each), but **four stream-generation changes
+while menus were open**. That disproves the assumption that the entire
+ESC menu interval necessarily owns one unchanging SXD resource. It
+does not establish whether a particular transition happened *before*
+the menu actor was confirmed, nor what a native driver does internally.
+
+Relevant external material distinguishes the ADPCM/APM decoder layer from
+the selectable CPA audio output layer:
+
+- The community thread
+  https://raymanpc.com/forum/threads/tonic-trouble-soundtrack.5981/page-5
+  reports `[DLL_Adpcm]` decoder drivers (`APMmx`, `APMP5`) separately
+  from `[DLL_Sxd]` output drivers and notes WinMM `waveOut` imports
+  in the SXD driver family. This is **community observation**, not a
+  disassembly of the owner's approved CD DLL.
+- FFmpeg's APM demuxer/decoder patch
+  https://ffmpeg.org/pipermail/ffmpeg-devel/2020-February/257381.html
+  concerns compressed APM media and does **not** document native
+  `PauseTransitionSxd` / `ResumeTransitionSxd` semantics.
+- `Snd_Cpa.ini` can select output backends, so the effect of dropping
+  or replaying a pause must not be assumed to be identical under the
+  WinMM, DirectSound and other installed drivers.
+
+In the standard opt-in runtime, the next bounded **passive** log line is
+`RUNTIME-ESC-PREDRIVER-WINDOW`. It samples already observed, global
+monotonic event counts at three boundaries: (1) immediately before the
+original script Pause wrapper, (2) immediately after it, and (3) at the
+next ESC menu tick. It reports:
+
+- `stop_during_wrapper`, `stop_after_wrapper`: native StopSxd or
+  StopTransitionSxd callbacks recorded through the existing hooks;
+- `play_during_wrapper`, `play_after_wrapper`: calls of the existing
+  original PlayTransitionEx hook; and
+- `menu_known`, `esc_actor_confirmed`: the already established native
+  menu flag and separate verified ESC actor on the render tick.
+
+The counters are **global to observed driver callbacks** and may include
+other sounds. A nonzero delta means an apparently quiet interval
+was not actually free of tracked Play/Stop events; it does **not**
+prove a specific music track changed. A zero delta does **not** prove
+SXD stability: some stream changes may not use those tracked APIs,
+and events may occur after the logged tick. The log is emitted only
+**after** the current audio compensation path, not inside the native
+driver callback; it cannot delay a native pause for disk I/O.
+
+The pure `pre_driver_pause::Policy` also now reports
+`impossible_replay=true` if a native Stop retires the exact stream while
+one or both original Pauses are held. Previously this `void` Stop path
+silently discarded the debt. Both one-Pause and two-Pause cases have
+pure synthetic tests. This does **not** repair the driver; it prevents
+research from mistaking an unbalanced Stop for a safe rollback.
+
+**Consequence:** keep active pre-driver suppression disabled. The next
+owner run can collect this new log to see whether native Stop/Play
+occurs before actor confirmation, but it will not solve the unavoidable
+stream-retirement problem by itself. A *real* driver-specific audit of
+the exact installed SXD binary and lifecycle contract is still needed
+before the risky experiment can be enabled.
