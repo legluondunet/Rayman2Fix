@@ -438,3 +438,71 @@ Theme-mismatch Pause *without* leaving an unrepayable
 original Pause debt across an SXD resource transition.
 No bypass or hard-coded level/track exception is justified.
 Until then the current conservative recovery is correct.
+
+## Actual SXD driver DLL versus configured candidates (14 November, ongoing)
+
+The owner-specific original retail CD has `dll/snd_cpa_mmx.ini`,
+which the Rayman2Fix installer copies to `dll/snd_cpa.ini`
+on fresh installations. The installed file may subsequently be
+edited; it is not safe to infer the active driver from an MMX
+filename or the `Default` setting alone.
+
+Community reverse-engineering of the CPA sound system shows a
+configurable `[DLL_Sxd]` chain with keys
+`Unconditionnal` (the original misspelling),
+`Default`, `File0`, `File1` and optional `TestN`
+functions. The APM/ADPCM decoder selection is separate under
+`[DLL_Adpcm]`, and the audio output/mixer plugins may import
+WinMM `waveOut` (though individual installed versions vary).
+For background, see:
+
+- https://raymanpc.com/forum/threads/aureal-3d-a3d-restoration-achieving-better-3d-sound-quality-in-rayman-2-and-tonic-trouble-se-retail-update-6.26077/
+- https://raymanpc.com/forum/threads/tonic-trouble-soundtrack.5981/page-5
+
+These external reports are not verification of the owner's exact
+1999 CD driver. **Do not silently substitute** an A3D,
+DirectSound, WinMM, or aftermarket sound DLL: community reports
+also document disappearing sound and crashes with alternate
+audio configurations.
+
+The standard, opt-in `MusicInPauseMenu` runtime now emits
+two separate, strictly read-only diagnostics:
+
+1. `RUNTIME-AUDIO-CONFIG` at explicit DLL initialization,
+   before audio driver hooks are installed. It reads the
+   actual installed `dll/snd_cpa.ini` via the OS's INI
+   read function and prints only ASCII-normalized values:
+   `sxd_unconditional`, `sxd_default`,
+   `sxd_file0`, `sxd_file1` and `adpcm_default`.
+   Missing INI is reported, not repaired. This is the
+   **configured candidate list**, not proof of selection.
+2. `RUNTIME-AUDIO-DRIVER` for each *actually hooked*
+   original native PauseTransitionSxd, ResumeTransitionSxd,
+   StopSxd, and StopTransitionSxd callback. The existing
+   research helper uses `GetModuleHandleExW` with
+   `FROM_ADDRESS | UNCHANGED_REFCOUNT` on the original
+   callback pointer (saved before the existing table hook),
+   then logs the owning module **basename and RVA only**.
+   The same address-based helper now runs in the **standard**
+   music-enabled instrumentation as well as research mode.
+   Unlike the INI, this identifies what module owns the
+   actual native callback code; if it reports an EXE thunk
+   or unknown module, that remains an unresolved layer.
+
+Both diagnostics leave all DLL names, bytes, function
+pointers, audio flags and call behavior unchanged. The
+original INI is never rewritten. They execute outside native
+driver callbacks, on the same initialization/install paths
+where other diagnostic messages already exist. No additional
+`LoadLibrary`, `GetProcAddress`, or driver calls were
+introduced.
+
+**Evidence needed:** one ordinary Windows/native or Wine
+runtime log showing `RUNTIME-AUDIO-CONFIG` and the four
+`RUNTIME-AUDIO-DRIVER` module owners, under
+`MusicInPauseMenu=1` and `Log=1`. The owner need not
+modify any audio INI or install any new DLL. We can then
+identify the actual backend and restrict further lifecycle
+research to that verified module instead of extrapolating
+from community driver names. No physical pre-driver Pause
+withholding is enabled.
