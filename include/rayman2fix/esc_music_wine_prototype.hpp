@@ -80,7 +80,10 @@ struct ThemeRefWatchInput {
 class ThemeRefWatchPolicy {
 public:
     static constexpr std::uint32_t kWindowMs=120000u;
-    static constexpr unsigned kMaxEvents=24u;
+    // The intro itself may consume 24 music-state changes before the first ESC.
+    // Reserve room to observe the subsequent Theme/SXD handoff, without
+    // changing any runtime audio behavior or extending the time window.
+    static constexpr unsigned kMaxEvents=48u;
     bool observe(const ThemeRefWatchInput& sample,
                  std::uint32_t session_age_ms) noexcept {
         if(session_age_ms>kWindowMs || events_>=kMaxEvents)return false;
