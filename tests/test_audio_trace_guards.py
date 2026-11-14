@@ -237,6 +237,25 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("#if RAYMAN2FIX_AUDIO_TRACE",before)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
+    def test_current_native_theme_player_identity_is_a_readonly_gate(self):
+        section=self.runtime.split(
+            "AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {",1)[1]
+        section=section.split("struct AudioSoundContext {",1)[0]
+        self.assertIn("kThemePlayerCurrentKeyRva=0xB95CC",section)
+        self.assertIn("out.outer_bank_provenance=inspect_audio_native_bank_origin(",section)
+        self.assertIn("out.outer_bank_provenance.bank_id>=0",section)
+        self.assertIn("out.outer_bank_provenance.resource_index>=0",section)
+        self.assertIn("native_theme_player_key_matches_outer",section)
+        self.assertIn("current_theme_key==expected_key",section)
+        self.assertIn("safe_read(module+kThemePlayerCurrentKeyRva",section)
+        self.assertNotIn("WriteProcessMemory(",section)
+        self.assertNotIn("VirtualProtect(",section)
+        self.assertLess(
+            section.index("out.outer_bank_provenance=inspect_audio_native_bank_origin("),
+            section.index("current_theme_key==expected_key"))
+        self.assertIn("native_theme_player_key_matches_outer=%d", self.runtime)
+        self.assertNotIn("MusicInPauseMenu",self.config)
+
     def test_native_bank_provenance_scan_is_bounded_and_fail_closed(self):
         # The registry is a source of actual bank ID and table index,
         # unlike arbitrary high/low halves of the record's +0 Id field.
