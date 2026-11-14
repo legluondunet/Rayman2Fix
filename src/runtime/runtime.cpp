@@ -379,6 +379,7 @@ std::atomic<int> g_audio_last_depth{-1};
 // as ESC-only, and do NOT treat the engine clock pause as a menu flag.
 std::atomic<int> g_audio_last_ingame_menu{-1};
 std::atomic<int> g_audio_last_engine_pause{-1};
+std::atomic<int> g_audio_last_f1_down{-1};
 volatile LONG g_audio_poll_guard=0;
 bool executable_page(const void* addr) {
     MEMORY_BASIC_INFORMATION m{};
@@ -1083,6 +1084,124 @@ constexpr AudioHook kAudioHooks[kAudioSlotCount]={
     audio_stop_sxd,audio_stop_transition_sxd,
     audio_set_sound_volume_sxd,audio_stop_cd
 };
+// The published ACP_Ray2 object helper looks up a personal-type name
+// via the GAM object-type registry, then searches the direct Actor children
+// of the live and inactive dynamic-world roots. Rayman2AP independently
+// names YAM_GenMenuMap_I1 as the in-game escape-menu actor candidate.
+// This probe faithfully reads *only* original-CD structs, never calls game
+// functions, never mutates an actor and never treats presence as ESC proof.
+// Unknown (-1) on any malformed or incomplete registry/world traversal.
+struct AudioMenuActorSnapshot {
+    int type_found=-1;
+    int dynamic_actor=-1;
+    int inactive_actor=-1;
+    unsigned type_nodes=0;
+    unsigned dynamic_nodes=0;
+    unsigned inactive_nodes=0;
+};
+AudioMenuActorSnapshot inspect_audio_menu_actor_readonly() {
+    AudioMenuActorSnapshot out{};
+    auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!module)return out;
+    const auto read=[&](std::uintptr_t address,void* dst,SIZE_T size) {
+        SIZE_T n=0;
+        return address>=0x10000u &&
+            ReadProcessMemory(GetCurrentProcess(),
+                reinterpret_cast<const void*>(address),dst,size,&n)!=0 &&
+            n==size;
+    };
+    // GAM_tdstObjectType = three 12-byte dynamic-list anchors.
+    // Personal-type anchor is VA 0x5013F8, whose first DWORD is the
+    // first element. The original game uses array index as the type ID,
+    // and reads element+0x0C for its name (0x407B00..0x407B1C).
+    constexpr std::uintptr_t kPersonalTypesRva=0x1013F8;
+    constexpr std::uintptr_t kDynamicWorldRva=0x100FD0;
+    constexpr std::uintptr_t kInactiveWorldRva=0x100FC4;
+    constexpr unsigned kMaxTypeNodes=4096;
+    constexpr unsigned kMaxActorNodes=4096;
+    constexpr char kMenuPersonalType[]="YAM_GenMenuMap_I1";
+    const auto base=reinterpret_cast<std::uintptr_t>(module);
+    DWORD anchor[3]{};
+    if(!read(base+kPersonalTypesRva,anchor,sizeof(anchor)) ||
+       anchor[2]==0u || anchor[2]>kMaxTypeNodes ||
+       anchor[0]<0x10000u)return out;
+    const auto list_va=base+kPersonalTypesRva;
+    DWORD type_node=anchor[0],type_index=0,found_index=0;
+    unsigned found=0;
+    DWORD seen_type[kMaxTypeNodes]{};
+    for(DWORD i=0;i<anchor[2];++i) {
+        if(type_node<0x10000u)return out;
+        for(DWORD j=0;j<i;++j)
+            if(seen_type[j]==type_node)return out;
+        seen_type[i]=type_node;
+        DWORD elem[4]{}; // next,prev,parent,name
+        if(!read(type_node,elem,sizeof(elem)) ||
+           elem[2]!=list_va)return out;
+        ++out.type_nodes;
+        if(elem[3]>=0x10000u) {
+            char name[sizeof(kMenuPersonalType)]{};
+            if(!read(elem[3],name,sizeof(name)))return out;
+            if(std::memcmp(name,kMenuPersonalType,sizeof(name))==0) {
+                ++found;
+                found_index=i;
+                if(found>1u)return out; // duplicate types: unknown
+            }
+        } else return out;
+        type_node=elem[0];
+        type_index=i;
+    }
+    (void)type_index;
+    if(type_node!=0u)return out; // incomplete/changed list
+    if(found==0u) {
+        out.type_found=0; // scanned registry, but no candidate name
+        return out;
+    }
+    out.type_found=1;
+    // HIE_tdstSuperObject: type+0, linked actor+4, children-first+8,
+    // next-sibling+0x14. HIE_tdstEngineObject standard-game pointer+4.
+    // GAM_tdstStandardGame personal type+8. Match by unique type INDEX.
+    const auto scan_world=[&](std::uintptr_t root_ptr_rva,
+                              unsigned* scanned) -> int {
+        DWORD root=0;
+        if(!read(base+root_ptr_rva,&root,sizeof(root)) ||
+           root<0x10000u)return -1;
+        DWORD child=0;
+        if(!read(std::uintptr_t(root)+8u,&child,sizeof(child)))return -1;
+        DWORD seen[kMaxActorNodes]{};
+        unsigned matches=0;
+        for(unsigned i=0;i<kMaxActorNodes;++i) {
+            if(child==0u)return matches ? 1 : 0; // complete traversal
+            if(child<0x10000u)return -1;
+            for(unsigned j=0;j<i;++j)
+                if(seen[j]==child)return -1;
+            seen[i]=child;
+            DWORD so[6]{}; // type, linked, first,last,count,next
+            if(!read(child,so,sizeof(so)))return -1;
+            ++*scanned;
+            if(so[0]==2u) { // HIE_C_Type_Actor
+                if(so[1]<0x10000u)return -1;
+                DWORD std_game=0,personal=0;
+                if(!read(std::uintptr_t(so[1])+4u,&std_game,sizeof(std_game)) ||
+                   std_game<0x10000u ||
+                   !read(std::uintptr_t(std_game)+8u,
+                         &personal,sizeof(personal)))return -1;
+                if(personal==found_index)++matches;
+            }
+            child=so[5];
+        }
+        return -1; // traversal cap reached
+    };
+    out.dynamic_actor=scan_world(kDynamicWorldRva,&out.dynamic_nodes);
+    out.inactive_actor=scan_world(kInactiveWorldRva,&out.inactive_nodes);
+    // A partial world scan is never enough to prove actor presence
+    // or absence. Keep both unknown if either hierarchy fails.
+    if(out.dynamic_actor<0 || out.inactive_actor<0) {
+        out.dynamic_actor=-1;
+        out.inactive_actor=-1;
+    }
+    return out;
+}
+
 void poll_audio_pause_trace() {
     if(!g_log || InterlockedCompareExchange(&g_audio_poll_guard,1,0)!=0)
         return;
@@ -1128,8 +1247,12 @@ void poll_audio_pause_trace() {
                 static_cast<int>(in_game_menu),std::memory_order_relaxed);
             const int old_engine=g_audio_last_engine_pause.exchange(
                 static_cast<int>(engine_paused),std::memory_order_relaxed);
+            const int f1=int((GetAsyncKeyState(VK_F1)&0x8000)!=0);
+            const int old_f1=g_audio_last_f1_down.exchange(
+                f1,std::memory_order_relaxed);
             if(old_menu!=static_cast<int>(in_game_menu) ||
-               old_engine!=static_cast<int>(engine_paused)) {
+               old_engine!=static_cast<int>(engine_paused) ||
+               old_f1!=f1) {
                 char msg[236]{};
                 std::snprintf(msg,sizeof(msg),
                     "RUNTIME-AUDIO-UI-STATE: t_ms=%lu in_game_menu=%u engine_paused=%u prior_menu=%d prior_engine_paused=%d foreground=%u (read-only; generic menu flag, not ESC/F1 proof)",
@@ -1138,6 +1261,22 @@ void poll_audio_pause_trace() {
                     unsigned(in_game_menu),unsigned(engine_paused),
                     old_menu,old_engine,unsigned(game_window_is_foreground()));
                 log_line(msg);
+                // Companion actor probe: the 1999 CD registry/world
+                // structures are observed read-only, with strict bounds.
+                // F1 is an independent UI action; sampling its key edge
+                // does not assume it changes the in-game menu flag.
+                const auto actor=inspect_audio_menu_actor_readonly();
+                char actor_line[350]{};
+                std::snprintf(actor_line,sizeof(actor_line),
+                    "RUNTIME-AUDIO-MENU-ACTOR: t_ms=%lu in_game_menu=%u engine_paused=%u f1_down=%d esc_down=%u personal_type_found=%d dynamic_actor=%d inactive_actor=%d type_nodes=%u dynamic_nodes=%u inactive_nodes=%u (read-only; actor candidate not proof of ESC/F1)",
+                    static_cast<unsigned long>(now-g_audio_origin.load(
+                        std::memory_order_acquire)),
+                    unsigned(in_game_menu),unsigned(engine_paused),
+                    f1,unsigned((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0),
+                    actor.type_found,actor.dynamic_actor,
+                    actor.inactive_actor,actor.type_nodes,
+                    actor.dynamic_nodes,actor.inactive_nodes);
+                log_line(actor_line);
             }
         }
     }
