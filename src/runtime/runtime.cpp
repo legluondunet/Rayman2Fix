@@ -1393,13 +1393,55 @@ void proto_install_callsites() {
     proto_log("source-hooks-installed","script-and-win32-focus-separated");
 }
 bool proto_esc_menu_actor_open();
+// One-time, bounded diagnostic for a rejected first music-owner verdict.
+// No raw driver pointers are emitted; this never changes authorization.
+void proto_log_owner_rejection(DWORD handle,DWORD elapsed_ms) {
+    if(!g_log)return;
+    const DWORD before=GetTickCount();
+    const auto owner=inspect_audio_theme_owner(handle);
+    char line[440]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-ESC-OWNER-DIAG: pending_ms=%lu owner_scan_ms=%lu "
+        "outer_candidates=%u inner_active=%u inner_transition=%u "
+        "inner_driver_matches=%u theme_owned_driver=%u "
+        "native_player_ref_match=%d outer_bank_complete=%u "
+        "outer_bank_candidates=%u outer_bank=%d outer_index=%d "
+        "inner_bank_complete=%u inner_bank_candidates=%u "
+        "inner_bank=%d inner_index=%d (bounded read-only; no raw pointers)",
+        static_cast<unsigned long>(elapsed_ms),
+        static_cast<unsigned long>(GetTickCount()-before),
+        owner.outer_candidates,owner.inner_active,owner.inner_transition,
+        owner.inner_driver_matches,owner.theme_owned_driver,
+        owner.native_theme_player_ref_matches_outer,
+        owner.outer_bank_provenance.list_complete,
+        owner.outer_bank_provenance.candidates,
+        owner.outer_bank_provenance.bank_id,
+        owner.outer_bank_provenance.resource_index,
+        owner.inner_bank_provenance.list_complete,
+        owner.inner_bank_provenance.candidates,
+        owner.inner_bank_provenance.bank_id,
+        owner.inner_bank_provenance.resource_index);
+    log_line(line);
+}
 void proto_menu_tick() {
     if(!g_proto_callsites_installed.load(std::memory_order_acquire))return;
-    // The approved game's loaded-bank traversal is bounded but nontrivial;
-    // do not rescan every 16ms on the render thread.
+    // The full bank/actor scan is bounded but nontrivial; keep the 75ms
+    // safety cadence outside pending transitions. During an ESC opening,
+    // a cheap menu-byte check removes up to 75ms of avoidable audible
+    // silence before the two native ResumeTransitionSxd calls.
     static DWORD last_probe=0;
     const DWORD now=GetTickCount();
-    if(last_probe && DWORD(now-last_probe)<75u)return;
+    if(last_probe && DWORD(now-last_probe)<75u) {
+        bool pending=false;
+        {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            pending=g_proto.phase()==proto::Phase::pending_menu;
+        }
+        if(!pending)return;
+        BYTE menu_quick=0;
+        if(proto_game_read(0xB9BC8,menu_quick) && menu_quick==0u)
+            return; // no expensive bank scan while awaiting native UI
+    }
     last_probe=now;
     proto::Phase phase=proto::Phase::idle;
     DWORD started=0;
@@ -1425,19 +1467,26 @@ void proto_menu_tick() {
     // independent observation of the live actor YAM_GenMenuMap_I1
     // whose appearance at ESC was confirmed in the owner's Nov 14 log.
     // Only inspect it once on the pending->menu-open transition.
+    const DWORD verify_start=GetTickCount();
     const bool actor_ok=!(phase==proto::Phase::pending_menu &&
                           known && menu!=0) ||
                          proto_esc_menu_actor_open();
     const bool current=actor_ok &&
         proto_identity(handle,generation).valid();
+    const DWORD verify_ms=DWORD(GetTickCount()-verify_start);
     proto::Dispatch action{};
     {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
         action=g_proto.menu_tick(known && actor_ok,menu!=0,
                                  game_window_is_foreground(),current);
     }
-    // One bounded verdict per actual pending -> menu-open observation.
-    // This diagnostic is never used to authorize a native call.
+    // NEVER synchronously write the menu verdict BEFORE the native audio
+    // compensation: CreateFile/WriteFile/CloseHandle on Wine can make the
+    // brief original pause audible. The verdict is diagnostic only.
+    const DWORD dispatch_start=GetTickCount();
+    proto_dispatch(action);
+    proto_deferred_safety();
+    const DWORD dispatch_ms=DWORD(GetTickCount()-dispatch_start);
     if(phase==proto::Phase::pending_menu && known && menu!=0) {
         proto_log("menu-verdict",
             !actor_ok ? "escape-menu-actor-not-verified" :
@@ -1445,9 +1494,27 @@ void proto_menu_tick() {
             action.command==proto::Command::resume ?
                 "paired-native-resume-requested" :
                 "candidate-rejected-native-audio-unchanged");
+        if(g_log) {
+            char timing[190]{};
+            std::snprintf(timing,sizeof(timing),
+                "RUNTIME-ESC-PERF: pending_ms=%lu verify_ms=%lu dispatch_ms=%lu "
+                "compensated=%u (timings captured before verdict log)",
+                static_cast<unsigned long>(now-started),
+                static_cast<unsigned long>(verify_ms),
+                static_cast<unsigned long>(dispatch_ms),
+                unsigned(action.command==proto::Command::resume));
+            log_line(timing);
+        }
+        // The rejection code above covers several different native
+        // ownership gates. Inspect ONE rejected owner after all audio
+        // dispatch decisions, to establish the first-ESC root cause.
+        static bool first_owner_rejection_logged=false;
+        if(g_log && actor_ok && !current &&
+           !first_owner_rejection_logged) {
+            first_owner_rejection_logged=true;
+            proto_log_owner_rejection(handle,DWORD(now-started));
+        }
     }
-    proto_dispatch(action);
-    proto_deferred_safety();
 }
 #endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE
 
