@@ -388,3 +388,53 @@ and its native passthrough on uncertainty. Active pre-driver
 Pause suppression stays disabled until the exact installed
 SXD backend's rollback and stream-retirement behavior is
 independently proven.
+
+## Owner 19:28 source-paired SXD results and regression cases (14 November 2026)
+
+The latest owner log `Rayman2Fix(20261114-192852).log`
+confirms the new `RUNTIME-ESC-SXD-LIFETIME` measurement:
+
+- **10** source-identified native ESC script Pause wrappers, **9**
+  completed native script Resume wrappers. All nine paired
+  successfully (`paired=1`, `overlap=0`) with exact Pause depth
+  `1->2`, Resume depth `2->1` and no extra native driver slots.
+- Four first-menu attempts kept the strict rejected Theme
+  `9:12` / active outer `9:5` / inner SXD `9:6` mismatch.
+  Six subsequent attempts requested the already validated
+  paired-resume compensation when the Theme reference matched.
+- **Three closed, paired menu sessions** detected a real nested SXD
+  resource transition while still showing the ESC menu:
+  `9:8 -> 9:9`, `9:10 -> 9:11`, and `239:5 -> 239:6`.
+  Each had `samples=2 changes=1 unknown=0` and emitted the
+  safety `phase=6` quarantine. The game forwarded both native
+  script Resume callbacks in the quarantined sessions.
+- A **fourth** transition `239:8 -> 239:1` was visible from
+  the Theme watcher while the menu was open; the log ended
+  before a paired script Resume, so no lifetime result can
+  be claimed for this cycle.
+- All 9 matching lifetimes and all 10 short opening windows
+  still report zero observed native Play/Stop events.
+
+This is now a **direct source-paired counterexample** to treating
+Play/Stop counters as stream-identity assurance: provenance
+may progress while those counters do not. It does NOT prove
+that a physical driver handle was destroyed or recycled; an
+SXD index progression could be ordinary playback sequence
+inside an existing Theme.
+
+Four exact observed inner-resource changes were added to pure
+`esc_music_wine_prototype_tests.cpp`. They deliberately keep
+driver handle, outer Theme and generation the same while
+changing only inner SXD resource identity. They assert that
+the compensator quarantines immediately, never binds an
+old synthetic command to the new stream, passes through
+both real script Resume callbacks, and safely re-arms on
+a later independent menu. These tests call no game code
+and do not enable pre-driver Pause suppression.
+
+**Next research requirement:** identify the verified, backend-specific
+native audio operation that can prevent the first early
+Theme-mismatch Pause *without* leaving an unrepayable
+original Pause debt across an SXD resource transition.
+No bypass or hard-coded level/track exception is justified.
+Until then the current conservative recovery is correct.
