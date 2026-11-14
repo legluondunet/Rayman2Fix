@@ -1449,7 +1449,7 @@ void proto_menu_tick() {
     proto_dispatch(action);
     proto_deferred_safety();
 }
-#endif // RAYMAN2FIX_ESC_MUSIC_PROTO
+#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE
 
 void audio_trace_forward(unsigned slot,DWORD arg) {
     const auto original=reinterpret_cast<AudioPauseFn>(
@@ -1524,7 +1524,6 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         }
 #endif
     }
-#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
 #endif // research-only per-call sound diagnostics
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
     bool forwarded=true;
