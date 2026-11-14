@@ -318,3 +318,73 @@ No driver state machine modification, new compensating commands,
 time delays, or risky intercepts were introduced by the lifetime
 observer. `pre_driver_pause::Policy` remains completely disconnected
 from production.
+
+## Counterexample: SXD resource changes with zero native Play/Stop events (14 November, 19:10)
+
+Owner log `Rayman2Fix(20261114-191013).log` (199 lines)
+shows ten fully identified ESC Pause source wrappers, nine matched
+script Resume wrappers, and nine `RUNTIME-ESC-PREDRIVER-LIFETIME`
+reports with `paired=1 overlap=0`. All nine show
+`play_between=0 stop_between=0 play_during_resume=0
+stop_during_resume=0`. Despite these global zero counts,
+a script pause starts at **71,032 ms** with inner SXD **9:8**,
+the existing read-only Theme watcher reports **9:9** at
+**71,375 ms** with `menu=1`, and the coordinator enters
+`phase=6 theme-or-sxd-stream-changed-native-passthrough`
+before the paired Resume at **73,985 ms** (whose lifetime
+counters still report all zeros). At a later opening at
+82,454 ms, inner SXD **9:11** transitions to **239:5**
+at 83,360 ms while menu=1; the log ends before a paired
+script Resume for that opening.
+
+**This invalidates a proposed safety criterion:** absence of
+observed PlayTransitionEx and StopSxd/StopTransitionSxd
+does not imply unchanged nested SXD provenance. The
+change may be subresource progression or backend-internal
+transition; it is not proof that a new native driver handle
+was allocated. Never authorize physical Pause withholding
+based on these counters.
+
+### Next read-only observation: `RUNTIME-ESC-SXD-LIFETIME`
+
+The same standard runtime now correlates *already acquired*
+Theme/SXD resource-provenance snapshots with a
+source-identified ESC menu lifetime. The existing confirmed
+menu-tick `inspect_audio_theme_owner` result supplies an
+initial inner-bank/index baseline; the existing change-triggered
+Theme watcher contributes later inner provenance samples
+while the game's menu flag is 1. No new
+`ReadProcessMemory` or driver operation is added by the
+observer, and all sampled state remains outside audio
+driver callbacks.
+
+The `RUNTIME-ESC-SXD-LIFETIME` line is emitted with
+`RUNTIME-ESC-PREDRIVER-LIFETIME` after script Resume:
+
+- `paired`: the pre-existing same-thread/generation/unique-pair test;
+  all resource counts are invalid if 0.
+- `sampled`: paired with at least one complete unique inner
+  provenance snapshot. If 0, first/last keys and changes
+  cannot be interpreted.
+- `first`, `last`: observed original loaded bank and index,
+  not file paths, pointers, or synthetic music identifiers.
+- `samples`, `changes`, `unknown`: bounded count of
+  valid observed snapshots, changes compared to the previous
+  valid sample, and samples with incomplete provenance.
+- `play_between`, `stop_between`: the already recorded
+  global native command counts for direct comparison.
+
+The sampling is *not exhaustive*: the watcher is at most
+40 ms cadence and change-triggered, with a 48-event /
+120 s observation budget, and some game changes may happen
+between observations. `changes=0` still does not prove
+a stable driver stream. `changes>0` with `play_between=0`
+is a useful direct counterexample to command-count-only
+authorizations. The source-dependent coordinator's
+`phase=6` stream-change protection is unchanged.
+
+**Go/no-go:** retain the previously validated music coordinator
+and its native passthrough on uncertainty. Active pre-driver
+Pause suppression stays disabled until the exact installed
+SXD backend's rollback and stream-retirement behavior is
+independently proven.
