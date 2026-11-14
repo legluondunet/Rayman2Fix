@@ -160,6 +160,52 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("pre_driver_pause::Policy",self.runtime)
         self.assertNotIn("RUNTIME-ESC-PREDRIVER-WINDOW:",wrapper)
 
+    def test_predriver_lifetime_is_only_observational_and_requires_pairing(self):
+        # Observe native Play/Stop across the whole ESC menu, in addition to
+        # the wrapper-to-first-tick window. No same-thread/generation/overlap
+        # proof means that a zero event count is NOT a valid measurement.
+        self.assertIn("struct ProtoEscLifetimeStart",self.runtime)
+        self.assertIn("thread_id=0;",self.runtime)
+        self.assertIn("g_proto_esc_lifetime_start={",self.runtime)
+        pause=self.runtime.split(
+            "void __cdecl proto_script_pause() {",1)[1].split(
+            "void __cdecl proto_script_resume() {",1)[0]
+        self.assertIn("g_proto_esc_lifetime_start.valid",pause)
+        self.assertIn("g_proto_esc_lifetime_start.overlap=true;",pause)
+        self.assertIn("native_play_before,native_stop_before",pause)
+        self.assertIn("proto_call_original(0x536D0)",pause)
+        self.assertNotIn("RUNTIME-ESC-PREDRIVER-LIFETIME:",pause)
+
+        resume=self.runtime.split(
+            "void __cdecl proto_script_resume() {",1)[1].split(
+            "void proto_flush_predriver_resume_report() {",1)[0]
+        self.assertIn("lifetime=g_proto_esc_lifetime_start;",resume)
+        self.assertIn("lifetime.thread_id==GetCurrentThreadId()",resume)
+        self.assertIn("lifetime.generation==",resume)
+        self.assertIn("!lifetime.overlap",resume)
+        self.assertIn("g_proto.end_script_resume();",resume)
+        self.assertIn("proto_call_original(0x53700)",resume)
+        self.assertIn("play_pre-lifetime.play_before",resume)
+        self.assertIn("stop_pre-lifetime.stop_before",resume)
+        self.assertIn("play_post-play_pre",resume)
+        self.assertIn("stop_post-stop_pre",resume)
+        self.assertIn("if(paired)",resume)
+        self.assertNotIn("log_line(",resume)
+
+        flush=self.runtime.split(
+            "void proto_flush_predriver_resume_report() {",1)[1].split(
+            "// Focus is a Win32",1)[0]
+        self.assertIn("RUNTIME-ESC-PREDRIVER-LIFETIME:",flush)
+        self.assertIn("paired=%u overlap=%u",flush)
+        self.assertIn("play_between=%u stop_between=%u",flush)
+        self.assertIn("play_during_resume=%u stop_during_resume=%u",flush)
+        self.assertNotIn("proto_dispatch(",flush)
+        self.assertNotIn("ReadProcessMemory(",flush)
+        self.assertNotIn("VirtualProtect(",flush)
+        self.assertIn("proto_flush_predriver_resume_report();",self.runtime)
+        # The separate policy model is never wired into production hooks.
+        self.assertNotIn("pre_driver_pause::Policy",self.runtime)
+
     def test_intro_theme_controller_watcher_is_change_triggered_and_bounded(self):
         self.assertIn("void proto_theme_transition_watch_tick()",self.runtime)
         start=self.runtime.index("void proto_theme_transition_watch_tick()")
