@@ -182,6 +182,15 @@ public:
     // Unrelated native script pause, contradictory UI evidence, or driver
     // failure: never issue a synthetic resume again for this generation.
     void quarantine() noexcept {
+        // Before the first compensating driver resume, the game still
+        // owns every native audio call unchanged. Return to Idle so the
+        // next ESC attempt can be evaluated independently; quarantining
+        // a non-adopted candidate until an unrelated Stop would otherwise
+        // disable all later menu tests.
+        if(!compensated_) {
+            clear();
+            return;
+        }
         if(phase_!=Phase::idle)phase_=Phase::quarantined;
     }
     // After uncertainty, restore physical silence on the ORIGINAL game
