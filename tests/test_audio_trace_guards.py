@@ -199,7 +199,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         # inner sound-table index from 0x459AF4. Never equate an SXD
         # handle with music unless the unique outer/inner link is proven.
         section=self.runtime.split(
-            "AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {",1)[1]
+            "AudioThemeOwnerContext inspect_audio_theme_owner(\n    DWORD argument,bool classify_native_ref=false) {",1)[1]
         section=section.split("struct AudioSoundContext {",1)[0]
         self.assertIn("kControllerRva=0xB95B8",section)
         self.assertIn("kNestedSlotRva=0xB95E8",section)
@@ -276,7 +276,7 @@ class AudioTraceGuardTests(unittest.TestCase):
 
     def test_current_native_theme_player_identity_is_a_readonly_gate(self):
         section=self.runtime.split(
-            "AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {",1)[1]
+            "AudioThemeOwnerContext inspect_audio_theme_owner(\n    DWORD argument,bool classify_native_ref=false) {",1)[1]
         section=section.split("struct AudioSoundContext {",1)[0]
         self.assertIn("kThemePlayerCurrentKeyRva=0xB95CC",section)
         self.assertIn("out.outer_bank_provenance=inspect_audio_native_bank_origin(",section)
