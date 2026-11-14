@@ -435,5 +435,18 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("TimeDateStamp!=kOriginalTimestamp",self.runtime)
         self.assertIn("kAudioSlotCount=14",self.runtime)
 
+
+    def test_native_current_theme_reference_does_not_use_serialized_bank_key(self):
+        # Old packed bank:index comparison is only a diagnostic. The
+        # original 0x45997B compares a descriptor pointer instead.
+        self.assertIn("native_theme_player_ref_matches_outer",self.runtime)
+        self.assertIn("static_cast<DWORD>(outer_descriptor_address)",self.runtime)
+        self.assertIn("owner.native_theme_player_ref_matches_outer!=1",self.runtime)
+        self.assertIn("native_theme_player_ref_matches_outer=%d",self.runtime)
+        self.assertIn("proto_esc_menu_actor_open()",self.runtime)
+        self.assertIn("snapshot.dynamic_actor==1",self.runtime)
+        self.assertIn("snapshot.inactive_actor==0",self.runtime)
+        self.assertIn("DWORD(now-last_probe)<75u",self.runtime)
+
 if __name__=="__main__":
     unittest.main()
