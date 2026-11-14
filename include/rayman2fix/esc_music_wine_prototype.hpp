@@ -95,12 +95,21 @@ public:
     Dispatch menu_tick(bool known, bool menu_open, bool foreground,
                        bool owner_same) noexcept {
         if(phase_==Phase::idle || phase_==Phase::quarantined)return {};
-        if(!known || !owner_same) {
+        if(!known) {
+            quarantine();
+            return {};
+        }
+        // The original script-driven two-pause pair can complete before
+        // the native ESC menu and Theme-player pointer finish their own
+        // transitions. Do not reject a provisional candidate just because
+        // the live Theme ref is not yet stable BEFORE the menu flag rises.
+        // No driver Resume is possible in that pending state.
+        if(phase_==Phase::pending_menu && !menu_open)return {};
+        if(!owner_same) {
             quarantine();
             return {};
         }
         if(phase_==Phase::pending_menu) {
-            if(!menu_open)return {}; // native callbacks precede UI flag rise
             if(!foreground || observed_pauses_!=2) {
                 quarantine();
                 return {};
