@@ -24,13 +24,12 @@ void strict_gates() {
     CHECK(x.begin_script_pause(true,true,true));
     x.observe_native_pause(kMusic,true);
     x.end_script_pause();
-    CHECK(x.phase()==Phase::quarantined);
+    CHECK(x.phase()==Phase::idle); // no compensating call: native passthrough
     CHECK(!x.menu_tick(true,true,true,true));
-    x.reset();
     CHECK(x.begin_script_pause(true,true,true));
     x.observe_native_pause(kMusic,true);
     x.observe_native_pause(kNewMusic,true); // recycled transport handle
-    CHECK(x.phase()==Phase::quarantined);
+    CHECK(x.phase()==Phase::idle); // reject this cycle, retry next ESC
 }
 void menu_open_close() {
     auto x=pending();
@@ -77,7 +76,7 @@ void stop_and_unknown() {
     CHECK(!x.current(77));
     auto y=pending();
     CHECK(!y.menu_tick(false,true,true,true));
-    CHECK(y.phase()==Phase::quarantined);
+    CHECK(y.phase()==Phase::idle);
     CHECK(!y.menu_tick(true,true,true,true));
     CHECK(y.native_resume(123,Origin::script_resume)); // no compensation yet: native passthrough
     y.native_stop(123);
