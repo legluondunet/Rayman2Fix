@@ -47,12 +47,18 @@ void exact_cardinality() {
         return true;
     };
     CHECK(m.deliver(kStream,Action::none,fake)==Delivery::ignored);
+    CHECK(m.deliver(kStream,Action::resume,fake)==Delivery::ignored);
+    CHECK(!m.physical_paused());
     CHECK(m.deliver(kStream,Action::suppress_paired_native,fake)==Delivery::rejected);
     CHECK(m.deliver(kStream,Action::forward_stop,fake)==Delivery::rejected);
     CHECK(calls.empty());
     CHECK(m.deliver(kStale,Action::resume,fake)==Delivery::rejected);
     CHECK(m.deliver(kStream,Action::pause,fake)==Delivery::delivered);
+    CHECK(m.physical_paused());
+    CHECK(m.deliver(kStream,Action::pause,fake)==Delivery::ignored);
     CHECK(m.deliver(kStream,Action::resume,fake)==Delivery::delivered);
+    CHECK(!m.physical_paused());
+    CHECK(m.deliver(kStream,Action::resume,fake)==Delivery::ignored);
     CHECK(calls.size()==4);
     CHECK(calls[0]==Action::pause && calls[1]==Action::pause);
     CHECK(calls[2]==Action::resume && calls[3]==Action::resume);
