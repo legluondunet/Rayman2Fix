@@ -206,6 +206,66 @@ class AudioTraceGuardTests(unittest.TestCase):
         # The separate policy model is never wired into production hooks.
         self.assertNotIn("pre_driver_pause::Policy",self.runtime)
 
+    def test_sxd_lifetime_provenance_is_sampled_and_never_authorizes_audio(self):
+        self.assertIn("struct ProtoEscLifetimeStart",self.runtime)
+        self.assertIn("sxd_baseline_valid=false;",self.runtime)
+        self.assertIn("unsigned sxd_changes=0;",self.runtime)
+        self.assertIn("RUNTIME-ESC-SXD-LIFETIME:",self.runtime)
+        observer=self.runtime.split(
+            "void proto_note_sampled_sxd(const AudioThemeOwnerContext& owner,",1)[1].split(
+            "void proto_theme_transition_watch_tick() {",1)[0]
+        for token in (
+            "if(!menu_visible || !g_log)return;",
+            "owner.inner_bank_provenance.list_complete==1u",
+            "owner.inner_bank_provenance.candidates==1u",
+            "if(!sample.valid || sample.overlap)return;",
+            "++sample.sxd_unknown;",
+            "sample.sxd_first_bank=bank;",
+            "sample.sxd_first_index=index;",
+            "++sample.sxd_changes;",
+            "++sample.sxd_samples;",
+        ):
+            self.assertIn(token,observer)
+        for forbidden in (
+            "proto_dispatch(", "original(", "VirtualProtect(", "ReadProcessMemory(",
+            "proto::Command", "g_audio_original[", "log_line("
+        ):
+            self.assertNotIn(forbidden,observer)
+
+        watcher=self.runtime.split(
+            "void proto_theme_transition_watch_tick() {",1)[1].split(
+            "void proto_menu_tick() {",1)[0]
+        self.assertIn("proto_note_sampled_sxd(owner,menu!=0u);",watcher)
+        self.assertLess(watcher.index("if(!watch.observe(snapshot,DWORD(now-origin)))return;"),
+                        watcher.index("proto_note_sampled_sxd(owner,menu!=0u);"))
+        self.assertIn("inspect_audio_theme_owner(0,true)",watcher)
+
+        tick=self.runtime.split(
+            "void proto_menu_tick() {",1)[1].split(
+            "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
+        self.assertIn("proto_note_sampled_sxd(owner,known && menu!=0 && actor_ok);",tick)
+        self.assertLess(tick.index("proto_dispatch(action);"),
+                        tick.index("proto_note_sampled_sxd(owner,known && menu!=0 && actor_ok);"))
+        self.assertEqual(tick.count("inspect_audio_theme_owner(probe.first_handle,true)"),1)
+
+        resume=self.runtime.split(
+            "void __cdecl proto_script_resume() {",1)[1].split(
+            "void proto_flush_predriver_resume_report() {",1)[0]
+        self.assertIn("g_proto_predriver_resume_report.sxd_changes=",resume)
+        self.assertIn("g_proto_predriver_resume_report.sxd_first_bank=",resume)
+        self.assertIn("g_proto_predriver_resume_report.sxd_unknown=",resume)
+        self.assertIn("if(paired)",resume)
+        flush=self.runtime.split(
+            "void proto_flush_predriver_resume_report() {",1)[1].split(
+            "// Focus is a Win32",1)[0]
+        self.assertIn("paired=%u sampled=%u",flush)
+        self.assertIn("samples=%u changes=%u unknown=%u",flush)
+        self.assertIn("report.play_between,report.stop_between",flush)
+        self.assertNotIn("proto_dispatch(",flush)
+        self.assertNotIn("ReadProcessMemory(",flush)
+        self.assertNotIn("VirtualProtect(",flush)
+        self.assertNotIn("pre_driver_pause::Policy",self.runtime)
+
     def test_intro_theme_controller_watcher_is_change_triggered_and_bounded(self):
         self.assertIn("void proto_theme_transition_watch_tick()",self.runtime)
         start=self.runtime.index("void proto_theme_transition_watch_tick()")
