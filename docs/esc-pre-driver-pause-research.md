@@ -136,3 +136,54 @@ pairs, or incompatible depth bookkeeping, a physical pre-driver suppression
 experiment remains prohibited. Even matching Resume pairs are not enough
 to solve the stream-handoff `impossible_replay` blocker in the research
 model. Keep this mode diagnostic-only and the PR draft.
+
+## Native Resume paired evidence and focus-loss no-go rule (14 November, 18:09)
+
+The follow-up owner's Windows native log
+`Rayman2Fix(20261114-180950).log` completed the passive observation:
+
+- 20 genuine ESC script pause candidates; first 16 logged Pause wrapper
+  pairs, and first 16 logged Resume wrapper pairs.
+- Every logged Pause wrapper had exactly **two slot-2 callbacks** for one
+  driver handle, no unrelated slot, with pause depth `1 -> 2`.
+- Every logged Resume wrapper had exactly **two slot-3 callbacks** for one
+  driver handle, no unrelated slot, with pause depth `2 -> 1`.
+- **Seven** first-menu rejections occurred with alternate controller
+  Theme `9:12`, outer Theme `9:5`, inner SXD `9:6`. All seven matching
+  Resume pairs were forwarded to the original driver (`2/0`).
+- After the controller matched Theme `9:5` and SXD advanced to `9:7`,
+  the next five Resume pairs were suppressed by the existing coordinator
+  (`0/2`) in sessions where the corresponding synthetic resume batch
+  had been authorized.
+- Two `phase=6` quarantined sessions returned to **native forwarded**
+  Resume pairs (`2/0`), followed by two subsequent successfully
+  compensated sessions (`0/2`). No mixed forwarded/suppressed pair
+  appears in these 16 samples.
+- Four `driver-command-rejected` stream-generation events occurred in
+  the full log; a single session can switch SXD resources during an
+  open menu. Do not mistake every `paired-native-resume-requested`
+  entry for a guaranteed complete stable menu session.
+
+These results establish strong source-specific callback pairing but do
+**not** establish safe physical rollback. A native stream may disappear
+or switch after an intercepted original Pause, before a verified ESC menu
+actor is observed, even when both Pause callbacks arrived as a pair.
+If that original native Pause is withheld and the exact source stream
+no longer exists, a later replay to a recycled handle could pause
+an unrelated song. The pure model signals `impossible_replay`;
+it has no safe native-driver recovery for that case.
+
+As an extra research-only safeguard, the pure model now immediately
+falls back on **any loss of foreground** during pre-actor menu
+confirmation, even if the menu actor is unknown or never observed.
+It replays held native Pauses only if the identical original stream
+is still valid; otherwise it explicitly reports impossible replay
+and emits no stale driver calls. Two synthetic tests cover this
+fail-closed decision and subsequent fresh-session rearming.
+
+**No-go for active physical pre-driver Pause withholding** until an
+independent proof establishes safe ordering for the stream-handoff and
+missing-original-Pause case. No build-time opt-in or live hook should
+enable it yet. The normal coordinator already preserves level music
+through safe gameplay exits; its existing `phase=6` native pass-through
+must remain intact. Keep production audio untouched.
