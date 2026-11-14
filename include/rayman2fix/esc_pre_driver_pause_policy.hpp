@@ -132,9 +132,18 @@ public:
 
     // Stops and new stream owners cancel the escrow; never replay a
     // deferred Pause on a handle that may now belong to different music.
-    void native_stop(std::uint32_t handle) noexcept {
-        if(identity_.handle==handle && state_!=State::idle)
-            state_=State::retired;
+    // An original Stop during escrow invalidates any deferred Pause.
+    // Silently retiring while a native Pause is held would hide a
+    // bookkeeping debt: physical rollback is impossible after the stream
+    // disappears. Explicitly report that barrier to a future bridge.
+    // NOTE: this policy is pure research and is NOT connected to runtime.
+    Decision native_stop(std::uint32_t handle) noexcept {
+        if(identity_.handle!=handle || state_==State::idle)return {};
+        const bool lost_held_pause=held_!=0u &&
+            (state_==State::holding_one || state_==State::holding_pair);
+        held_=0;
+        state_=State::retired;
+        return {false,0,lost_held_pause};
     }
     void exit_script_resume() noexcept {
         // A missing second Resume is not evidence for synthesizing a
