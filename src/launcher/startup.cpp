@@ -314,10 +314,11 @@ void Startup::initialize(bool provision_files) {
     const auto fps = option("Graphics", "FPSLimit");
     log("CONFIG: Graphics.FPSLimit=" +
         (fps.empty() ? "60 (default)" : fps));
+    const bool have_ini=fs::exists(ini_path_);
     log(std::string("CONFIG: Graphics.Force4x3=") +
-        (configured_force_4_3(ini_path_) ? "1" : "0"));
+        (have_ini && configured_force_4_3(ini_path_) ? "1" : "0"));
     log(std::string("CONFIG: Features.SkipCinematics=") +
-        (configured_skip_cinematics(ini_path_) ? "1" : "0"));
+        (have_ini && configured_skip_cinematics(ini_path_) ? "1" : "0"));
 
     if (provision_files) {
         log("RUNTIME: Rayman2Fix.dll=" +
