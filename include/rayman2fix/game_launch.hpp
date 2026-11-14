@@ -36,6 +36,7 @@ struct ChildDisplayOptions {
     std::uint32_t output_height = 0;
     bool enable_fov = false;
     bool skip_cinematics = false; // opt-in jail_20 key skip
+    bool music_in_pause_menu = false; // opt-in native Theme/SXD compensation
     std::uint32_t fps_limit = 60; // 0 = unlimited; applies to Glide grBufferSwap
     bool log_enabled = true;
     bool skip_executable_precheck = false; // only explicit --launch-no-verify
