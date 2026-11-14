@@ -80,6 +80,10 @@ void unknown_is_quarantine() {
     s.menu_open(true);
     CHECK(s.callback(kMusic,Kind::pause,Route::theme,Cause::unknown)==Action::hold_unknown);
     CHECK(s.quarantined() && s.logical_paused());
+    CHECK(s.has_deferred_pause());
+    CHECK(s.take_deferred_pause()==Action::pause);
+    CHECK(!s.has_deferred_pause());
+    CHECK(s.take_deferred_pause()==Action::none);
     s.focus(true,false);
     s.focus(true,true);
     CHECK(s.menu_close(true)==Action::none);
@@ -87,6 +91,15 @@ void unknown_is_quarantine() {
     CHECK(s.callback(kMusic,Kind::resume,Route::sxd,Cause::esc)==Action::hold_unknown);
     CHECK(s.other_resume()==Action::hold_unknown);
     CHECK(s.logical_paused());
+}
+void native_stop_cancels_deferred_unknown_pause() {
+    auto s=fresh();
+    CHECK(s.unknown()==Action::hold_unknown);
+    CHECK(s.has_deferred_pause());
+    CHECK(s.stop(kMusic)==Action::forward_stop);
+    CHECK(s.take_deferred_pause()==Action::none);
+    CHECK(!s.has_deferred_pause());
+    CHECK(!s.active());
 }
 void unexpected_callback_order_quarantines() {
     auto s=fresh();
@@ -125,6 +138,7 @@ void enumerate() {
 }
 int main() {
     gates();two_routes();nesting();stop_generation();unknown_is_quarantine();
-    unexpected_callback_order_quarantines();enumerate();
+    unexpected_callback_order_quarantines();
+    native_stop_cancels_deferred_unknown_pause();enumerate();
     std::cout<<"ESC shadow C++ policy: 32768 sequences + edge cases OK\n";
 }
