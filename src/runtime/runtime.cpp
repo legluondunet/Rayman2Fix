@@ -17,6 +17,10 @@
 #include "rayman2fix/scene_script_probe.hpp"
 #include "rayman2fix/intro_gate_timeline.hpp"
 #include "rayman2fix/intro_integer_reader.hpp"
+#include <mutex>
+#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#include "rayman2fix/esc_music_wine_prototype.hpp"
+#endif
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -30,6 +34,12 @@
 #error Rayman2Fix camera runtime requires Windows x86
 #endif
 
+#ifndef RAYMAN2FIX_ESC_MUSIC_PROTO
+#define RAYMAN2FIX_ESC_MUSIC_PROTO 0
+#endif
+#if RAYMAN2FIX_ESC_MUSIC_PROTO && !RAYMAN2FIX_AUDIO_TRACE
+#error ESC music experimental runtime requires the separate audio trace build
+#endif
 #ifndef RAYMAN2FIX_RESEARCH_PROBES
 #define RAYMAN2FIX_RESEARCH_PROBES 0
 #endif
@@ -1015,6 +1025,319 @@ DWORD __stdcall audio_play_transition_ex(DWORD a,DWORD b,DWORD c,DWORD d,DWORD e
     }
     return result;
 }
+
+#if RAYMAN2FIX_ESC_MUSIC_PROTO
+// An explicitly opted-in research build ONLY. The game keeps ownership of
+// the pause depth and both sound-record marks. Rebalancing the observed
+// paired Theme/SXD driver callbacks is deliberately experimental, not a
+// confirmed contract for every APM backend.
+namespace proto=r2fix::esc_proto;
+std::atomic<bool> g_proto_enabled{false};
+std::atomic<bool> g_proto_callsites_installed{false};
+std::atomic<unsigned> g_proto_generation{0};
+std::atomic<DWORD> g_proto_pending_at{0};
+std::mutex g_proto_mutex;
+proto::Coordinator g_proto;
+thread_local proto::Origin g_proto_origin=proto::Origin::unknown;
+class ProtoScope {
+public:
+    explicit ProtoScope(proto::Origin origin) noexcept : old_(g_proto_origin) {
+        g_proto_origin=origin;
+    }
+    ~ProtoScope(){g_proto_origin=old_;}
+private:
+    proto::Origin old_;
+};
+void proto_log(const char* action,const char* reason="none") {
+    if(!g_proto_enabled.load(std::memory_order_acquire) || !g_log)return;
+    char msg[215]{};
+    unsigned phase=0;
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        phase=unsigned(g_proto.phase());
+    }
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-ESC-PROTOTYPE: event=%s phase=%u detail=%s (experimental; original soundtrack only)",
+        action,phase,reason);
+    log_line(msg);
+}
+bool proto_game_read(std::uintptr_t rva,BYTE& out) {
+    const auto* module=static_cast<const BYTE*>(
+        reinterpret_cast<const void*>(GetModuleHandleW(nullptr)));
+    if(!module)return false;
+    SIZE_T read=0;
+    return ReadProcessMemory(GetCurrentProcess(),module+rva,&out,1,&read)!=0 &&
+           read==1 && out<=1;
+}
+bool proto_read_depth(DWORD& out) {
+    const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!module)return false;
+    SIZE_T read=0;
+    return ReadProcessMemory(GetCurrentProcess(),module+0xA3CC8,
+        &out,sizeof(out),&read)!=0 && read==sizeof(out) && out<=16u;
+}
+proto::Identity proto_identity(DWORD handle,std::uint64_t generation) {
+    proto::Identity id{};
+    if(!handle || handle==0xffffffffu || !generation)return id;
+    const auto owner=inspect_audio_theme_owner(handle);
+    if(owner.theme_owned_driver!=1u ||
+       owner.native_theme_player_key_matches_outer!=1 ||
+       owner.outer_bank_provenance.list_complete!=1u ||
+       owner.inner_bank_provenance.list_complete!=1u ||
+       owner.outer_bank_provenance.candidates!=1u ||
+       owner.inner_bank_provenance.candidates!=1u ||
+       owner.outer_bank_provenance.bank_id<0 ||
+       owner.inner_bank_provenance.bank_id<0 ||
+       owner.outer_bank_provenance.resource_index<0 ||
+       owner.inner_bank_provenance.resource_index<0)return id;
+    id.handle=handle;
+    id.native_theme_key=(DWORD(owner.outer_bank_provenance.bank_id)<<16) |
+        DWORD(owner.outer_bank_provenance.resource_index);
+    id.native_inner_key=(DWORD(owner.inner_bank_provenance.bank_id)<<16) |
+        DWORD(owner.inner_bank_provenance.resource_index);
+    id.generation=generation;
+    return id;
+}
+// Called on the original game thread, *outside* a native driver hook.
+// Every physical operation rechecks the live generation before contacting
+// a reused handle. These stdcall functions return void: no success proof.
+void proto_dispatch(proto::Dispatch action) {
+    if(!action || !g_proto_enabled.load(std::memory_order_acquire))return;
+    if(action.count!=2 || !action.handle || !action.generation) {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        g_proto.quarantine();
+        return;
+    }
+    const unsigned slot=action.command==proto::Command::pause ? 2u : 3u;
+    const auto fn=reinterpret_cast<AudioPauseFn>(
+        g_audio_original[slot].load(std::memory_order_acquire));
+    if(!fn) {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        g_proto.quarantine();
+        return;
+    }
+    for(unsigned i=0;i<action.count;++i) {
+        {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            if(!g_proto.current(action.generation) ||
+               g_proto.current_handle()!=action.handle)return;
+        }
+        if(!proto_identity(action.handle,action.generation).valid()) {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            g_proto.quarantine();
+            return;
+        }
+        fn(action.handle);
+    }
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        if(action.command==proto::Command::resume)
+            g_proto.complete_focus_recovery(action.generation);
+    }
+    proto_log(action.command==proto::Command::pause ?
+        "driver-pause-batch" : "driver-resume-batch","paired-calls=2");
+}
+void proto_deferred_safety() {
+    proto::Dispatch d{};
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        d=g_proto.take_safety_pause();
+    }
+    proto_dispatch(d);
+}
+using NativeAudioWrapper=void (__cdecl*)();
+void proto_call_original(std::uintptr_t rva) {
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    if(!base)return;
+    reinterpret_cast<NativeAudioWrapper>(base+rva)();
+}
+void __cdecl proto_script_pause() {
+    bool adopted=false;
+    if(g_proto_enabled.load(std::memory_order_acquire)) {
+        BYTE menu=0;
+        DWORD depth=0;
+        const bool candidate=game_window_is_foreground() &&
+            (GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0 &&
+            proto_game_read(0xB9BC8,menu) && menu==0 &&
+            proto_read_depth(depth) && depth==1;
+        if(candidate) {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            adopted=g_proto.begin_script_pause(true,true,true);
+            if(adopted) {
+                g_proto_generation.fetch_add(1,std::memory_order_acq_rel);
+                g_proto_pending_at.store(GetTickCount(),std::memory_order_release);
+            }
+        }
+    }
+    {
+        ProtoScope scope(proto::Origin::script_pause);
+        proto_call_original(0x536D0); // unchanged verified native wrapper
+    }
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        if(adopted)g_proto.end_script_pause();
+        else if(g_proto.phase()==proto::Phase::audible_menu)
+            g_proto.quarantine(); // independent nested script pause
+    }
+    proto_deferred_safety();
+    if(adopted)proto_log("script-pause-observed","await-native-menu-flag");
+}
+void __cdecl proto_script_resume() {
+    {
+        ProtoScope scope(proto::Origin::script_resume);
+        proto_call_original(0x53700);
+    }
+    if(g_proto_enabled.load(std::memory_order_acquire)) {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        g_proto.end_script_resume();
+    }
+    proto_deferred_safety();
+}
+void __cdecl proto_focus_pause() {
+    {
+        ProtoScope scope(proto::Origin::focus_pause);
+        proto_call_original(0x536D0);
+    }
+    proto::Dispatch d{};
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        d=g_proto.focus_pause();
+    }
+    proto_dispatch(d);
+    proto_deferred_safety();
+}
+void __cdecl proto_focus_resume() {
+    {
+        ProtoScope scope(proto::Origin::focus_resume);
+        proto_call_original(0x53700);
+    }
+    proto::Dispatch d{};
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        d=g_proto.focus_resume();
+    }
+    proto_dispatch(d);
+    proto_deferred_safety();
+}
+void proto_record_pause(DWORD handle) {
+    const unsigned generation=g_proto_generation.load(std::memory_order_acquire);
+    const proto::Identity id=proto_identity(handle,generation);
+    const std::lock_guard<std::mutex> lock(g_proto_mutex);
+    g_proto.observe_native_pause(id,id.valid());
+}
+bool proto_allow_resume(DWORD handle) {
+    const std::lock_guard<std::mutex> lock(g_proto_mutex);
+    return g_proto.native_resume(handle,g_proto_origin);
+}
+void proto_record_stop(DWORD handle) {
+    const std::lock_guard<std::mutex> lock(g_proto_mutex);
+    g_proto.native_stop(handle);
+}
+// The original CD's four independent E8 callers carry source provenance.
+// They must all match exact approved instruction bytes or NO caller is
+// patched. This code never modifies the on-disk game executable.
+struct ProtoCaller {
+    std::uintptr_t rva;
+    BYTE expected[5];
+    NativeAudioWrapper replacement;
+};
+const ProtoCaller kProtoCallers[4]={
+    {0x1C9C,{0xE8,0x2F,0x1A,0x05,0x00},proto_focus_pause},
+    {0x1CE9,{0xE8,0x12,0x1A,0x05,0x00},proto_focus_resume},
+    {0x71E70,{0xE8,0x5B,0x18,0xFE,0xFF},proto_script_pause},
+    {0x71E67,{0xE8,0x94,0x18,0xFE,0xFF},proto_script_resume}
+};
+bool proto_write_caller(BYTE* at,const BYTE* bytes) {
+    DWORD old=0;
+    if(!VirtualProtect(at,5,PAGE_EXECUTE_READWRITE,&old))return false;
+    std::memcpy(at,bytes,5);
+    FlushInstructionCache(GetCurrentProcess(),at,5);
+    DWORD unused=0;
+    VirtualProtect(at,5,old,&unused);
+    return true;
+}
+void proto_install_callsites() {
+    if(!g_proto_enabled.load(std::memory_order_acquire) ||
+       g_proto_callsites_installed.load(std::memory_order_acquire))return;
+    auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+    if(!base)return;
+    const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if(dos->e_magic!=IMAGE_DOS_SIGNATURE || dos->e_lfanew<=0 ||
+       dos->e_lfanew>=0x1000)return;
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS32*>(base+dos->e_lfanew);
+    if(pe->Signature!=IMAGE_NT_SIGNATURE ||
+       pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
+       pe->OptionalHeader.SizeOfImage<0xB9BC9)return;
+    BYTE replacement[4][5]{};
+    for(unsigned i=0;i<4;++i) {
+        const auto& entry=kProtoCallers[i];
+        if(std::memcmp(base+entry.rva,entry.expected,5)!=0) {
+            proto_log("caller-guard-rejected","original-code-bytes-mismatch");
+            return;
+        }
+        replacement[i][0]=0xE8;
+        const auto at=reinterpret_cast<std::intptr_t>(base+entry.rva+5);
+        const auto to=reinterpret_cast<std::intptr_t>(entry.replacement);
+        const std::int64_t distance=std::int64_t(to)-std::int64_t(at);
+        if(distance<INT32_MIN || distance>INT32_MAX) {
+            proto_log("caller-guard-rejected","hook-out-of-rel32-range");
+            return;
+        }
+        const std::int32_t relative=static_cast<std::int32_t>(distance);
+        std::memcpy(replacement[i]+1,&relative,sizeof(relative));
+    }
+    unsigned written=0;
+    for(unsigned i=0;i<4;++i) {
+        if(!proto_write_caller(base+kProtoCallers[i].rva,replacement[i]))break;
+        ++written;
+    }
+    if(written!=4) {
+        while(written) {
+            --written;
+            proto_write_caller(base+kProtoCallers[written].rva,
+                               kProtoCallers[written].expected);
+        }
+        proto_log("caller-guard-rejected","failed-write-rolled-back");
+        return;
+    }
+    g_proto_callsites_installed.store(true,std::memory_order_release);
+    proto_log("source-hooks-installed","script-and-win32-focus-separated");
+}
+void proto_menu_tick() {
+    if(!g_proto_callsites_installed.load(std::memory_order_acquire))return;
+    proto::Phase phase=proto::Phase::idle;
+    DWORD started=0;
+    std::uint32_t handle=0;
+    std::uint64_t generation=0;
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        phase=g_proto.phase();
+        handle=g_proto.current_handle();
+        generation=g_proto_generation.load(std::memory_order_relaxed);
+        started=g_proto_pending_at.load(std::memory_order_relaxed);
+    }
+    if(phase==proto::Phase::idle)return;
+    if(phase==proto::Phase::pending_menu &&
+       DWORD(GetTickCount()-started)>1500u) {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        if(g_proto.phase()==proto::Phase::pending_menu)g_proto.reset();
+        return;
+    }
+    BYTE menu=0;
+    const bool known=proto_game_read(0xB9BC8,menu);
+    const bool current=proto_identity(handle,generation).valid();
+    proto::Dispatch action{};
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        action=g_proto.menu_tick(known,menu!=0,
+                                 game_window_is_foreground(),current);
+    }
+    proto_dispatch(action);
+    proto_deferred_safety();
+}
+#endif // RAYMAN2FIX_ESC_MUSIC_PROTO
+
 void audio_trace_forward(unsigned slot,DWORD arg) {
     const auto original=reinterpret_cast<AudioPauseFn>(
         g_audio_original[slot].load(std::memory_order_acquire));
@@ -1067,7 +1390,22 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
             preview ? &wrapper_returns : nullptr,
             preview ? &confirmed_pairs : nullptr);
     }
-    if(original) original(arg);
+#if RAYMAN2FIX_ESC_MUSIC_PROTO
+    bool forwarded=true;
+    if(g_proto_enabled.load(std::memory_order_acquire) &&
+       g_proto_callsites_installed.load(std::memory_order_acquire)) {
+        if(slot==3u)forwarded=proto_allow_resume(arg);
+        if(slot==11u)proto_record_stop(arg);
+    }
+    if(original && forwarded)original(arg);
+    if(g_proto_enabled.load(std::memory_order_acquire) &&
+       g_proto_callsites_installed.load(std::memory_order_acquire) &&
+       slot==2u && g_proto_origin==proto::Origin::script_pause)
+        proto_record_pause(arg);
+    if(!forwarded)proto_log("native-resume-suppressed","verified-theme-only");
+#else
+    if(original)original(arg);
+#endif
     if(!sampled)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
     char line[1024]{};
@@ -1406,6 +1744,9 @@ void poll_audio_pause_trace() {
                          "(five args/result forwarded unchanged; research-only)");
         }
     }
+#if RAYMAN2FIX_ESC_MUSIC_PROTO
+    proto_install_callsites();
+#endif
     InterlockedExchange(&g_audio_poll_guard,0);
 }
 #endif // RAYMAN2FIX_AUDIO_TRACE
@@ -2440,6 +2781,9 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     poll_second_intro_skip();
 #if RAYMAN2FIX_AUDIO_TRACE
     poll_audio_pause_trace();
+#if RAYMAN2FIX_ESC_MUSIC_PROTO
+    proto_menu_tick();
+#endif
 #endif
 #if RAYMAN2FIX_RESEARCH_PROBES
     // This is exclusively the disabled Learn_10 research observer.
@@ -3934,10 +4278,29 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
+#if RAYMAN2FIX_ESC_MUSIC_PROTO
+    wchar_t proto_flag[8]{};
+    const DWORD flag_size=GetEnvironmentVariableW(
+        L"RAYMAN2FIX_ESC_AUDIO_PROTOTYPE",proto_flag,8);
+    const bool explicit_opt_in=flag_size==1 && proto_flag[0]==L'1';
+    g_proto_enabled.store(explicit_opt_in && g_log,std::memory_order_release);
+    if(g_proto_enabled.load(std::memory_order_acquire))
+        log_line("RUNTIME-ESC-PROTOTYPE: enabled=1 experiment=paired-SXD "
+                 "ESC+UI-transition+Theme-player; NOT validated music identity; "
+                 "preserve original game files");
+#endif
 #if RAYMAN2FIX_AUDIO_TRACE
     if (g_log) {
         g_audio_origin.store(GetTickCount(),std::memory_order_release);
+#if RAYMAN2FIX_ESC_MUSIC_PROTO
+        log_line(g_proto_enabled.load(std::memory_order_acquire) ?
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2 prototype=1 "
+            "(original calls normally forwarded; identified music resumes may be suppressed)" :
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2 prototype=0 "
+            "(all native audio calls forwarded unchanged)");
+#else
         log_line("RUNTIME-AUDIO-TRACE: enabled=1 schema=2 inner_record_ref=checked-pointer; 14 native channels, 64 events for Sxd pause/resume, 16 per other channel; all forwarded unchanged");
+#endif
     }
 #endif
     if (g_log) log_line(kResearchProbes ?
