@@ -171,3 +171,35 @@ These changes are a candidate-provenance repair, **not** evidence
 that the installed `WAVMWbvr.dll` pilot supports paired physical
 resume or that the sound continues. Windows x86/CI and one further
 live listening test are required.
+
+
+## Owner Wine trace — 14 November 2026, 10:50 (r3 milestone)
+
+`Rayman2Fix(20261114-105057).log` is the first real gameplay trace
+demonstrating the **full experimental adapter path**, across fifteen
+native ESC/menu-open events, with the tester responding *« enfin ! »*.
+The trace includes exactly **15** `script-pause-observed`,
+**15** `menu-verdict=paired-native-resume-requested`,
+**15** `driver-resume-batch`, and **28**
+`native-resume-suppressed` events. The live driver therefore received
+the intended two compensation calls in all fifteen observed menu
+openings; fourteen observed script exits had matching pairs of native
+resumes suppressed. This is evidence of the intended control flow,
+**not** an independent digital audio recording or a Windows native
+compatibility test.
+
+The last menu-open at ~173.6s is different: instead of a fifteenth
+matched native-close pair, the machine enters
+`driver-pause-batch phase=6` (`quarantined`) at ~176.1s and then the
+native game emits a legitimate `StopTransitionSxd` at ~176.145s.
+The experimental policy restored its fail-closed physical pause on
+uncertain state, rather than erroneously leaving music artificially
+playing after stop. Treat this as a **follow-up audit target** before
+release, not as proof of a crash or regression. The next logged
+scene transition completes, and the trace contains no explicit fatal
+error.
+
+The test does **not** demonstrate Alt+Tab: every sampled foreground
+state was 1. Native Windows and alternate audio backends are untested.
+Keep opt-in build-only functionality gated, PR #9 in draft, and the
+normal release build unchanged until those compatibility checks pass.
