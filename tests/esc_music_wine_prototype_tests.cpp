@@ -195,6 +195,74 @@ void synthetic_commands_are_bound_to_exact_original_theme_and_sxd() {
     CHECK(inner_advanced.same_dispatch(next));
     CHECK(!kMusic.same_dispatch(next));
 }
+void observed_nov14_in_menu_sxd_handoffs_never_reuse_old_driver_owner() {
+    // Owner's 2026-11-14 19:28 Windows trace, all with the SAME
+    // driver handle/Theme/generation, and with ZERO tracked native
+    // PlayTransitionEx + StopSxd events during their full ESC menus.
+    // A zero command count is not evidence that the inner SXD stayed
+    // identical: 9:8 -> 9:9, 9:10 -> 9:11, 239:5 -> 239:6,
+    // and 239:8 -> 239:1 were captured by the Theme watch.
+    struct Transition {std::uint32_t first, next;};
+    constexpr Transition changes[]{
+        {0x00090008u,0x00090009u},
+        {0x0009000au,0x0009000bu},
+        {0x00ef0005u,0x00ef0006u}, // bank 239 is 0xEF
+        {0x00ef0008u,0x00ef0001u},
+    };
+    for(const auto& pair:changes) {
+        const Identity before{123,0x00090005u,pair.first,77};
+        const Identity after{123,0x00090005u,pair.next,77};
+        CHECK(before.valid() && after.valid());
+        CHECK(!before.same(after));
+        CHECK(before.handle==after.handle);
+        CHECK(before.generation==after.generation);
+        CHECK(before.native_theme_key==after.native_theme_key);
+
+        Coordinator coordinator;
+        CHECK(coordinator.begin_script_pause(true,true,true));
+        coordinator.observe_native_pause(before,true);
+        coordinator.observe_native_pause(before,true);
+        coordinator.end_script_pause();
+        const auto original_resume=
+            coordinator.menu_tick(true,true,true,coordinator.owner_same(before));
+        CHECK(original_resume.command==Command::resume);
+        CHECK(original_resume.count==2);
+        CHECK(before.same_dispatch(original_resume));
+        CHECK(!after.same_dispatch(original_resume));
+
+        // The engine's nested descriptor advanced while the game showed
+        // the ESC actor. No Play/Stop callback is needed for this event.
+        CHECK(!coordinator.owner_same(after));
+        CHECK(!coordinator.menu_tick(true,true,true,coordinator.owner_same(after)));
+        CHECK(coordinator.phase()==Phase::quarantined);
+        CHECK(!coordinator.current(77));
+        // The pure coordinator may propose one LAST safety Pause for its
+        // old owner, but runtime must refuse to dispatch it to 'after'.
+        const auto old_safety=coordinator.take_safety_pause();
+        CHECK(old_safety.command==Command::pause);
+        CHECK(before.same_dispatch(old_safety));
+        CHECK(!after.same_dispatch(old_safety));
+        CHECK(!coordinator.take_safety_pause());
+        // Both original native Resume calls MUST pass through, never
+        // be swallowed by a stale compensation generation.
+        CHECK(coordinator.native_resume(123,Origin::script_resume));
+        CHECK(coordinator.native_resume(123,Origin::script_resume));
+        coordinator.end_script_resume();
+        CHECK(!coordinator.menu_tick(true,false,true,true));
+        CHECK(coordinator.phase()==Phase::idle);
+
+        // A subsequent ESC may independently adopt the new SXD resource.
+        CHECK(coordinator.begin_script_pause(true,true,true));
+        coordinator.observe_native_pause(after,true);
+        coordinator.observe_native_pause(after,true);
+        coordinator.end_script_pause();
+        const auto new_resume=coordinator.menu_tick(true,true,true,
+            coordinator.owner_same(after));
+        CHECK(new_resume.command==Command::resume);
+        CHECK(after.same_dispatch(new_resume));
+        CHECK(!before.same_dispatch(new_resume));
+    }
+}
 void quarantine_never_permanently_mutes_gameplay() {
     // The owner observed eight consecutive ResumeTransitionSxd calls
     // swallowed in phase=quarantined, after which level music never
@@ -245,5 +313,6 @@ int main() {
     stop_and_unknown();uncertainty_restores_silence();
     quarantine_never_permanently_mutes_gameplay();distinct_sfx();
     synthetic_commands_are_bound_to_exact_original_theme_and_sxd();
+    observed_nov14_in_menu_sxd_handoffs_never_reuse_old_driver_owner();
     std::cout<<"experimental ESC music FSM: strict gates, paired calls, focus, Stop OK\n";
 }
