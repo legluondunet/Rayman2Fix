@@ -1119,8 +1119,10 @@ void proto_dispatch(proto::Dispatch action) {
     for(unsigned i=0;i<action.count;++i) {
         {
             const std::lock_guard<std::mutex> lock(g_proto_mutex);
-            if(!g_proto.current(action.generation) ||
-               g_proto.current_handle()!=action.handle)return;
+            const bool authorized=g_proto.current(action.generation) ||
+                (action.command==proto::Command::pause &&
+                 g_proto.safety_current(action.generation));
+            if(!authorized || g_proto.current_handle()!=action.handle)return;
         }
         if(!proto_identity(action.handle,action.generation).valid()) {
             const std::lock_guard<std::mutex> lock(g_proto_mutex);
