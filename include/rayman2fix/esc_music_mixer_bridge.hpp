@@ -33,7 +33,7 @@ class MixerBridge final {
 public:
     bool bind(const Generation& g, std::uint32_t handle,
               const MixerProof& proof) noexcept {
-        if(bound_ || !g.valid() || handle==0 || handle==0xffffffffu ||
+        if(delivering_ || bound_ || !g.valid() || handle==0 || handle==0xffffffffu ||
            !proof.original_cd_verified || !proof.current_music_verified ||
            !proof.initially_playing_verified ||
            !proof.mixer_pause_resume_contract_verified ||
@@ -53,6 +53,13 @@ public:
 
     template<class Call>
     Delivery deliver(const Generation& g, Action action, Call&& call) noexcept {
+        // Native drivers may invoke a callback while a previous logical
+        // transaction is in flight. A second dispatch here would double
+        // pause/resume the same stream and could replay it incorrectly.
+        if(delivering_) {
+            uncertain_=true;
+            return Delivery::uncertain;
+        }
         if(!bound_ || owner_!=g) return Delivery::rejected;
         if(uncertain_) return Delivery::uncertain;
         if(action==Action::none) return Delivery::ignored;
@@ -68,14 +75,21 @@ public:
         if(requesting_pause==physical_paused_) return Delivery::ignored;
         const std::uint32_t count=action==Action::pause
                                      ? pause_calls_ : resume_calls_;
+        const std::uint32_t original_handle=handle_;
+        delivering_=true;
         for(std::uint32_t i=0;i<count;++i) {
-            // A partial callback batch is unsafe. Fail closed and do NOT
-            // issue further resumes on this generation after a failure.
-            if(!call(action,handle_)) {
+            // A driver callback may synchronously retire the owner (Stop),
+            // change a generation or attempt nested delivery. Never send
+            // the remainder of the batch to a dead/recycled stream.
+            const bool succeeded=call(action,original_handle);
+            if(!succeeded || !bound_ || owner_!=g ||
+               handle_!=original_handle || uncertain_) {
                 uncertain_=true;
+                delivering_=false;
                 return Delivery::uncertain;
             }
         }
+        delivering_=false;
         physical_paused_=requesting_pause;
         return Delivery::delivered;
     }
@@ -102,6 +116,7 @@ private:
     bool bound_=false;
     bool uncertain_=false;
     bool physical_paused_=false;
+    bool delivering_=false; // guards synchronous driver reentry and Stop
 };
 
 } // namespace r2fix::esc_music
