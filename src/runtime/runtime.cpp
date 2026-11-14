@@ -1130,6 +1130,10 @@ namespace proto=r2fix::esc_proto;
 std::atomic<bool> g_proto_enabled{false};
 std::atomic<bool> g_proto_callsites_installed{false};
 std::atomic<unsigned> g_proto_generation{0};
+// Purely diagnostic: every observed native SXD Stop callback advances this
+// monotonic counter. Unlike the coordinator's generation, it also covers
+// Stops outside ESC. It neither classifies music nor gates driver forwarding.
+std::atomic<unsigned> g_proto_native_stop_calls{0};
 std::atomic<DWORD> g_proto_pending_at{0};
 std::mutex g_proto_mutex;
 proto::Coordinator g_proto;
@@ -1156,6 +1160,13 @@ struct ProtoPreDriverReport {
     DWORD t_ms=0;
     int depth_before=-1;
     int depth_after=-1;
+    // Source-scoped snapshots, captured outside the native driver callbacks.
+    // Play/Stop counts include OTHER sounds: any delta disproves a totally
+    // quiet interval, but zero alone does not prove the SXD stream is stable.
+    unsigned native_stop_before=0;
+    unsigned native_stop_after=0;
+    unsigned native_play_before=0;
+    unsigned native_play_after=0;
 };
 // Store only a tiny snapshot after the original wrapper. The main menu
 // tick emits disk diagnostics AFTER trying native audio compensation.
@@ -1328,6 +1339,8 @@ void __cdecl proto_script_pause() {
     bool adopted=false;
     DWORD depth_before=0,depth_after=0;
     bool depth_before_ok=false,depth_after_ok=false;
+    unsigned native_stop_before=0,native_stop_after=0;
+    unsigned native_play_before=0,native_play_after=0;
     if(g_proto_enabled.load(std::memory_order_acquire)) {
         BYTE menu=0;
         DWORD depth=0;
@@ -1353,6 +1366,8 @@ void __cdecl proto_script_pause() {
     const bool predriver_trace=adopted && g_log && predriver_sample<16u;
     if(predriver_trace) {
         depth_before_ok=proto_read_depth(depth_before);
+        native_stop_before=g_proto_native_stop_calls.load(std::memory_order_acquire);
+        native_play_before=g_transition_play_calls.load(std::memory_order_acquire);
         g_proto_predriver_probe=ProtoPreDriverProbe{};
         g_proto_predriver_probe.active=true;
     }
@@ -1363,6 +1378,8 @@ void __cdecl proto_script_pause() {
     if(predriver_trace) {
         g_proto_predriver_probe.active=false;
         depth_after_ok=proto_read_depth(depth_after);
+        native_stop_after=g_proto_native_stop_calls.load(std::memory_order_acquire);
+        native_play_after=g_transition_play_calls.load(std::memory_order_acquire);
     }
     {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
@@ -1375,6 +1392,10 @@ void __cdecl proto_script_pause() {
                 depth_before_ok ? int(depth_before) : -1;
             g_proto_predriver_report.depth_after=
                 depth_after_ok ? int(depth_after) : -1;
+            g_proto_predriver_report.native_stop_before=native_stop_before;
+            g_proto_predriver_report.native_stop_after=native_stop_after;
+            g_proto_predriver_report.native_play_before=native_play_before;
+            g_proto_predriver_report.native_play_after=native_play_after;
         }
         if(adopted)g_proto.end_script_pause();
         else if(g_proto.phase()==proto::Phase::audible_menu)
@@ -1535,6 +1556,10 @@ bool proto_allow_resume(DWORD handle) {
     return g_proto.native_resume(handle,g_proto_origin);
 }
 void proto_record_stop(DWORD handle) {
+    // Observe the native Stop before it reaches the original driver. This
+    // counter is never read by the audio coordinator and never suppresses
+    // or changes a Stop call.
+    g_proto_native_stop_calls.fetch_add(1u,std::memory_order_relaxed);
     const std::lock_guard<std::mutex> lock(g_proto_mutex);
     g_proto.native_stop(handle);
 }
@@ -1853,6 +1878,29 @@ void proto_menu_tick() {
             owner.inner_bank_provenance.bank_id,
             owner.inner_bank_provenance.resource_index);
         log_line(line);
+        // Read-only source-window audit. Snapshot the global native Play
+        // and Stop call counts before/after the script wrapper and at the
+        // subsequent menu tick, AFTER all existing audio decisions.
+        // These are not per-song counters and MUST NOT authorize bypass.
+        const unsigned stop_tick=g_proto_native_stop_calls.load(
+            std::memory_order_acquire);
+        const unsigned play_tick=g_transition_play_calls.load(
+            std::memory_order_acquire);
+        char window[340]{};
+        std::snprintf(window,sizeof(window),
+            "RUNTIME-ESC-PREDRIVER-WINDOW: t_ms=%lu "
+            "stop_during_wrapper=%u stop_after_wrapper=%u "
+            "play_during_wrapper=%u play_after_wrapper=%u "
+            "menu_known=%u esc_actor_confirmed=%u "
+            "(read-only global events, not a music-owner proof; audio unchanged)",
+            static_cast<unsigned long>(report.t_ms),
+            report.native_stop_after-report.native_stop_before,
+            stop_tick-report.native_stop_after,
+            report.native_play_after-report.native_play_before,
+            play_tick-report.native_play_after,
+            unsigned(known),
+            unsigned(known && menu!=0 && actor_ok));
+        log_line(window);
     }
     if(phase==proto::Phase::pending_menu && known && menu!=0) {
         proto_log("menu-verdict",
