@@ -90,8 +90,12 @@ public:
             state_=State::menu_committed;
             return {};
         }
-        if((menu_known && visible_esc_actor &&
-            (!foreground || !same_original_stream)) ||
+        // A lost foreground invalidates ESC ownership immediately, even
+        // before the render thread has observed the actual menu actor.
+        // Holding back a native Pause during Alt+Tab is not acceptable.
+        // The original stream still has to be rechecked before replay.
+        if(!foreground ||
+           (menu_known && visible_esc_actor && !same_original_stream) ||
            age_ms>=kMenuConfirmationDeadlineMs) {
             return fallback(same_original_stream);
         }
