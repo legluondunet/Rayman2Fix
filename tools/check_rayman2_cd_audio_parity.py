@@ -76,6 +76,22 @@ ANCHOR_BYTES = (
     ("resume_mark_compare", 0x45813C, bytes.fromhex("3B C8")),
     ("resume_mark_clear", 0x458143, bytes.fromhex("C7 06 00 00 00 00")),
     # Original-CD bank registry and resource resolver share these fields.
+    # Original-CD type registry: three 12-byte list anchors.
+    # The third begins at 0x5013F8 (personal type list). 0x407B00
+    # walks its next-element (+0) and obtains the name from element+0xC.
+    # The world roots are engine globals, not UI state booleans.
+    ("menu_personal_list_initializer", 0x403C90,
+     bytes.fromhex("BA F8 13 50 00")),
+    ("menu_personal_list_indexer", 0x407B04,
+     bytes.fromhex("A1 F8 13 50 00")),
+    ("menu_personal_next_pointer", 0x407B0D,
+     bytes.fromhex("8B 00")),
+    ("menu_personal_name_pointer", 0x407B16,
+     bytes.fromhex("8B 40 0C")),
+    ("menu_dynamic_world_global", 0x403B75,
+     bytes.fromhex("A3 D0 0F 50 00")),
+    ("menu_inactive_world_global", 0x403B7F,
+     bytes.fromhex("A3 C4 0F 50 00")),
     ("loaded_bank_list_head", 0x4538C0, bytes.fromhex("A1 50 4D 51 00")),
     ("loaded_bank_id_field", 0x4538CD, bytes.fromhex("39 48 04")),
     ("loaded_bank_next_field", 0x4538D2, bytes.fromhex("8B 40 3C")),
@@ -529,6 +545,21 @@ def audit(cd_bytes: bytes, ref_bytes: bytes, *, require_pins: bool = True,
             "exact_pinned_pair": pinned, "selected_audio_code_equal": all_checks,
             "original_cd_audio_path_confirmed": pinned and all_checks and check_anchors,
             "original_cd_bank_filename_formatter_verified": pinned and bank_checked,
+            "menu_actor_readonly_source_map": {
+                "pinned_original_cd_and_reference_anchors_verified": pinned
+                    and check_anchors and all(x["verified_both"]
+                        for x in byte_anchors
+                        if x["name"].startswith("menu_personal_")
+                        or x["name"].startswith("menu_dynamic_world_")
+                        or x["name"].startswith("menu_inactive_world_")),
+                "personal_type_list_head_va": "0x005013F8",
+                "dynamic_world_global_va": "0x00500FD0",
+                "inactive_world_global_va": "0x00500FC4",
+                "list_element_next_offset": 0,
+                "list_element_name_offset": 12,
+                "actor_live_instance_not_yet_observed": True,
+                "actor_presence_is_not_ESC_exclusivity_proof": True,
+            },
             "native_loaded_bank_inverse_mapping": {
                 "verified_pinned_cd_and_reference": pinned and
                     all(x["verified_both"] for x in byte_anchors if
