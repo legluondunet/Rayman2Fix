@@ -125,3 +125,68 @@ The next high-confidence input is a normal owner log from
 that build. The actual resolved ADPCM DLL can then be
 identified and, if necessary, studied through its own
 hash-locked original bytes. Keep PR #10 draft.
+
+## Exact downstream ADPCM DLL identified in owner's 21:31 session (14 November)
+
+A new Windows runtime log, `Rayman2Fix(20261114-213131).log`,
+shows that the new original-DLL indirection-table observer
+resolves **all three** delegated type-4 functions successfully:
+
+| Native ADPCM delegate | Resolved original module | Callback RVA | Resolution |
+| --- | --- | --- | --- |
+| StopTransitionSxdADPCM | `APMMXbvr.dll` | `0x54C0` | loaded, executable address |
+| PauseTransitionSxdADPCM | `APMMXbvr.dll` | `0x54D0` | loaded, executable address |
+| ResumeTransitionSxdADPCM | `APMMXbvr.dll` | `0x54E0` | loaded, executable address |
+
+The source of these three facts is the **actual original
+WAVMWbvr function-pointer table at runtime**, not the
+`[DLL_Adpcm] Default=APMPW` configuration string. This
+establishes the full original module chain as
+`rayman2.exe → WAVMWbvr.dll type 4 → APMMXbvr.dll`
+for observed source-specific ESC transition objects. It
+does **not** establish the per-stream implementation
+inside APMMXbvr or how pause state is rolled back.
+
+The session contains **10** source-verified script Pause
+wrappers, all ten with post-native type `4`, and **8**
+script Resume wrappers, each with two same-object native
+slot-3 calls, no mixed pair: **six** early strict Theme
+reference mismatches forwarded both, **two** stable
+compensated menus suppressed both. The first observed menu
+at 115.953 s compensated while inner SXD was `239:17`,
+then progressed to `239:18` / `239:19` while menu=1
+and entered the normal `phase=6` quarantine. This
+first session has **no script Resume trace** before an
+intro/level transition; its original native pause depth
+is subsequently observed to start at **2** rather than 1.
+The first following source Resume at 156.141 s correctly
+reports `paired=0 overlap=1` because the earlier
+recorded opening was not closed by a matched Resume.
+**Its zero Play/Stop deltas are invalid**, not evidence
+of an event-free session. Seven subsequent completed
+lifetime reports are paired successfully; a last
+compensated opening at 174.922 s also quarantines
+without a matching close before the log ends.
+The absence of a matching close in a log is not by
+itself proof of a persistent stuck pause or a crash;
+no owner listening outcome was supplied.
+
+**Precise next static target:** the *owner's* actual
+`Rayman2Fix/dll/APMMXbvr.dll` (case-insensitive Windows
+name). Obtain that DLL from the same CD installation
+without modification, hash it and verify the three
+exported addresses/RVAs `0x54C0/0x54D0/0x54E0`.
+Then statically trace the original type-4
+Pause/Resume/Stop leaf paths, their per-channel state
+and any callbacks, stop/replacement, refcount or queue
+management. Do not guess that these three adjacent
+entries are no-op stubs, and do not assume that the
+sample/voice boolean state in WAVMWbvr applies to
+the delegated ADPCM implementation.
+
+Public project `raytools/ACP_Ray2` documents
+multipart CPA Themes; their logical transition keys
+do not establish a physical voice lifetime. No
+additional gameplay test is required merely to
+identify the module, and no original DLL is
+modified or committed.
