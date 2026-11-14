@@ -200,6 +200,41 @@ class TraceEvidenceTests(unittest.TestCase):
             stop["menu_flag_zero_is_not_a_resume_or_stop_reason_proof"])
         self.assertTrue(result["in_game_menu_flag_cannot_distinguish_ESC_from_F1"])
 
+    def test_retail_native_current_theme_player_key_crosschecks_actual_bank(self):
+        native=(
+            " outer_native_bank=9 outer_native_index=5"
+            " outer_bank_candidates=1 outer_bank_list_complete=1"
+            " inner_native_bank=9 inner_native_index=7"
+            " inner_bank_candidates=1 inner_bank_list_complete=1"
+        )
+        result=M.summarize("\n".join((
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
+            trace("PauseTransitionSxd",1,100),
+            owner("PauseTransitionSxd",1,inner=50)+native+
+            " native_theme_player_key_matches_outer=1",
+            trace("PauseTransitionSxd",2,101),
+            owner("PauseTransitionSxd",2,inner=50)+native+
+            " native_theme_player_key_matches_outer=0",
+            trace("StopTransitionSxd",1,102),
+            owner("StopTransitionSxd",1,inner=50)+native+
+            " native_theme_player_key_matches_outer=-1",
+        )))
+        self.assertEqual(result["ownership_records_validated"],3)
+        evidence=result["current_native_theme_player_matches_loaded_owner_events"]
+        self.assertEqual(len(evidence),1)
+        self.assertEqual(evidence[0]["outer_loaded_bank_and_index"],[9,5])
+        self.assertEqual(evidence[0]["inner_loaded_bank_and_index"],[9,7])
+        self.assertTrue(evidence[0]["does_not_prove_audible_level_music"])
+
+    def test_legacy_owned_theme_without_player_key_never_infers_a_match(self):
+        result=M.summarize("\n".join((
+            "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
+            trace("PauseTransitionSxd",1,100),
+            owner("PauseTransitionSxd",1),
+        )))
+        self.assertEqual(result[
+            "current_native_theme_player_matches_loaded_owner_events"],[])
+
     def test_real_loaded_bank_provenance_is_separate_from_Id_halves(self):
         def mk(event, sample, timestamp, bank, index, inner_bank, inner_index):
             return (
