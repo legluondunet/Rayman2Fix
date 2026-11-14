@@ -1061,6 +1061,7 @@ std::atomic<bool> g_proto_enabled{false};
 std::atomic<bool> g_proto_callsites_installed{false};
 std::atomic<unsigned> g_proto_generation{0};
 std::atomic<DWORD> g_proto_pending_at{0};
+std::atomic<unsigned> g_proto_live_ref_retry_logged_generation{0};
 std::mutex g_proto_mutex;
 proto::Coordinator g_proto;
 thread_local proto::Origin g_proto_origin=proto::Origin::unknown;
@@ -1160,10 +1161,15 @@ void proto_dispatch(proto::Dispatch action) {
                  g_proto.safety_current(action.generation));
             if(!authorized || g_proto.current_handle()!=action.handle)return;
         }
-        if(!proto_identity(action.handle,action.generation).valid()) {
+        const auto live_identity=proto_identity(action.handle,action.generation);
+        {
             const std::lock_guard<std::mutex> lock(g_proto_mutex);
-            g_proto.quarantine();
-            return;
+            // Rechecking the handle alone is unsafe after a scene change:
+            // require both exact native bank identities AND the generation.
+            if(!g_proto.identity_matches(live_identity)) {
+                g_proto.quarantine();
+                return;
+            }
         }
         fn(action.handle);
     }
@@ -1414,9 +1420,19 @@ void proto_menu_tick() {
     }
     if(phase==proto::Phase::idle)return;
     if(phase==proto::Phase::pending_menu &&
-       DWORD(GetTickCount()-started)>1500u) {
-        const std::lock_guard<std::mutex> lock(g_proto_mutex);
-        if(g_proto.phase()==proto::Phase::pending_menu)g_proto.reset();
+       DWORD(now-started)>proto::kLiveThemeVerifyWindowMs) {
+        bool reset=false;
+        {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            if(g_proto.phase()==proto::Phase::pending_menu &&
+               g_proto_generation.load(std::memory_order_relaxed)==generation) {
+                g_proto.reset();
+                reset=true;
+            }
+        }
+        if(reset && g_proto_live_ref_retry_logged_generation.load(
+                std::memory_order_relaxed)==generation)
+            proto_log("menu-verdict","live-theme-ref-timeout-native-audio-unchanged");
         return;
     }
     BYTE menu=0;
@@ -1428,13 +1444,33 @@ void proto_menu_tick() {
     const bool actor_ok=!(phase==proto::Phase::pending_menu &&
                           known && menu!=0) ||
                          proto_esc_menu_actor_open();
-    const bool current=actor_ok &&
-        proto_identity(handle,generation).valid();
+    // A provisional pause owner was saved from TWO original script-driven
+    // native PauseTransitionSxd calls. Compare the exact loaded Theme and
+    // SXD keys again at menu open; a reused driver handle is insufficient.
+    const auto live_identity=actor_ok ? proto_identity(handle,generation) :
+        proto::Identity{};
+    const bool foreground=game_window_is_foreground();
+    bool current=false;
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        current=actor_ok && g_proto.identity_matches(live_identity);
+    }
+    if(proto::retry_live_theme_identity(phase,known,menu!=0,actor_ok,
+                                       foreground,current,DWORD(now-started))) {
+        // The first menu may appear before native current Theme pointer
+        // settles. Leave original pause in effect; retry at most once
+        // each 75ms, for <=1500ms. Never synthesize an unverified Resume.
+        const auto seen=g_proto_live_ref_retry_logged_generation.exchange(
+            static_cast<unsigned>(generation),std::memory_order_relaxed);
+        if(seen!=generation)
+            proto_log("menu-verdict","await-live-theme-ref-native-audio-unchanged");
+        return;
+    }
     proto::Dispatch action{};
     {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
         action=g_proto.menu_tick(known && actor_ok,menu!=0,
-                                 game_window_is_foreground(),current);
+                                 foreground,current);
     }
     // One bounded verdict per actual pending -> menu-open observation.
     // This diagnostic is never used to authorize a native call.
