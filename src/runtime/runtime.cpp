@@ -366,7 +366,7 @@ void log_cpa_sound_configuration() {
     wchar_t* end=wcsrchr(path,L'\\');
     if(!end)return;
     const wchar_t filename[]=L"dll\\snd_cpa.ini";
-    if(static_cast<std::size_t>(end-path)+
+    if(static_cast<std::size_t>(end+1-path)+
        (sizeof(filename)/sizeof(filename[0]))>MAX_PATH)return;
     wcscpy_s(end+1,MAX_PATH-static_cast<std::size_t>(end+1-path),filename);
     const DWORD attributes=GetFileAttributesW(path);
