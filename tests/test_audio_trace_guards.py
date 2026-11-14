@@ -266,11 +266,11 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("VirtualProtect(",flush)
         self.assertNotIn("pre_driver_pause::Policy",self.runtime)
 
-    def test_exact_owner_adpcm_voice_probe_is_post_native_readonly_and_bounded(self):
+    def test_exact_owner_adpcm_voice_probe_is_post_dispatch_readonly_and_bounded(self):
         # Original WAVMW transition type=4 -> APMMX ADPCM handle ->
         # 0xE4-stride validated voice. Sampling is NOT pause authorization.
         helper=self.runtime.split(
-            "ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_post_pause(DWORD ref) {",
+            "ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {",
             1)[1].split("void __cdecl proto_script_pause() {",1)[0]
         for fragment in (
             'GetModuleHandleW(L"WAVMWbvr.dll")',
@@ -296,7 +296,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         callback=self.runtime.split(
             "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1].split(
             "void __stdcall audio_pause_sxd(",1)[0]
-        self.assertNotIn("proto_sample_adpcm_voice_post_pause(",callback)
+        self.assertNotIn("proto_sample_adpcm_voice_after_dispatch(",callback)
         # The *separate research-only* RAYMAN2FIX_AUDIO_TRACE branch
         # already reads process memory in legacy callback diagnostics.
         # Standard opt-in production hooks must NOT add any such read.
@@ -305,22 +305,21 @@ class AudioTraceGuardTests(unittest.TestCase):
         pause=self.runtime.split(
             "void __cdecl proto_script_pause() {",1)[1].split(
             "void __cdecl proto_script_resume() {",1)[0]
-        self.assertIn("if(transition_type_post_pause==4)",pause)
-        self.assertIn("adpcm_voice=proto_sample_adpcm_voice_post_pause(",pause)
-        self.assertLess(
-            pause.index("proto_call_original(0x536D0);"),
-            pause.index("proto_sample_adpcm_voice_post_pause("))
-        self.assertIn("if(predriver_trace)",pause)  # sample budget=16
-        self.assertIn("g_proto_predriver_report.adpcm_voice_sampled=",pause)
-        self.assertIn("g_proto_predriver_report.adpcm_voice_pause=",pause)
+        self.assertIn("proto_call_original(0x536D0);",pause)
+        self.assertIn("if(predriver_trace)",pause)  # first 16 eligible sources
+        self.assertNotIn("proto_sample_adpcm_voice_after_dispatch(",pause)
         tick=self.runtime.split(
             "void proto_menu_tick() {",1)[1].split(
             "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
         self.assertIn("RUNTIME-ESC-ADPCM-VOICE:",tick)
-        self.assertIn("report.adpcm_voice_sampled",tick)
+        self.assertIn("report.transition_type_post_pause==4",tick)
+        self.assertIn("proto_sample_adpcm_voice_after_dispatch(probe.first_handle)",tick)
+        self.assertIn("snapshot=post-dispatch",tick)
         self.assertLess(tick.index("proto_dispatch(action);"),
-                        tick.index("RUNTIME-ESC-ADPCM-VOICE:"))
-        self.assertNotIn("proto_sample_adpcm_voice_post_pause(",tick)
+                        tick.index("proto_sample_adpcm_voice_after_dispatch("))
+        self.assertLess(tick.index("proto_deferred_safety();"),
+                        tick.index("proto_sample_adpcm_voice_after_dispatch("))
+        self.assertNotIn("g_proto_predriver_report.adpcm_voice_sampled",self.runtime)
 
     def test_transition_object_type_probe_is_post_native_bounded_and_passive(self):
         # The owner's SHA-pinned WAVMWbvr PE has a tagged transition
