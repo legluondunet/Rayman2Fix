@@ -475,19 +475,19 @@ class TraceEvidenceTests(unittest.TestCase):
         self.assertFalse(result["focus_loss_not_proven_when_missing"])
         self.assertTrue(result["theme_ownership_does_not_prove_audible_music"])
 
-    def test_menu_actor_and_f1_are_readonly_candidates_not_esc_proof(self):
+    def test_menu_actor_is_readonly_candidate_not_esc_visibility_proof(self):
         data = "\n".join((
             "RUNTIME-AUDIO-TRACE: enabled=1 schema=2",
             "RUNTIME-AUDIO-MENU-ACTOR: t_ms=1000 in_game_menu=0 "
-            "engine_paused=0 f1_down=0 esc_down=0 "
+            "engine_paused=0 esc_down=0 "
             "personal_type_found=1 dynamic_actor=0 inactive_actor=0 "
             "type_nodes=680 dynamic_nodes=119 inactive_nodes=25",
             "RUNTIME-AUDIO-MENU-ACTOR: t_ms=1600 in_game_menu=0 "
-            "engine_paused=0 f1_down=1 esc_down=0 "
+            "engine_paused=0 esc_down=1 "
             "personal_type_found=1 dynamic_actor=0 inactive_actor=0 "
             "type_nodes=680 dynamic_nodes=119 inactive_nodes=25",
             "RUNTIME-AUDIO-MENU-ACTOR: t_ms=4200 in_game_menu=1 "
-            "engine_paused=0 f1_down=0 esc_down=0 "
+            "engine_paused=0 esc_down=0 "
             "personal_type_found=1 dynamic_actor=1 inactive_actor=0 "
             "type_nodes=680 dynamic_nodes=120 inactive_nodes=25",
         ))
@@ -497,29 +497,28 @@ class TraceEvidenceTests(unittest.TestCase):
             [x["candidate_actor_in_active_world"]
              for x in result["menu_actor_readonly_snapshots"]], [0, 0, 1])
         self.assertEqual(
-            [x["f1_key_down_at_sample"]
+            [x["esc_key_down_at_sample"]
              for x in result["menu_actor_readonly_snapshots"]], [0, 1, 0])
         self.assertTrue(result[
-            "menu_actor_candidate_cannot_distinguish_ESC_from_F1"])
+            "menu_actor_candidate_not_sufficient_to_prove_ESC_visibility"])
         self.assertTrue(result[
             "older_logs_lacking_actor_snapshots_are_not_negative_evidence"])
         for entry in result["menu_actor_readonly_snapshots"]:
             self.assertTrue(entry["name_only_candidate_not_ESC_UI_proof"])
-            self.assertTrue(entry["f1_key_sample_not_F1_menu_proof"])
         self.assertNotIn("KEEP_PRIVATE", str(result))
 
     def test_bad_actor_registry_and_invalid_snapshots_are_not_presence(self):
         data = "\n".join((
             "RUNTIME-AUDIO-MENU-ACTOR: t_ms=800 in_game_menu=1 "
-            "engine_paused=0 f1_down=0 esc_down=0 "
+            "engine_paused=0 esc_down=0 "
             "personal_type_found=1 dynamic_actor=-1 inactive_actor=-1 "
             "type_nodes=4096 dynamic_nodes=4096 inactive_nodes=0 "
             "private_path=KEEP_PRIVATE",
             "RUNTIME-AUDIO-MENU-ACTOR: t_ms=900 in_game_menu=1 "
-            "engine_paused=0 f1_down=0 esc_down=0 "
+            "engine_paused=0 esc_down=0 "
             "personal_type_found=1 dynamic_actor=9 inactive_actor=0",
             "RUNTIME-AUDIO-MENU-ACTOR: t_ms=1000 in_game_menu=9 "
-            "engine_paused=0 f1_down=0 esc_down=0 "
+            "engine_paused=0 esc_down=0 "
             "personal_type_found=1 dynamic_actor=1 inactive_actor=0",
         ))
         result=M.summarize(data)
