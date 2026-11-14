@@ -341,6 +341,60 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Build separately gated ESC music Wine prototype
+        shell: pwsh
+        run: |
+          # This is not a user-facing release. The output contains only our
+          # launcher, its injected research DLL and the pinned GameFrame.
+          # RAYMAN2FIX_ESC_AUDIO_PROTOTYPE=1 must ALSO be set at runtime.
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=OFF -DRAYMAN2FIX_AUDIO_TRACE=ON -DRAYMAN2FIX_ESC_MUSIC_PROTO=ON
+          if ($LASTEXITCODE -ne 0) { throw 'ESC experiment CMake configure failed' }
+          cmake --build build --config Release --target Rayman2Fix --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'ESC experiment Windows x86 build failed' }
+          @'
+          from pathlib import Path
+          data=Path('build/Release/Rayman2Fix.dll').read_bytes()
+          for marker in (
+              b'RUNTIME-ESC-PROTOTYPE: enabled=1',
+              b'source-hooks-installed',
+              b'RUNTIME-AUDIO-TRACE: enabled=1',
+          ):
+              if marker not in data:
+                  raise SystemExit(f'ESC prototype DLL missing marker {marker!r}')
+          print('Opt-in native ESC prototype DLL linked: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'ESC experiment was not linked' }
+          New-Item -Path esc-prototype -ItemType Directory -Force | Out-Null
+          Copy-Item build/Release/Rayman2Fix.exe esc-prototype/Rayman2Fix.exe
+          $global:LASTEXITCODE = 0
+      - name: Verify ESC prototype EXE contains the exact new injected DLL
+        shell: pwsh
+        run: |
+          New-Item -Path esc-prototype-smoke -ItemType Directory -Force | Out-Null
+          Copy-Item esc-prototype/Rayman2Fix.exe esc-prototype-smoke/Rayman2Fix.exe
+          & ./esc-prototype-smoke/Rayman2Fix.exe --verify 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 2) { throw 'Prototype did not fail safely without media' }
+          $deployed = 'esc-prototype-smoke/Rayman2Fix/Rayman2Fix.dll'
+          if (!(Test-Path $deployed)) { throw 'Embedded prototype DLL not deployed' }
+          $expected=(Get-FileHash build/Release/Rayman2Fix.dll -Algorithm SHA256).Hash
+          $actual=(Get-FileHash $deployed -Algorithm SHA256).Hash
+          if ($expected -ne $actual) { throw 'Stale embedded prototype DLL' }
+          @'
+          from pathlib import Path
+          data=Path('esc-prototype-smoke/Rayman2Fix/Rayman2Fix.dll').read_bytes()
+          if b'RUNTIME-ESC-PROTOTYPE: enabled=1' not in data:
+              raise SystemExit('Embedded DLL lacks opted-in prototype marker')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Prototype DLL marker missing after deployment' }
+          $global:LASTEXITCODE = 0
+      - name: Upload opt-in experimental ESC music launcher
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rayman2Fix-Windows-x86-esc-music-prototype
+          path: esc-prototype/
+          if-no-files-found: error
+          retention-days: 14
+
   linux-tests:
     runs-on: ubuntu-latest
     steps:
