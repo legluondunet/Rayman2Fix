@@ -225,6 +225,29 @@ class ParityTests(unittest.TestCase):
             pe.chunks[0x4245C8] = b"\x90" + pe.chunks[0x4245C8][1:]
             self.assertFalse(MOD.inspect_menu_background_handle(pe)["matched"])
 
+    def test_menu_actor_registry_roots_are_pinned_to_original_cd(self):
+        anchors = {
+            name: (addr, op)
+            for name, addr, op in MOD.ANCHOR_BYTES
+            if name.startswith("menu_personal_")
+               or name.startswith("menu_dynamic_world_")
+               or name.startswith("menu_inactive_world_")
+        }
+        self.assertEqual(anchors, {
+            "menu_personal_list_initializer":
+                (0x403C90,bytes.fromhex("BA F8 13 50 00")),
+            "menu_personal_list_indexer":
+                (0x407B04,bytes.fromhex("A1 F8 13 50 00")),
+            "menu_personal_next_pointer":
+                (0x407B0D,bytes.fromhex("8B 00")),
+            "menu_personal_name_pointer":
+                (0x407B16,bytes.fromhex("8B 40 0C")),
+            "menu_dynamic_world_global":
+                (0x403B75,bytes.fromhex("A3 D0 0F 50 00")),
+            "menu_inactive_world_global":
+                (0x403B7F,bytes.fromhex("A3 C4 0F 50 00")),
+        })
+
     def test_inverse_loaded_bank_lookup_has_original_cd_code_anchors(self):
         anchors = {
             name: (address, raw)
