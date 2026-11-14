@@ -5,6 +5,7 @@
 #include "rayman2fix/sha256.hpp"
 #include "rayman2fix/patch_install.hpp"
 #include "rayman2fix/exe_patch.hpp"
+#include "rayman2fix/owner_exe.hpp"
 #include "rayman2fix/gameframe.hpp"
 #include "rayman2fix/game_launch.hpp"
 #include "rayman2fix/game_config.hpp"
@@ -416,28 +417,12 @@ void publish_installation(const fs::path& game_dir, const fs::path& staging) {
     }
 }
 
-// Discover only byte-for-byte approved owner-supplied complete EXEs placed
-// BESIDE Rayman2Fix.exe (never in the extracted game directory). Accept any
-// filename ending in .exe, including Rayman2(4).exe from a browser download;
-// filename alone is NOT trusted. Reject multiple matching candidates rather
-// than selecting arbitrarily, and never inspect symlinks.
+// Only the allowlisted complete owner executable is accepted, regardless
+// of its downloaded filename. The pure scanner has synthetic unit tests.
 std::optional<fs::path> find_approved_unprotected_executable(
     const fs::path& launcher_root) {
-    std::optional<fs::path> candidate;
-    for (const auto& entry : fs::directory_iterator(launcher_root)) {
-        if (!entry.is_regular_file() || entry.is_symlink() ||
-            upper(entry.path().extension().u8string()) != ".EXE" ||
-            entry.file_size() != kApprovedUnprotectedExeSize)
-            continue;
-        if (sha256_file(entry.path()) != kApprovedUnprotectedExeSha256)
-            continue;
-        if (candidate)
-            throw std::runtime_error(
-                "multiple approved unprotected game EXEs beside Rayman2Fix.exe; "
-                "keep only one (original CD files are not modified)");
-        candidate = entry.path();
-    }
-    return candidate;
+    return find_owner_executable(launcher_root,
+        kApprovedUnprotectedExeSize,kApprovedUnprotectedExeSha256);
 }
 
 // Patch bytes are intentionally not bundled until we obtain the ORIGINAL
