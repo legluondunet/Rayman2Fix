@@ -39,6 +39,42 @@ struct Identity {
     }
 };
 
+// Lightweight, render-thread-only change detector for READ-ONLY
+// intro-to-level Theme controller research. It only decides whether an
+// already-sampled native controller snapshot deserves a diagnostic log.
+// It never authorizes, pauses, or resumes any audio.
+struct ThemeRefWatchInput {
+    std::uint32_t controller_active=0;
+    std::uint32_t player_ref=0;
+    std::uint32_t nested_record_ref=0;
+    std::uint8_t menu_flag=0;
+    bool same(const ThemeRefWatchInput& other) const noexcept {
+        return controller_active==other.controller_active &&
+               player_ref==other.player_ref &&
+               nested_record_ref==other.nested_record_ref &&
+               menu_flag==other.menu_flag;
+    }
+};
+class ThemeRefWatchPolicy {
+public:
+    static constexpr std::uint32_t kWindowMs=120000u;
+    static constexpr unsigned kMaxEvents=24u;
+    bool observe(const ThemeRefWatchInput& sample,
+                 std::uint32_t session_age_ms) noexcept {
+        if(session_age_ms>kWindowMs || events_>=kMaxEvents)return false;
+        if(initialized_ && sample.same(previous_))return false;
+        previous_=sample;
+        initialized_=true;
+        ++events_;
+        return true;
+    }
+    unsigned events() const noexcept{return events_;}
+private:
+    bool initialized_=false;
+    unsigned events_=0;
+    ThemeRefWatchInput previous_{};
+};
+
 // This policy assumes the game's original paired Theme/SXD calls have
 // already reached the real driver. A matching *experimental* resume batch
 // starts only AFTER native AI_g_bInGameMenu rises, never from Escape key alone.
