@@ -127,7 +127,7 @@ class APMMXReadOnlyAuditTests(unittest.TestCase):
         with patch.object(audit, "OWNER_ORIGINAL_SHA256",
                           hashlib.sha256(data).hexdigest()):
             with patch.object(audit, "OWNER_STATIC_SIGNATURES",
-                              {0x54C0: b"\\x90\\x90\\x90"}):
+                              {0x54C0: b"\x90\x90\x90"}):
                 result = audit.audit_bytes(data)
                 self.assertTrue(result["owner_original_sha256_matches"])
                 contract = result["owner_static_pause_contract"]
@@ -136,7 +136,7 @@ class APMMXReadOnlyAuditTests(unittest.TestCase):
                 self.assertEqual(contract["resume_value"], 0)
                 self.assertTrue(contract["stop_invalidates_handle"])
             with patch.object(audit, "OWNER_STATIC_SIGNATURES",
-                              {0x54C0: b"\\xCC\\xCC"}):
+                              {0x54C0: b"\xCC\xCC"}):
                 with self.assertRaisesRegex(audit.PEFormatError, "signature mismatch"):
                     audit.audit_bytes(data)
 
