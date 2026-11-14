@@ -1,10 +1,15 @@
-# Rayman2Fix — *experimental* ESC music continuation
+# Rayman2Fix — archived ESC music Wine prototype research
 
-This is **not a release**. The build has not yet been validated against the
-owner's installed audio-driver DLL or by a real Wine gameplay session.
-Only the separate GitHub Actions artifact
-`Rayman2Fix-Windows-x86-esc-music-prototype` contains the executable with
-this experimental code. The normal build is unaffected.
+**Historical development record.** The owner's real Wine gameplay tests on
+14 November 2026 validated the original level music continuing in the ESC
+menu, with Alt+Tab. The r3 prototype was merged in PR #9. The new normal
+runtime integration is implemented separately in PR #10, with
+`[Features] MusicInPauseMenu=0` by default and `1` to opt in.
+
+The following paragraphs describe the **earlier standalone research artifact
+only**. Its old compile switches and environment variable are **not**
+required by the standard launcher. The old provisional cautions below
+refer to the state *before* the owner's successful Wine validation.
 
 ## Activation and safeguards
 
@@ -50,7 +55,7 @@ selected. Focus transitions have a separate policy, including safety pause
 and a fail-closed quarantine for unexpected event orders. F1 is excluded.
 The native scene pause flags and per-sound markers are not rewritten.
 
-**This is still a working hypothesis requiring actual listening.**
+**At the time this was a working hypothesis; subsequent Wine listening succeeded.**
 The observable key press and in-game menu flag are combined with distinct
 native source paths, but do not on their own prove that no other script can
 enter a similar state. If no eligible current Theme is found or a required
@@ -86,8 +91,9 @@ A successful CI build demonstrates executable compilation and embedding,
 **not** that audio continued correctly in Wine. If sound behaves unexpectedly,
 stop this experiment and relaunch with a **normal nonexperimental build** to
 restore the normal DLL, without deleting music files or overwriting saves.
-Do not merge this prototype or expose `MusicInPauseMenu=1` until a real
-Windows/Wine test validates sound, focus and Stop behavior.
+Historical note: this was a pre-validation restriction. The owner has
+subsequently validated sound and Alt+Tab under Wine; the production INI
+option is available on the dedicated integration branch.
 
 
 ## Evidence from owner Wine test — 14 November 2026
