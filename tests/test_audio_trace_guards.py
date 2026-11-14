@@ -624,6 +624,40 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("VirtualProtect(",probe)
         self.assertNotIn("std::filesystem",probe)
 
+    def test_cpa_ini_audit_reads_only_original_game_config_at_initialization(self):
+        audit=self.runtime.split("void log_cpa_sound_configuration() {",1)[1].split(
+            "bool game_window_is_foreground() {",1)[0]
+        self.assertIn('L"dll\\\\snd_cpa.ini"',audit)
+        self.assertIn("GetModuleFileNameW(nullptr,path,MAX_PATH)",audit)
+        self.assertIn("GetFileAttributesW(path)",audit)
+        self.assertIn("GetPrivateProfileStringW(",audit)
+        self.assertIn('L"DLL_Sxd",L"Unconditionnal"',audit)
+        self.assertIn('L"DLL_Sxd",L"Default"',audit)
+        self.assertIn('L"DLL_Sxd",L"File0"',audit)
+        self.assertIn('L"DLL_Sxd",L"File1"',audit)
+        self.assertIn('L"DLL_Adpcm",L"Default"',audit)
+        self.assertIn("RUNTIME-AUDIO-CONFIG:",audit)
+        self.assertIn("configuration candidates only; original DLL unchanged",audit)
+        self.assertIn("end+1-path",audit)  # include '\\0' in bound
+        for forbidden in (
+            "WritePrivateProfileString", "LoadLibrary", "GetProcAddress",
+            "CreateFile", "WriteFile", "VirtualProtect", "RegSetValue",
+        ):
+            self.assertNotIn(forbidden,audit)
+        init=self.runtime.split(
+            "DWORD WINAPI Rayman2Fix_Initialize(void* input) {",1)[1].split(
+            "BOOL APIENTRY DllMain(",1)[0]
+        self.assertIn("log_cpa_sound_configuration();",init)
+        self.assertLess(init.index("g_audio_origin.store(GetTickCount()"),
+                        init.index("log_cpa_sound_configuration();"))
+        self.assertLess(init.index("log_cpa_sound_configuration();"),
+                        init.index("const DWORD camera_status = install_camera_hook();"))
+        callback=self.runtime.split(
+            "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1].split(
+            "void __stdcall audio_pause_sxd(",1)[0]
+        self.assertNotIn("log_cpa_sound_configuration();",callback)
+        self.assertNotIn("GetPrivateProfileStringW(",callback)
+
     def test_native_bank_provenance_scan_is_bounded_and_fail_closed(self):
         # The registry is a source of actual bank ID and table index,
         # unlike arbitrary high/low halves of the record's +0 Id field.
