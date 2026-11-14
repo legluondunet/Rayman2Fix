@@ -50,7 +50,20 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("if(last_sample && DWORD(now-last_sample)<40u)return;",watcher)
         self.assertIn("proto::ThemeRefWatchPolicy::kWindowMs",watcher)
         self.assertIn("proto::ThemeRefWatchInput snapshot",watcher)
+        self.assertIn("read_native(0xB8C98,records,sizeof(records))",watcher)
+        self.assertIn("decode_audio_nested_record_ref(nested,module)",watcher)
+        self.assertIn("record.words[1]",watcher)
+        self.assertIn("controller_words[3],controller_words[5]",watcher)
+        self.assertIn("nested,outer_descriptor,inner_descriptor,menu",watcher)
         self.assertIn("if(!watch.observe(snapshot,DWORD(now-origin)))return;",watcher)
+        self.assertIn("outer_descriptor_ref==other.outer_descriptor_ref",self.esc_music_header)
+        self.assertIn("inner_descriptor_ref==other.inner_descriptor_ref",self.esc_music_header)
+        self.assertIn("controller_field0c==other.controller_field0c",self.esc_music_header)
+        # The menu byte is useful to display, but it must not exhaust
+        # the 24-event Theme monitor budget on repeat ESC toggles.
+        header_body=self.esc_music_header.split(
+            "bool same(const ThemeRefWatchInput& other) const noexcept {",1)[1].split("}",1)[0]
+        self.assertNotIn("menu_flag==other.menu_flag",header_body)
         self.assertIn("inspect_audio_theme_owner(0,true)",watcher)
         self.assertIn("RUNTIME-ESC-THEME-WATCH:",watcher)
         self.assertIn("alt_same_bank=%d",watcher)
@@ -76,6 +89,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("proto_identity(handle,generation).valid()",tick)
         self.assertIn("proto_esc_menu_actor_open()",tick)
         self.assertIn("RUNTIME-ESC-PERF:",tick)
+        self.assertIn('"RUNTIME-ESC-PERF: t_ms=%lu pending_ms=%lu',tick)
         self.assertIn("RUNTIME-ESC-OWNER-DIAG:",self.runtime)
         self.assertIn("native_player_ref_match=%d",self.runtime)
         self.assertIn("native_player_ref_class=%d",self.runtime)
