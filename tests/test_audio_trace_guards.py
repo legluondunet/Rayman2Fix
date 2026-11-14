@@ -256,6 +256,27 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("native_theme_player_key_matches_outer=%d", self.runtime)
         self.assertNotIn("MusicInPauseMenu",self.config)
 
+    def test_audio_driver_module_probe_logs_only_basename_and_rva(self):
+        section=self.runtime.split(
+            "void log_audio_driver_module(unsigned slot,const void* current) {",1)[1]
+        section=section.split("// Owner's exact CD executable",1)[0]
+        self.assertIn("GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS",section)
+        self.assertIn("GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT",section)
+        self.assertIn("GetModuleFileNameW(",section)
+        self.assertIn("beginning=wide+i+1",section)
+        self.assertIn("callback_rva=0x%08X",section)
+        self.assertIn("module basename only",section)
+        self.assertNotIn("WriteProcessMemory(",section)
+        self.assertNotIn("VirtualProtect(",section)
+        self.assertNotIn("LoadLibrary",section)
+        self.assertNotIn("GetProcAddress",section.replace(
+            "// DLL loading, no GetProcAddress, no game writes.", ""))
+        self.assertNotIn("MusicInPauseMenu",self.config)
+        hook=self.runtime.split("void poll_audio_pause_trace() {",1)[1]
+        self.assertIn("log_audio_driver_module(i,current);",hook)
+        self.assertLess(hook.index("log_audio_driver_module(i,current);"),
+                        hook.index("// Hook the five-argument transition"))
+
     def test_native_bank_provenance_scan_is_bounded_and_fail_closed(self):
         # The registry is a source of actual bank ID and table index,
         # unlike arbitrary high/low halves of the record's +0 Id field.
