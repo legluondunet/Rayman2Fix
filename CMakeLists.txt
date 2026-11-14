@@ -244,6 +244,15 @@ if(BUILD_TESTING)
   add_test(NAME esc-music-wine-prototype-policy
     COMMAND esc_music_wine_prototype_tests)
 
+  # An isolated *model* for pre-driver ESC Pause interception.
+  # Does not link to runtime or alter the shipping audio path.
+  add_executable(esc_pre_driver_pause_tests
+    tests/esc_pre_driver_pause_tests.cpp)
+  target_include_directories(esc_pre_driver_pause_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-pre-driver-pause-research-model
+    COMMAND esc_pre_driver_pause_tests)
+
   add_executable(fov_math_tests tests/fov_math_tests.cpp)
   target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME widescreen-hor-plus-math COMMAND fov_math_tests)
