@@ -89,6 +89,8 @@ void uncertainty_restores_silence() {
     x.quarantine();
     const auto pause=x.take_safety_pause();
     CHECK(pause.command==Command::pause && pause.count==2);
+    CHECK(x.safety_current(pause.generation));
+    CHECK(!x.current(pause.generation)); // no artificial resumes after uncertainty
     CHECK(!x.take_safety_pause()); // only one safety pause batch
     CHECK(!x.native_resume(123,Origin::focus_resume)); // cannot wake music
     x.native_stop(123);
