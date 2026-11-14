@@ -246,3 +246,156 @@ confirmed functions and their callees. If the file does not
 match, investigate that discrepancy rather than overriding
 validation or importing a random online DLL. No runtime
 patch or new audio hook is part of this tool.
+
+## Owner supplied the exact downstream `APMMXbvr.dll`: static ADPCM Pause/Resume mixer analysis
+
+The **original** `apmmxbvr.dll` attached on 14 November 2026 has
+been inspected directly in read-only mode using the PE export table and
+x86 disassembly, **without running it, changing it, or committing its
+bytes**. It is the exact secondary module whose three native
+callback RVAs the owner already observed with
+`RUNTIME-AUDIO-ADPCM-DELEGATE`.
+
+### Original binary identity
+
+| Property | Observed value |
+| --- | --- |
+| File | `apmmxbvr.dll` |
+| Size | **95,744 bytes** |
+| SHA-256 | `ab2d7cc613fea6dd8b039e76f00a6f5d15c7ed37f2b93e0be7a86dbc6a0ee4cf` |
+| Format | PE32, 32-bit Intel x86, five sections |
+| PE timestamp | `0x38076F98`, **1999-10-15 18:16:56 UTC** |
+| Image base | `0x10000000` |
+| Mapped image size | `0x000EE000` |
+| `.text` on disk | RVA `0x1000`, raw size `0xD800` |
+| Export table | 59 named functions, including all three exact delegates |
+
+All three exports from the actual file **exactly match the owner's
+resolved addresses**, and each is an x86 stdcall one-argument wrapper:
+
+| Original ADPCM export | RVA | Calls within this DLL |
+| --- | --- | --- |
+| `_SND_fn_vStopTransitionSxdADPCM@4` | **`0x54C0`** | `0x3340 → 0x1700` |
+| `_SND_fn_vPauseTransitionSxdADPCM@4` | **`0x54D0`** | `0x3380 → 0x1ED0` |
+| `_SND_fn_vResumeTransitionSxdADPCM@4` | **`0x54E0`** | `0x33C0 → 0x1F10` |
+
+The internal wrappers at `0x3340`, `0x3380` and `0x33C0`
+first check the same original initialization/global-enable value at
+VA `0x100E82A8`. If enabled, they acquire a shared critical
+section via `0x1020` with the original lock object at
+VA `0x100163D0`, call the respective leaf function, release via
+`0x1030`, and return. This is evidence of a common lock,
+**not proof of a thread-safe interception outside that lock**.
+
+### The actual Pause/Resume implementation
+
+The two internal leaves inspect an opaque ADPCM handle and recover a
+record pointer from `[handle + 0]`. They both call original
+validator `0x2480` before writing any voice state. Validation
+checks that the record lies in an original ADPCM record pool beginning
+at VA `0x100E67D8`, that its offset is aligned to the original
+**`0xE4`-byte record stride**, and that the supplied handle
+matches `[record+0xD4]`. A null or invalid handle returns an
+error instead of writing the pause flag.
+
+For a *valid* record:
+
+- `0x1ED0 + 0x20` (VA `0x10001EF0`) executes
+  `C7 46 1C 01 00 00 00`, meaning **`[record+0x1C] = 1`**
+  (pause).
+- `0x1F10 + 0x20` (VA `0x10001F30`) executes
+  `C7 46 1C 00 00 00 00`, meaning **`[record+0x1C] = 0`**
+  (resume).
+
+The functions **assign a Boolean-style field**, not `++`/`--`
+on a reference count at this leaf. Calling Pause twice on the same
+valid ADPCM record simply assigns 1 twice at this layer; calling
+Resume twice assigns 0 twice. This does **not** prove that the game
+scripts' global pause depth, the higher-level CPA Theme subsystem,
+or another device/mixer callback has no independent state.
+
+### Crucial: exactly how the ADPCM mixer makes paused voices silent
+
+The original PCM mixing function at RVA **`0x18D0`** clears
+its output accumulation buffer before scanning live ADPCM records.
+The original record-loop cursor starts at VA `0x100E6804`,
+which is **record-pool base + `0x2C`**, and advances by
+`0xE4` per record.
+
+At RVA `0x196C`:
+
+```asm
+mov eax, [esi-0x10]           ; record+0x1C, pause flag
+test eax, eax
+jne 0x10001B41               ; skip this voice's decoding/mixing
+mov eax, [esi+0xB0]          ; record+0xDC, separate state
+test eax, eax
+jne 0x10001B41               ; also skip if other gate is set
+```
+
+The relation is exact: `esi=record+0x2C`, therefore
+`esi-0x10=record+0x1C`. When Pause has stored 1,
+the per-voice mixing/decoding path is skipped, leaving that
+voice out of the newly produced PCM mix; Resume clears the
+flag and allows it to participate again if still valid and
+otherwise eligible. This proves the observed *per-record
+mixer gate*, **not a Windows `waveOutPause` device call**.
+The original module imports `KERNEL32.dll`, not `WINMM.dll`;
+its actual output is delegated elsewhere.
+
+### Stop irreversibly retires the current ADPCM object
+
+The ADPCM Stop leaf `0x1700` validates the same handle and
+clears a nested state field at `[record+0xC4]+0x60`
+when that nested pointer is present. It then calls the
+existing original `0x15D0` retirement function, which
+validates the handle, releases associated objects, **sets
+`[handle+0]=0` at RVA `0x1655`**, adjusts record
+references, and removes/compacts the `0xE4`-stride record
+array while decrementing the live record count. In particular,
+the former handle does **not** provide a guaranteed way
+to resume a physically retired sound after Stop.
+
+Thus a Pause-debt protocol must not assume that delayed
+Resume calls can always be replayed against the same
+record, especially across game-level or logical Theme/SXD
+part transitions. The original validator may reject the
+old pointer after retirement, and its record storage may
+have moved; **never store this raw record pointer in a
+fix-level long-lived object**.
+
+### Engineering conclusions for the ESC patch
+
+1. We now have direct, original-binary evidence why the
+   default native script Pause makes type-4 ADPCM music
+   silent: a per-record Boolean pause flag causes the
+   1999 mixer to **skip decoding/mixing that voice**.
+   The previous MIDI/device/global-pause assumptions were
+   too broad for the owner's confirmed active audio path.
+2. The first six ESC openings have `type=4` but early
+   Theme-player reference mismatch (alternate `9:12`
+   vs active outer `9:5`, inner `9:6`). The missing
+   compensation is due to the higher-level strong owner
+   check, **not an ADPCM refcount at this leaf**.
+3. A future pre-driver test could *in principle* avoid
+   setting the ADPCM pause flag for a precisely
+   source-verified transition owner. But selecting **the
+   correct original ADPCM record across two identical
+   callbacks, native script/global pause depth and a
+   possible Stop or resource move** remains unresolved.
+   It could also leave unintended nonmusic sounds
+   playing during the menu. Do **not** enable physical
+   Pause suppression based on the Boolean leaf alone.
+4. A second safe research line is to compare, in a
+   pure deterministic model, two original Pause/Resume
+   writes on one valid record with an intervening
+   Stop/reallocation, and prove that retirement forbids
+   deferred writes/replay. The actual sound-driver DLL is
+   unchanged and existing `phase=6` native passthrough
+   remains mandatory.
+
+The read-only inspector `tools/audit_apmmxbvr.py` verifies the
+original exports and byte-address provenance separately; this
+section records the manually verified static control flow
+from this **exact SHA-256**. No runtime test of changed
+audio behavior has been attempted.
