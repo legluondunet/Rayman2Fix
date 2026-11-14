@@ -92,17 +92,13 @@ int main(int argc, char** argv) {
               fullscreen.presentation.borderless_applied &&
               fullscreen.presentation.changes > 0,
               "window supervisor found and applied borderless fullscreen");
-        // CI desktop can be 4:3 (status=2: no Hor+ hook needed),
-        // whereas widescreen tests must reject the untrusted fixture's
-        // unknown camera signature (status=3).
-        const bool widescreen = static_cast<double>(options.output_width) /
-                                options.output_height > 1.334;
-        const auto expected_status = widescreen ? 3ul : 2ul;
+        // Camera dispatch now supports the targeted intro skip even in 4:3.
+        // An untrusted executable MUST be refused at ALL resolutions:
+        // neither the camera nor the intro/2D hooks may be installed.
         if (!(fullscreen.fov_hook.attempted &&
               fullscreen.fov_hook.dll_loaded &&
-              (widescreen ? !fullscreen.fov_hook.active
-                          : fullscreen.fov_hook.active) &&
-              fullscreen.fov_hook.init_status == expected_status)) {
+              !fullscreen.fov_hook.active &&
+              fullscreen.fov_hook.init_status == 3ul)) {
             std::cerr << "FOV test diagnostics: attempted=" << fullscreen.fov_hook.attempted
                       << " loaded=" << fullscreen.fov_hook.dll_loaded
                       << " active=" << fullscreen.fov_hook.active
@@ -110,7 +106,7 @@ int main(int argc, char** argv) {
                       << " win32_error=" << fullscreen.fov_hook.win32_error
                       << "\\n";
             throw std::runtime_error(
-                "remote runtime must refuse unknown wide EXE or skip on 4:3");
+                "remote runtime must refuse unknown executable at every aspect ratio");
         }
 
         std::wifstream window(root / "child-window.txt");

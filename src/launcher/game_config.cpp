@@ -59,25 +59,37 @@ std::vector<std::string> lines_of(const fs::path& file) {
     if (in.bad()) throw std::runtime_error("failed reading INI");
     return lines;
 }
-std::string read_graphics_setting(const fs::path& ini,
-                                  const char* key, const char* fallback) {
+std::string read_ini_setting(const fs::path& ini,
+                             const char* section_name,
+                             const char* key, const char* fallback) {
     const auto lines = lines_of(ini);
     std::string current, choice = fallback;
     for (const auto& raw : lines) {
         std::string next;
-        if (section(raw, next)) { current = next; continue; }
-        const auto line = trim(raw);
-        if (line.empty() || line.front() == ';' || line.front() == '#') continue;
-        const auto equal = line.find('=');
-        if (equal == std::string::npos || current != "GRAPHICS" ||
-            upper(trim(line.substr(0, equal))) != upper(key))
-            continue;
-        choice = trim(line.substr(equal + 1));
+        if (section(raw, next)) {current=next;continue;}
+        const auto line=trim(raw);
+        if(line.empty() || line.front()==';' || line.front()=='#')continue;
+        const auto equal=line.find('=');
+        if(equal==std::string::npos || current!=upper(section_name) ||
+           upper(trim(line.substr(0,equal)))!=upper(key))continue;
+        choice=trim(line.substr(equal+1));
     }
-    if (choice.empty())
-        throw std::runtime_error(std::string("empty [Graphics] ") + key +
-                                 " in Rayman2Fix.ini");
+    if(choice.empty())
+        throw std::runtime_error(std::string("empty [")+section_name+
+                                 "] "+key+" in Rayman2Fix.ini");
     return choice;
+}
+std::string read_graphics_setting(const fs::path& ini,
+                                  const char* key, const char* fallback) {
+    return read_ini_setting(ini,"Graphics",key,fallback);
+}
+bool read_ini_flag(const fs::path& ini,const char* section_name,
+                   const char* key) {
+    const std::string value=read_ini_setting(ini,section_name,key,"0");
+    if(value!="0" && value!="1")
+        throw std::runtime_error(std::string("invalid [")+
+            section_name+"] "+key+"; use 0 or 1");
+    return value=="1";
 }
 std::string read_resolution_setting(const fs::path& ini) {
     return read_graphics_setting(ini, "Resolution", "Desktop");
@@ -219,6 +231,24 @@ std::pair<std::uint32_t, std::uint32_t> configured_output_resolution(
     return resolution(read_resolution_setting(ini));
 }
 
+bool configured_force_4_3(const fs::path& ini) {
+    return read_ini_flag(ini,"Graphics","Force4x3");
+}
+bool configured_skip_cinematics(const fs::path& ini) {
+    return read_ini_flag(ini,"Features","SkipCinematics");
+}
+std::pair<std::uint32_t,std::uint32_t> configured_render_resolution(
+        const fs::path& ini) {
+    const auto physical=configured_output_resolution(ini);
+    if(!configured_force_4_3(ini))return physical;
+    // Preserve exact 4:3 in the largest integer-pixel area. GameFrame's
+    // native present() clears black outside it, without EXE hacks.
+    const auto units=std::min(physical.first/4u,physical.second/3u);
+    if(units<160u)
+        throw std::runtime_error("unsupported [Graphics] Force4x3 canvas");
+    return {units*4u,units*3u};
+}
+
 // FPSLimit=60 by default; 0 = unlimited for troubleshooting, 15-240 =
 // supported limits. Keep this in the single Rayman2Fix.ini user config.
 std::uint32_t configured_fps_limit(const fs::path& ini) {
@@ -232,6 +262,98 @@ std::uint32_t configured_fps_limit(const fs::path& ini) {
     if (fps != 0 && (fps < 15 || fps > 240))
         throw std::runtime_error("unsupported [Graphics] FPSLimit; use 0 or 15..240");
     return fps;
+}
+
+void ensure_rayman2fix_ini_options(const fs::path& ini) {
+    const auto raw=lines_of(ini);
+    std::string current;
+    bool graphics=false,features=false,force=false,skip=false;
+    for(const auto& text:raw) {
+        std::string next;
+        if(section(text,next)) {
+            current=next;
+            graphics|=current=="GRAPHICS";
+            features|=current=="FEATURES";
+            continue;
+        }
+        const auto t=trim(text);
+        if(t.empty() || t.front()==';' || t.front()=='#')continue;
+        const auto p=t.find('=');
+        if(p==std::string::npos)continue;
+        const auto key=upper(trim(t.substr(0,p)));
+        if(current=="GRAPHICS" && key=="FORCE4X3")force=true;
+        if(current=="FEATURES" && key=="SKIPCINEMATICS")skip=true;
+    }
+    if(force && skip)return;
+    std::vector<std::string> output;
+    std::string active;
+    bool added_force=false,added_skip=false;
+    const auto inject=[&]() {
+        if(active=="GRAPHICS" && !force && !added_force) {
+            output.emplace_back("; 1 = centered 4:3 picture with black sidebars");
+            output.emplace_back("Force4x3=0");
+            added_force=true;
+        }
+        if(active=="FEATURES" && !skip && !added_skip) {
+            output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 only");
+            output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
+            output.emplace_back("SkipCinematics=0");
+            added_skip=true;
+        }
+    };
+    for(const auto& text:raw) {
+        std::string next;
+        if(section(text,next)) {
+            inject();
+            active=next;
+        }
+        output.push_back(text);
+    }
+    inject();
+    if(!graphics) {
+        if(!output.empty() && !output.back().empty())
+            output.emplace_back();
+        output.emplace_back("[Graphics]");
+        output.emplace_back("; 1 = centered 4:3 picture with black sidebars");
+        output.emplace_back("Force4x3=0");
+    }
+    if(!features) {
+        if(!output.empty() && !output.back().empty())
+            output.emplace_back();
+        output.emplace_back("[Features]");
+        output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 only");
+        output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
+        output.emplace_back("SkipCinematics=0");
+    }
+    // Retain original BOM, comments, unrelated keys and EOL type.
+    std::ifstream old(ini,std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(old)),
+                            std::istreambuf_iterator<char>());
+    if(old.bad())throw std::runtime_error("cannot read Rayman2Fix.ini");
+    old.close(); // Release file handle before atomic rename on Windows/Wine.
+    const std::string eol=bytes.find("\r\n")!=std::string::npos ? "\r\n" : "\n";
+    std::string updated;
+    for(const auto& text:output){updated+=text;updated+=eol;}
+    fs::path pending=ini;pending+=".rayman2fix-new";
+    fs::path previous=ini;previous+=".rayman2fix-previous";
+    if(fs::exists(pending)||fs::is_symlink(pending)||
+       fs::exists(previous)||fs::is_symlink(previous))
+        throw std::runtime_error("unresolved Rayman2Fix.ini staging");
+    try {
+        std::ofstream out(pending,std::ios::binary|std::ios::trunc);
+        if(!out)throw std::runtime_error("cannot stage Rayman2Fix.ini");
+        out.write(updated.data(),static_cast<std::streamsize>(updated.size()));
+        out.close();
+        if(!out)throw std::runtime_error("cannot write Rayman2Fix.ini");
+        fs::rename(ini,previous);
+        try{fs::rename(pending,ini);}
+        catch(...){fs::rename(previous,ini);throw;}
+        fs::remove(previous);
+    }catch(...){
+        std::error_code ignored;
+        fs::remove(pending,ignored);
+        throw;
+    }
 }
 
 void synchronize_rayman2_ubi_ini(const fs::path& game_dir, Startup& startup) {

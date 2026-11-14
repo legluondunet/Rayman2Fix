@@ -198,6 +198,9 @@ ChildProcessResult run_child_process(
     // extension RAYMAN2FIX_FPS_LIMIT for producer-side grBufferSwap pacing.
     ScopedChildEnvironment glide_size(L"GLIDE_SIZE");
     ScopedChildEnvironment fps_limit(L"RAYMAN2FIX_FPS_LIMIT");
+    ScopedChildEnvironment glide_probe(L"RAYMAN2FIX_GLIDE_PROBE");
+    if (!glide_probe.set(display.log_enabled ? L"1" : L"0"))
+        return {false, 0, glide_probe.error()};
     if (display.borderless) {
         if (!display.output_width || !display.output_height ||
             display.output_width > 16384 || display.output_height > 8640 ||
@@ -217,6 +220,7 @@ ChildProcessResult run_child_process(
                                         nullptr, nullptr, FALSE, 0, nullptr,
                                         cwd.c_str(), &startup, &raw);
     const DWORD spawn_error = created ? 0 : GetLastError();
+    glide_probe.restore();
     fps_limit.restore();
     glide_size.restore();
     if (!created) return {false, 0, spawn_error};
@@ -228,7 +232,8 @@ ChildProcessResult run_child_process(
         result.fov_hook = initialize_game_fov(
             reinterpret_cast<std::uintptr_t>(process.handle),
             raw.dwProcessId, working_directory / "Rayman2Fix.dll",
-            display.output_width, display.output_height, display.log_enabled);
+            display.output_width, display.output_height, display.log_enabled,
+            display.skip_cinematics);
     }
 
     if (display.borderless) {
@@ -284,21 +289,23 @@ int launch_verified_game(Startup& startup, bool verify) {
     const auto configured = (!verify && !fs::exists(startup.ini_path()))
         ? std::make_pair(monitor.width, monitor.height)
         : configured_output_resolution(startup.ini_path());
+    const auto content = configured_render_resolution(startup.ini_path());
     if (configured.first < 640 || configured.second < 480)
         throw std::runtime_error("invalid native output size");
     ChildDisplayOptions display{};
     display.borderless = true;
     display.monitor = monitor;
-    display.output_width = configured.first;
-    display.output_height = configured.second;
+    display.output_width = content.first;
+    display.output_height = content.second;
+    display.skip_cinematics = configured_skip_cinematics(startup.ini_path());
     display.enable_fov = true;
     display.fps_limit = (!verify && !fs::exists(startup.ini_path()))
         ? 60u : configured_fps_limit(startup.ini_path());
     display.skip_executable_precheck = !verify;
     display.log_enabled = startup.logging_enabled();
     if (verify) ensure_rayman2_dpi_manifest(root);
-    const auto aspect = static_cast<double>(configured.first) /
-                        static_cast<double>(configured.second);
+    const auto aspect = static_cast<double>(content.first) /
+                        static_cast<double>(content.second);
     std::ostringstream ratio;
     ratio << std::fixed << std::setprecision(4) << aspect;
     if (verify) {
@@ -318,16 +325,26 @@ int launch_verified_game(Startup& startup, bool verify) {
                 std::to_string(display.output_width) + "x" +
                 std::to_string(display.output_height) +
                 " output_aspect=" + ratio.str() +
-                " GameFrame.GLIDE_SIZE=explicit window=borderless-not-topmost");
-    startup.log("WIDESCREEN: native output configured; game camera/Hor+ "
-                "FOV patch not yet validated (do not confuse output scaling with Hor+)");
+                " physical_canvas=" + std::to_string(configured.first) + "x" +
+                std::to_string(configured.second) +
+                " GameFrame.GLIDE_SIZE=explicit window=borderless-not-topmost" +
+                (configured_force_4_3(startup.ini_path()) ?
+                    " aspect_mode=4:3-centered-black-bars" :
+                    " aspect_mode=Auto"));
+    startup.log(configured_force_4_3(startup.ini_path()) ?
+                "WIDESCREEN: 4:3 mode selected; world Hor+ inactive, internal and output aspect 4:3" :
+                "WIDESCREEN: native output configured; game camera/Hor+ FOV patch not yet validated (do not confuse output scaling with Hor+)");
     startup.log("FPS: limiter=" + std::to_string(display.fps_limit) +
                 (display.fps_limit ? " cap at GameFrame.grBufferSwap"
                                    : " unlimited (GameFrame pacing disabled)"));
     std::cout << "Launching Rayman 2 (Glide2)...\n" << std::flush;
     startup.log("LAUNCH-START: child=rayman2.exe working_directory=Rayman2Fix");
     const auto started = std::chrono::steady_clock::now();
-    const auto result = run_child_process(root / "rayman2.exe", root, display);
+    // Launcher and DLL no longer share a file handle: only the approved
+    // game launch resets Rayman2Fix.log, keeping installer messages separate.
+    startup.prepare_runtime_log();
+    const ChildProcessResult result =
+        run_child_process(root / "rayman2.exe", root, display);
     const auto seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - started).count();
     if (!result.started) {
@@ -364,7 +381,7 @@ int launch_verified_game(Startup& startup, bool verify) {
                 " win32_error=" + std::to_string(result.fov_hook.win32_error));
     if (result.exit_code != 0) {
         std::cerr << "Rayman 2 exited with code " << exit_hex(result.exit_code)
-                  << "; see Rayman2Fix.log.\n";
+                  << "; see Rayman2Fix_installer.log and Rayman2Fix.log.\n";
         return 1;
     }
     std::cout << "Rayman 2 exited normally.\n";

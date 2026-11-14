@@ -97,7 +97,7 @@ bool remote_call(HANDLE process, void* routine, void* parameter,
     return true;
 }
 struct Init {
-    DWORD size, magic, width, height, logging;
+    DWORD size, magic, width, height, logging, skip_cinematics;
 };
 #endif
 } // namespace
@@ -105,7 +105,7 @@ struct Init {
 FovHookResult initialize_game_fov(
     std::uintptr_t process_handle, unsigned long pid,
     const fs::path& dll, std::uint32_t width, std::uint32_t height,
-    bool log_enabled) {
+    bool log_enabled, bool skip_cinematics) {
     FovHookResult result{};
 #ifdef _WIN32
     result.attempted = true;
@@ -163,7 +163,7 @@ FovHookResult initialize_game_fov(
     if (!entry) { result.win32_error = ERROR_PROC_NOT_FOUND; return result; }
 
     const Init options{sizeof(Init), 0x32584652u, width, height,
-                       log_enabled ? 1u : 0u};
+                       log_enabled ? 1u : 0u, skip_cinematics ? 1u : 0u};
     RemoteData arguments(process, &options, sizeof(options));
     if (!arguments.memory) {
         result.win32_error = GetLastError();
@@ -184,6 +184,7 @@ FovHookResult initialize_game_fov(
     (void)width;
     (void)height;
     (void)log_enabled;
+    (void)skip_cinematics;
 #endif
     return result;
 }

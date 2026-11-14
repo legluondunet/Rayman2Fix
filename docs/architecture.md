@@ -3,11 +3,24 @@
 Rayman2Fix is a **new, clean-room** project for the original PC CD-ROM editions
 of **Rayman 2: The Great Escape**. It has no source-code dependency on Ray2Fix.
 
+## Investigating the projected screen-world overlay
+
+The initial native 2D glyph/frame observations prove that the tested
+font quads themselves stay within the first lower frame. A separate,
+public Ray2Fix implementation identifies **superimposed 3D actor**
+placement and extent as an independent widescreen correction path.
+See [superimposed actor research](superimposed-actor-research.md).
+The candidate equations are covered by independent math tests but
+are deliberately **not hooked** in the unverified CD engine code.
+Never enable both actor-level X squeeze and the existing narrowed
+screen-world viewport X squeeze at once.
+
 ## Permanent layout
 
 ```text
 Rayman2Fix.exe                       launcher / installer / verifier
-Rayman2Fix.log                       one log, reset at each launcher start
+Rayman2Fix_installer.log             installer + launcher, reset per launch
+Rayman2Fix.log                       DLL + GameFrame, reset at game launch
 Rayman2Fix/
     rayman2.exe                      copied from original CD (not yet playable)
     Rayman2Fix.dll                   unpacked from launcher (currently inert)
@@ -48,7 +61,8 @@ SDL3 and controller support are deferred to a subsequent phase.
    `Rayman2Fix.dll`, retaining exactly one rolling backup:
    `Rayman2Fix.dll.bak` (the immediately previous DLL). An older `.bak` is
    discarded after successful replacement; legacy numbered backups migrate.
-   Write a single optional log beside the launcher with passive system info.
+   Write `Rayman2Fix_installer.log` beside the launcher with passive system
+    information; reserve `Rayman2Fix.log` for the game and its DLL.
 3. If `Rayman2Fix/rayman2.exe` exists, check its **local CD receipt**:
    expected file names, sizes and SHA-256 hashes, sound initialization and game executable.
    If any file is missing or changed, refuse startup, **never auto-repair or

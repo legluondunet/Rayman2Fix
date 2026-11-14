@@ -33,7 +33,7 @@ static void usage() {
         << "Installation directory: <launcher>/Rayman2Fix/\n"
         << "Unchecked launch does not verify executable presence, hashes, CD files,\n"
         << "or modify/repair the installation; OS errors are returned as-is.\n"
-        << "Installer log: <launcher>/Rayman2Fix.log\n";
+        << "Options: <launcher>/Rayman2Fix/Rayman2Fix.ini\n"\n        << "Installer log: <launcher>/Rayman2Fix_installer.log\n"\n        << "Game/runtime log: <launcher>/Rayman2Fix.log\n";
 }
 
 static int inspect_cd(const fs::path& executable, const std::vector<fs::path>& media,

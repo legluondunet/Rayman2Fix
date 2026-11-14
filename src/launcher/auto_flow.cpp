@@ -267,7 +267,7 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
 }
 
 // Upgrade an already installed original CD without requiring a second
-// extraction. Old Rayman2Fix receipts may list these six root-only files.
+// extraction. Old Rayman2Fix receipts may list these root-only files.
 // Only an otherwise verified RAYMAN2 installation is eligible; the receipt
 // is replaced with rollback before any original files are removed.
 void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {

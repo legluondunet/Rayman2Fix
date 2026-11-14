@@ -61,8 +61,16 @@ target_compile_definitions(Rayman2Fix PRIVATE
   RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}"
 )
 
-# Rayman 2 itself is 32-bit. This DLL is intentionally only a benign,
-# loadable placeholder until per-build injection/hooks are verified.
+# Preserve the read-only Learn_10 reverse-engineering probes for explicitly
+# requested developer builds, but exclude their per-frame memory scans and
+# extra native script detours from normal Windows/Wine releases.
+# No additional user-facing INI option is needed.
+option(RAYMAN2FIX_RESEARCH_PROBES
+  "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
+option(RAYMAN2FIX_AUDIO_TRACE
+  "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
+
+# Rayman 2 itself is 32-bit; runtime builds are Windows x86 only.
 if(WIN32)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
     message(FATAL_ERROR "Rayman2Fix runtime must be compiled for 32-bit Windows")
@@ -70,6 +78,12 @@ if(WIN32)
   add_library(Rayman2FixRuntime SHARED src/runtime/runtime.cpp)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME Rayman2Fix)
   target_compile_definitions(Rayman2FixRuntime PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+  if(RAYMAN2FIX_RESEARCH_PROBES)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
+  endif()
+  if(RAYMAN2FIX_AUDIO_TRACE)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_AUDIO_TRACE=1)
+  endif()
   target_include_directories(Rayman2FixRuntime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
   # Package the project's own x86 DLL inside Rayman2Fix.exe as RCDATA.
@@ -197,9 +211,52 @@ if(BUILD_TESTING)
   target_link_libraries(game_launch_tests PRIVATE rayman2_patch)
   add_test(NAME game-launch-preflight COMMAND game_launch_tests)
 
+  # Pure C++17 research-only ESC music shadow core, no Win32 or game
+  # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
+  add_executable(esc_music_shadow_cpp_tests tests/esc_music_shadow_cpp_tests.cpp)
+  target_include_directories(esc_music_shadow_cpp_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-music-shadow-state-machine COMMAND esc_music_shadow_cpp_tests)
+  # Backend adapter cannot run without an independently validated real
+  # APM driver contract; unit tests use fake callbacks, never real music.
+  add_executable(esc_music_mixer_bridge_tests
+    tests/esc_music_mixer_bridge_tests.cpp)
+  target_include_directories(esc_music_mixer_bridge_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-music-mixer-adapter-contract
+    COMMAND esc_music_mixer_bridge_tests)
+
   add_executable(fov_math_tests tests/fov_math_tests.cpp)
   target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME widescreen-hor-plus-math COMMAND fov_math_tests)
+
+  add_executable(hud_math_tests tests/hud_math_tests.cpp)
+  target_include_directories(hud_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME centered-hud-4-by-3-math COMMAND hud_math_tests)
+
+  add_executable(screen_camera_tests tests/screen_camera_tests.cpp)
+  target_include_directories(screen_camera_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-4-by-3-screen-world-camera COMMAND screen_camera_tests)
+
+  add_executable(superimposed_math_tests tests/superimposed_math_tests.cpp)
+  target_include_directories(superimposed_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME screen-world-superimposed-actor-math COMMAND superimposed_math_tests)
+
+  add_executable(intro_skip_tests tests/intro_skip_tests.cpp)
+  target_include_directories(intro_skip_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME second-intro-skip-guard COMMAND intro_skip_tests)
+
+  add_executable(scene_script_probe_tests tests/scene_script_probe_tests.cpp)
+  target_include_directories(scene_script_probe_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME learn10-scene-script-readonly-probe COMMAND scene_script_probe_tests)
+
+  add_executable(intro_gate_timeline_tests tests/intro_gate_timeline_tests.cpp)
+  target_include_directories(intro_gate_timeline_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME learn10-bounded-gate-event-timeline COMMAND intro_gate_timeline_tests)
+
+  add_executable(intro_integer_reader_tests tests/intro_integer_reader_tests.cpp)
+  target_include_directories(intro_integer_reader_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME learn10-typed-integer-reader COMMAND intro_integer_reader_tests)
 
   if(WIN32)
     # Harmless child executable for a Win32 CreateProcessW smoke test. This
