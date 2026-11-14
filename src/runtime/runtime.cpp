@@ -1150,6 +1150,17 @@ struct ProtoPreDriverProbe {
 };
 thread_local ProtoPreDriverProbe g_proto_predriver_probe{};
 std::atomic<unsigned> g_proto_predriver_probe_budget{0};
+struct ProtoPreDriverReport {
+    bool ready=false;
+    ProtoPreDriverProbe probe{};
+    DWORD t_ms=0;
+    int depth_before=-1;
+    int depth_after=-1;
+};
+// Store only a tiny snapshot after the original wrapper. The main menu
+// tick emits disk diagnostics AFTER trying native audio compensation.
+// Guarded by g_proto_mutex, never held inside a native driver hook.
+ProtoPreDriverReport g_proto_predriver_report{};
 
 class ProtoScope {
 public:
@@ -1323,41 +1334,21 @@ void __cdecl proto_script_pause() {
         proto_call_original(0x536D0); // unchanged verified native wrapper
     }
     if(predriver_trace) {
-        auto& probe=g_proto_predriver_probe;
-        probe.active=false;
+        g_proto_predriver_probe.active=false;
         depth_after_ok=proto_read_depth(depth_after);
-        // Diagnostic ONLY, after the native pause wrapper has completed.
-        // A live-ref mismatch is informative; it must never authorize a
-        // driver resume or cause suppression on this production path.
-        const auto owner=inspect_audio_theme_owner(probe.first_handle,true);
-        char line[540]{};
-        std::snprintf(line,sizeof(line),
-            "RUNTIME-ESC-PREDRIVER-GATE: t_ms=%lu callbacks=%u "
-            "transition_pauses=%u other_slots=%u different_handles=%u "
-            "slots=%u,%u,%u,%u depth_before=%d depth_after=%d "
-            "owner_driver=%u outer_candidates=%u native_ref_class=%d "
-            "native_ref_match=%d outer_bank=%d outer_index=%d "
-            "inner_bank=%d inner_index=%d "
-            "(script-origin read-only pre-driver order; all native calls forwarded)",
-            static_cast<unsigned long>(GetTickCount()-
-                g_audio_origin.load(std::memory_order_acquire)),
-            probe.callback_count,probe.pause_count,probe.unrelated_slots,
-            probe.other_handle_count,
-            probe.first_slots[0],probe.first_slots[1],
-            probe.first_slots[2],probe.first_slots[3],
-            depth_before_ok ? int(depth_before) : -1,
-            depth_after_ok ? int(depth_after) : -1,
-            owner.theme_owned_driver,owner.outer_candidates,
-            owner.native_theme_player_ref_class,
-            owner.native_theme_player_ref_matches_outer,
-            owner.outer_bank_provenance.bank_id,
-            owner.outer_bank_provenance.resource_index,
-            owner.inner_bank_provenance.bank_id,
-            owner.inner_bank_provenance.resource_index);
-        log_line(line);
     }
     {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        if(predriver_trace) {
+            g_proto_predriver_report.ready=true;
+            g_proto_predriver_report.probe=g_proto_predriver_probe;
+            g_proto_predriver_report.t_ms=DWORD(GetTickCount()-
+                g_audio_origin.load(std::memory_order_acquire));
+            g_proto_predriver_report.depth_before=
+                depth_before_ok ? int(depth_before) : -1;
+            g_proto_predriver_report.depth_after=
+                depth_after_ok ? int(depth_after) : -1;
+        }
         if(adopted)g_proto.end_script_pause();
         else if(g_proto.phase()==proto::Phase::audible_menu)
             g_proto.quarantine(); // independent nested script pause
@@ -1733,6 +1724,44 @@ void proto_menu_tick() {
     proto_dispatch(action);
     proto_deferred_safety();
     const DWORD dispatch_ms=DWORD(GetTickCount()-dispatch_start);
+    // Consume diagnostics only AFTER the critical audio compensation path.
+    // Callback telemetry was gathered before original driver forwarding,
+    // but no native audio callback has ever been delayed by its file I/O.
+    ProtoPreDriverReport report{};
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        if(g_proto_predriver_report.ready) {
+            report=g_proto_predriver_report;
+            g_proto_predriver_report.ready=false;
+        }
+    }
+    if(report.ready && g_log) {
+        const auto& probe=report.probe;
+        const auto owner=inspect_audio_theme_owner(probe.first_handle,true);
+        char line[540]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-ESC-PREDRIVER-GATE: t_ms=%lu callbacks=%u "
+            "transition_pauses=%u other_slots=%u different_handles=%u "
+            "slots=%u,%u,%u,%u depth_before=%d depth_after=%d "
+            "owner_driver=%u outer_candidates=%u native_ref_class=%d "
+            "native_ref_match=%d outer_bank=%d outer_index=%d "
+            "inner_bank=%d inner_index=%d "
+            "(script-origin read-only pre-driver order; all native calls forwarded)",
+            static_cast<unsigned long>(report.t_ms),
+            probe.callback_count,probe.pause_count,probe.unrelated_slots,
+            probe.other_handle_count,
+            probe.first_slots[0],probe.first_slots[1],
+            probe.first_slots[2],probe.first_slots[3],
+            report.depth_before,report.depth_after,
+            owner.theme_owned_driver,owner.outer_candidates,
+            owner.native_theme_player_ref_class,
+            owner.native_theme_player_ref_matches_outer,
+            owner.outer_bank_provenance.bank_id,
+            owner.outer_bank_provenance.resource_index,
+            owner.inner_bank_provenance.bank_id,
+            owner.inner_bank_provenance.resource_index);
+        log_line(line);
+    }
     if(phase==proto::Phase::pending_menu && known && menu!=0) {
         proto_log("menu-verdict",
             !actor_ok ? "escape-menu-actor-not-verified" :
