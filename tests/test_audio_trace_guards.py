@@ -41,6 +41,28 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("RAYMAN2FIX_ESC_MUSIC_FEATURE=1",self.cmake)
         self.assertIn("RUNTIME-ESC-MUSIC: enabled=1",self.runtime)
 
+    def test_intro_theme_controller_watcher_is_change_triggered_and_bounded(self):
+        self.assertIn("void proto_theme_transition_watch_tick()",self.runtime)
+        start=self.runtime.index("void proto_theme_transition_watch_tick()")
+        end=self.runtime.index("void proto_menu_tick()",start)
+        watcher=self.runtime[start:end]
+        self.assertIn("if(last_sample && DWORD(now-last_sample)<40u)return;",watcher)
+        self.assertIn("proto::ThemeRefWatchPolicy::kWindowMs",watcher)
+        self.assertIn("proto::ThemeRefWatchInput snapshot",watcher)
+        self.assertIn("if(!watch.observe(snapshot,DWORD(now-origin)))return;",watcher)
+        self.assertIn("inspect_audio_theme_owner(0,true)",watcher)
+        self.assertIn("RUNTIME-ESC-THEME-WATCH:",watcher)
+        self.assertIn("alt_same_bank=%d",watcher)
+        self.assertIn("inner_index=%d",watcher)
+        self.assertNotIn("fn(action.handle)",watcher)
+        self.assertNotIn("proto_dispatch(",watcher)
+        self.assertNotIn("VirtualProtect(",watcher)
+        self.assertIn("proto_menu_tick();\n    // Never defer native ESC compensation behind diagnostic disk I/O.\n    proto_theme_transition_watch_tick();",self.runtime)
+        self.assertIn("static constexpr unsigned kMaxEvents=24u",
+                      self.esc_music_header)
+        self.assertIn("static constexpr std::uint32_t kWindowMs=120000u",
+                      self.esc_music_header)
+
     def test_esc_transition_latency_and_first_rejection_are_observable_without_bypass(self):
         # The approved paired driver calls and strict current-player check
         # remain unchanged. A menu opening should not wait behind an
