@@ -25,18 +25,21 @@ class AudioTraceGuardTests(unittest.TestCase):
             self.runtime)
         self.assertIn("sequence_ref_class=%u",self.runtime)
         self.assertIn("inner_ref_class=%u",self.runtime)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
-    def test_hook_is_compiled_out_of_normal_approved_camera_path(self):
-        self.assertRegex(self.runtime,
-            r'#if RAYMAN2FIX_AUDIO_TRACE\s+poll_audio_pause_trace\(\);\s+(?:#if RAYMAN2FIX_ESC_MUSIC_PROTO\s+proto_menu_tick\(\);\s+#endif\s+)?#endif')
-        self.assertIn("#if RAYMAN2FIX_AUDIO_TRACE\nusing AudioPauseFn",self.runtime)
-        self.assertIn('if(!g_log || InterlockedCompareExchange(',self.runtime)
-        self.assertIn("if(n<=kAudioSlotCount)",self.runtime)
+    def test_standard_audio_hooks_are_feature_gated_and_research_remains_separate(self):
+        # The standard runtime has a real opt-in feature now. Research
+        # stack/driver enumeration remains excluded without AUDIO_TRACE=ON.
+        self.assertIn("#if RAYMAN2FIX_AUDIO_HOOKS\n    poll_audio_pause_trace();",self.runtime)
+        self.assertIn("#if RAYMAN2FIX_ESC_MUSIC_ACTIVE\n    proto_menu_tick();",self.runtime)
+        self.assertIn("#if RAYMAN2FIX_AUDIO_TRACE\n    //",self.runtime)
+        self.assertIn("if(!g_proto_enabled.load(std::memory_order_acquire))return;",self.runtime)
+        self.assertIn("if(i!=2u && i!=3u && i!=10u && i!=11u)continue;",self.runtime)
         self.assertIn("if(!current || current==hook)continue;",self.runtime)
         self.assertIn("!executable_page(current)",self.runtime)
-        self.assertIn("InterlockedCompareExchangePointer(ptr,hook,current)==current",
-                      self.runtime)
+        self.assertIn("InterlockedCompareExchangePointer(ptr,hook,current)==current",self.runtime)
+        self.assertIn("RAYMAN2FIX_ESC_MUSIC_FEATURE=1",self.cmake)
+        self.assertIn("RUNTIME-ESC-MUSIC: enabled=1",self.runtime)
 
     def test_menu_and_engine_pause_probe_is_read_only_and_research_only(self):
         # A future optional observation must distinguish the native menu
@@ -55,7 +58,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("RUNTIME-AUDIO-UI-STATE: t_ms=",section)
         self.assertIn("not ESC visibility proof",section)
         self.assertNotIn("WriteProcessMemory(",section)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_original_audio_function_always_called_unchanged(self):
         section=self.runtime.split("void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1]
@@ -103,7 +106,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("_AddressOfReturnAddress()",self.runtime)
         self.assertIn("case 1:return \"game-script-pause\"",self.runtime)
         self.assertIn("case 3:return \"windows-activation-pause\"",self.runtime)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_call_time_menu_flags_are_only_read_before_native_forward(self):
         section=self.runtime.split(
@@ -125,7 +128,7 @@ class AudioTraceGuardTests(unittest.TestCase):
                         section.index("if(original) original(arg);"))
         self.assertNotIn("WriteProcessMemory(",section)
         self.assertNotIn("VK_F1",section)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_native_sequence_slot_is_only_read_in_audio_research_build(self):
         # The original single-stream controller's sound-table index is
@@ -145,7 +148,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("WriteProcessMemory(",section)
         self.assertNotIn("InterlockedCompareExchangePointer(",section)
         self.assertIn("argument==handle",section)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_sequence_state_follows_native_nonzero_guard(self):
         # The game's type-11 pause callback checks state != 0,
@@ -190,7 +193,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertLess(trace.index("theme=inspect_audio_theme_owner(arg)"),
                         trace.index("if(original) original(arg);"))
         self.assertIn("if(original) original(arg);",trace)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_menu_actor_read_only_probe_is_bounded_and_fail_closed(self):
         section=self.runtime.split(
@@ -235,7 +238,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         before=self.runtime.split(
             "AudioMenuActorSnapshot inspect_audio_menu_actor_readonly()",1)[0]
         self.assertIn("#if RAYMAN2FIX_AUDIO_TRACE",before)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_current_native_theme_player_identity_is_a_readonly_gate(self):
         section=self.runtime.split(
@@ -254,7 +257,7 @@ class AudioTraceGuardTests(unittest.TestCase):
             section.index("out.outer_bank_provenance=inspect_audio_native_bank_origin("),
             section.index("current_theme_key==expected_key"))
         self.assertIn("native_theme_player_key_matches_outer=%d", self.runtime)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_audio_driver_module_probe_logs_only_basename_and_rva(self):
         section=self.runtime.split(
@@ -271,7 +274,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("LoadLibrary",section)
         self.assertNotIn("GetProcAddress",section.replace(
             "// DLL loading, no GetProcAddress, no game writes.", ""))
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
         hook=self.runtime.split("void poll_audio_pause_trace() {",1)[1]
         self.assertIn("log_audio_driver_module(i,current);",hook)
         self.assertLess(hook.index("log_audio_driver_module(i,current);"),
@@ -305,7 +308,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("WriteProcessMemory(",section)
         self.assertNotIn("VirtualProtect(",section)
         self.assertNotIn("if(original)",section)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_native_bank_provenance_attached_only_to_unique_theme_and_inner(self):
         owner=self.runtime.split(
@@ -352,7 +355,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("slot>=64u",self.runtime)
         self.assertIn("inner_ref_class=%u",self.runtime)
         self.assertIn("sequence_ref_class=%u",self.runtime)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_transition_play_to_pause_correlation_is_research_only(self):
         # _SND_fn_lPlayTransitionExSxd@20 has FIVE stdcall arguments.
@@ -368,7 +371,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("event<16u",self.runtime)
         self.assertIn("InterlockedCompareExchangePointer(play_slot,hook,current)==current",self.runtime)
         self.assertIn("not music-identified",self.runtime)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_transition_descriptor_identity_is_read_only_and_bounded(self):
         self.assertIn("g_last_transition_play_descriptor",self.runtime)
@@ -380,7 +383,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("event<16u",self.runtime)
         self.assertIn("ReadProcessMemory(",self.runtime)
         self.assertIn("0x4582A4",self.runtime)
-        self.assertNotIn("MusicInPauseMenu",self.config)
+        self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu")',self.config)
 
     def test_transition_descriptor_content_comparison_is_read_only(self):
         # Snapshot four words at play time and emit equality bits only.
