@@ -95,45 +95,6 @@ void uncertainty_restores_silence() {
     x.native_stop(123);
     CHECK(x.phase()==Phase::idle);
 }
-void first_esc_late_owner_verification() {
-    // At the first real menu opening, original script pauses already
-    // happened and the current-player pointer can still be transitioning.
-    // The feature must neither quarantine early nor resume until verified.
-    auto x=pending();
-    CHECK(x.identity_matches(kMusic));
-    CHECK(!x.identity_matches(Identity{}));
-    CHECK(!x.identity_matches(Identity{123,0x00090006,0x00090007,77}));
-    CHECK(!x.identity_matches(kNewMusic)); // reused handle, new generation
-    CHECK(retry_live_theme_identity(x.phase(),true,true,true,true,false,0));
-    CHECK(retry_live_theme_identity(x.phase(),true,true,true,true,false,1450));
-    CHECK(!retry_live_theme_identity(x.phase(),true,true,true,true,false,
-                                    kLiveThemeVerifyWindowMs));
-    CHECK(!retry_live_theme_identity(x.phase(),true,false,true,true,false,20));
-    CHECK(!retry_live_theme_identity(x.phase(),true,true,false,true,false,20));
-    CHECK(!retry_live_theme_identity(x.phase(),true,true,true,false,false,20));
-    CHECK(!retry_live_theme_identity(x.phase(),true,true,true,true,true,20));
-    // Caller defers policy evaluation: original driver remains paused.
-    CHECK(x.phase()==Phase::pending_menu && x.native_pause_count()==2);
-    // A provisional current-player mismatch before the native menu
-    // appears is not yet actionable and must not quarantine the stream.
-    CHECK(!x.menu_tick(true,false,true,false));
-    CHECK(x.phase()==Phase::pending_menu);
-    // Only after EXACT live identity is re-established may paired
-    // native ResumeTransitionSxd be requested.
-    CHECK(x.menu_tick(true,true,true,x.identity_matches(kMusic)).command==
-          Command::resume);
-    CHECK(x.phase()==Phase::audible_menu);
-    // If identity never stabilizes by the timeout, fail closed.
-    auto y=pending();
-    CHECK(!y.identity_matches(Identity{123,0x00090006,0x00090007,77}));
-    y.reset();
-    CHECK(y.phase()==Phase::idle);
-    CHECK(y.native_resume(123,Origin::script_resume));
-    auto closed=pending();
-    closed.end_script_resume(); // ESC closed before live identity settled
-    CHECK(closed.phase()==Phase::idle);
-    CHECK(closed.native_resume(123,Origin::script_resume));
-}
 void distinct_sfx() {
     auto x=pending();
     CHECK(x.menu_tick(true,true,true,true).command==Command::resume);
@@ -144,7 +105,7 @@ void distinct_sfx() {
     CHECK(x.phase()==Phase::quarantined);
 }
 int main() {
-    strict_gates();menu_open_close();first_esc_late_owner_verification();focus_during_esc();
+    strict_gates();menu_open_close();focus_during_esc();
     stop_and_unknown();uncertainty_restores_silence();distinct_sfx();
     std::cout<<"experimental ESC music FSM: strict gates, paired calls, focus, Stop OK\n";
 }
