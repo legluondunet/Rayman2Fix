@@ -1404,7 +1404,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         proto_record_pause(arg);
     if(!forwarded)proto_log("native-resume-suppressed","verified-theme-only");
 #else
-    if(original)original(arg);
+    if(original) original(arg);
 #endif
     if(!sampled)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
