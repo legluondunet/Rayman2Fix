@@ -399,3 +399,92 @@ original exports and byte-address provenance separately; this
 section records the manually verified static control flow
 from this **exact SHA-256**. No runtime test of changed
 audio behavior has been attempted.
+
+## Passive source-paired ADPCM voice audit (14 November, next Windows run)
+
+The two original owner-supplied DLLs now provide enough verified
+structure for a *read-only snapshot* of the specific ADPCM
+record referenced by a source-identified ESC Pause
+**after the game's unmodified original wrapper returns**.
+
+The standard opt-in `MusicInPauseMenu` runtime adds
+`RUNTIME-ESC-ADPCM-VOICE`, with four deliberately narrow
+fields:
+
+- `sampled=1` means **all** original version guards,
+  pointer-chain checks and record-live-count checks passed
+  in one bounded post-wrapper snapshot. `sampled=0`
+  means **unknown**, not an absent sound or an unpaused
+  sound.
+- `voice_index` is the *temporary ordinal* of the
+  verified `0xE4`-stride active record in the actual
+  APMMX module, not a song ID, a stable music identity
+  or a WinMM voice handle. Its value must not be cached
+  or compared across a Stop/compaction.
+- `paused=0|1|2` is the record's actual `+0x1C` state
+  as observed after the original Pause wrapper: unpaused,
+  paused or unexpected other value. `-1` means unknown.
+  It is measured before any synthetic Resume compensation,
+  even though the line is **printed later**, after audio
+  decisions.
+- `other_gate=0|1` is the record's separate mixer
+  exclusion field at `+0xDC`: zero or nonzero.
+  A zero `paused` flag alone does not establish audible
+  output when the other gate is set.
+
+The snapshot is admitted **only** after precisely two
+source-identified original slot-2 callbacks with an
+identical transition-object argument and a post-wrapper
+type `4`; the pre-existing first-16 ESC-source budget
+applies. No new memory reads occur inside audio callbacks.
+
+Strict positive checks:
+
+1. Actual saved original Pause callback address is
+   `WAVMWbvr.dll + 0xC7E0`.
+2. The two loaded DLLs' PE headers are x86 with the
+   owner-observed respective 1999 timestamps and image
+   sizes, and both verified exported function entry
+   byte prefixes match the attached originals. These
+   are *runtime version fingerprints*, **not** a
+   dynamic full-file SHA-256 proof.
+3. The actual original WAVMW delegated function pointer
+   at RVA `0x26A9C` equals
+   `APMMXbvr.dll + 0x54D0`.
+4. `[transition+0]=4`; `[transition+4]` supplies the
+   ADPCM handle; `[handle]` references an original
+   record with pool RVA `0xE67D8`, record stride
+   `0xE4`, live record count RVA `0x24EC4`,
+   active count `1..30`, and
+   `[record+0xD4] == handle`.
+5. Reads of the ADPCM handle target and live record count
+   before and after the remaining observations must be
+   identical. If they disagree, return `sampled=0`
+   and never attribute the pause state to a stable record.
+
+There is **no long-lived cache of the transition pointer,
+ADPCM handle or record address**, no write to the original
+game, no direct call into the ADPCM DLL, no added native
+Pause/Resume/Stop and no changed compensation decision.
+Source/Theme eligibility is unchanged. This snapshot
+does not acquire the original ADPCM driver's critical
+section, so even repeatable observations are still
+**diagnostic only**, not an atomic guarantee of
+stability across an asynchronous Stop or pool compaction.
+
+This specifically tests the unanswered early-menu case:
+when `RUNTIME-ESC-PREDRIVER-GATE native_ref_class=3`
+(`9:12` mismatched with the active `9:5` Theme), does
+the separately source-verified original paused transition
+also have a valid live ADPCM record with `paused=1`?
+If yes, the native Pause reaches an actual eligible
+record even under the higher-level Theme pointer mismatch.
+It does **not**, by itself, prove that suppressing the
+pause is safe (other sounds, Stop/compaction, focus,
+script depth and Resume debt remain independent).
+
+**Safety no-go:** the observed `voice_index` can be reused
+after Stop/compaction. Even a stable ordinal in consecutive
+menu logs is not a music-generation token. The
+previous no-pre-driver-suppression policy continues until
+a reliable exact owner/retirement contract is established.
