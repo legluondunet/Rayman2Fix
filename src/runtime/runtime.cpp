@@ -1224,6 +1224,11 @@ struct ProtoPreDriverReport {
     DWORD t_ms=0;
     int depth_before=-1;
     int depth_after=-1;
+    // Post-wrapper-only read of the original WAVMWbvr transition object's
+    // first DWORD. -1=unreadable/not-applicable, 0=other, 1/2/4=tags
+    // established by static analysis of owner's hash-pinned DLL.
+    // It is NOT a physical voice ID and never authorizes audio calls.
+    int transition_type_post_pause=-1;
     // Source-scoped snapshots, captured outside the native driver callbacks.
     // Play/Stop counts include OTHER sounds: any delta disproves a totally
     // quiet interval, but zero alone does not prove the SXD stream is stable.
@@ -1438,12 +1443,30 @@ void proto_call_original(std::uintptr_t rva) {
     if(!base)return;
     reinterpret_cast<NativeAudioWrapper>(base+rva)();
 }
+// The exact uploaded WAVMWbvr.dll (SHA256 cd0a0ad0...) dispatches
+// PauseTransitionSxd from the first DWORD of its *object pointer*.
+// Sample the tag ONLY after the unchanged original script wrapper has
+// returned. Never read game/driver memory inside its audio callbacks,
+// and never use this value to authorize/suppress native Pause/Resume.
+// This diagnostic is bounded by the existing first-16 ESC-source budget.
+int proto_read_transition_type_post_wrapper(DWORD object_ref) {
+    if(object_ref<0x10000u || object_ref==0xffffffffu)return -1;
+    DWORD type=0;
+    SIZE_T read=0;
+    const bool ok=ReadProcessMemory(
+        GetCurrentProcess(),
+        reinterpret_cast<const void*>(std::uintptr_t(object_ref)),
+        &type,sizeof(type),&read)!=0 && read==sizeof(type);
+    if(!ok)return -1;
+    return (type==1u || type==2u || type==4u) ? int(type) : 0;
+}
 void __cdecl proto_script_pause() {
     bool adopted=false;
     DWORD depth_before=0,depth_after=0;
     bool depth_before_ok=false,depth_after_ok=false;
     unsigned native_stop_before=0,native_stop_after=0;
     unsigned native_play_before=0,native_play_after=0;
+    int transition_type_post_pause=-1;
     if(g_proto_enabled.load(std::memory_order_acquire)) {
         BYTE menu=0;
         DWORD depth=0;
@@ -1480,6 +1503,12 @@ void __cdecl proto_script_pause() {
     }
     if(predriver_trace) {
         g_proto_predriver_probe.active=false;
+        // No added work inside audio callbacks or before native pause.
+        // Both source-specific original calls must have used one object.
+        if(g_proto_predriver_probe.pause_count==2u &&
+           g_proto_predriver_probe.other_handle_count==0u)
+            transition_type_post_pause=proto_read_transition_type_post_wrapper(
+                g_proto_predriver_probe.first_handle);
         depth_after_ok=proto_read_depth(depth_after);
         native_stop_after=g_proto_native_stop_calls.load(std::memory_order_acquire);
         native_play_after=g_transition_play_calls.load(std::memory_order_acquire);
@@ -1499,6 +1528,8 @@ void __cdecl proto_script_pause() {
             g_proto_predriver_report.native_stop_after=native_stop_after;
             g_proto_predriver_report.native_play_before=native_play_before;
             g_proto_predriver_report.native_play_after=native_play_after;
+            g_proto_predriver_report.transition_type_post_pause=
+                transition_type_post_pause;
         }
         if(adopted && predriver_trace) {
             const bool overlap=g_proto_esc_lifetime_start.valid;
@@ -2085,7 +2116,7 @@ void proto_menu_tick() {
         // Use the source-verified opening snapshot as the baseline;
         // watch-only sampling could otherwise miss the first menu interval.
         proto_note_sampled_sxd(owner,known && menu!=0 && actor_ok);
-        char line[540]{};
+        char line[590]{};
         std::snprintf(line,sizeof(line),
             "RUNTIME-ESC-PREDRIVER-GATE: t_ms=%lu callbacks=%u "
             "transition_pauses=%u other_slots=%u different_handles=%u "
@@ -2093,6 +2124,7 @@ void proto_menu_tick() {
             "owner_driver=%u outer_candidates=%u native_ref_class=%d "
             "native_ref_match=%d outer_bank=%d outer_index=%d "
             "inner_bank=%d inner_index=%d "
+            "transition_type_post_pause=%d "
             "(script-origin read-only pre-driver order; all native calls forwarded)",
             static_cast<unsigned long>(report.t_ms),
             probe.callback_count,probe.pause_count,probe.unrelated_slots,
@@ -2106,7 +2138,8 @@ void proto_menu_tick() {
             owner.outer_bank_provenance.bank_id,
             owner.outer_bank_provenance.resource_index,
             owner.inner_bank_provenance.bank_id,
-            owner.inner_bank_provenance.resource_index);
+            owner.inner_bank_provenance.resource_index,
+            report.transition_type_post_pause);
         log_line(line);
         // Read-only source-window audit. Snapshot the global native Play
         // and Stop call counts before/after the script wrapper and at the
