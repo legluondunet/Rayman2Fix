@@ -217,6 +217,14 @@ if(BUILD_TESTING)
   target_include_directories(esc_music_shadow_cpp_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME esc-music-shadow-state-machine COMMAND esc_music_shadow_cpp_tests)
+  # Backend adapter cannot run without an independently validated real
+  # APM driver contract; unit tests use fake callbacks, never real music.
+  add_executable(esc_music_mixer_bridge_tests
+    tests/esc_music_mixer_bridge_tests.cpp)
+  target_include_directories(esc_music_mixer_bridge_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-music-mixer-adapter-contract
+    COMMAND esc_music_mixer_bridge_tests)
 
   add_executable(fov_math_tests tests/fov_math_tests.cpp)
   target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
