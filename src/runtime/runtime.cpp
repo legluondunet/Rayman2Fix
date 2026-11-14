@@ -1261,6 +1261,13 @@ bool proto_write_caller(BYTE* at,const BYTE* bytes) {
 void proto_install_callsites() {
     if(!g_proto_enabled.load(std::memory_order_acquire) ||
        g_proto_callsites_installed.load(std::memory_order_acquire))return;
+    // Never route native game events to the research adapter until BOTH
+    // transition driver callbacks and the two Stop paths are installed.
+    // Otherwise an early script pause could acquire an owner that cannot
+    // be resumed or retired safely by our explicit bridge.
+    for(const unsigned slot: {2u,3u,10u,11u})
+        if(!g_audio_original[slot].load(std::memory_order_acquire))
+            return;
     auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
     if(!base)return;
     const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
