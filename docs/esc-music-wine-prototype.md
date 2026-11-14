@@ -122,3 +122,52 @@ suppression/replay is permitted. The old packed bank/index comparison is
 preserved only to understand legacy trace logs. Neither comparison
 alone proves audible music identity; real Wine listening and Alt+Tab
 still need validation.
+
+## Experimental Wine log — 14 November 2026, 10:37
+
+`Rayman2Fix(20261114-103730).log` is the first confirmed
+`prototype=1` / `source-hooks-installed` test. The original audio
+calls still flowed through unchanged: **no** `driver-resume-batch`
+or `native-resume-suppressed` was emitted, and the first
+`script-pause-observed` was already `phase=0` (candidate discarded).
+This is not a successful music-continuation test.
+
+The log exposed two separate experimental gating errors:
+
+1. The first ESC script pause at `t_ms=38040–38041` has a unique,
+   bank-proven native Theme + SXD owner (outer 9:5, inner 9:6), but
+   `native_theme_player_ref_matches_outer=0`. The old adapter demanded
+   this **final** player match while merely collecting the two native
+   Pause callbacks, discarding the candidate before the menu flag rose.
+   The observed previous/next scenes can transiently carry a different
+   native player reference. We now collect the strict unique outer/inner
+   owner and bank identity **provisionally**, then revalidate
+   `native_theme_player_ref_matches_outer=1` before any synthetic Resume.
+   A mismatch at menu-open remains a hard opt-out, not a bypass.
+2. A later ESC script pause at `t_ms=88176–88177` entered at native
+   pause depth 2, not 1. Its current-player descriptor reference
+   **did** match (1), but the prototype's earlier hard-coded
+   `depth==1` candidate restriction silently rejected it. Native
+   pause depth is cumulative, so candidate detection now accepts only
+   a bounded depth in **1..8** while still requiring a real pressed ESC,
+   foreground and initially closed menu, plus unchanged native
+   script-wrapper provenance.
+
+The return-address research probe printed `audio_origin=unknown`
+after all four source call sites were diverted through the experimental
+DLL. That is expected from a changed native call stack and should not be
+treated as an unsourced audio event. The new trace labels its origin
+using the **scoped thread-local original caller** from the already
+verified source-specific detours. This changes diagnostics only, not
+the selected physical handles or source of hook authorization.
+
+A genuine `StopTransitionSxd` occurred before the first menu flag
+fell (`t_ms=46425`), so no compensation may retain that retired
+Theme. The regression remains important for the **second** and
+**third** ESC sessions, which have a current-player pointer match
+and a real native menu actor.
+
+These changes are a candidate-provenance repair, **not** evidence
+that the installed `WAVMWbvr.dll` pilot supports paired physical
+resume or that the sound continues. Windows x86/CI and one further
+live listening test are required.
