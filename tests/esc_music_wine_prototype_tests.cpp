@@ -114,6 +114,10 @@ void first_esc_late_owner_verification() {
     CHECK(!retry_live_theme_identity(x.phase(),true,true,true,true,true,20));
     // Caller defers policy evaluation: original driver remains paused.
     CHECK(x.phase()==Phase::pending_menu && x.native_pause_count()==2);
+    // A provisional current-player mismatch before the native menu
+    // appears is not yet actionable and must not quarantine the stream.
+    CHECK(!x.menu_tick(true,false,true,false));
+    CHECK(x.phase()==Phase::pending_menu);
     // Only after EXACT live identity is re-established may paired
     // native ResumeTransitionSxd be requested.
     CHECK(x.menu_tick(true,true,true,x.identity_matches(kMusic)).command==
