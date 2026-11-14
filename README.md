@@ -1,73 +1,32 @@
-## Music in the Escape pause menu — research build
-
-Requested future setting: `[Features] MusicInPauseMenu=0` (disabled by
-default). **Not yet implemented in the user INI**, because a reliable
-audio-only pause policy has not been identified. No placebo option is
-shipped. The original music and the game's sound driver are unchanged.
-
-The separately labelled GitHub Actions artifact
-`Rayman2Fix-Windows-x86-audio-trace` has a **research-only** DLL with
-`RAYMAN2FIX_AUDIO_TRACE=1`; the normal
-`Rayman2Fix-Windows-x86-bootstrap` build has **no audio tracer**.
-On the one SHA-256-approved original CD executable, and only when
-`[Debug] Log=1`, this tracer observes up to 16 calls per native
-audio channel (14 independently bounded channels; 64 for the
-common Sxd pause/resume channels so multiple menus fit), including Sxd
-pause/resume/stop, Sxd transitions, sound volume, MIDI,
-MIDI transitions and CD audio.
-The 1999 PC CD assembly additionally confirms a 64-record global
-sound table and one global audio pause-depth counter. Research-only
-log lines now include the matching `sound_slot` number (0–63, when
-available), native `sound_transport` (SXD=1 / MIDI=2 when readable),
-transition and active flags, and `global_pause_depth`. Additional
-`RUNTIME-AUDIO-STATE` lines record actual changes of the native
-pause-depth counter every ~500 ms, including when no audio callback
-fires. The `sound_matches` field reports when several game sound
-records share the same driver handle; a non-unique `sound_slot`
-must **not** be assumed to identify an individual song.
-The first native source-classification test returned
-`audio_origin=unknown` for every observed call. The updated
-research build widens its stack read from 96 to at most 1,024
-32-bit words (4 KiB) within the first committed region and,
-on the first two events for each pause/resume channel, logs
-`RUNTIME-AUDIO-CALLSTACK` with up to four *candidate* code
-RVAs (no absolute pointers or data) plus `wrapper_returns`
-and `paired_callers` counts. A provenance label now requires
-**exactly one** adjacent pair from the approved CD's native
-pause/resume wrapper and its verified outer script/Windows
-caller; solitary stale return addresses never qualify.
-Candidate RVAs by themselves are diagnostic evidence,
-not validated return frames.
-New `audio_origin` diagnostics attempt to distinguish actual
-`game-script-pause` / `game-script-resume` call paths from
-`windows-activation-pause` / `windows-activation-resume`
-using the original CD's verified code-return addresses. If the
-bounded read-only call-stack snapshot cannot classify safely,
-it reports `unknown` or `ambiguous`; a pressed Esc key
-alone must never authorize music to continue.
-These are read-only observations, **not proof of a music stream**, and no
-raw memory address, sound resource filename or pointer is logged.
-The global audio pause routine is invoked both by the window
-activation handler and by a native game script, so suppressing its
-calls based on a key or focus alone would be unsafe. The verified original driver function is always called with
-the same argument; no sound is silenced, played, skipped, replaced,
-or looped. Installation of those diagnostic-only hooks fails closed
-when driver functions or game-memory protections are unexpected.
-The research build is **not a stable release**.
-
-For a reproducible Wine test, play until music is audible, open
-the Escape menu for a few seconds, return to the level,
-then Alt-Tab away and back (to contrast focus-based audio pauses).
-Exit the game and provide **both** `Rayman2Fix_installer.log` and
-`Rayman2Fix.log` from beside `Rayman2Fix.exe`. The lines
-`RUNTIME-AUDIO-TRACE` identify exactly which native music/sound
-pause channel is invoked and whether the game had focus at
-that moment; a key-down flag is only supporting evidence, not
-a menu-state detector. F1 is out of scope for this improvement.
-Until the exact music-only record is verified, do not enable
-an audio bypass. See issue #4.
-
 # Rayman2Fix
+
+## Original level music in the Escape menu
+
+The owner's Wine tests validated continuing the game's **original level
+music** while the in-game **Escape** menu is open, including Alt+Tab. The
+feature is integrated into the normal Windows x86 runtime without external
+soundtrack files, without requiring `[Debug] Log=1` and without the old
+`RAYMAN2FIX_ESC_AUDIO_PROTOTYPE` environment variable. The original SFX,
+native scene Stops and independent Win32 activation pauses are preserved.
+
+For a verified installation, set this in
+`Rayman2Fix/Rayman2Fix.ini`:
+
+```ini
+[Features]
+MusicInPauseMenu=1
+```
+
+The default is **0 (disabled)** as originally requested. `1` enables
+the function; `0` restores normal native music pausing. The installer
+adds the missing key to old INIs without changing existing values, comments
+or unrelated options. Only the approved original CD executable is hooked.
+`--launch-no-verify` bypasses runtime provisioning and must not be
+used when updating the embedded DLL.
+
+The separate `docs/esc-music-wine-prototype.md` records the now-completed
+research and the initial Wine validation; experimental audio tracers remain
+available only in explicitly requested research builds.
 
 **A new, independent compatibility project for Rayman 2: The Great Escape (PC CD editions).**
 
