@@ -537,6 +537,148 @@ void log_audio_driver_module(unsigned slot,const void* current) {
     log_line(msg);
 }
 
+// Original owner's hash-pinned WAVMWbvr.dll contains dynamically resolved
+// type-4 ADPCM Stop/Pause/Resume transition thunks in three consecutive
+// PE data slots. Read them ONCE after a source-confirmed ESC menu, on
+// the normal render thread AFTER the existing audio compensation. Never
+// call these delegates, read them in a native callback or log raw pointers.
+// A basename/timestamp/entry-opcode guard prevents applying original-DLL
+// offsets to unrelated versions. This is a *version fingerprint*, not
+// a full SHA-256 proof of the image bytes.
+void log_adpcm_delegate_origins_readonly() {
+    if(!g_log)return;
+    const auto original=g_audio_original[2u].load(std::memory_order_acquire);
+    if(!original) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=no-original-pause (read-only)");
+        return;
+    }
+    HMODULE h=nullptr;
+    if(!GetModuleHandleExW(
+         GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+         GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+         reinterpret_cast<LPCWSTR>(original),&h) || !h) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=unknown-origin (read-only)");
+        return;
+    }
+    wchar_t path[MAX_PATH]{};
+    const DWORD len=GetModuleFileNameW(h,path,MAX_PATH);
+    if(!len || len>=MAX_PATH) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=unknown-module (read-only)");
+        return;
+    }
+    const wchar_t* name=path;
+    for(DWORD i=0;i<len;++i)
+        if(path[i]==L'\\' || path[i]==L'/')name=path+i+1;
+    const BYTE* base=reinterpret_cast<const BYTE*>(h);
+    const auto origin=reinterpret_cast<std::uintptr_t>(original);
+    if(CompareStringOrdinal(name,-1,L"WAVMWbvr.dll",-1,TRUE)!=CSTR_EQUAL ||
+       origin!=reinterpret_cast<std::uintptr_t>(base)+0xC7E0u) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=other-pause-owner (read-only)");
+        return;
+    }
+    const HANDLE proc=GetCurrentProcess();
+    const auto read=[&](const void* address,void* out,SIZE_T size) {
+        SIZE_T copied=0;
+        return ReadProcessMemory(proc,address,out,size,&copied)!=0 &&
+            copied==size;
+    };
+    IMAGE_DOS_HEADER dos{};
+    if(!read(base,&dos,sizeof(dos)) ||
+       dos.e_magic!=IMAGE_DOS_SIGNATURE ||
+       dos.e_lfanew<=0 || dos.e_lfanew>=0x1000) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=invalid-dos (read-only)");
+        return;
+    }
+    IMAGE_NT_HEADERS32 nt{};
+    if(!read(base+dos.e_lfanew,&nt,sizeof(nt)) ||
+       nt.Signature!=IMAGE_NT_SIGNATURE ||
+       nt.FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       nt.FileHeader.TimeDateStamp!=0x38076FB4u ||
+       nt.OptionalHeader.Magic!=IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
+       nt.OptionalHeader.SizeOfImage!=0x87000u) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=unverified-image (read-only)");
+        return;
+    }
+    constexpr BYTE expected_pause[7]{0x8B,0x4C,0x24,0x04,0x8B,0x01,0x48};
+    BYTE actual_pause[sizeof(expected_pause)]{};
+    if(!read(base+0xC7E0u,actual_pause,sizeof(actual_pause)) ||
+       std::memcmp(actual_pause,expected_pause,sizeof(actual_pause))!=0) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=entry-mismatch (read-only)");
+        return;
+    }
+    // This exact disk DLL dispatches:
+    // StopTransitionSxd type 4 -> [module+0x26A98],
+    // PauseTransitionSxd type 4 -> [module+0x26A9C],
+    // ResumeTransitionSxd type 4 -> [module+0x26AA0].
+    constexpr unsigned slot_rvas[3]{0x26A98u,0x26A9Cu,0x26AA0u};
+    constexpr unsigned fallback_rvas[3]{0x3C50u,0x3C80u,0x3CB0u};
+    const char* labels[3]{"stop","pause","resume"};
+    for(unsigned i=0;i<3u;++i) {
+        DWORD target=0;
+        if(!read(base+slot_rvas[i],&target,sizeof(target)) ||
+           !target || target==0xFFFFFFFFu) {
+            char msg[170]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-AUDIO-ADPCM-DELEGATE: op=%s status=unresolved "
+                "(read-only; no call)",labels[i]);
+            log_line(msg);
+            continue;
+        }
+        const auto address=std::uintptr_t(target);
+        if(address==std::uintptr_t(base)+fallback_rvas[i]) {
+            char msg[170]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-AUDIO-ADPCM-DELEGATE: op=%s status=fallback "
+                "(original DLL no-op; no call)",labels[i]);
+            log_line(msg);
+            continue;
+        }
+        HMODULE target_module=nullptr;
+        if(!GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(address),&target_module) ||
+           !target_module ||
+           !executable_page(reinterpret_cast<const void*>(address))) {
+            char msg[180]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-AUDIO-ADPCM-DELEGATE: op=%s status=unknown "
+                "(read-only; no call)",labels[i]);
+            log_line(msg);
+            continue;
+        }
+        wchar_t target_path[MAX_PATH]{};
+        const DWORD n=GetModuleFileNameW(
+            target_module,target_path,MAX_PATH);
+        const wchar_t* target_name=target_path;
+        if(!n || n>=MAX_PATH) {
+            char msg[180]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-AUDIO-ADPCM-DELEGATE: op=%s status=unknown-name "
+                "(read-only; no call)",labels[i]);
+            log_line(msg);
+            continue;
+        }
+        for(DWORD j=0;j<n;++j)
+            if(target_path[j]==L'\\' || target_path[j]==L'/')
+                target_name=target_path+j+1;
+        char safe_basename[64]{};
+        unsigned k=0;
+        for(const wchar_t* p=target_name;*p && k+1<sizeof(safe_basename);++p)
+            safe_basename[k++]=(*p>=33 && *p<=126)
+                ? static_cast<char>(*p) : '?';
+        char msg[256]{};
+        const auto target_rva=address-
+            reinterpret_cast<std::uintptr_t>(target_module);
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-AUDIO-ADPCM-DELEGATE: op=%s status=resolved "
+            "module=%s callback_rva=0x%08X "
+            "(original indirect target; read-only; no call)",
+            labels[i],safe_basename,static_cast<unsigned>(target_rva));
+        log_line(msg);
+    }
+}
+
 // Owner's exact CD executable, source RVA=0x4580B0: the *global*
 // pause/resume dispatcher walks 64 sound records, 0x20 bytes each,
 // starting at 0x4B8C98. This maps an opaque driver argument back to a
@@ -2164,6 +2306,15 @@ void proto_menu_tick() {
             unsigned(known),
             unsigned(known && menu!=0 && actor_ok));
         log_line(window);
+        // Read the original type-4 delegate destinations at most once
+        // and only after the native script wrapper and all current
+        // audio compensation have already completed.
+        static bool adpcm_targets_logged=false; // render thread only
+        if(report.transition_type_post_pause==4 &&
+           !adpcm_targets_logged) {
+            adpcm_targets_logged=true;
+            log_adpcm_delegate_origins_readonly();
+        }
     }
     if(phase==proto::Phase::pending_menu && known && menu!=0) {
         proto_log("menu-verdict",
