@@ -353,6 +353,67 @@ void log_line(const char* message) {
     WriteFile(file, "\r\n", 2, &written, nullptr);
     CloseHandle(file);
 }
+// Read-only audit of the ORIGINAL CPA sound configuration, not a fix
+// configuration and never a driver selection override. The key is spelled
+// "Unconditionnal" by the 1999 engine. This runs once on explicit runtime
+// initialization, not from a native audio callback, with no config changes.
+#if RAYMAN2FIX_AUDIO_HOOKS
+void log_cpa_sound_configuration() {
+    if(!g_log)return;
+    wchar_t path[MAX_PATH]{};
+    const DWORD length=GetModuleFileNameW(nullptr,path,MAX_PATH);
+    if(!length || length>=MAX_PATH)return;
+    wchar_t* end=wcsrchr(path,L'\\');
+    if(!end)return;
+    const wchar_t filename[]=L"dll\\snd_cpa.ini";
+    if(static_cast<std::size_t>(end-path)+
+       (sizeof(filename)/sizeof(filename[0]))>MAX_PATH)return;
+    wcscpy_s(end+1,MAX_PATH-static_cast<std::size_t>(end+1-path),filename);
+    const DWORD attributes=GetFileAttributesW(path);
+    if(attributes==INVALID_FILE_ATTRIBUTES ||
+       (attributes&FILE_ATTRIBUTE_DIRECTORY)!=0u) {
+        log_line("RUNTIME-AUDIO-CONFIG: status=missing (no audio settings changed)");
+        return;
+    }
+    // Strict ASCII field normalization: no path, quoted line, or injected
+    // line break from a user-editable legacy INI ever enters the log.
+    const auto field=[&](const wchar_t* section,const wchar_t* key,
+                         char (&out)[48]) {
+        wchar_t wide[96]{};
+        const DWORD n=GetPrivateProfileStringW(
+            section,key,L"unset",wide,
+            static_cast<DWORD>(sizeof(wide)/sizeof(wide[0])),path);
+        unsigned k=0;
+        for(DWORD i=0;i<n && k+1<sizeof(out);++i) {
+            const wchar_t c=wide[i];
+            if((c>=L'A' && c<=L'Z') ||
+               (c>=L'a' && c<=L'z') ||
+               (c>=L'0' && c<=L'9') ||
+               c==L'_' || c==L'-' || c==L'.')
+                out[k++]=static_cast<char>(c);
+            else
+                out[k++]='?';
+        }
+        out[k]='\0';
+    };
+    char unconditional[48]{},default_sxd[48]{},file0[48]{},file1[48]{},
+         default_adpcm[48]{};
+    field(L"DLL_Sxd",L"Unconditionnal",unconditional);
+    field(L"DLL_Sxd",L"Default",default_sxd);
+    field(L"DLL_Sxd",L"File0",file0);
+    field(L"DLL_Sxd",L"File1",file1);
+    field(L"DLL_Adpcm",L"Default",default_adpcm);
+    char line[400]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-AUDIO-CONFIG: status=present "
+        "sxd_unconditional=%s sxd_default=%s sxd_file0=%s sxd_file1=%s "
+        "adpcm_default=%s "
+        "(configuration candidates only; original DLL unchanged)",
+        unconditional,default_sxd,file0,file1,default_adpcm);
+    log_line(line);
+}
+#endif
+
 bool game_window_is_foreground() {
     HWND foreground = GetForegroundWindow();
     DWORD pid = 0;
@@ -5173,6 +5234,10 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
 #endif
 #if RAYMAN2FIX_AUDIO_HOOKS
     g_audio_origin.store(GetTickCount(),std::memory_order_release);
+    // Capture intended CPA config before the original sound driver is
+    // initialized. The actual native callback owners are logged later
+    // from the hooked original function pointers, not inferred here.
+    log_cpa_sound_configuration();
 #if RAYMAN2FIX_AUDIO_TRACE
     if (g_log) {
 #if RAYMAN2FIX_ESC_MUSIC_PROTO
