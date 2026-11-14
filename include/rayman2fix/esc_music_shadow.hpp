@@ -41,6 +41,7 @@ struct Proof {
     bool current_level_music=false;
     bool esc_lifetime=false;
     bool mixer_adapter=false;
+    bool initial_driver_playing=false; // verified baseline, not inferred
     bool focus_known=false;
     bool foreground=false;
 };
@@ -53,6 +54,7 @@ public:
     bool attach(const Generation& g, const Proof& p) noexcept {
         if(active_ || !g.valid() || !p.current_level_music ||
            !p.esc_lifetime || !p.mixer_adapter ||
+           !p.initial_driver_playing ||
            !p.focus_known || !p.foreground) return false;
         owner_=g;
         active_=true;
