@@ -20,6 +20,11 @@ struct Dispatch {
     std::uint32_t handle=0;
     unsigned count=0;
     std::uint64_t generation=0;
+    // Bind every synthetic driver command to the native stream captured
+    // on the two original script-pause callbacks. A driver handle can be
+    // reused while a Theme changes its inner SXD descriptor in-place.
+    std::uint32_t native_theme_key=0;
+    std::uint32_t native_inner_key=0;
     explicit operator bool() const noexcept { return command!=Command::none; }
 };
 struct Identity {
@@ -36,6 +41,12 @@ struct Identity {
                native_theme_key==other.native_theme_key &&
                native_inner_key==other.native_inner_key &&
                generation==other.generation;
+    }
+    bool same_dispatch(const Dispatch& action) const noexcept {
+        return valid() && handle==action.handle &&
+               native_theme_key==action.native_theme_key &&
+               native_inner_key==action.native_inner_key &&
+               generation==action.generation;
     }
 };
 
@@ -285,6 +296,11 @@ public:
         return phase_!=Phase::idle && phase_!=Phase::quarantined &&
                identity_.generation==token && token!=0;
     }
+    // Never consider an in-flight Theme→SXD handoff the same stream just
+    // because the driver handle still exists and the bank list is valid.
+    bool owner_same(const Identity& live) const noexcept {
+        return current(live.generation) && live.same(identity_);
+    }
     // A quarantined generation may receive ONE last safety *pause*
     // (never a resume), provided native Stop has not retired it.
     bool safety_current(std::uint64_t token) const noexcept {
@@ -299,7 +315,8 @@ public:
     void reset() noexcept {clear();}
 private:
     Dispatch make(Command c) const noexcept {
-        return {c,identity_.handle,observed_pauses_,identity_.generation};
+        return {c,identity_.handle,observed_pauses_,identity_.generation,
+                identity_.native_theme_key,identity_.native_inner_key};
     }
     void clear() noexcept {
         phase_=Phase::idle;
