@@ -1087,12 +1087,19 @@ bool proto_read_depth(DWORD& out) {
     return ReadProcessMemory(GetCurrentProcess(),module+0xA3CC8,
         &out,sizeof(out),&read)!=0 && read==sizeof(out) && out<=16u;
 }
-proto::Identity proto_identity(DWORD handle,std::uint64_t generation) {
+proto::Identity proto_identity(DWORD handle,std::uint64_t generation,
+                              bool require_current_theme=true) {
     proto::Identity id{};
     if(!handle || handle==0xffffffffu || !generation)return id;
     const auto owner=inspect_audio_theme_owner(handle);
+    // The native player reference may briefly disagree with the unique
+    // Theme/SXD ownership while script pause callbacks are arriving.
+    // Record the *candidate* only from the separately hooked script path,
+    // but NEVER resume the physical driver without exact live player
+    // pointer equality at the later menu-open transition.
     if(owner.theme_owned_driver!=1u ||
-       owner.native_theme_player_ref_matches_outer!=1 ||
+       (require_current_theme &&
+        owner.native_theme_player_ref_matches_outer!=1) ||
        owner.outer_bank_provenance.list_complete!=1u ||
        owner.inner_bank_provenance.list_complete!=1u ||
        owner.outer_bank_provenance.candidates!=1u ||
@@ -1169,10 +1176,14 @@ void __cdecl proto_script_pause() {
     if(g_proto_enabled.load(std::memory_order_acquire)) {
         BYTE menu=0;
         DWORD depth=0;
+        // The engine's native pause depth is cumulative. The first
+        // menu entered at depth 1, but a subsequent ESC menu in the same
+        // session was entered at depth 2 (Nov 14 Wine evidence).
+        // A hard-coded ==1 silently disabled all subsequent attempts.
         const bool candidate=game_window_is_foreground() &&
             (GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0 &&
             proto_game_read(0xB9BC8,menu) && menu==0 &&
-            proto_read_depth(depth) && depth==1;
+            proto_read_depth(depth) && depth>=1u && depth<=8u;
         if(candidate) {
             const std::lock_guard<std::mutex> lock(g_proto_mutex);
             adopted=g_proto.begin_script_pause(true,true,true);
@@ -1234,7 +1245,10 @@ void __cdecl proto_focus_resume() {
 }
 void proto_record_pause(DWORD handle) {
     const unsigned generation=g_proto_generation.load(std::memory_order_acquire);
-    const proto::Identity id=proto_identity(handle,generation);
+    // Paired pause callbacks establish a provisional Theme/SXD identity.
+    // A strong current native player match is mandatory only before any
+    // synthetic driver Resume, never while gathering pause evidence.
+    const proto::Identity id=proto_identity(handle,generation,false);
     const std::lock_guard<std::mutex> lock(g_proto_mutex);
     g_proto.observe_native_pause(id,id.valid());
 }
@@ -1424,6 +1438,26 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
             preview ? &scanned_words : nullptr,
             preview ? &wrapper_returns : nullptr,
             preview ? &confirmed_pairs : nullptr);
+#if RAYMAN2FIX_ESC_MUSIC_PROTO
+        // The experimental source detours insert a DLL frame, so
+        // return-address-based origin parsing can report "unknown".
+        // Restore the proven source from the scoped, per-thread wrapper
+        // instead of guessing from the Escape key or global menu flag.
+        if(g_proto_enabled.load(std::memory_order_acquire) &&
+           g_proto_callsites_installed.load(std::memory_order_acquire)) {
+            switch(g_proto_origin) {
+                case proto::Origin::script_pause:
+                    audio_origin="game-script-pause";break;
+                case proto::Origin::script_resume:
+                    audio_origin="game-script-resume";break;
+                case proto::Origin::focus_pause:
+                    audio_origin="windows-activation-pause";break;
+                case proto::Origin::focus_resume:
+                    audio_origin="windows-activation-resume";break;
+                default:break;
+            }
+        }
+#endif
     }
 #if RAYMAN2FIX_ESC_MUSIC_PROTO
     bool forwarded=true;
