@@ -186,6 +186,53 @@ void moving_track_cannot_receive_stale_rollback_or_resume() {
     CHECK(q.state()==State::retired);
     CHECK(!q.script_resume(kOriginal,true).suppress_current);
 }
+void native_stop_invalidates_unreplayable_held_pauses() {
+    Policy p;
+    CHECK(p.begin(true,true,true));
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    p.end_script_pause();
+    // A different stream's Stop must not terminate the ESC escrow.
+    const auto other=p.native_stop(kOtherHandle.handle);
+    CHECK(!other.impossible_replay);
+    CHECK(other.replay_held_pauses==0);
+    CHECK(p.state()==State::holding_pair);
+
+    // A Stop on the held original stream cannot safely replay Pause:
+    // the stream may be freed or the handle immediately reused.
+    const auto invalid=p.native_stop(kOriginal.handle);
+    CHECK(invalid.impossible_replay);
+    CHECK(invalid.replay_held_pauses==0);
+    CHECK(!invalid.suppress_current);
+    CHECK(p.held_pauses()==0);
+    CHECK(p.state()==State::retired);
+    CHECK(!p.script_resume(kOriginal,true).suppress_current);
+}
+void native_stop_during_one_pending_pause_is_also_unreplayable() {
+    Policy p;
+    CHECK(p.begin(true,true,true));
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    const auto invalid=p.native_stop(kOriginal.handle);
+    CHECK(invalid.impossible_replay);
+    CHECK(invalid.replay_held_pauses==0);
+    CHECK(p.held_pauses()==0);
+    CHECK(!p.end_script_pause().replay_held_pauses);
+    CHECK(p.state()==State::retired);
+
+    // Once a menu has been confirmed, Stop retires without trying to
+    // resurrect the previous transport's original Pause.
+    Policy q;
+    CHECK(q.begin(true,true,true));
+    CHECK(q.script_pause(kOriginal,true).suppress_current);
+    CHECK(q.script_pause(kOriginal,true).suppress_current);
+    q.end_script_pause();
+    q.menu_observation(true,true,true,true,1);
+    CHECK(q.state()==State::menu_committed);
+    const auto stopped=q.native_stop(kOriginal.handle);
+    CHECK(!stopped.impossible_replay);
+    CHECK(stopped.replay_held_pauses==0);
+    CHECK(!q.script_resume(kOriginal,true).suppress_current);
+}
 void verified_9_12_to_9_5_mismatch_needs_no_player_pointer_bypass() {
     // The *native controller* may still reference a different Theme in
     // the same bank (9:12) while the unique active SXD owner is 9:5/9:6.
@@ -212,6 +259,8 @@ int main() {
     lost_focus_before_actor_seen_replays_original_immediately();
     stream_change_and_focus_loss_never_replay_stale_pauses();
     moving_track_cannot_receive_stale_rollback_or_resume();
+    native_stop_invalidates_unreplayable_held_pauses();
+    native_stop_during_one_pending_pause_is_also_unreplayable();
     verified_9_12_to_9_5_mismatch_needs_no_player_pointer_bypass();
     std::cout<<"pre-driver ESC model: pair, rollback, provenance, focus, Stop OK\n";
     return 0;
