@@ -1,5 +1,6 @@
 #include "rayman2fix/patch_install.hpp"
 #include "rayman2fix/sha256.hpp"
+#include "rayman2fix/owner_exe.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -104,6 +105,30 @@ int main() {
         write(exe, cd_exe);
         require(r2fix::verify_exe_replacement(root, hash, cd_exe.size(), error),
                 "unpatched original again verifies");
+
+        // Scanner uses exact hash/length, never a potentially misleading
+        // filename. Test cases use only synthetic byte strings.
+        const fs::path sidecar_root=root / "adjacent";
+        fs::create_directory(sidecar_root);
+        write(sidecar_root/"Rayman2Fix.exe","LAUNCHER");
+        write(sidecar_root/"wrong.exe","0123456789abcdefgh");
+        require(!r2fix::find_owner_executable(
+                    sidecar_root,unprotected.size(),
+                    r2fix::sha256_text(unprotected)).has_value(),
+                "untrusted filename never selects wrong EXE hash");
+        const fs::path named=sidecar_root/"Rayman2(4).EXE";
+        write(named,unprotected);
+        const auto found=r2fix::find_owner_executable(
+            sidecar_root,unprotected.size(),r2fix::sha256_text(unprotected));
+        require(found && *found==named,
+                "exact owner EXE is detected regardless of downloaded name");
+        write(sidecar_root/"copy.exe",unprotected);
+        bool ambiguous=false;
+        try {(void)r2fix::find_owner_executable(
+            sidecar_root,unprotected.size(),r2fix::sha256_text(unprotected));}
+        catch(const std::runtime_error&){ambiguous=true;}
+        require(ambiguous,"duplicate approved EXE sidecars must be rejected");
+        fs::remove(sidecar_root/"copy.exe");
 
         // A complete owner-supplied EXE is discovered separately by
         // auto_flow, but must use this same safe .bak/marker transaction.
