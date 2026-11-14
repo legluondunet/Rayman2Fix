@@ -214,6 +214,15 @@ the selectable CPA audio output layer:
   or replaying a pause must not be assumed to be identical under the
   WinMM, DirectSound and other installed drivers.
 
+The installer source `src/launcher/auto_flow.cpp` establishes one more
+edition-specific detail: a fresh install copies
+`dll/snd_cpa_mmx.ini` to `dll/snd_cpa.ini`. This makes the MMX
+configuration the installed default, **not** proof of the exact active
+`[DLL_Sxd]` runtime driver or of its Stop/Play semantics. The selected
+ini contents and exact installed driver binary must be inspected before
+any backend-specific claim. Existing installations may preserve their
+already configured sound driver.
+
 In the standard opt-in runtime, the next bounded **passive** log line is
 `RUNTIME-ESC-PREDRIVER-WINDOW`. It samples already observed, global
 monotonic event counts at three boundaries: (1) immediately before the
