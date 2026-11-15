@@ -234,6 +234,30 @@ class GeneralizedThemeHandoffEvidenceTests(unittest.TestCase):
         self.assertFalse(comp["same_underlying_game_timer_proven"])
         self.assertFalse(newer_h["native_music_generation_proven"])
 
+    def test_third_actual_owner_shaped_session_converges_to_65_ms_residual_range(self):
+        # Real owner run 08:40 (prior observed Theme 9:12 at 33067,
+        # pending 9:12->9:5 at 33917; committed at 47017).
+        # Two later owner runs have much longer early ESC pauses.
+        first=A2.scan(observed_log(33067,33917,47017,[
+            (34367,35817),(37350,41733),(42734,46067)]))
+        second=A2.scan(observed_log(30971,31871,50372,[
+            (32873,38023),(39024,41424),
+            (42157,46790),(47790,50239)]))
+        third=A2.scan(observed_log(34849,35749,63549,[
+            (36718,43051),(44284,52501),(53535,62868)]))
+        first_h=first["handoffs"][0]
+        self.assertTrue(first_h["complete_source_evidence"])
+        self.assertEqual(first_h["sampled_pending_wall_ms"],13100)
+        self.assertEqual(first_h["source_paired_esc_ms"],9166)
+        self.assertEqual(first_h["wall_minus_source_esc_ms"],3934)
+        comp=A2.compare([first,second,third])
+        self.assertTrue(comp["comparison_available"])
+        self.assertEqual(comp["evidence_windows"],3)
+        self.assertEqual(comp["wall_spread_ms"],14700)
+        self.assertEqual(comp["menu_spread_ms"],14717)
+        self.assertEqual(comp["outside_esc_residual_spread_ms"],65)
+        self.assertFalse(comp["same_underlying_game_timer_proven"])
+
     def test_missing_previous_current_ref_disqualifies_pending_window(self):
         lines=observed_log(34849,35749,63549,[(36718,43051)])
         lines[0]=observer_row(34849,(9,11))
