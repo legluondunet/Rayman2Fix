@@ -1409,3 +1409,77 @@ and in-place primary reuse; endpoint voice flags and public
 export counters do not uniquely identify those events.
 No live-driver query, dynamic hook, or runtime audio change
 was introduced by this audit.
+
+## 21. Passive global output-buffer positions across original ESC audio handoff
+
+The exact original APMMX output-buffer wrappers independently
+maintain two **32-bit global output-position counters**:
+
+| Native output wrapper | Original read | Original write | Buffer-fill call |
+| --- | --- | --- | --- |
+| Mode 0 `0x3400` | `0x3431` reads RVA `0xE82A0` | `0x3465` writes RVA `0xE82A0` | `0x344C -> 0x18D0` |
+| Mode 1 `0x34B0` | `0x34D3` reads RVA `0x24ED0` | `0x350B` writes RVA `0x24ED0` | `0x34F2 -> 0x18D0` |
+
+These values change as the original native output
+functions advance their buffer positions; they are **not**
+song identifiers, per-voice generations, or guaranteed
+monotonic counters across reinitialization.
+
+The existing, separately opted-in ESC diagnostic
+`proto_sample_adpcm_voice_after_dispatch()` now also
+reads **these two global DWORD values** using the
+already established, original-PE-verified APMMX module,
+after all original audio dispatch decisions. The current
+`RUNTIME-ESC-ADPCM-VOICE` and
+`RUNTIME-ESC-ADPCM-RESUME` lines each add:
+
+```text
+mode0_output=<unsigned-32-bit> mode1_output=<unsigned-32-bit>
+```
+
+The same 16-opening and 16-closing diagnostic budgets
+apply. No original function is invoked and no additional
+original callback is hooked. The values are captured
+only with an accepted original ADPCM voice snapshot;
+`sampled=0` must remain **unknown**, not a zero
+position. Output counters are independently updated
+and the pair is **not an atomic mixer-state snapshot**.
+
+The offline `tools/audit_esc_adpcm_evidence.py` parser
+now compares such pairs only when a single opening is
+followed by a source-paired, sampled closing, with
+no intervening overlapping opening. A counter increase
+is **evidence only that the sampled global output
+position changed** during the interval, not that
+the specific paused song advanced or that the
+original callback ran on a particular thread.
+A decrease may be wraparound or reinitialization;
+the parser does not interpret it as negative
+progress. Equal counters do not prove that no
+buffer-fill callback ran.
+
+Six synthetic regressions reject missing or corrupt
+values, 32-bit overflow, non-unique opening pairs,
+unpaired closing and counter wrap ambiguities.
+A separate runtime source guard checks that the
+new reads stay outside all native callbacks and
+cannot authorize new driver commands.
+
+**How this helps with the early Escape:** a new
+Wine log from the latest experimental binary
+can differentiate visibly advancing global ADPCM
+output positions from stable sampled values
+between the original script pause and script resume.
+This is a **diagnostic step**, not a proof of physical
+record continuity or an invitation to hook the
+mixer. Existing owner logs from 15 November
+predate these counters, so no claim about their
+values in those sessions is made.
+
+**No change to early-ESC music forwarding or any
+production path.** The original
+`ref_class=3` pending handoff remains the
+directly observed reason the current coordinator
+rejects compensation; hidden native lifetime
+changes remain only *possible* alternate hazards,
+not proven causes in that log.
