@@ -20,7 +20,7 @@ class SyntheticMixerPE:
     image_size = 0xEE000
 
     def __init__(self, raw):
-        self.code = bytearray(bytes([0x90]) * 0x1E000)
+        self.code = bytearray(bytes([0x90]) * 0xD800)
         for rva, hex_bytes in A.ANCHORS.values():
             op = bytes.fromhex(hex_bytes)
             self.code[rva-0x1000:rva-0x1000+len(op)] = op
@@ -41,7 +41,7 @@ class SyntheticWavePE:
     image_size = 0x87000
 
     def __init__(self, data):
-        self.code = bytearray(b'\\x90' * 0x1E000)
+        self.code = bytearray(bytes([0x90]) * 0x1E000)
         for rva, hex_bytes in A.WAVMW_BUFFER_SITES.values():
             op = bytes.fromhex(hex_bytes)
             self.code[rva:rva+len(op)] = op
