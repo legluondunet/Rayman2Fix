@@ -28,6 +28,27 @@ inline bool center_normalized_superimposed_x(float original_x,
     return true;
 }
 
+// In the approved CD executable TextSuperImposed measures the native
+// viewport width and height separately:
+// VA 0x475BC6 loads the viewport WIDTH, VA 0x475BCC the HEIGHT;
+// FMULs at 0x475BEF and 0x475BF7 divide by 640 and 480.
+// Only the horizontal extent must be narrowed in panoramical mode.
+// Applying the squeeze again to the vertical coefficient produced
+// text squashed to 75% height at 16:9 (confirmed by screenshot pairs).
+// Keep vertical coefficient invariant at any supported aspect ratio.
+inline bool superimposed_text_extent_coefficients(
+    float horizontal_squeeze, float& horizontal, float& vertical) {
+    if(!std::isfinite(horizontal_squeeze) ||
+       horizontal_squeeze<=0.25f || horizontal_squeeze>1.0f)
+        return false;
+    const float x=(1.0f/640.0f)*horizontal_squeeze;
+    constexpr float y=1.0f/480.0f;
+    if(!std::isfinite(x) || x<=0.0f) return false;
+    horizontal=x;
+    vertical=y;
+    return true;
+}
+
 // Proc-style screen placement: the original actor procedure passes
 // coordinates as thousandths of the screen, not as GLI 2D percent.
 inline bool remap_superimposed_screen_x(std::int32_t x_1000,
