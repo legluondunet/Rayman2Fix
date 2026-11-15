@@ -1579,3 +1579,106 @@ and four synthetic classifier regressions in
 effect resumes no longer veto a legitimate observation and
 that a failed/blocked snapshot is never mistaken for missing
 music or driver retirement. PR #10 remains **DRAFT**.
+
+## 23. Owner 15:34 Wine verification: original ADPCM output progression across ESC (2026-11-15)
+
+The owner ran the **corrected, explicitly enabled**
+experimental launcher and supplied
+`Rayman2Fix(20261115-153430).log` (417 lines).
+`RUNTIME-ESC-PROTOTYPE: enabled=1`,
+`RUNTIME-AUDIO-TRACE: enabled=1 schema=2 prototype=1`.
+This is a real Wine run, **not** synthetic CI evidence.
+
+**The 15:13 instrumentation defect is fixed in practice:**
+there are six original source-qualified ESC Pause openings,
+five same-thread/generation-paired script Resume closings, and
+three closing samples with **`gate=1 sampled=1`**.
+The two other closings are deliberately excluded with
+`gate=0 sampled=0` after detected original SXD resource
+changes (`9:7→9:8` and `9:8→9:9`).
+The sixth opening had no matching original script Resume
+before the journal ended and must **not** be treated as a
+completed menu interval.
+
+The first three openings are the known
+**pending Theme reference** (`native_ref_class=3`,
+`native_ref_match=0`), and the original compensation
+is rejected. Each opening reads native APMMX
+`voice_index=0, paused=1, active=1` after the
+original Pause. Each paired closing reads the
+original music voice as `voice_index=0,
+paused=0, active=1` **after** the original
+native Resume; no synthetic music resume was
+issued, and the three reported intervals have
+zero **exported** Play/Stop calls. The recorded
+inner resource `9:6` is unchanged in these
+bounded paired observations.
+
+Most importantly, the two original **global**
+APMMX buffer-output positions now have valid
+measurements **within** the same menus:
+
+| ESC interval (ms) | Elapsed | Mode 0 open → close | Mode 1 open → close | Signed observed change |
+| --- | ---: | ---: | ---: | ---: |
+| 36718–43051 | 6333 ms | 762740 → 902660 | Same | +139920 |
+| 44284–52501 | 8217 ms | 929940 → 1111440 | Same | +181500 |
+| 53535–62868 | 9333 ms | 1134320 → 1340460 | Same | +206140 |
+
+Across these intervals, the average rise is **≈22089
+counter units/second** (individual intervals ≈22094,
+22088, 22087). Both global counters were exactly equal
+at each measured endpoint and increased by equal
+amounts. This is **real observed native output-position
+progression across each early ESC interval**, even though
+the voice was paused at opening and the game's Theme
+handoff was unresolved.
+
+**Crucial interpretation:** The counters refer to
+the **global output-buffer mixer**, not the
+particular music stream. These results
+show that original native audio output positions
+continue advancing across the early ESC menus;
+they do **not** show that the music played or that
+the same physical musical voice remained
+continuously allocated. The opening and closing
+flags are post-wrapper endpoint samples, **not**
+continuous observation of paused/active state
+between them. No WAVMW query invocation,
+internal APMMX record retire, audio thread identity,
+or physical voice epoch is proved. The measured
+rate is a counter rate, **not independently
+proven to be a 22050 Hz music sample rate**.
+
+The later matching original Theme class-1 openings
+have a post-compensation `paused=0,active=1`
+snapshot, but their native SXD changes trigger
+the existing **fail-closed** compensation policy
+(`driver-command-rejected` phase 6), so native
+script Resume remains forwarded. The final
+incomplete opening similarly triggers
+original-native fallback; do not infer it
+closed from the session ending.
+
+A new **synthetic** regression in
+`tests/test_esc_adpcm_evidence.py`
+reconstructs six abstract opening intervals,
+three valid counter deltas, two correctly
+refused stream-switch closings, and one
+unpaired opening. It asserts that the
+log classifier never promotes global counter
+movement into `proves_music_voice_progressed`
+or `can_prove_continuous_physical_voice_generation`.
+
+**Next experiment:** Establish a reliable
+original Theme handoff/generation identification
+during the first ESC, rather than suppressing
+two original native Pauses solely because the
+mixer output counters advanced. Until all
+native record retire/reinitialize routes
+and the pending player reference are
+safely accounted for, the original
+`native_ref_class=3` rejection remains
+correct. No changes to driver forwarding,
+music compensation authorization, or
+runtime hooks are justified by this log.
+PR #10 remains **draft**.
