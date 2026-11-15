@@ -409,6 +409,28 @@ and early texture/palette uploads. These diagnostics let us distinguish a
 No pixels are changed and there is no user-visible configuration setting.
 This is investigative pending in-game comparison of the loading artwork.
 
+## Ubisoft logo and other native superimposed actor matrices in widescreen
+
+The approved retail CD engine writes one calculated value into **both**
+the horizontal X and vertical Z columns of a superimposed actor
+transformation matrix (at `0x471230` and `0x4718D6`). An older
+widescreen fix reduced that common value by `g_hud_scale`, unintentionally
+squeezing the opening Ubisoft logo/arc **vertically** along with its
+horizontal centering. A distinct text-only correction had already fixed
+« PRÉSENTE » while leaving the logo distorted.
+
+The new patch keeps the existing X coefficient but, **only** in those
+two SHA-locked native store sequences, restores Z to its original size
+by multiplying by `1 / g_hud_scale`. It uses an x86 trampoline with
+validated original bytes, preserves the original x87 stack depth and
+registers, validates and installs both sites atomically with the
+pre-existing superimposed source patch, and fails closed on unknown EXEs.
+No global 3D transform, 2D/HUD callback, text coefficient or cinematic
+viewport correction is changed. Unit tests cover native 4:3, 16:9,
+21:9 and both x86 gateway encodings. Visual confirmation of the logo
+and other superimposed actors remains necessary before merge; the
+existing `RUNTIME-OVERLAY-ACTOR` log reports the applied coefficient.
+
 ## Cinematic titles: preserve 4:3 text proportions in widescreen
 
 The approved retail game builds native `TextSuperImposed` titles

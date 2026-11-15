@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 namespace r2fix {
 
@@ -66,6 +68,8 @@ inline bool remap_superimposed_screen_x(std::int32_t x_1000,
 // The original superimposed-object script writes the same uniform
 // extent into its X/Z matrix columns. Screen dimensions enter the
 // size calculation separately from the position conversion.
+// This historical helper is retained for regression comparisons; the
+// widescreen runtime now restores the original Z/vertical matrix column.
 inline bool superimposed_uniform_extent(float native_viewport_height,
                                         float squeeze,float& out_extent) {
     if(!std::isfinite(native_viewport_height) ||
@@ -76,6 +80,59 @@ inline bool superimposed_uniform_extent(float native_viewport_height,
         kSuperimposedReferenceHeight*squeeze;
     if(!std::isfinite(scale) || scale<=0.0f)return false;
     out_extent=scale;
+    return true;
+}
+
+// VA 0x47122A and 0x4718CF multiply the approved retail viewport width
+// by the same 1/640 coefficient. The original game stores that result
+// at the matrix X and Z axes (VA 0x471230 and 0x4718D6 respectively).
+// Previous widescreen code squeezed BOTH axes, visibly flattening the
+// Ubisoft overlay/logo by 25% in 16:9. Keep X squeezed and restore Z.
+inline bool superimposed_actor_extent_coefficients(
+    float horizontal_squeeze, float& horizontal_coefficient,
+    float& vertical_restoration_multiplier) {
+    if(!std::isfinite(horizontal_squeeze) ||
+       horizontal_squeeze<=0.25f || horizontal_squeeze>1.0f)
+        return false;
+    const float x=(1.0f/640.0f)*horizontal_squeeze;
+    const float undo_vertical=1.0f/horizontal_squeeze;
+    if(!std::isfinite(x) || x<=0.0f ||
+       !std::isfinite(undo_vertical) || undo_vertical<=0.0f)
+        return false;
+    horizontal_coefficient=x;
+    vertical_restoration_multiplier=undo_vertical;
+    return true;
+}
+
+// Fixed-size x86 gateway for the TWO approved native actor-matrix store
+// sites only. These both originally execute:
+//   fst dword ptr [edi/esi+34h]
+//   fstp dword ptr [edi/esi+54h]
+// The replacement keeps the first (X), restores native size for the
+// second (Z, vertical) with an x87 FMUL m32real, then jumps back.
+// No register changes, no extra FPU stack elements and no world draw hooks.
+// Return-location and factor addresses are x86 virtual addresses.
+struct SuperimposedActorStoreGateway {
+    std::array<std::uint8_t,17> bytes{};
+};
+inline bool make_superimposed_actor_store_gateway(
+    bool use_edi,
+    std::uint32_t multiplier_va,
+    std::uint32_t gateway_va,
+    std::uint32_t resume_va,
+    SuperimposedActorStoreGateway& result) {
+    if(!multiplier_va || !gateway_va || !resume_va)return false;
+    const std::uint8_t base=use_edi ? 0x57 : 0x56;
+    result.bytes={{
+        0xD9,base,0x34, // FST [edi/esi + 0x34] (horizontal)
+        0xD8,0x0D,0,0,0,0, // FMUL dword ptr [multiplier_va] (vertical)
+        0xD9,static_cast<std::uint8_t>(base+0x08),0x54, // FSTP [edi/esi + 0x54]
+        0xE9,0,0,0,0 // JMP return to the original native procedure
+    }};
+    std::memcpy(result.bytes.data()+5,&multiplier_va,4);
+    const std::uint32_t relative=resume_va-
+        (gateway_va+static_cast<std::uint32_t>(result.bytes.size()));
+    std::memcpy(result.bytes.data()+13,&relative,4);
     return true;
 }
 

@@ -103,12 +103,16 @@ std::atomic<unsigned> g_overlay_source_routes[5]{};
 std::atomic<unsigned> g_overlay_source_routes_after_frame[5]{};
 const void* g_approved_overlay_viewport=nullptr;
 // The original PE stores coefficients at VA 0x49CC58 / 0x49CCA4
-// (1/640) and 0x49CCA8 (1/480). Redirect only FOUR verified
-// fmul operands to DLL-owned values; never overwrite shared constants.
+// (1/640) and 0x49CCA8 (1/480). Redirect FOUR verified
+// FMUL operands to DLL-owned values; never overwrite shared constants.
+// Two actor-matrix FST/FSTP sites also require separate horizontal and
+// vertical extents: widening text alone did NOT correct the Ubisoft logo.
+
 // TextSuperImposed's x extent uses WIDTH/640, and the z extent uses
 // HEIGHT/480 (native 0x475BC6..0x475BF7): squeeze WIDTH only.
 // Squeezing HEIGHT also made the cinematic text 25% too short in 16:9.
 float g_superimposed_actor_extent_coefficient=1.0f/640.0f;
+float g_superimposed_actor_vertical_restoration=1.0f;
 float g_superimposed_text_x_coefficient=1.0f/640.0f;
 float g_superimposed_text_z_coefficient=1.0f/480.0f;
 constexpr uintptr_t kCameraRva = 0x22AB0; // verified VA=0x422AB0 for image base 0x400000
@@ -3399,6 +3403,19 @@ void install_approved_overlay_source_patch() {
             &g_superimposed_text_z_coefficient},
     };
     constexpr unsigned kFactorCount=sizeof(factors)/sizeof(factors[0]);
+    // Original retail CD x86: FST [edi/esi+0x34], FSTP [edi/esi+0x54].
+    // These are the only approved actor-matrix writes modified here.
+    struct ActorStoreSite {
+        std::uint32_t rva;
+        BYTE expected[6];
+        bool uses_edi;
+    };
+    constexpr ActorStoreSite actor_stores[]={
+        {0x71230u,{0xD9,0x57,0x34,0xD9,0x5F,0x54},true},
+        {0x718D6u,{0xD9,0x56,0x34,0xD9,0x5E,0x54},false}
+    };
+    constexpr unsigned kActorStoreCount=
+        sizeof(actor_stores)/sizeof(actor_stores[0]);
     auto* target=base+kNativeScreenToVertexRva;
     if(pe->OptionalHeader.SizeOfImage<kNativeScreenToVertexRva+
             sizeof(kNativeScreenToVertexExpected) ||
@@ -3415,7 +3432,17 @@ void install_approved_overlay_source_patch() {
             return;
         }
     }
-    g_superimposed_actor_extent_coefficient=(1.0f/640.0f)*g_hud_scale;
+    for(const auto& site:actor_stores) {
+        if(pe->OptionalHeader.SizeOfImage<site.rva+sizeof(site.expected) ||
+           std::memcmp(base+site.rva,site.expected,
+                       sizeof(site.expected))!=0) {
+            log_line("RUNTIME-OVERLAY-ACTOR: approved matrix stores mismatch; no source hooks installed");
+            return;
+        }
+    }
+    if(!r2fix::superimposed_actor_extent_coefficients(
+        g_hud_scale,g_superimposed_actor_extent_coefficient,
+        g_superimposed_actor_vertical_restoration))return;
     // The screen-X correction remains 4:3-centered; restore the
     // native vertical text size, independently of the monitor aspect.
     if(!r2fix::superimposed_text_extent_coefficients(
@@ -3435,25 +3462,70 @@ void install_approved_overlay_source_patch() {
         return;
     }
 
-    // Acquire write access to all five sites before the first edit.
-    BYTE* sites[kFactorCount+1]{};
-    DWORD old_protection[kFactorCount+1]{};
+    // Build the 2 narrowly scoped x86 gateways before patching any
+    // original game bytes, and make each executable but not writable.
+    // Their entry FPU stack state is exactly the original FST state.
+    BYTE* actor_gateways[kActorStoreCount]{};
+    auto free_actor_gateways=[&]() {
+        for(auto* code:actor_gateways)
+            if(code)VirtualFree(code,0,MEM_RELEASE);
+    };
+    for(unsigned i=0;i<kActorStoreCount;++i) {
+        auto* code=static_cast<BYTE*>(VirtualAlloc(
+            nullptr,64,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+        if(!code) {
+            free_actor_gateways();
+            VirtualFree(gateway,0,MEM_RELEASE);
+            return;
+        }
+        actor_gateways[i]=code;
+        r2fix::SuperimposedActorStoreGateway instructions{};
+        if(!r2fix::make_superimposed_actor_store_gateway(
+            actor_stores[i].uses_edi,
+            static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(
+                &g_superimposed_actor_vertical_restoration)),
+            static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(code)),
+            static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(
+                base+actor_stores[i].rva+sizeof(actor_stores[i].expected))),
+            instructions)) {
+            free_actor_gateways();
+            VirtualFree(gateway,0,MEM_RELEASE);
+            return;
+        }
+        std::memcpy(code,instructions.bytes.data(),
+                    instructions.bytes.size());
+        if(!VirtualProtect(code,64,PAGE_EXECUTE_READ,&ignored)) {
+            free_actor_gateways();
+            VirtualFree(gateway,0,MEM_RELEASE);
+            return;
+        }
+        FlushInstructionCache(GetCurrentProcess(),code,
+                              instructions.bytes.size());
+    }
+    // All seven original code sites must be writable before *any*
+    // original bytes change; refuse partial installation.
+    constexpr unsigned kPatchCount=kFactorCount+kActorStoreCount+1;
+    BYTE* sites[kPatchCount]{};
+    DWORD old_protection[kPatchCount]{};
     for(unsigned i=0;i<kFactorCount;++i)
         sites[i]=base+factors[i].rva;
-    sites[kFactorCount]=target;
+    for(unsigned i=0;i<kActorStoreCount;++i)
+        sites[kFactorCount+i]=base+actor_stores[i].rva;
+    sites[kPatchCount-1]=target;
     unsigned writable=0;
-    for(;writable<kFactorCount+1;++writable) {
+    for(;writable<kPatchCount;++writable) {
         if(!VirtualProtect(sites[writable],6,
               PAGE_EXECUTE_READWRITE,&old_protection[writable]))break;
     }
-    if(writable<kFactorCount+1) {
+    if(writable<kPatchCount) {
         while(writable>0) {
             --writable;
             VirtualProtect(sites[writable],6,
                 old_protection[writable],&ignored);
         }
+        free_actor_gateways();
         VirtualFree(gateway,0,MEM_RELEASE);
-        log_line("RUNTIME-OVERLAY-SOURCE: cannot prepare all native code sites; fallback viewport retained");
+        log_line("RUNTIME-OVERLAY-SOURCE: cannot prepare all native code sites; no source hooks installed");
         return;
     }
     for(unsigned i=0;i<kFactorCount;++i) {
@@ -3463,6 +3535,12 @@ void install_approved_overlay_source_patch() {
         std::memcpy(sites[i]+2,&operand,sizeof(operand));
         FlushInstructionCache(GetCurrentProcess(),sites[i],6);
     }
+    for(unsigned i=0;i<kActorStoreCount;++i) {
+        write_jump(sites[kFactorCount+i],actor_gateways[i]);
+        sites[kFactorCount+i][5]=0x90; // original 6-byte x87 stores
+        FlushInstructionCache(GetCurrentProcess(),
+            sites[kFactorCount+i],6);
+    }
     g_original_screen_to_vertex=
         reinterpret_cast<NativeScreenToVertex>(gateway);
     g_approved_overlay_viewport=base+kNativeUiViewportRva;
@@ -3471,7 +3549,7 @@ void install_approved_overlay_source_patch() {
     target[5]=0x90;
     FlushInstructionCache(GetCurrentProcess(),target,6);
     // Reprotect in reverse order, including overlapping code pages.
-    for(unsigned i=kFactorCount+1;i>0;--i) {
+    for(unsigned i=kPatchCount;i>0;--i) {
         const unsigned idx=i-1;
         VirtualProtect(sites[idx],6,old_protection[idx],&ignored);
     }
@@ -3488,6 +3566,12 @@ void install_approved_overlay_source_patch() {
         double(g_superimposed_text_z_coefficient),
         double(g_hud_scale));
     log_line(text_line);
+    char actor_line[230]{};
+    std::snprintf(actor_line,sizeof(actor_line),
+        "RUNTIME-OVERLAY-ACTOR: source matrix X scale=%.4f Z vertical restoration=%.4f; 2 approved x86 matrix store gateways installed (no cinematic-specific logic)",
+        double(g_hud_scale),
+        double(g_superimposed_actor_vertical_restoration));
+    log_line(actor_line);
 }
 // The public GOG Ray2Fix source suggests three superimposed-actor
 // code locations. They are NOT approved offsets for this CD executable.
