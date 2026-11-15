@@ -27,11 +27,37 @@ class FakeOwnerPE:
             content = bytes.fromhex(hex_bytes)
             self.text[site-0x1000:site-0x1000+len(content)] = content
 
+    def exports(self):
+        return {'_SND_fn_bTestIsPlayingSxdADPCM@4': 0x5150}
+
     def read_rva(self, rva, size):
         start = rva-0x1000
         if start < 0 or size < 0 or start + size > len(self.text):
             raise A.PEFormatError('synthetic .text bounds exceeded')
         return bytes(self.text[start:start+size])
+
+
+class FakeWavPE:
+    machine = 0x14C
+    timestamp = 0x38076FB4
+    image_base = 0x10000000
+    image_size = 0x87000
+
+    def __init__(self, raw):
+        self.text = bytearray(b'\x90' * 0x22000)
+        for rva, hex_bytes in A.WAVMW_SITES.values():
+            opcodes = bytes.fromhex(hex_bytes)
+            self.text[rva:rva+len(opcodes)] = opcodes
+        symbol = b'_SND_fn_bTestIsPlayingSxdADPCM@4\0'
+        self.text[0x21560:0x21560+len(symbol)] = symbol
+
+    def read_rva(self, rva, size):
+        if rva < 0 or size < 0 or rva+size > len(self.text):
+            raise A.PEFormatError('WAVMW synthetic bounds')
+        return bytes(self.text[rva:rva+size])
+
+    def exports(self):
+        return {'_SND_fn_bTestIsPlayingSxd@4': 0xB8A0}
 
 
 class LockRoutesTests(unittest.TestCase):
@@ -119,6 +145,68 @@ class LockRoutesTests(unittest.TestCase):
         self.assertIn((0x2900, 0x2923), A.NO_LOCAL_LOCK)
         self.assertIn((0x1F50, 0x1F73), A.NO_LOCAL_LOCK)
         self.assertIn((0x15D0, 0x16F1), A.NO_LOCAL_LOCK)
+
+    def test_two_original_dlls_link_type4_to_testplaying_delegate(self):
+        primary, wave = b'fake original APMMX', b'fake original WAVMW'
+        def factory(blob):
+            return FakeOwnerPE(blob) if blob == primary else FakeWavPE(blob)
+        with (patch.object(A, 'OWNER_ORIGINAL_SHA256', hashlib.sha256(primary).hexdigest()),
+              patch.object(A, 'WAVMW_OWNER_SHA256', hashlib.sha256(wave).hexdigest()),
+              patch.object(A, 'PE32', factory)):
+            report = A.audit_wavmw_bridge(wave, primary)
+        self.assertTrue(report['static_type4_dispatch_chain_verified'])
+        self.assertEqual(report['wavmw_opcode_anchors_verified'], 16)
+        self.assertEqual(report['wavmw_direct_edges_verified'], 3)
+        self.assertFalse(report['actual_runtime_function_pointer_observed'])
+        self.assertFalse(report['permission_to_change_audio'])
+
+    def test_dual_dll_audit_refuses_unapproved_wavmw_before_pe_parse(self):
+        primary = b'fake original APMMX'
+        with (patch.object(A, 'OWNER_ORIGINAL_SHA256', hashlib.sha256(primary).hexdigest()),
+              patch.object(A, 'PE32', FakeOwnerPE)):
+            with self.assertRaisesRegex(A.PEFormatError, 'WAVMW SHA-256 mismatch'):
+                A.audit_wavmw_bridge(b'an unknown DLL', primary)
+
+    def test_dual_dll_audit_rejects_unexpected_wavmw_symbol(self):
+        primary, wave = b'fake original APMMX', b'fake original WAVMW'
+        class MissingSymbol(FakeWavPE):
+            def __init__(self, raw):
+                super().__init__(raw)
+                self.text[0x21560] = 0
+        def factory(blob):
+            return FakeOwnerPE(blob) if blob == primary else MissingSymbol(blob)
+        with (patch.object(A, 'OWNER_ORIGINAL_SHA256', hashlib.sha256(primary).hexdigest()),
+              patch.object(A, 'WAVMW_OWNER_SHA256', hashlib.sha256(wave).hexdigest()),
+              patch.object(A, 'PE32', factory)):
+            with self.assertRaisesRegex(A.PEFormatError, 'resolver symbol mismatch'):
+                A.audit_wavmw_bridge(wave, primary)
+
+    def test_dual_dll_audit_rejects_changed_dispatch_function_pointer(self):
+        primary, wave = b'fake original APMMX', b'fake original WAVMW'
+        class MissingDispatch(FakeWavPE):
+            def __init__(self, raw):
+                super().__init__(raw)
+                self.text[0x7BB0] = 0x90
+        def factory(blob):
+            return FakeOwnerPE(blob) if blob == primary else MissingDispatch(blob)
+        with (patch.object(A, 'OWNER_ORIGINAL_SHA256', hashlib.sha256(primary).hexdigest()),
+              patch.object(A, 'WAVMW_OWNER_SHA256', hashlib.sha256(wave).hexdigest()),
+              patch.object(A, 'PE32', factory)):
+            with self.assertRaisesRegex(A.PEFormatError, 'indirect_test_vtable_call'):
+                A.audit_wavmw_bridge(wave, primary)
+
+    def test_dual_dll_audit_rejects_wrong_wavmw_export(self):
+        primary, wave = b'fake original APMMX', b'fake original WAVMW'
+        class DifferentExport(FakeWavPE):
+            def exports(self):
+                return {'_SND_fn_bTestIsPlayingSxd@4': 0xB900}
+        def factory(blob):
+            return FakeOwnerPE(blob) if blob == primary else DifferentExport(blob)
+        with (patch.object(A, 'OWNER_ORIGINAL_SHA256', hashlib.sha256(primary).hexdigest()),
+              patch.object(A, 'WAVMW_OWNER_SHA256', hashlib.sha256(wave).hexdigest()),
+              patch.object(A, 'PE32', factory)):
+            with self.assertRaisesRegex(A.PEFormatError, 'WAVMW TestIsPlaying export mismatch'):
+                A.audit_wavmw_bridge(wave, primary)
 
     def test_static_auditor_makes_no_native_runtime_writes(self):
         source = (Path(__file__).resolve().parents[1] /
