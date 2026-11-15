@@ -184,6 +184,69 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("pre_driver_pause::Policy",self.runtime)
         self.assertNotIn("RUNTIME-ESC-PREDRIVER-WINDOW:",wrapper)
 
+    def test_adpcm_pause_snapshot_rechecks_active_and_pause_state(self):
+        # The original active flag at record+0x28 is a better diagnostic
+        # than source-only Play/Stop counts, but it is NOT an epoch token.
+        sampler=self.runtime.split(
+            "ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {",
+            1)[1].split("void __cdecl proto_script_pause() {",1)[0]
+        self.assertIn("int active=-1;",self.runtime)
+        self.assertIn("record_address+0x28u",sampler)
+        self.assertIn("&active,sizeof(active)",sampler)
+        self.assertIn("&active_after,sizeof(active_after)",sampler)
+        self.assertIn("active_after!=active",sampler)
+        self.assertIn("pause_after!=pause",sampler)
+        self.assertIn("record_after!=record || count_after!=count",sampler)
+        self.assertIn("out.active=active==0u ? 0 : (active==1u ? 1 : 2);",sampler)
+        self.assertIn("ABA",sampler)
+        self.assertNotIn("TestIsPlayingSxd(",sampler)
+        self.assertNotIn("ResumeTransitionSxd(",sampler)
+        self.assertNotIn("PauseTransitionSxd(",sampler)
+        self.assertNotIn("WriteProcessMemory(",sampler)
+
+    def test_adpcm_resume_snapshot_is_after_original_audio_and_on_render_thread(self):
+        resume=self.runtime.split("void __cdecl proto_script_resume() {",1)[1].split(
+            "void proto_flush_predriver_resume_report() {",1)[0]
+        flush=self.runtime.split("void proto_flush_predriver_resume_report() {",1)[1].split(
+            "// Focus is a Win32",1)[0]
+        self.assertIn("proto_call_original(0x53700);",resume)
+        self.assertNotIn("proto_sample_adpcm_voice_after_dispatch(",resume)
+        self.assertNotIn("proto_read_transition_type_post_wrapper(",resume)
+        self.assertNotIn("RUNTIME-ESC-ADPCM-RESUME:",resume)
+        self.assertIn("g_proto_predriver_resume_report.ready=false;",flush)
+        self.assertIn("report.lifetime_paired &&",flush)
+        self.assertIn("probe.resume_count==2u",flush)
+        self.assertIn("probe.unrelated_slots==0u",flush)
+        self.assertIn("probe.other_handle_count==0u",flush)
+        self.assertIn("transition_type==4",flush)
+        self.assertIn("proto_read_transition_type_post_wrapper(probe.first_handle)",flush)
+        self.assertIn("proto_sample_adpcm_voice_after_dispatch(probe.first_handle)",flush)
+        self.assertIn("RUNTIME-ESC-ADPCM-RESUME:",flush)
+        self.assertIn("snapshot=post-native-resume",flush)
+        self.assertIn("ABA not excluded",flush)
+        self.assertNotIn("ReadProcessMemory(",flush)
+        self.assertNotIn("TestIsPlayingSxd(",flush)
+        self.assertNotIn("proto_dispatch(",flush)
+        self.assertNotIn("VirtualProtect(",flush)
+        self.assertNotIn("WriteProcessMemory(",flush)
+        self.assertLess(flush.index("log_line(resource_line);"),
+                        flush.index("RUNTIME-ESC-ADPCM-RESUME:"))
+
+    def test_adpcm_open_and_close_samples_never_authorize_audio_actions(self):
+        tick=self.runtime.split("void proto_menu_tick() {",1)[1].split(
+            "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
+        self.assertIn("RUNTIME-ESC-ADPCM-VOICE:",tick)
+        self.assertIn("paused=%d active=%d other_gate=%d",tick)
+        self.assertIn("ABA not excluded",tick)
+        self.assertLess(tick.index("proto_dispatch(action);"),
+                        tick.index("RUNTIME-ESC-ADPCM-VOICE:"))
+        self.assertIn("proto_flush_predriver_resume_report();",self.runtime)
+        # Neither source samples nor the model are credentials for
+        # synthesizing audio on a recycled native handle.
+        self.assertNotIn("if(adpcm_voice.sampled)",tick)
+        self.assertNotIn("if(adpcm_voice.active)",tick)
+        self.assertNotIn("if(adpcm_voice.pause)",tick)
+
     def test_predriver_lifetime_is_only_observational_and_requires_pairing(self):
         # Observe native Play/Stop across the whole ESC menu, in addition to
         # the wrapper-to-first-tick window. No same-thread/generation/overlap
