@@ -71,7 +71,8 @@ class OriginalQueryGuardTests(unittest.TestCase):
         self.assertFalse(pos['completed_driver_retirement_proven'])
         bridge = info['wavmw_getpos_bridge']
         self.assertTrue(bridge['type4_adpcm_dispatch_path_verified'])
-        self.assertEqual(bridge['wavmw_opcode_windows_verified'], 12)
+        self.assertEqual(bridge['wavmw_opcode_windows_verified'], 13)
+        self.assertTrue(bridge['uninitialized_inner_returns_minus_one_without_adpcm'])
         self.assertEqual(bridge['wavmw_direct_edges_verified'], 2)
         self.assertFalse(bridge['getpos_called_during_esc_proven'])
         self.assertFalse(bridge['runtime_audio_change_authorized'])
@@ -290,6 +291,16 @@ class OriginalQueryGuardTests(unittest.TestCase):
                          (0x2A20, 0x2320))
 
 
+
+    def test_wavmw_getpos_missing_inner_cannot_be_called_a_native_retirement(self):
+        class BadWav(SyntheticQueryWavPE):
+            def __init__(self, raw):
+                super().__init__(raw)
+                self.text[0x7CE6] = 0x90
+        with self.assertRaisesRegex(A.PEFormatError,
+                                    'getpos_uninitialized_returns_minus_one'):
+            A.audit_wavmw_position_bridge(
+                BadWav(b'synthetic'), SyntheticQueryApmPE(b'synthetic'))
 
     def test_wavmw_getpos_rejects_changed_dynamic_symbol(self):
         class BadWav(SyntheticQueryWavPE):
