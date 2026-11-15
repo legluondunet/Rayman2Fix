@@ -28,6 +28,10 @@ std::pair<std::uint32_t, std::uint32_t> configured_render_resolution(
 // Only user-triggered jail_20 skip is supported; Learn_10 remains safe.
 bool configured_skip_cinematics(const std::filesystem::path& rayman2fix_ini);
 
+// Opt-in, source-specific suppression of game-drawn dialogue backdrops
+// and cinematic letterbox frame quads. Does not alter Force4x3 sidebars.
+bool configured_remove_black_frames(const std::filesystem::path& rayman2fix_ini);
+
 // Add missing new options to existing INIs without discarding user settings.
 void ensure_rayman2fix_ini_options(const std::filesystem::path& rayman2fix_ini);
 
