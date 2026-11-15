@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import audit_esc_adpcm_evidence as A
+from audit_adpcm_primary_epoch import SyntheticEpochModel
 
 
 def fixture(stage='pending', cls=3, getpos='resolved', test='resolved',
@@ -70,6 +71,40 @@ class EvidenceTests(unittest.TestCase):
                 self.assertFalse(
                     report['stage_comparison']['original_entry_fingerprints_both_stages'])
                 self.assertFalse(report['stage_comparison']['proves_original_query_was_executed'])
+
+    def test_matching_five_verified_pointers_and_endpoints_cannot_exclude_aba(self):
+        # Two physically different native histories are indistinguishable
+        # to the limited current diagnostic. Do not infer a musical epoch
+        # from even five exact original callbacks and two active samples.
+        log=fixture(fingerprint=1)+[
+            'RUNTIME-ESC-PREDRIVER-GATE: t_ms=100 transition_pauses=2',
+            'RUNTIME-ESC-ADPCM-VOICE: t_ms=100 sampled=1 voice_index=0 '
+            'paused=1 active=1',
+            'RUNTIME-ESC-PREDRIVER-LIFETIME: t_ms=400 paired=1 overlap=0 '
+            'play_between=0 stop_between=0',
+            'RUNTIME-ESC-ADPCM-RESUME: t_ms=400 paired=1 sampled=1 '
+            'voice_index=0 paused=0 active=1',
+        ]+fixture('synchronized',1,fingerprint=1)
+        continuous=SyntheticEpochModel()
+        first=continuous.primary_commit(7)
+        self.assertTrue(continuous.matches_conceptual_epoch(7,first))
+        recycled=SyntheticEpochModel()
+        prior=recycled.primary_commit(7)
+        # No observed exported Stop; original primary can reuse a
+        # physical record slot, retaining the native handle and count.
+        current=recycled.primary_commit(7)
+        self.assertNotEqual(prior,current)
+        self.assertFalse(recycled.matches_conceptual_epoch(7,prior))
+        # Both histories produce these IDENTICAL five-delegate and
+        # active=1 endpoint records; only the hidden native epoch differs.
+        report=A.classify(log)
+        self.assertTrue(
+            report['stage_comparison']['original_entry_fingerprints_both_stages'])
+        self.assertEqual(report['observations']['adpcm_open_samples'],1)
+        self.assertEqual(report['observations']['adpcm_close_samples'],1)
+        self.assertEqual(report['observations']['export_quiet_lifetimes'],1)
+        self.assertFalse(report['can_prove_internal_retirement_absent'])
+        self.assertFalse(report['can_prove_continuous_physical_voice_generation'])
 
     def test_dynamic_fallback_is_a_change_not_a_proof_of_call(self):
         result=A.classify(fixture()+fixture('synchronized', 1, getpos='fallback'))
