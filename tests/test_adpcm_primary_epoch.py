@@ -102,6 +102,15 @@ class SyntheticEpochModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown primary"):
             model.auxiliary_init(7)
 
+    def test_missing_epoch_never_matches_null_or_zero(self):
+        model = A.SyntheticEpochModel()
+        self.assertFalse(model.matches_conceptual_epoch(6, None))
+        self.assertFalse(model.matches_conceptual_epoch(6, 0))
+        self.assertFalse(model.matches_conceptual_epoch(6, False))
+        model.primary_commit(6)
+        self.assertFalse(model.matches_conceptual_epoch(6, None))
+        self.assertFalse(model.matches_conceptual_epoch(6, False))
+
     def test_retirement_and_unknown_external_change_are_fail_closed(self):
         model = A.SyntheticEpochModel()
         first = model.primary_commit(1)
