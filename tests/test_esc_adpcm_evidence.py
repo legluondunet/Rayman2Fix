@@ -173,6 +173,80 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(result['stage_comparison']['changed_operations'], ['get-pos'])
         self.assertFalse(result['can_prove_query_invocation'])
 
+    def test_buffer_output_positions_pair_but_never_prove_music_generation(self):
+        log=[
+            'RUNTIME-ESC-ADPCM-VOICE: sampled=1 active=1 '
+            'mode0_output=1024 mode1_output=2048',
+            'RUNTIME-ESC-PREDRIVER-LIFETIME: paired=1 overlap=0 '
+            'play_between=0 stop_between=0',
+            'RUNTIME-ESC-ADPCM-RESUME: paired=1 sampled=1 active=1 '
+            'mode0_output=1536 mode1_output=3072',
+        ]
+        info=A.classify(log)
+        output=info['native_output_positions']
+        self.assertEqual(output['paired_counter_snapshots'],1)
+        self.assertEqual(output['mode0_increased_pairs'],1)
+        self.assertEqual(output['mode1_increased_pairs'],1)
+        self.assertFalse(output['proves_original_mixer_callback_was_invoked'])
+        self.assertFalse(output['proves_music_voice_progressed'])
+        self.assertFalse(info['can_prove_continuous_physical_voice_generation'])
+
+    def test_buffer_output_positions_unchanged_are_not_stable_voice_proof(self):
+        info=A.classify([
+            'RUNTIME-ESC-ADPCM-VOICE: sampled=1 mode0_output=1024 mode1_output=2048',
+            'RUNTIME-ESC-ADPCM-RESUME: paired=1 sampled=1 '
+            'mode0_output=1024 mode1_output=2048',
+        ])
+        self.assertEqual(info['native_output_positions']['paired_counter_snapshots'],1)
+        self.assertEqual(info['native_output_positions']['mode0_increased_pairs'],0)
+        self.assertFalse(info['native_output_positions']['proves_music_voice_progressed'])
+
+    def test_buffer_output_counter_drop_does_not_mean_negative_or_stable_progress(self):
+        info=A.classify([
+            'RUNTIME-ESC-ADPCM-VOICE: sampled=1 mode0_output=4294967290 mode1_output=6000',
+            'RUNTIME-ESC-ADPCM-RESUME: paired=1 sampled=1 '
+            'mode0_output=120 mode1_output=7000',
+        ])
+        output=info['native_output_positions']
+        self.assertEqual(output['paired_counter_snapshots'],1)
+        self.assertEqual(output['counter_decreased_or_wrapped_pairs'],1)
+        self.assertEqual(output['mode1_increased_pairs'],0)
+
+    def test_overlapping_esc_opens_do_not_mix_output_counter_snapshots(self):
+        info=A.classify([
+            'RUNTIME-ESC-ADPCM-VOICE: sampled=1 mode0_output=10 mode1_output=10',
+            'RUNTIME-ESC-ADPCM-VOICE: sampled=1 mode0_output=20 mode1_output=20',
+            'RUNTIME-ESC-ADPCM-RESUME: paired=1 sampled=1 '
+            'mode0_output=100 mode1_output=100',
+        ])
+        self.assertEqual(info['native_output_positions']['paired_counter_snapshots'],0)
+        self.assertEqual(info['native_output_positions']['overlapping_open_pairs_refused'],1)
+
+    def test_missing_or_malformed_output_counters_fail_closed(self):
+        bad=[
+            ('mode0_output=-1 mode1_output=1', 'mode0_output=2 mode1_output=3'),
+            ('mode0_output=4294967296 mode1_output=1', 'mode0_output=2 mode1_output=3'),
+            ('mode0_output=abc mode1_output=1', 'mode0_output=2 mode1_output=3'),
+            ('mode0_output=1', 'mode0_output=2 mode1_output=3'),
+        ]
+        for op,cl in bad:
+            with self.subTest(op=op):
+                info=A.classify([
+                    'RUNTIME-ESC-ADPCM-VOICE: sampled=1 '+op,
+                    'RUNTIME-ESC-ADPCM-RESUME: paired=1 sampled=1 '+cl,
+                ])
+                self.assertEqual(
+                    info['native_output_positions']['paired_counter_snapshots'],0)
+
+    def test_unpaired_closing_output_counters_are_not_compared(self):
+        info=A.classify([
+            'RUNTIME-ESC-ADPCM-VOICE: sampled=1 mode0_output=1 mode1_output=1',
+            'RUNTIME-ESC-ADPCM-RESUME: paired=0 sampled=1 '
+            'mode0_output=100 mode1_output=100',
+        ])
+        self.assertEqual(info['native_output_positions']['paired_counter_snapshots'],0)
+        self.assertFalse(info['native_output_positions']['proves_original_mixer_callback_was_invoked'])
+
     def test_only_legacy_three_callbacks_never_claims_comparison(self):
         older = [f'RUNTIME-AUDIO-ADPCM-DELEGATE: op={op} status=resolved '
                  'module=APMMXbvr.dll callback_rva=0x000054D0'
