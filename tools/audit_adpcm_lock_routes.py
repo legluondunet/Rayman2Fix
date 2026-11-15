@@ -40,6 +40,18 @@ ANCHORS = {
     "transition_stop_acquire": (0x334E, "e8 cd dc ff ff"),
     "transition_stop_inner": (0x335B, "e8 a0 e3 ff ff"),
     "transition_stop_release": (0x3368, "e8 c3 dc ff ff"),
+    "setparam_sxd_export_entry": (0x5120, "8b 4c 24 08 83 ec 08 8d 44 24 00"),
+    "setparam_sxd_export_call": (0x513C, "e8 6f d7 ff ff"),
+    "setparam_transition_export_entry": (0x5430, "8b 4c 24 08 83 ec 08"),
+    "setparam_transition_export_call": (0x544C, "e8 ff dd ff ff"),
+    "setparam_sxd_lock": (0x28C1, "e8 5a e7 ff ff"),
+    "setparam_sxd_inner": (0x28D3, "e8 58 f3 ff ff"),
+    "setparam_sxd_unlock": (0x28E9, "e8 42 e7 ff ff"),
+    "setparam_transition_lock": (0x326A, "e8 b1 dd ff ff"),
+    "setparam_transition_inner": (0x3278, "e8 b3 e9 ff ff"),
+    "setparam_transition_unlock": (0x328C, "e8 9f dd ff ff"),
+    "setparam_inner_tests_active": (0x1C54, "8b 46 28 85 c0 74 31"),
+    "setparam_inner_retire": (0x1C8C, "57 e8 3e f9 ff ff"),
 }
 # Known direct E8+rel32 transfer edges in the original file.
 EDGES = {
@@ -58,6 +70,15 @@ EDGES = {
     "transition_stop_acquire": (0x334E, 0x1020),
     "transition_stop_inner": (0x335B, 0x1700),
     "transition_stop_release": (0x3368, 0x1030),
+    "setparam_sxd_export_call": (0x513C, 0x28B0),
+    "setparam_transition_export_call": (0x544C, 0x3250),
+    "setparam_sxd_lock": (0x28C1, 0x1020),
+    "setparam_sxd_inner": (0x28D3, 0x1C30),
+    "setparam_sxd_unlock": (0x28E9, 0x1030),
+    "setparam_transition_lock": (0x326A, 0x1020),
+    "setparam_transition_inner": (0x3278, 0x1C30),
+    "setparam_transition_unlock": (0x328C, 0x1030),
+    "setparam_inner_retire": (0x1C8D, 0x15D0),
 }
 # Original bounded function ranges (end-exclusive). Raw scan explicitly
 # checks only direct E8 calls to the known lock handlers, not all x86 paths.
@@ -75,6 +96,8 @@ LOCKED_ROUTES = {
     "regular_play": (0x31E0, 0x324A),
     "direct_stop": (0x2930, 0x2967),
     "transition_stop": (0x3340, 0x3371),
+    "setparam_sxd": (0x28B0, 0x28F5),
+    "setparam_transition": (0x3250, 0x3299),
 }
 
 
@@ -134,6 +157,9 @@ def audit(data: bytes) -> dict:
         'retirement_rva': '0x15D0',
         'known_lock_va': '0x100163D0',
         'exported_stop_count_cannot_prove_no_retirement': True,
+        'setparam_may_retire_inactive_without_exported_stop': True,
+        'setparam_both_routes_use_known_driver_lock': True,
+        'setparam_currently_observed_in_owner_esc_log': False,
         'all_retirement_synchronized_proven': False,
         'runtime_audio_change_authorized': False,
         'limitation': ('The exported TestIsPlaying -> cleanup -> retirement path has '
