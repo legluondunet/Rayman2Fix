@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""Conservative, read-only ESC ADPCM log evidence classifier.
+
+Only classifies observed log fields; never treats a resolved callback as
+an invocation, a zero exported Stop count as absence of retirement, or
+identical sampled slot/handle as a native physical voice generation.
+No proprietary game bytes and no process or DLL calls.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+OPS = ('stop', 'pause', 'resume', 'test-is-playing', 'get-pos')
+STAGES = {'pending': 3, 'synchronized': 1}
+PREFIX_CONTEXT = 'RUNTIME-AUDIO-ADPCM-DELEGATE-CONTEXT:'
+PREFIX_DELEGATE = 'RUNTIME-AUDIO-ADPCM-DELEGATE:'
+PREFIX_OPEN = 'RUNTIME-ESC-ADPCM-VOICE:'
+PREFIX_CLOSE = 'RUNTIME-ESC-ADPCM-RESUME:'
+PREFIX_PAIR = 'RUNTIME-ESC-PREDRIVER-LIFETIME:'
+PREFIX_GATE = 'RUNTIME-ESC-PREDRIVER-GATE:'
+KEY_VAL = re.compile(r'([a-z][a-z0-9_]*)=([^\s]+)')
+
+
+def fields(s: str) -> dict[str, str]:
+    return dict(KEY_VAL.findall(s))
+
+
+def classify(lines: list[str]) -> dict:
+    groups: dict[str, dict] = {k: {'entries': {}, 'warnings': []} for k in (*STAGES, 'legacy')}
+    current: str | None = None
+    current_count = 0
+    observations = {'esc_gate_count': 0, 'adpcm_open_samples': 0,
+                    'adpcm_close_samples': 0, 'paired_menu_lifetimes': 0,
+                    'export_quiet_lifetimes': 0, 'inactive_open_samples': 0,
+                    'inactive_close_samples': 0}
+    warnings: list[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if PREFIX_CONTEXT in line:
+            info = fields(line.split(PREFIX_CONTEXT, 1)[1])
+            name = info.get('stage', '')
+            try:
+                ref = int(info.get('ref_class', '-1'))
+            except ValueError:
+                ref = -1
+            if name not in STAGES or STAGES[name] != ref:
+                current = None
+                warnings.append('invalid delegate context; subsequent pointers not trusted')
+            else:
+                current = name
+                if groups[name]['entries']:
+                    groups[name]['warnings'].append('repeated context; duplicate entries are ambiguous')
+                current_count = 0
+            continue
+        if PREFIX_DELEGATE in line:
+            info = fields(line.split(PREFIX_DELEGATE, 1)[1])
+            group = current if current is not None else 'legacy'
+            op = info.get('op')
+            if op not in OPS:
+                groups[group]['warnings'].append('unknown native callback operation')
+                continue
+            current_count += 1
+            if current_count > len(OPS) and group != 'legacy':
+                groups[group]['warnings'].append('more than five delegate rows in a context')
+            if op in groups[group]['entries']:
+                groups[group]['warnings'].append('duplicate callback entry: '+op)
+                continue
+            groups[group]['entries'][op] = {
+                'status': info.get('status', 'unknown'),
+                'module': info.get('module'),
+                'callback_rva': info.get('callback_rva'),
+            }
+        if PREFIX_GATE in line:
+            observations['esc_gate_count'] += 1
+        if PREFIX_OPEN in line:
+            info = fields(line.split(PREFIX_OPEN, 1)[1])
+            if info.get('sampled') == '1':
+                observations['adpcm_open_samples'] += 1
+                if info.get('active') == '0':
+                    observations['inactive_open_samples'] += 1
+        if PREFIX_CLOSE in line:
+            info = fields(line.split(PREFIX_CLOSE, 1)[1])
+            if info.get('sampled') == '1' and info.get('paired') == '1':
+                observations['adpcm_close_samples'] += 1
+                if info.get('active') == '0':
+                    observations['inactive_close_samples'] += 1
+        if PREFIX_PAIR in line:
+            info = fields(line.split(PREFIX_PAIR, 1)[1])
+            if info.get('paired') == '1' and info.get('overlap') == '0':
+                observations['paired_menu_lifetimes'] += 1
+                if info.get('play_between') == '0' and info.get('stop_between') == '0':
+                    observations['export_quiet_lifetimes'] += 1
+
+    for name, group in groups.items():
+        missing = [op for op in OPS if op not in group['entries']]
+        group['missing'] = missing
+        group['complete'] = not missing and not group['warnings']
+        group['trusted_for_comparison'] = (group['complete'] and name != 'legacy')
+    p, s = groups['pending'], groups['synchronized']
+    if p['trusted_for_comparison'] and s['trusted_for_comparison']:
+        changed = [op for op in OPS if p['entries'][op] != s['entries'][op]]
+    else:
+        changed = None  # never call a missing pair unchanged
+    return {
+        'schema': 'rayman2fix-adpcm-log-evidence-v1',
+        'read_only': True,
+        'observer_not_invoker': True,
+        'delegates': groups,
+        'stage_comparison': {'available': changed is not None,
+                             'changed_operations': changed},
+        'observations': observations,
+        'warnings': warnings,
+        'can_prove_query_invocation': False,
+        'can_prove_internal_retirement_absent': False,
+        'can_prove_continuous_physical_voice_generation': False,
+        'assessment': ('Pointer resolution and endpoint snapshots do not prove call execution, '
+                       'absence of internal retire or immutable native voice identity. '
+                       'TestIsPlaying and GetPos can themselves mutate original state.'),
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('log', type=Path)
+    ap.add_argument('--json', action='store_true')
+    args = ap.parse_args(argv)
+    try:
+        content = args.log.read_text(encoding='utf-8', errors='replace')
+    except OSError as exc:
+        print(f'Cannot read ESC audio log: {exc}', file=sys.stderr)
+        return 2
+    result = classify(content.splitlines())
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        for stage, group in result['delegates'].items():
+            print(f'{stage}: {len(group["entries"])}/5 callbacks, '
+                  f'complete={group["complete"]}, missing={",".join(group["missing"])}')
+        print('Early/late comparison: ', result['stage_comparison'])
+        print(result['assessment'])
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
