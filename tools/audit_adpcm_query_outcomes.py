@@ -82,6 +82,7 @@ def audit(wav_data: bytes, apm_data: bytes) -> dict:
         'permission_to_modify_audio': False,
         'runtime_callback_observed': False,
         'getpos_side_effect': audit_position_getter(apm),
+        'wavmw_getpos_bridge': audit_wavmw_position_bridge(wav, apm),
         'caveat': ('Static original-DLL outcome classification only. Native '
                    'TestIsPlaying can itself mutate state; never call it as an observer.'),
     }
@@ -91,6 +92,64 @@ def audit(wav_data: bytes, apm_data: bytes) -> dict:
 # a *conditional write* to the SAME original +0x28 active flag
 # that bTestIsPlaying's internal cleanup later inspects.
 # All opcode windows checked on the exact owner original.
+
+# The game-facing WAVMW _SND_fn_rGetPosSxd@4 export has its own
+# type-4 branch to the exact APMMX position getter. This bridge,
+# too, can be absent at runtime; the gate is not automatically taken.
+WAVMW_GETPOS_SITES = {
+    'game_facing_getpos': (0xBD20, '8b 4c 24 04 8b 41 08 48 74 3c'),
+    'type4_getpos_branch': (0xBD2D, '83 e8 02 74 12'),
+    'type4_getpos_dispatch': (0xBD44, '8b 41 04 8b 0d b0 7e 02 10 50 51 e8 7c bf ff ff'),
+    'getpos_checks_inner_started': (0x7CD0, '8b 44 24 08 8b 48 30 85 c9 74 0b'),
+    'getpos_indirect_callback_slot': (0x7CE2, 'ff 51 40'),
+    'type4_callback_table_slot6': (0xBF8F, 'c7 44 24 20 10 35 00 10'),
+    'type4_callback_table_copy': (0x7DAF, 'b9 09 00 00 00 f3 a5'),
+    'getpos_dynamic_trampoline': (0x3510, 'a1 14 6a 02 10 85 c0 75 06'),
+    'getpos_dynamic_callback': (0x3524, 'ff 15 14 6a 02 10'),
+    'loader_getpos_symbol_pointer': (0x587E, '68 08 16 02 10 56 e8 17 e7 ff ff'),
+    'loader_getpos_pointer_publish': (0x588C, 'a3 14 6a 02 10'),
+    'loader_getpos_fallback': (0x5895, 'c7 05 14 6a 02 10 30 35 00 10'),
+}
+WAVMW_GETPOS_EDGES = {
+    'type4_to_position_helper': (0xBD4F, 0x7CD0),
+    'symbol_to_kernel_resolver': (0x5884, 0x3FA0),
+}
+
+
+def audit_wavmw_position_bridge(wav: PE32, apm: PE32) -> dict:
+    if wav.exports().get('_SND_fn_rGetPosSxd@4') != 0xBD20:
+        raise PEFormatError('original WAVMW GetPosSxd export mismatch')
+    if apm.exports().get('_SND_fn_rGetPosSxdADPCM@4') != 0x51A0:
+        raise PEFormatError('original APMMX GetPosSxd export mismatch')
+    symbol = b'_SND_fn_rGetPosSxdADPCM@4\0'
+    if wav.read_rva(0x21608, len(symbol)) != symbol:
+        raise PEFormatError('original WAVMW GetPos ADPCM symbol mismatch')
+    for name, (rva, raw_hex) in WAVMW_GETPOS_SITES.items():
+        raw = bytes.fromhex(raw_hex)
+        if wav.read_rva(rva, len(raw)) != raw:
+            raise PEFormatError(f'original WAVMW GetPos opcode mismatch: {name}')
+    for name, (site, target) in WAVMW_GETPOS_EDGES.items():
+        raw = wav.read_rva(site, 5)
+        calculated = site + 5 + int.from_bytes(raw[1:], 'little', signed=True)
+        if raw[0] != 0xE8 or calculated != target:
+            raise PEFormatError(f'original WAVMW GetPos direct-call mismatch: {name}')
+    branch = wav.read_rva(0xBD30, 2)
+    if branch[0] != 0x74 or 0xBD32 + int.from_bytes(branch[1:], 'little', signed=True) != 0xBD44:
+        raise PEFormatError('original WAVMW GetPos type-4 branch target mismatch')
+    return {
+        'game_facing_getpos_export_rva': '0xBD20',
+        'adpcm_getpos_export_rva': '0x51A0',
+        'wavmw_opcode_windows_verified': len(WAVMW_GETPOS_SITES),
+        'wavmw_direct_edges_verified': len(WAVMW_GETPOS_EDGES),
+        'adpcm_getpos_symbol_rva': '0x21608',
+        'wavmw_getpos_callback_slot': '0x40',
+        'dynamic_function_pointer_rva': '0x26A14',
+        'type4_adpcm_dispatch_path_verified': True,
+        'runtime_dynamic_pointer_currently_observed': False,
+        'getpos_called_during_esc_proven': False,
+        'runtime_audio_change_authorized': False,
+    }
+
 APMMX_POSITION_SITES = {
     'getpos_export': (0x51A0, '8b 44 24 04 50 e8 56 d8 ff ff 83 c4 04 c2 04 00'),
     'getpos_core': (0x2A00, 'a1 a8 82 0e 10 83 ec 08 56'),
