@@ -538,8 +538,10 @@ void log_audio_driver_module(unsigned slot,const void* current) {
 }
 
 // Original owner's hash-pinned WAVMWbvr.dll contains dynamically resolved
-// type-4 ADPCM Stop/Pause/Resume transition thunks in three consecutive
-// PE data slots. Read them ONCE after a source-confirmed ESC menu, on
+// type-4 ADPCM Stop/Pause/Resume transition thunks, plus separate
+// TestIsPlaying and GetPos query thunks in the same PE data region.
+// Read them at most ONCE for each original Theme-ref class (3 pending,
+// 1 synchronized), after a source-confirmed ESC menu, on
 // the normal render thread AFTER the existing audio compensation. Never
 // call these delegates, read them in a native callback or log raw pointers.
 // A basename/timestamp/entry-opcode guard prevents applying original-DLL
@@ -606,14 +608,22 @@ void log_adpcm_delegate_origins_readonly() {
         log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=entry-mismatch (read-only)");
         return;
     }
-    // This exact disk DLL dispatches:
-    // StopTransitionSxd type 4 -> [module+0x26A98],
-    // PauseTransitionSxd type 4 -> [module+0x26A9C],
-    // ResumeTransitionSxd type 4 -> [module+0x26AA0].
-    constexpr unsigned slot_rvas[3]{0x26A98u,0x26A9Cu,0x26AA0u};
-    constexpr unsigned fallback_rvas[3]{0x3C50u,0x3C80u,0x3CB0u};
-    const char* labels[3]{"stop","pause","resume"};
-    for(unsigned i=0;i<3u;++i) {
+    // This exact disk DLL dispatches the original ADPCM type-4 thunks:
+    // StopTransition -> [module+0x26A98], Pause -> +0x26A9C,
+    // Resume -> +0x26AA0, TestIsPlaying -> +0x26A00,
+    // GetPos -> +0x26A14. The latter two queries may mutate driver state
+    // when ACTUALLY CALLED by the game, so we only READ their pointers.
+    // Pointer resolution is not proof of any live query invocation.
+    constexpr unsigned slot_rvas[5]{
+        0x26A98u,0x26A9Cu,0x26AA0u,0x26A00u,0x26A14u
+    };
+    constexpr unsigned fallback_rvas[5]{
+        0x3C50u,0x3C80u,0x3CB0u,0x3440u,0x3530u
+    };
+    const char* labels[5]{
+        "stop","pause","resume","test-is-playing","get-pos"
+    };
+    for(unsigned i=0;i<5u;++i) {
         DWORD target=0;
         if(!read(base+slot_rvas[i],&target,sizeof(target)) ||
            !target || target==0xFFFFFFFFu) {
@@ -2508,13 +2518,28 @@ void proto_menu_tick() {
             unsigned(known),
             unsigned(known && menu!=0 && actor_ok));
         log_line(window);
-        // Read the original type-4 delegate destinations at most once
-        // and only after the native script wrapper and all current
-        // audio compensation have already completed.
-        static bool adpcm_targets_logged=false; // render thread only
-        if(report.transition_type_post_pause==4 &&
-           !adpcm_targets_logged) {
-            adpcm_targets_logged=true;
+        // Compare native delegate provenance at most twice: once with
+        // the original pending Theme ref (class 3) and once with the
+        // synchronized original ref (class 1). In both cases the source
+        // is verified and ALL native menu audio dispatch has completed.
+        // These are pointer snapshots, not proof that any query ran.
+        static bool adpcm_targets_logged_pending=false;
+        static bool adpcm_targets_logged_synced=false; // render thread only
+        const int cls=owner.native_theme_player_ref_class;
+        const bool can_trace_delegate=
+            report.transition_type_post_pause==4 &&
+            ((cls==3 && !adpcm_targets_logged_pending) ||
+             (cls==1 && !adpcm_targets_logged_synced));
+        if(can_trace_delegate) {
+            if(cls==3)adpcm_targets_logged_pending=true;
+            else adpcm_targets_logged_synced=true;
+            char context[250]{};
+            std::snprintf(context,sizeof(context),
+                "RUNTIME-AUDIO-ADPCM-DELEGATE-CONTEXT: ref_class=%d "
+                "stage=%s (source-confirmed post-dispatch, "
+                "resolution is NOT invocation)",
+                cls,cls==3 ? "pending" : "synchronized");
+            log_line(context);
             log_adpcm_delegate_origins_readonly();
         }
     }
