@@ -97,7 +97,7 @@ jobs:
           $initial = (Get-Content $ini | Where-Object {
             $_.Trim() -and !$_.Trim().StartsWith(';')
           })
-          if ($initial.Count -ne 8 -or $initial[0] -ne '[Debug]' -or
+          if ($initial.Count -ne 9 -or $initial[0] -ne '[Debug]' -or
               $initial[1] -ne 'Log=1' -or $initial[2] -ne '[Graphics]' -or
               $initial[3] -ne 'Resolution=Desktop' -or
               $initial[4] -ne 'FPSLimit=60' -or
