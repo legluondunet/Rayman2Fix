@@ -973,3 +973,61 @@ cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build --target esc_pre_driver_pause_tests
 ctest --test-dir build --output-on-failure -R esc-pre-driver-pause-research-model
 ```
+
+## 17. Original GetPos active-flag writer is not locally lock-bracketed
+
+Direct, read-only inspection of the same exact original 1999
+`APMMXbvr.dll` reveals that **all three original functions in the
+game-facing GetPos ADPCM chain** have no raw direct `E8` call
+to the known native critical-section helpers
+`0x1020` (acquire) or `0x1030` (release) within
+their verified function bodies:
+
+| Function | Exact original RVA range inspected | Potential action |
+| --- | --- | --- |
+| GetPos public export | `0x51A0..0x51AF` | Forwards original argument |
+| GetPos core | `0x2A00..0x2A54` | Calls `0x2320`, processes return status |
+| Position/progression reader | `0x2320..0x247D` | **May write `[record+0x28]=0`** at `0x2446` |
+
+This extends the existing TestIsPlaying/internal-retirement
+no-local-lock finding. The expanded
+`tools/audit_adpcm_lock_routes.py` verifies **seven**
+bounded non-lock-calling code ranges and the original four
+Play/Stop lock envelopes. Two additional synthetic regressions
+reject a new direct native-lock call inside the GetPos reader
+and retain the **not-proven** external/indirect synchronization
+status.
+
+**What is and is not proved:** neither original GetPos nor
+TestIsPlaying visibly calls the known internal lock helpers
+in its own bounded function chain, whereas the known
+Play/Stop wrappers do. That does **not** prove they execute
+without a lock acquired by a *caller*, nor does it identify
+the exact thread that owns each audio operation. The original
+read/write lifetime may still race with a mixer or asynchronous
+original callback. Therefore even two identical coherent
+`ReadProcessMemory` endpoint samples cannot certify no
+retirement or ABA between them.
+
+### External tracing is a different, intrusive experiment
+
+The independently documented Wine `+snoop` facility can
+instrument **native DLL export calls**, whereas ordinary
+`+relay` predominantly observes Wine's builtin DLL interfaces.
+Wine's implementation uses trampolines, and community
+documentation explicitly warns `+snoop` may destabilize
+an application:
+<https://github.com/wine-mirror/wine/blob/master/dlls/ntdll/relay.c>.
+Likewise, attaching a debugger and placing execution
+breakpoints can stop/resume game threads and alter timing.
+**None of these instruments has been activated for Rayman2Fix,
+and they should not be described as non-perturbing or as
+proof of native lifetime coverage.** A controlled,
+separately gated investigation would need to establish
+its own no-regression and threading criteria.
+
+The new passive five-delegate fingerprint + ESC endpoint
+diagnostic is safer for gathering preliminary evidence,
+but remains a **provenance and endpoint** observation only.
+The pre-driver Pause escrow stays disconnected from
+the game and native driver. PR #10 remains a draft.
