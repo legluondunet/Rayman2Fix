@@ -87,7 +87,7 @@ class OriginalQueryGuardTests(unittest.TestCase):
         self.assertFalse(bridge['getpos_called_during_esc_proven'])
         self.assertFalse(bridge['runtime_audio_change_authorized'])
         setparam=info['wavmw_setparam_bridge']
-        self.assertEqual(setparam['wavmw_opcode_anchors_verified'],19)
+        self.assertEqual(setparam['wavmw_opcode_anchors_verified'],21)
         self.assertEqual(setparam['wavmw_direct_call_edges_verified'],5)
         self.assertEqual(setparam['wavmw_conditional_branches_verified'],2)
         self.assertTrue(setparam['plain_setparam_can_unlink_wavmw_outer_on_false'])
