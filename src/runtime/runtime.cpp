@@ -886,6 +886,16 @@ struct AudioThemeOwnerContext {
     // 4 readable non-Theme data, 5 unreadable/unmapped reference.
     // These values never authorize audio and contain no raw pointers.
     int native_theme_player_ref_class=-1;
+    // Original approved-CD code establishes a two-stage Theme switch:
+    // 0x4595F6 sets [controller+0x0C]=1 and +0x44=pending descriptor;
+    // 0x459476 clears the flag, then +0x14 receives the pending pointer.
+    // -1 means unreadable/unknown/not applicable; pending target is
+    // considered only if flag=1 AND the unique active outer Theme is
+    // already verified as an actual original type-11 descriptor.
+    // Diagnostic only: NEVER authorize Pause/Resume from these fields.
+    int native_theme_pending_state=-1;
+    int native_pending_target_matches_outer=-1;
+    int native_pending_target_differs_current=-1;
     // Classify the *alternative* native Theme descriptor by its original
     // loaded bank, never by the untrusted Id halves. Research-only,
     // sampled on the first rejected/accepted ESC after physical callbacks.
@@ -969,6 +979,21 @@ AudioThemeOwnerContext inspect_audio_theme_owner(
                 int(current_theme_key==
                     static_cast<DWORD>(outer_descriptor_address));
             if(classify_native_ref) {
+                DWORD switch_flag=0,pending_target=0;
+                if(safe_read(module+kControllerRva+0x0Cu,
+                             &switch_flag,sizeof(switch_flag)) &&
+                   safe_read(module+kControllerRva+0x44u,
+                             &pending_target,sizeof(pending_target)) &&
+                   switch_flag<=1u) {
+                    out.native_theme_pending_state=int(switch_flag);
+                    if(switch_flag==1u && pending_target>=0x10000u) {
+                        out.native_pending_target_matches_outer=int(
+                            std::uintptr_t(pending_target)==
+                            outer_descriptor_address);
+                        out.native_pending_target_differs_current=int(
+                            pending_target!=current_theme_key);
+                    }
+                }
                 if(current_theme_key==0u)
                     out.native_theme_player_ref_class=0;
                 else if(current_theme_key==outer_descriptor_address)
@@ -2112,12 +2137,14 @@ void proto_log_owner_rejection(DWORD handle,DWORD elapsed_ms,
     if(!g_log)return;
     const DWORD before=GetTickCount();
     const auto owner=inspect_audio_theme_owner(handle,true);
-    char line[660]{};
+    char line[850]{};
     std::snprintf(line,sizeof(line),
         "RUNTIME-ESC-OWNER-DIAG: event=%s pending_ms=%lu owner_scan_ms=%lu "
         "outer_candidates=%u inner_active=%u inner_transition=%u "
         "inner_driver_matches=%u theme_owned_driver=%u "
         "native_player_ref_match=%d native_player_ref_class=%d "
+        "pending_switch_state=%d pending_target_matches_outer=%d "
+        "pending_target_differs_current=%d "
         "alt_ref_bank=%d alt_ref_index=%d alt_ref_same_bank=%d "
         "alt_ref_complete=%u alt_ref_candidates=%u "
         "outer_bank_complete=%u "
@@ -2130,6 +2157,9 @@ void proto_log_owner_rejection(DWORD handle,DWORD elapsed_ms,
         owner.inner_driver_matches,owner.theme_owned_driver,
         owner.native_theme_player_ref_matches_outer,
         owner.native_theme_player_ref_class,
+        owner.native_theme_pending_state,
+        owner.native_pending_target_matches_outer,
+        owner.native_pending_target_differs_current,
         owner.alternative_ref_bank,
         owner.alternative_ref_index,
         owner.alternative_ref_same_bank,
@@ -2186,106 +2216,6 @@ void proto_note_sampled_sxd(const AudioThemeOwnerContext& owner,
     sample.sxd_last_index=index;
     ++sample.sxd_samples;
 }
-// Read-only research of the *approved retail CD* engine's Theme player
-// control fields. The first ESC observed controller+0x0C=1 while the
-// player still referred to the former 9:12 Theme, then 0 when it
-// matched 9:5. We do NOT yet know what +0x0C means. Search only
-// the PE's original executable .text for the 32-bit *address
-// literals* of controller+0x00/+0x0C/+0x14. A match is only an
-// unaligned displacement candidate, NOT proof of a native instruction,
-// reader, writer, state machine, or physical audio ownership.
-//
-// Run ONCE during explicit initialization after the existing camera
-// hook has validated the approved game version; never in callbacks,
-// pending ESC, or its native resume/compensation critical path.
-void proto_audit_controller_code_references() {
-    if(!g_proto_enabled.load(std::memory_order_acquire) || !g_log)return;
-    const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
-    if(!module)return;
-    const HANDLE process=GetCurrentProcess();
-    const auto read=[&](const void* address,void* dest,SIZE_T size) {
-        SIZE_T received=0;
-        return ReadProcessMemory(process,address,dest,size,&received)!=0 &&
-               received==size;
-    };
-    IMAGE_DOS_HEADER dos{};
-    if(!read(module,&dos,sizeof(dos)) ||
-       dos.e_magic!=IMAGE_DOS_SIGNATURE ||
-       dos.e_lfanew<0x40 || dos.e_lfanew>0x1000)return;
-    IMAGE_NT_HEADERS32 nt{};
-    if(!read(module+dos.e_lfanew,&nt,sizeof(nt)) ||
-       nt.Signature!=IMAGE_NT_SIGNATURE ||
-       nt.FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
-       nt.FileHeader.TimeDateStamp!=kOriginalTimestamp ||
-       nt.OptionalHeader.Magic!=IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
-       nt.OptionalHeader.SizeOfImage<0x9B1D0u) {
-        log_line("RUNTIME-ESC-CONTROLLER-XREF: status=version-unverified (no code scan)");
-        return;
-    }
-    // These boundaries were recorded from the SHA256-approved retail
-    // executable. Do not scan heap, loaded driver DLLs, or arbitrary code.
-    constexpr unsigned kCodeStart=0x1000u;
-    constexpr unsigned kCodeEnd=0x9B1D0u;
-    std::vector<BYTE> code(kCodeEnd-kCodeStart);
-    if(!read(module+kCodeStart,code.data(),code.size())) {
-        log_line("RUNTIME-ESC-CONTROLLER-XREF: status=code-unreadable (no audio changes)");
-        return;
-    }
-    struct NativeField {const char* label;unsigned rva;};
-    constexpr NativeField fields[]{
-        {"active_00",0xB95B8u},
-        {"state_0c",0xB95C4u},
-        {"player_ref_14",0xB95CCu},
-    };
-    constexpr unsigned kMaxEmitted=12u;
-    constexpr unsigned kBefore=10u;
-    constexpr unsigned kAfter=10u;
-    constexpr char kHex[]="0123456789ABCDEF";
-    for(const auto& field:fields) {
-        const std::uintptr_t va=
-            reinterpret_cast<std::uintptr_t>(module)+field.rva;
-        if(va>0xFFFFFFFFu)continue; // supported x86 only
-        const DWORD literal=static_cast<DWORD>(va);
-        BYTE wanted[4]{};
-        std::memcpy(wanted,&literal,sizeof(wanted));
-        unsigned hits=0,emitted=0;
-        for(std::size_t i=0;i+sizeof(wanted)<=code.size();++i) {
-            if(std::memcmp(code.data()+i,wanted,sizeof(wanted))!=0)continue;
-            ++hits;
-            if(emitted>=kMaxEmitted)continue;
-            ++emitted;
-            const std::size_t begin=i>=kBefore ? i-kBefore : 0u;
-            const std::size_t end=
-                (code.size()-i>sizeof(wanted)+kAfter)
-                ? i+sizeof(wanted)+kAfter : code.size();
-            // Mask the 4 address bytes. This is *code* provenance,
-            // not a log of process pointers, player handles or paths.
-            char context[(kBefore+4u+kAfter)*2u+1u]{};
-            unsigned pos=0;
-            for(std::size_t j=begin;j<end;++j) {
-                const bool addr_byte=j>=i && j<i+sizeof(wanted);
-                context[pos++]=addr_byte?'?':kHex[code[j]>>4u];
-                context[pos++]=addr_byte?'?':kHex[code[j]&0xFu];
-            }
-            context[pos]='\0';
-            char line[280]{};
-            std::snprintf(line,sizeof(line),
-                "RUNTIME-ESC-CONTROLLER-XREF: field=%s disp_rva=0x%08X "
-                "context_masked=%s status=literal-candidate-only "
-                "(not decoded as an instruction; read-only)",
-                field.label,static_cast<unsigned>(i+kCodeStart),context);
-            log_line(line);
-        }
-        char summary[260]{};
-        std::snprintf(summary,sizeof(summary),
-            "RUNTIME-ESC-CONTROLLER-XREF-SUMMARY: field=%s matches=%u "
-            "shown=%u truncated=%u status=read-only-literal-scan "
-            "(zero does not rule out register-relative access)",
-            field.label,hits,emitted,unsigned(hits>emitted));
-        log_line(summary);
-    }
-}
-
 void proto_theme_transition_watch_tick() {
     if(!g_proto_callsites_installed.load(std::memory_order_acquire) ||
        !g_proto_enabled.load(std::memory_order_acquire) || !g_log)return;
@@ -2345,10 +2275,12 @@ void proto_theme_transition_watch_tick() {
     // This is a change-triggered sample, not continuous surveillance.
     // A missing transition cannot be taken as proof that the stream stood still.
     proto_note_sampled_sxd(owner,menu!=0u);
-    char line[600]{};
+    char line[760]{};
     std::snprintf(line,sizeof(line),
         "RUNTIME-ESC-THEME-WATCH: seq=%u t_ms=%lu menu=%u active=%lu "
         "controller_field0c=%lu ref_class=%d ref_match=%d "
+        "pending_switch_state=%d pending_target_matches_outer=%d "
+        "pending_target_differs_current=%d "
         "outer_candidates=%u outer_bank=%d outer_index=%d "
         "inner_active=%u inner_transition=%u inner_bank=%d inner_index=%d "
         "alt_bank=%d alt_index=%d alt_same_bank=%d "
@@ -2359,6 +2291,9 @@ void proto_theme_transition_watch_tick() {
         static_cast<unsigned long>(controller_words[3]),
         owner.native_theme_player_ref_class,
         owner.native_theme_player_ref_matches_outer,
+        owner.native_theme_pending_state,
+        owner.native_pending_target_matches_outer,
+        owner.native_pending_target_differs_current,
         owner.outer_candidates,
         owner.outer_bank_provenance.bank_id,
         owner.outer_bank_provenance.resource_index,
@@ -5672,11 +5607,6 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     const DWORD camera_status = install_camera_hook();
     // Unknown/unsupported game versions never receive additional hooks.
     if (camera_status == 1) {
-#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
-        // One-time bounded code-only provenance audit: before gameplay
-        // and unrelated to the native ESC Pause/Resume critical path.
-        proto_audit_controller_code_references();
-#endif
         // The source transform covers all four native inverse-projection
         // callers and four independent extent operations as a single
         // guarded stage; only then bypass the older viewport squeeze.
