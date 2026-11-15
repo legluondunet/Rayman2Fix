@@ -474,6 +474,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_audit_original_cd_theme_callback.py'
       - name: Verify source-paired ESC adjusted Theme handoff timing
         run: python3 -m unittest discover -s tests -p 'test_theme_handoff_timing.py'
+      - name: Verify chronological Theme predecessor and pending-target provenance
+        run: python3 -m unittest discover -s tests -p 'test_theme_handoff_history.py'
       - name: Verify offline owner-scoped audio trace evidence parser
         run: python3 -m unittest discover -s tests -p 'test_audio_trace_evidence.py'
       - name: Verify bounded ESC ADPCM post-dispatch source and lifetime evidence
