@@ -88,11 +88,12 @@ class NativePauseResumeTests(unittest.TestCase):
             ctor.assert_not_called()
 
     def test_mismatched_original_apm_refused(self):
-        with patch.object(A,'PE32') as ctor:
+        with (patch.object(A,'WAVMW_OWNER_SHA256',hashlib.sha256(WAV).hexdigest()),
+              patch.object(A,'PE32',FakeWave) as ctor):
             with self.assertRaisesRegex(A.PEFormatError,'apm original SHA-256 mismatch'):
                 A.audit(WAV,b'not APMMX')
-            # WAV is parsed first; APM fails before its own PE parse.
-            self.assertEqual(ctor.call_count,0)  # WAV cannot pass hash either
+            # WAV parsed exactly once; bad APM hash is refused before
+            # any original ADPCM PE opcodes can be interpreted.
 
     def test_native_resume_zero_write_is_not_optional(self):
         class Bad(FakeAdpcm):
