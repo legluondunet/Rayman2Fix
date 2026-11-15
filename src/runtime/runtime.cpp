@@ -623,6 +623,19 @@ void log_adpcm_delegate_origins_readonly() {
     const char* labels[5]{
         "stop","pause","resume","test-is-playing","get-pos"
     };
+    // Exact original APMMX export RVAs and first 16 opcode bytes, checked
+    // offline against the owner's original 1999 DLL. No Windows export
+    // resolution or driver invocation is permitted by this readout.
+    constexpr unsigned owner_rvas[5]{
+        0x54C0u,0x54D0u,0x54E0u,0x5150u,0x51A0u
+    };
+    constexpr BYTE owner_entry[5][16]{
+        {0x8B,0x44,0x24,0x04,0x50,0xE8,0x76,0xDE,0xFF,0xFF,0x83,0xC4,0x04,0xC2,0x04,0x00},
+        {0x8B,0x44,0x24,0x04,0x50,0xE8,0xA6,0xDE,0xFF,0xFF,0x83,0xC4,0x04,0xC2,0x04,0x00},
+        {0x8B,0x44,0x24,0x04,0x50,0xE8,0xD6,0xDE,0xFF,0xFF,0x83,0xC4,0x04,0xC2,0x04,0x00},
+        {0x8B,0x44,0x24,0x04,0x50,0xE8,0xA6,0xD7,0xFF,0xFF,0x83,0xC4,0x04,0xC2,0x04,0x00},
+        {0x8B,0x44,0x24,0x04,0x50,0xE8,0x56,0xD8,0xFF,0xFF,0x83,0xC4,0x04,0xC2,0x04,0x00}
+    };
     for(unsigned i=0;i<5u;++i) {
         DWORD target=0;
         if(!read(base+slot_rvas[i],&target,sizeof(target)) ||
@@ -677,14 +690,41 @@ void log_adpcm_delegate_origins_readonly() {
         for(const wchar_t* p=target_name;*p && k+1<sizeof(safe_basename);++p)
             safe_basename[k++]=(*p>=33 && *p<=126)
                 ? static_cast<char>(*p) : '?';
-        char msg[256]{};
+        const auto* owner_base=reinterpret_cast<const BYTE*>(target_module);
         const auto target_rva=address-
             reinterpret_cast<std::uintptr_t>(target_module);
+        // A DLL basename alone could identify an unexpected replacement.
+        // Treat the owner's PE timestamp, image size, exact expected RVA
+        // and original entry opcode as a BOUNDED fingerprint, not a
+        // cryptographic verification of every loaded code/data byte.
+        bool owner_fingerprint=false;
+        if(CompareStringOrdinal(target_name,-1,L"APMMXbvr.dll",-1,TRUE)==CSTR_EQUAL &&
+           target_rva==owner_rvas[i]) {
+            IMAGE_DOS_HEADER original_dos{};
+            IMAGE_NT_HEADERS32 original_nt{};
+            BYTE actual_entry[16]{};
+            if(read(owner_base,&original_dos,sizeof(original_dos)) &&
+               original_dos.e_magic==IMAGE_DOS_SIGNATURE &&
+               original_dos.e_lfanew>0 && original_dos.e_lfanew<0x1000 &&
+               read(owner_base+original_dos.e_lfanew,
+                    &original_nt,sizeof(original_nt)) &&
+               original_nt.Signature==IMAGE_NT_SIGNATURE &&
+               original_nt.FileHeader.Machine==IMAGE_FILE_MACHINE_I386 &&
+               original_nt.FileHeader.TimeDateStamp==0x38076F98u &&
+               original_nt.OptionalHeader.Magic==IMAGE_NT_OPTIONAL_HDR32_MAGIC &&
+               original_nt.OptionalHeader.SizeOfImage==0xEE000u &&
+               read(owner_base+owner_rvas[i],actual_entry,sizeof(actual_entry)) &&
+               std::memcmp(actual_entry,owner_entry[i],sizeof(actual_entry))==0)
+                owner_fingerprint=true;
+        }
+        char msg[300]{};
         std::snprintf(msg,sizeof(msg),
             "RUNTIME-AUDIO-ADPCM-DELEGATE: op=%s status=resolved "
             "module=%s callback_rva=0x%08X "
-            "(original indirect target; read-only; no call)",
-            labels[i],safe_basename,static_cast<unsigned>(target_rva));
+            "original_entry_fingerprint=%u "
+            "(PE/opcode only, NOT full SHA; pointer is not invocation; no call)",
+            labels[i],safe_basename,static_cast<unsigned>(target_rva),
+            unsigned(owner_fingerprint));
         log_line(msg);
     }
 }
