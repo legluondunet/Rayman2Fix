@@ -26,6 +26,8 @@ class SyntheticMixerPE:
             self.code[rva-0x1000:rva-0x1000+len(op)] = op
 
     def read_rva(self, rva, n):
+        if rva==0x12010:
+            return b'_SND_fn_lCreateNewBufferExSxd@16\0'[:n]
         i = rva-0x1000
         if i < 0 or n < 0 or i+n > len(self.code):
             raise A.PEFormatError('synthetic PE bounds')
