@@ -520,6 +520,8 @@ Force4x3=0
 ; 1 = allow Space/Enter/Esc to skip jail_20 only
 ; Learn_10 skip remains disabled (unsafe)
 SkipCinematics=0
+; 1 = hide black dialogue backdrops and game-drawn cinematic letterbox frames
+RemoveBlackFrames=0
 ```
 
 `Resolution=Desktop` automatically uses the primary desktop resolution on
@@ -544,6 +546,20 @@ and the native UI is not squeezed.
 It does **not** skip the first cinematic `jail_10`, the unsafe
 `learn_10` sequence, or later game cutscenes. With the default
 `SkipCinematics=0`, even the second intro behaves normally.
+
+`RemoveBlackFrames=1` in `[Features]` enables an experimental,
+**opt-in visual filter** for game-drawn 2D frame rectangles: the wide
+lower-screen backdrops behind dialogue text and horizontal screen-edge
+letterbox bars used by cinematics. The filter targets the exact
+`GLI_vDisplayFrame` producer in the supported original CD executable;
+it does **not** hide text glyphs, UI image sprites, the full-screen
+black fade, or change world rendering. It remains disabled by default
+(`RemoveBlackFrames=0`), and is independent of
+`SkipCinematics` and `Force4x3`. The sidebars introduced
+by `Force4x3=1` are produced by GameFrame rather than the game
+and are intentionally unaffected. Some cutscenes may draw their black
+bands through a different video/image path; this requires testing in
+the game and is not yet claimed as universally supported.
 Existing INIs receive only the missing disabled options, preserving
 their custom values, unrelated settings and comments.
 
