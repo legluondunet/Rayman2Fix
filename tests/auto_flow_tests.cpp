@@ -183,7 +183,8 @@ int main() {
               "4:3 and cinematic skip opt-in recognized");
         check(!r2fix::configured_remove_black_frames(user_ini),
               "new visual filter disabled when absent");
-        write(user_ini,"[Features]\nRemoveBlackFrames=1\n");
+        write(user_ini,"[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+                       "[Features]\nSkipCinematics=1\nRemoveBlackFrames=1\n");
         check(r2fix::configured_remove_black_frames(user_ini),
               "black-frame removal requires explicit opt-in");
         check(r2fix::configured_render_resolution(user_ini) ==
