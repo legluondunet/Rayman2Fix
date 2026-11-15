@@ -1685,7 +1685,8 @@ PR #10 remains **draft**.
 
 ## 24. Two owner Wine sessions: Theme handoff wall-clock extension follows original ESC time
 
-The user supplied two complete, **actual opt-in Wine sessions**,
+Three complete, **actual opt-in Wine sessions** are available:
+`Rayman2Fix(20261115-084027).log`,
 `Rayman2Fix(20261115-151318).log` and
 `Rayman2Fix(20261115-153430).log`. Independently parsing
 their original, change-triggered Theme watcher and source-specific
@@ -1702,23 +1703,25 @@ pre-switch current Theme was **9:12**, and the next
 observed settled current Theme was **9:5**
 (`native_ref_class=1, ref_match=1, pending_state=0`).
 
-| Source-backed event | 15:13 Wine log | 15:34 Wine log |
-| --- | ---: | ---: |
-| Last verified previous current 9:12 (`t_ms`) | 30971 | 34849 |
-| First verified pending 9:12 → 9:5 (`t_ms`) | 31871 | 35749 |
-| First verified committed 9:5 (`t_ms`) | 50372 | 63549 |
-| **Pending-to-committed observed wall span** | **18501 ms** | **27800 ms** |
-| Verified source-specific early ESC intervals | 4 | 3 |
-| Source-paired menu durations | 5150 + 2400 + 4633 + 2449 ms | 6333 + 8217 + 9333 ms |
-| **Total observed ESC intervals** | **14632 ms** | **23883 ms** |
-| **Observed wall span minus paired ESC intervals** | **3869 ms** | **3917 ms** |
+| Source-backed event | 08:40 Wine log | 15:13 Wine log | 15:34 Wine log |
+| --- | ---: | ---: | ---: |
+| Last verified previous current 9:12 (`t_ms`) | 33067 | 30971 | 34849 |
+| First verified pending 9:12 → 9:5 (`t_ms`) | 33917 | 31871 | 35749 |
+| First verified committed 9:5 (`t_ms`) | 47017 | 50372 | 63549 |
+| **Pending-to-committed observed wall span** | **13100 ms** | **18501 ms** | **27800 ms** |
+| Verified source-specific early ESC intervals | 3 | 4 | 3 |
+| Source-paired menu durations | 1450 + 4383 + 3333 ms | 5150 + 2400 + 4633 + 2449 ms | 6333 + 8217 + 9333 ms |
+| **Total observed ESC intervals** | **9166 ms** | **14632 ms** | **23883 ms** |
+| **Observed wall span minus paired ESC intervals** | **3934 ms** | **3869 ms** | **3917 ms** |
 
-The two pending-to-committed wall spans differ
-by **9299 ms**. The two total source-confirmed ESC
-menu durations differ by **9251 ms**. Their
-remaining, non-menu elapsed time differs by
-only **48 ms**, despite >9 seconds difference
-in the time spent within ESC menus. The native
+Across all **three independently recorded sessions**,
+the pending-to-committed wall spans range over **14700 ms**,
+and the total source-confirmed ESC menu times range
+over **14717 ms**. Yet the measured wall-clock remainders
+outside the recorded ESC intervals span only **65 ms**
+(`3869..3934 ms`). Comparing the two afternoon sessions
+alone yields **48 ms** residual spread despite **9251 ms**
+difference in ESC menu time. The native
 controller switch is therefore **consistent
 with an approximately four-second progression
 requirement outside script-ESC menu intervals**.
@@ -1786,10 +1789,12 @@ sessions and explicit fail-closed counterexamples.
 
 ```sh
 python3 tools/analyze_theme_handoff_timing.py \
+  'Rayman2Fix(20261115-084027).log' \
   'Rayman2Fix(20261115-151318).log' \
   'Rayman2Fix(20261115-153430).log' --json
 
 python3 tools/audit_theme_handoff_timing.py \
+  'Rayman2Fix(20261115-084027).log' \
   'Rayman2Fix(20261115-151318).log' \
   'Rayman2Fix(20261115-153430).log' --json
 ```
