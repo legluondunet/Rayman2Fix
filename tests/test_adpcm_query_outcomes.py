@@ -22,22 +22,32 @@ class SyntheticQueryApmPE(FakeOwnerPE):
         return {
             '_SND_fn_bTestIsPlayingSxdADPCM@4': 0x5150,
             '_SND_fn_rGetPosSxdADPCM@4': 0x51A0,
+            '_SND_fn_bSetParamSxdADPCM@8': 0x5120,
+            '_SND_fn_bSetParamTransitionSxdADPCM@8': 0x5430,
         }
 
 
 class SyntheticQueryWavPE(FakeWavPE):
     def __init__(self, raw):
         super().__init__(raw)
-        for rva, hex_bytes in tuple(A.WAVMW_GATES.values()) + tuple(A.WAVMW_GETPOS_SITES.values()):
+        for rva, hex_bytes in (tuple(A.WAVMW_GATES.values()) +
+                               tuple(A.WAVMW_GETPOS_SITES.values()) +
+                               tuple(A.WAVMW_SETPARAM_SITES.values())):
             data = bytes.fromhex(hex_bytes)
             self.text[rva:rva+len(data)] = data
         symbol = b'_SND_fn_rGetPosSxdADPCM@4\0'
         self.text[0x21608:0x21608+len(symbol)] = symbol
+        for rva, name in ((0x21540, '_SND_fn_bSetParamSxdADPCM@8'),
+                          (0x21A20, '_SND_fn_bSetParamTransitionSxdADPCM@8')):
+            name_bytes = name.encode('ascii') + b'\0'
+            self.text[rva:rva+len(name_bytes)] = name_bytes
 
     def exports(self):
         return {
             '_SND_fn_bTestIsPlayingSxd@4': 0xB8A0,
             '_SND_fn_rGetPosSxd@4': 0xBD20,
+            '_SND_fn_bSetParamSxd@8': 0xB7F0,
+            '_SND_fn_bSetParamTransitionSxd@8': 0xC5D0,
         }
 
 
@@ -76,6 +86,13 @@ class OriginalQueryGuardTests(unittest.TestCase):
         self.assertEqual(bridge['wavmw_direct_edges_verified'], 2)
         self.assertFalse(bridge['getpos_called_during_esc_proven'])
         self.assertFalse(bridge['runtime_audio_change_authorized'])
+        setparam=info['wavmw_setparam_bridge']
+        self.assertEqual(setparam['wavmw_opcode_anchors_verified'],19)
+        self.assertEqual(setparam['wavmw_direct_call_edges_verified'],5)
+        self.assertEqual(setparam['wavmw_conditional_branches_verified'],2)
+        self.assertTrue(setparam['plain_setparam_can_unlink_wavmw_outer_on_false'])
+        self.assertFalse(setparam['hidden_apmmx_retirement_during_esc_observed'])
+        self.assertFalse(setparam['runtime_audio_change_authorized'])
 
 
     def test_unknown_version_refused(self):
@@ -301,6 +318,58 @@ class OriginalQueryGuardTests(unittest.TestCase):
                                     'getpos_uninitialized_returns_minus_one'):
             A.audit_wavmw_position_bridge(
                 BadWav(b'synthetic'), SyntheticQueryApmPE(b'synthetic'))
+
+    def test_both_wavmw_setparam_lookups_are_original_exports(self):
+        report=A.audit_wavmw_setparam_bridge(
+            SyntheticQueryWavPE(b'synthetic'),SyntheticQueryApmPE(b'synthetic'))
+        self.assertEqual(report['plain_setparam_dynamic_slot_rva'],'0x269FC')
+        self.assertEqual(report['transition_setparam_dynamic_slot_rva'],'0x26A88')
+        self.assertEqual(report['wavmw_direct_call_edges_verified'],5)
+        self.assertFalse(report['native_query_or_setter_was_executed'])
+
+    def test_wavmw_setparam_unapproved_export_rejected(self):
+        class Bad(SyntheticQueryWavPE):
+            def exports(self):
+                return {'_SND_fn_bSetParamSxd@8':0xB800}
+        with self.assertRaisesRegex(A.PEFormatError,'SetParam export identity'):
+            A.audit_wavmw_setparam_bridge(Bad(b'synthetic'),
+                                          SyntheticQueryApmPE(b'synthetic'))
+
+    def test_wavmw_setparam_wrong_dynamic_lookup_name_rejected(self):
+        class Bad(SyntheticQueryWavPE):
+            def __init__(self,raw):
+                super().__init__(raw)
+                self.text[0x21A20]=0x00
+        with self.assertRaisesRegex(A.PEFormatError,'SetParam dynamic symbol'):
+            A.audit_wavmw_setparam_bridge(Bad(b'synthetic'),
+                                          SyntheticQueryApmPE(b'synthetic'))
+
+    def test_wavmw_setparam_wrong_type4_callback_branch_rejected(self):
+        class Bad(SyntheticQueryWavPE):
+            def __init__(self,raw):
+                super().__init__(raw)
+                self.text[0xC5E4]=0x17
+        with self.assertRaisesRegex(A.PEFormatError,'SetParam opcode mismatch|SetParam branch'):
+            A.audit_wavmw_setparam_bridge(Bad(b'synthetic'),
+                                          SyntheticQueryApmPE(b'synthetic'))
+
+    def test_wavmw_setparam_outer_cleanup_cannot_be_rewired(self):
+        class Bad(SyntheticQueryWavPE):
+            def __init__(self,raw):
+                super().__init__(raw)
+                self.text[0xB87F]=0x90
+        with self.assertRaisesRegex(A.PEFormatError,'plain_on_false_unlinks_outer|call edge'):
+            A.audit_wavmw_setparam_bridge(Bad(b'synthetic'),
+                                          SyntheticQueryApmPE(b'synthetic'))
+
+    def test_wavmw_setparam_unknown_native_trampoline_rejected(self):
+        class Bad(SyntheticQueryWavPE):
+            def __init__(self,raw):
+                super().__init__(raw)
+                self.text[0x3B49+2]=0x89
+        with self.assertRaisesRegex(A.PEFormatError,'transition_dynamic_indirect_call'):
+            A.audit_wavmw_setparam_bridge(Bad(b'synthetic'),
+                                          SyntheticQueryApmPE(b'synthetic'))
 
     def test_wavmw_getpos_rejects_changed_dynamic_symbol(self):
         class BadWav(SyntheticQueryWavPE):
