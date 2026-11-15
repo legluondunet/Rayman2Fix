@@ -233,7 +233,7 @@ ChildProcessResult run_child_process(
             reinterpret_cast<std::uintptr_t>(process.handle),
             raw.dwProcessId, working_directory / "Rayman2Fix.dll",
             display.output_width, display.output_height, display.log_enabled,
-            display.skip_cinematics);
+            display.skip_cinematics, display.remove_black_frames);
     }
 
     if (display.borderless) {
@@ -301,6 +301,8 @@ int launch_verified_game(Startup& startup, bool verify) {
     display.output_height = content.second;
     display.skip_cinematics = !unchecked_without_ini &&
         configured_skip_cinematics(startup.ini_path());
+    display.remove_black_frames = !unchecked_without_ini &&
+        configured_remove_black_frames(startup.ini_path());
     display.enable_fov = true;
     display.fps_limit = unchecked_without_ini
         ? 60u : configured_fps_limit(startup.ini_path());
@@ -337,6 +339,8 @@ int launch_verified_game(Startup& startup, bool verify) {
     startup.log(configured_force_4_3(startup.ini_path()) ?
                 "WIDESCREEN: 4:3 mode selected; world Hor+ inactive, internal and output aspect 4:3" :
                 "WIDESCREEN: native output configured; game camera/Hor+ FOV patch not yet validated (do not confuse output scaling with Hor+)");
+    startup.log(std::string("FEATURES: RemoveBlackFrames=") +
+                (display.remove_black_frames ? "1 (opt-in source-frame filter)" : "0 (original game rendering)"));
     startup.log("FPS: limiter=" + std::to_string(display.fps_limit) +
                 (display.fps_limit ? " cap at GameFrame.grBufferSwap"
                                    : " unlimited (GameFrame pacing disabled)"));
