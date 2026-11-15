@@ -462,6 +462,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_adpcm_buffer_fill.py'
       - name: Verify original WAVMW type-4 and APMMX Pause Resume semantics
         run: python3 -m unittest discover -s tests -p 'test_adpcm_pause_resume_semantics.py'
+      - name: Verify 64-entry original CD ESC Pause Resume sound-table preflight
+        run: python3 -m unittest discover -s tests -p 'test_original_cd_esc_sound_table.py'
       - name: Verify original ADPCM primary commit vs auxiliary initialization
         run: python3 -m unittest discover -s tests -p 'test_adpcm_primary_epoch.py'
       - name: Verify original ADPCM hidden retire and driver-lock route audits
