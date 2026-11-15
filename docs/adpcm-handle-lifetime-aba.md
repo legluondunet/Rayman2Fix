@@ -444,6 +444,12 @@ Verified **static** dispatch chain in the WAVMW caller:
    from RVA `0x21560`; the resolver at `0x3FA0` imports
    `GetProcAddress`, and the returned function pointer is published
    at `0x57F8`.
+   If this delegated TestIsPlaying result is zero, the WAVMW
+   helper at `0x7BBC` may invalidate its inner sound wrapper at
+   `0x7BED` and remove it through `0x7BF3 -> 0x7550`. The
+   caller at `0xB904` can then unlink the outer SXD list entry
+   through `0xB909 -> 0xB630`. Thus a *query* can trigger
+   additional WAVMW object cleanup without an exported Stop.
 4. On the owner's exact APMMX, that symbol exports RVA `0x5150`.
    As proved in section 9, this reaches the original
    `0x2900 -> 0x1F50 -> 0x15D0` *conditional* inactive cleanup
@@ -467,8 +473,8 @@ python3 tools/audit_adpcm_lock_routes.py Rayman2Fix/dll/APMMXbvr.dll \
 python3 -m unittest discover -s tests -p 'test_adpcm_lock_routes.py'
 ```
 
-The extended auditor validates **16 additional WAVMW opcode windows,
-three direct-call edges, both exact PE versions and export names,
+The extended auditor validates **23 additional WAVMW opcode windows,
+five direct-call edges, both exact PE versions and export names,
 the embedded ADPCM symbol, and the original type-4 branch**. The
 synthetic test suite now has **14 tests**. It does not capture
 runtime function pointers or add any process hook; both DLLs remain
