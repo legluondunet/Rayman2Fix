@@ -79,10 +79,15 @@ WAVMW_BUFFER_SITES = {
     'wavmw_backend_other_call': (0xC41E, 'e8 5d 0d 00 00'),
     'wavmw_buffer_result_storage': (0xC45C, '8b 0f 89 08 89 70 04'),
     'wavmw_buffer_error_return': (0xC468, '5f 83 c8 ff 5e c2 10 00'),
+    'wavmw_type2_lower_callback_address': (0xCB88, 'c7 44 24 24 80 c9 00 10'),
+    'wavmw_type2_lower_layer_buffer_call': (0xCB94, 'e8 57 f8 ff ff'),
+    'wavmw_type2_indirect_callback_entry': (0xC980, '53 55 8b 6c 24 0c 56 57'),
+    'wavmw_type2_indirect_callback_invocation': (0xCA25, '50 51 ff 55 18'),
 }
 WAVMW_BUFFER_EDGES = {
     'backend_type2_call': (0xC412, 0xCB00),
     'backend_other_call': (0xC41E, 0xD180),
+    'type2_register_lower_layer_buffer': (0xCB94, 0xC3F0),
 }
 
 
@@ -114,6 +119,8 @@ def audit_wavmw_registration(data: bytes) -> dict:
         'opcode_windows_verified': len(WAVMW_BUFFER_SITES),
         'direct_call_edges_verified': len(WAVMW_BUFFER_EDGES),
         'original_callback_provider_link_verified': True,
+        'wavmw_type2_can_wrap_lower_layer_callback': True,
+        'wamw_indirect_callback_target_generation_proven': False,
         'runtime_provider_selected_or_invoked_proven': False,
         'callback_executed_during_esc_proven': False,
         'permission_to_change_audio': False,
