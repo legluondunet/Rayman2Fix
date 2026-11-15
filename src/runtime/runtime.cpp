@@ -1576,6 +1576,47 @@ bool proto_game_read(std::uintptr_t rva,BYTE& out) {
     return ReadProcessMemory(GetCurrentProcess(),module+rva,&out,1,&read)!=0 &&
            read==1 && out<=1;
 }
+// Bounded, read-only native Theme callback eligibility *flags*.
+// Original approved CD 0x4596E0 first checks [0x4B9618], player+0x00
+// and player+0x04 before it can call 0x459460 to promote pending +0x44.
+// No native callback is invoked, no instrumented driver writes occur.
+// These two successive reads are not an atomic engine-state snapshot.
+struct ProtoThemeCallbackGuardSnapshot {
+    int sampled=0;
+    int controller_active=-1;
+    int controller4_nonzero=-1;
+    int pending=-1;
+    int global_nonzero=-1;
+    int eligible_from_flags=-1;
+};
+ProtoThemeCallbackGuardSnapshot proto_sample_theme_callback_guards() {
+    ProtoThemeCallbackGuardSnapshot out{};
+    if(!g_proto_enabled.load(std::memory_order_acquire) ||
+       !g_proto_callsites_installed.load(std::memory_order_acquire))
+        return out;
+    const auto* base=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!base)return out;
+    const auto read=[&](std::uintptr_t rva,void* dst,SIZE_T size) {
+        SIZE_T n=0;
+        return ReadProcessMemory(GetCurrentProcess(),base+rva,dst,size,&n)!=0 &&
+               n==size;
+    };
+    DWORD a[4]{},b[4]{};
+    DWORD global_a=0,global_b=0;
+    if(!read(0xB95B8u,a,sizeof(a)) ||
+       !read(0xB9618u,&global_a,sizeof(global_a)) ||
+       !read(0xB95B8u,b,sizeof(b)) ||
+       !read(0xB9618u,&global_b,sizeof(global_b)) ||
+       std::memcmp(a,b,sizeof(a))!=0 || global_a!=global_b)return out;
+    out.sampled=1;
+    out.controller_active=a[0]==0u ? 0 : (a[0]==1u ? 1 : 2);
+    out.controller4_nonzero=a[1]==0u ? 0 : 1;
+    out.pending=a[3]==0u ? 0 : (a[3]==1u ? 1 : 2);
+    out.global_nonzero=global_a==0u ? 0 : 1;
+    out.eligible_from_flags=int(
+        a[0]==1u && a[1]==0u && global_a==0u && a[3]==1u);
+    return out;
+}
 bool proto_read_depth(DWORD& out) {
     const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
     if(!module)return false;
@@ -2064,6 +2105,24 @@ void proto_flush_predriver_resume_report() {
         report.sxd_samples,report.sxd_changes,report.sxd_unknown,
         report.play_between,report.stop_between);
     log_line(resource_line);
+    // Original source-paired Resume completed on the game thread.
+    // The controller gate snapshot is diagnostic-only and cannot
+    // authorize physical driver operations or interpret a callback tick.
+    const ProtoThemeCallbackGuardSnapshot close_cb_guards=
+        report.lifetime_paired && !report.lifetime_overlap ?
+        proto_sample_theme_callback_guards() :
+        ProtoThemeCallbackGuardSnapshot{};
+    char close_cb_line[320]{};
+    std::snprintf(close_cb_line,sizeof(close_cb_line),
+        "RUNTIME-ESC-THEME-CALLBACK-GUARDS: stage=close t_ms=%lu "
+        "sampled=%d active=%d ctrl4_nonzero=%d pending=%d "
+        "global_nonzero=%d eligible_from_flags=%d "
+        "(post-original Resume; read-only; not execution proof)",
+        static_cast<unsigned long>(report.t_ms),
+        close_cb_guards.sampled,close_cb_guards.controller_active,
+        close_cb_guards.controller4_nonzero,close_cb_guards.pending,
+        close_cb_guards.global_nonzero,close_cb_guards.eligible_from_flags);
+    log_line(close_cb_line);
     // This is an additional *observation*, NEVER an extra native
     // TestIsPlaying call (that query can retire the original ADPCM
     // record). Use the transition object just seen by the unmodified
@@ -2560,6 +2619,25 @@ void proto_menu_tick() {
             owner.inner_bank_provenance.resource_index,
             report.transition_type_post_pause);
         log_line(line);
+        // Only compare the ORIGINAL controller gate values after
+        // the native Pause and all existing synthetic safety decisions.
+        // Eligible flags are never permission to issue a music command.
+        const ProtoThemeCallbackGuardSnapshot cb_guards=
+            owner.theme_owned_driver==1u &&
+            report.transition_type_post_pause==4 ?
+            proto_sample_theme_callback_guards() :
+            ProtoThemeCallbackGuardSnapshot{};
+        char cb_guard_line[320]{};
+        std::snprintf(cb_guard_line,sizeof(cb_guard_line),
+            "RUNTIME-ESC-THEME-CALLBACK-GUARDS: stage=open t_ms=%lu "
+            "sampled=%d active=%d ctrl4_nonzero=%d pending=%d "
+            "global_nonzero=%d eligible_from_flags=%d "
+            "(original CD callback guards; read-only; not execution proof)",
+            static_cast<unsigned long>(report.t_ms),
+            cb_guards.sampled,cb_guards.controller_active,
+            cb_guards.controller4_nonzero,cb_guards.pending,
+            cb_guards.global_nonzero,cb_guards.eligible_from_flags);
+        log_line(cb_guard_line);
         // The snapshot is from AFTER existing native audio dispatch.
         // Early rejected menus may retain Pause=1, while compensated
         // menus may show Pause=0; this is diagnostic only.
