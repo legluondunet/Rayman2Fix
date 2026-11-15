@@ -213,7 +213,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("RUNTIME-ESC-SXD-LIFETIME:",self.runtime)
         observer=self.runtime.split(
             "void proto_note_sampled_sxd(const AudioThemeOwnerContext& owner,",1)[1].split(
-            "void proto_audit_controller_code_references() {",1)[0]
+            "void proto_theme_transition_watch_tick() {",1)[0]
         for token in (
             "if(!menu_visible || !g_log)return;",
             "owner.inner_bank_provenance.list_complete==1u",
@@ -775,63 +775,50 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("VirtualProtect(",probe)
         self.assertNotIn("std::filesystem",probe)
 
-    def test_cd_theme_controller_code_literal_probe_is_one_time_and_readonly(self):
-        # The original retail-CD Theme transition field (+0x0C) is
-        # not understood yet. Look for literal-address candidates in
-        # approved EXE code once, not memory writes or new audio calls.
-        probe=self.runtime.split(
-            "void proto_audit_controller_code_references() {",1)[1].split(
-            "void proto_theme_transition_watch_tick() {",1)[0]
-        for code in (
-            "g_proto_enabled.load(std::memory_order_acquire)",
-            "GetModuleHandleW(nullptr)",
-            "GetCurrentProcess()", "ReadProcessMemory(",
-            "nt.FileHeader.TimeDateStamp!=kOriginalTimestamp",
-            "IMAGE_FILE_MACHINE_I386",
-            "nt.OptionalHeader.SizeOfImage<0x9B1D0u",
-            "kCodeStart=0x1000u", "kCodeEnd=0x9B1D0u",
-            "std::vector<BYTE> code(kCodeEnd-kCodeStart)",
-            '{"active_00",0xB95B8u}',
-            '{"state_0c",0xB95C4u}',
-            '{"player_ref_14",0xB95CCu}',
-            "kMaxEmitted=12u",
-            "addr_byte?'?':kHex[code[j]>>4u]",
-            "RUNTIME-ESC-CONTROLLER-XREF:",
-            "status=literal-candidate-only",
-            "RUNTIME-ESC-CONTROLLER-XREF-SUMMARY:",
-            "zero does not rule out register-relative access",
+    def test_cd_native_pending_theme_target_is_read_only_and_not_audio_authorization(self):
+        # The exact hash-approved CD EXE sets controller+0x0C=1 and
+        # stores the target descriptor in +0x44, then later promotes
+        # it into +0x14. Observe descriptor equality, never assume
+        # the active ADPCM voice belongs to a safe generation.
+        self.assertIn("int native_theme_pending_state=-1;",self.runtime)
+        self.assertIn("int native_pending_target_matches_outer=-1;",self.runtime)
+        self.assertIn("int native_pending_target_differs_current=-1;",self.runtime)
+        observer=self.runtime.split(
+            "AudioThemeOwnerContext inspect_audio_theme_owner(",1)[1].split(
+            "struct AudioSoundContext {",1)[0]
+        for token in (
+            "out.outer_candidates!=1u",
+            "out.outer_bank_provenance=inspect_audio_native_bank_origin(",
+            "if(classify_native_ref)",
+            "safe_read(module+kControllerRva+0x0Cu,",
+            "safe_read(module+kControllerRva+0x44u,",
+            "switch_flag<=1u",
+            "if(switch_flag==1u && pending_target>=0x10000u)",
+            "out.native_theme_pending_state=int(switch_flag)",
+            "out.native_pending_target_matches_outer=int(",
+            "std::uintptr_t(pending_target)==",
+            "outer_descriptor_address",
+            "out.native_pending_target_differs_current=int(",
+            "pending_target!=current_theme_key",
         ):
-            self.assertIn(code,probe)
-        for unsafe in (
-            "VirtualProtect(", "WriteProcessMemory(", "GetProcAddress(",
-            "LoadLibrary", "CreateFile", "WriteFile", "proto_dispatch(",
-            "proto_allow_resume(", "std::thread(", "Sleep(",
+            self.assertIn(token,observer)
+        for forbidden in (
+            "WriteProcessMemory(", "VirtualProtect(", "LoadLibrary",
+            "proto_dispatch(", "proto_allow_resume(", "g_proto.resume(",
         ):
-            self.assertNotIn(unsafe,probe)
-        init=self.runtime.split(
-            "DWORD WINAPI Rayman2Fix_Initialize(void* input) {",1)[1].split(
-            "BOOL APIENTRY DllMain(",1)[0]
-        self.assertEqual(init.count("proto_audit_controller_code_references();"),1)
-        self.assertIn("if (camera_status == 1) {",init)
-        self.assertIn("#if RAYMAN2FIX_ESC_MUSIC_ACTIVE",init)
-        self.assertGreater(
-            init.index("proto_audit_controller_code_references();"),
-            init.index("if (camera_status == 1) {"))
-        self.assertLess(
-            init.index("proto_audit_controller_code_references();"),
-            init.index("install_approved_overlay_source_patch();"))
-        callback=self.runtime.split(
-            "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1].split(
-            "void __stdcall audio_pause_sxd(",1)[0]
-        self.assertNotIn("proto_audit_controller_code_references();",callback)
-        pause=self.runtime.split(
-            "void __cdecl proto_script_pause() {",1)[1].split(
-            "void __cdecl proto_script_resume() {",1)[0]
-        self.assertNotIn("proto_audit_controller_code_references();",pause)
-        tick=self.runtime.split(
-            "void proto_menu_tick() {",1)[1].split(
-            "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
-        self.assertNotIn("proto_audit_controller_code_references();",tick)
+            self.assertNotIn(forbidden,observer)
+        identity=self.runtime.split(
+            "proto::Identity proto_identity(DWORD handle,",1)[1].split(
+            "// Called on the original game thread",1)[0]
+        self.assertIn("owner.native_theme_player_ref_matches_outer!=1",identity)
+        self.assertNotIn("native_pending_target_matches_outer",identity)
+        self.assertNotIn("native_theme_pending_state",identity)
+        self.assertIn("pending_target_matches_outer=%d",self.runtime)
+        self.assertIn("pending_target_differs_current=%d",self.runtime)
+        # Redundant startup .text scan is removed now that we have the
+        # owner's exact SHA-matched original executable to disassemble.
+        self.assertNotIn("proto_audit_controller_code_references()",self.runtime)
+        self.assertNotIn("RUNTIME-ESC-CONTROLLER-XREF:",self.runtime)
 
     def test_cpa_ini_audit_reads_only_original_game_config_at_initialization(self):
         audit=self.runtime.split("void log_cpa_sound_configuration() {",1)[1].split(
