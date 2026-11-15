@@ -1209,7 +1209,7 @@ indirect callback sites, and the conditional outer
 cleanup are now checked by
 `audit_wavmw_setparam_bridge()` inside
 `tools/audit_adpcm_query_outcomes.py`. This adds
-**19 WAVMW exact opcode windows, five rel32 call
+**21 WAVMW exact opcode windows, five rel32 call
 edges, two conditional branches** and six synthetic
 negative/positive tests. The larger
 `test_adpcm_query_outcomes.py` suite now contains
