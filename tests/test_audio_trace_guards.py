@@ -541,6 +541,27 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("proto_dispatch(",body)
         self.assertNotIn("original(",body)
 
+    def test_original_adpcm_five_entry_call_targets_are_consistent(self):
+        # Validate exact original 16-byte opcode signatures embedded in
+        # the read-only diagnostic against their original E8 rel32 targets.
+        # The game or DLL is never loaded by this synthetic source check.
+        code=self.runtime.split("constexpr BYTE owner_entry[5][16]{",1)[1].split(
+            "};",1)[0]
+        entries=re.findall(r"\\{([^}]*)\\}",code)
+        self.assertEqual(len(entries),5)
+        original_rvas=(0x54C0,0x54D0,0x54E0,0x5150,0x51A0)
+        targets=(0x3340,0x3380,0x33C0,0x2900,0x2A00)
+        for rva, destination, row in zip(original_rvas,targets,entries):
+            with self.subTest(rva=hex(rva)):
+                raw=bytes(int(byte,16) for byte in
+                          re.findall(r"0x([0-9A-Fa-f]{2})",row))
+                self.assertEqual(len(raw),16)
+                self.assertEqual(raw[:6],
+                                 bytes((0x8B,0x44,0x24,0x04,0x50,0xE8)))
+                relative=int.from_bytes(raw[6:10],'little',signed=True)
+                self.assertEqual(rva+10+relative,destination)
+                self.assertEqual(raw[10:],bytes((0x83,0xC4,0x04,0xC2,0x04,0x00)))
+
     def test_adpcm_query_delegate_readout_has_no_new_native_side_effects(self):
         body=self.runtime.split("void log_adpcm_delegate_origins_readonly() {",1)[1].split(
             "// Owner's exact CD executable",1)[0]
