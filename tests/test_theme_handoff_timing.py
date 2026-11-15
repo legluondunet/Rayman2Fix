@@ -258,6 +258,48 @@ class GeneralizedThemeHandoffEvidenceTests(unittest.TestCase):
         self.assertEqual(comp["outside_esc_residual_spread_ms"],65)
         self.assertFalse(comp["same_underlying_game_timer_proven"])
 
+    def test_three_owner_part_progressions_point_to_48_second_segment_end(self):
+        # These are abstracted source-event fixtures, not game data.
+        # The ORIGINAL current Theme 9:12 was seen to progress from
+        # inner part 239:11 to 239:12 exactly 4800ms apart.
+        sessions=[
+            (33067,33917,47017,
+             ((34367,35817),(37350,41733),(42734,46067)),4784,850),
+            (30971,31871,50372,
+             ((32873,38023),(39024,41424),
+              (42157,46790),(47790,50239)),4769,900),
+            (34849,35749,63549,
+             ((36718,43051),(44284,52501),
+              (53535,62868)),4817,900),
+        ]
+        observed=[]
+        for previous,pending,committed,intervals,expected_total,offset in sessions:
+            with self.subTest(previous=previous):
+                rows=observed_log(previous,pending,committed,list(intervals))
+                rows.insert(0,observer_row(previous-4800,(9,12),
+                                           inner_bank=239,inner_index=11))
+                rows[1]=observer_row(previous,(9,12),
+                                     inner_bank=239,inner_index=12)
+                h=A2.scan(rows)["handoffs"][0]
+                self.assertTrue(h["complete_source_evidence"])
+                self.assertEqual(h["prior_inner_part_bank_index"],[239,11])
+                self.assertEqual(h["previous_inner_part_bank_index"],[239,12])
+                self.assertEqual(h["prior_observed_part_interval_ms"],4800)
+                self.assertEqual(h["pending_requested_after_last_part_sample_ms"],offset)
+                self.assertEqual(h["previous_part_to_commit_minus_esc_ms"],
+                                 expected_total)
+                self.assertFalse(h["part_boundary_callback_execution_proven"])
+                observed.append(expected_total)
+        self.assertEqual(max(observed)-min(observed),48)
+
+    def test_without_prior_part_change_no_cadence_or_callback_inferred(self):
+        h=A2.scan(observed_log(34849,35749,63549,
+                              [(36718,43051)]))["handoffs"][0]
+        self.assertTrue(h["complete_source_evidence"])
+        self.assertIsNone(h["prior_observed_part_interval_ms"])
+        self.assertIsNone(h["previous_part_to_commit_minus_esc_ms"])
+        self.assertFalse(h["part_boundary_callback_execution_proven"])
+
     def test_missing_previous_current_ref_disqualifies_pending_window(self):
         lines=observed_log(34849,35749,63549,[(36718,43051)])
         lines[0]=observer_row(34849,(9,11))
