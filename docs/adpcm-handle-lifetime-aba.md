@@ -349,47 +349,47 @@ runtime-policy change.
 
 An independently verified read-only static inspection uncovered a more
 specific source of the remaining lifetime ambiguity. The owner's exact
-1999 APMMXbvr.dll exports \`_SND_fn_bTestIsPlayingSxdADPCM@4\` at
+1999 APMMXbvr.dll exports `_SND_fn_bTestIsPlayingSxdADPCM@4` at
 **RVA 0x5150**. The following actual original call sequence is possible:
 
-\`\`\`text
+```text
 0x5150  TestIsPlayingSxdADPCM (export)
   0x5155 -> 0x2900  wrapper checks initialization
     0x290E -> 0x1F50  checks [record+0x28] active state
       0x1F68 -> 0x15D0  retires inactive record and rebases handle pool
-\`\`\`
+```
 
-The final call is **conditional**: the validator must be reached with
-a usable handle and the record's inactive flag must be zero. A mere
+The final call is **conditional**: the cleanup must receive a non-null handle
+whose record's active flag is zero. A mere
 TestIsPlaying invocation does not necessarily retire the record.
 
 The same exact original DLL has normal explicit Stop entry points
 with visibly bracketing calls to the known shared critical-section
-helpers (\`0x1020\` enter, \`0x1030\` leave; lock object at VA
-\`0x100163D0\`). Its two Play wrappers also bracket the shared primary
-allocator \`0x13A0\` with the same lock:
+helpers (`0x1020` enter, `0x1030` leave; lock object at VA
+`0x100163D0`). Its two Play wrappers also bracket the shared primary
+allocator `0x13A0` with the same lock:
 
 | Native route | Known lock acquire | Relevant operation | Known release |
 | --- | --- | --- | --- |
-| transition Play \`0x2780\` | \`0x2795\` | \`0x27BE -> 0x13A0\` | \`0x281D\` |
-| regular Play \`0x31E0\` | \`0x31F7\` | \`0x3223 -> 0x13A0\` | \`0x323C\` |
-| direct Stop \`0x2930\` | \`0x2947\` | \`0x2950 -> 0x15D0\` | \`0x295D\` |
-| transition Stop \`0x3340\` | \`0x334E\` | \`0x335B -> 0x1700 -> 0x15D0\` | \`0x3368\` |
-| TestIsPlaying \`0x5150\` | **none directly** | inactive cleanup \`0x1F68 -> 0x15D0\` | **none directly** |
+| transition Play `0x2780` | `0x2795` | `0x27BE -> 0x13A0` | `0x281D` |
+| regular Play `0x31E0` | `0x31F7` | `0x3223 -> 0x13A0` | `0x323C` |
+| direct Stop `0x2930` | `0x2947` | `0x2950 -> 0x15D0` | `0x295D` |
+| transition Stop `0x3340` | `0x334E` | `0x335B -> 0x1700 -> 0x15D0` | `0x3368` |
+| TestIsPlaying `0x5150` | **none directly** | inactive cleanup `0x1F68 -> 0x15D0` | **none directly** |
 
-A bounded raw E8/rel32 call scan on the exact original \`.text\`
-found no **direct** calls to \`0x1020\` or \`0x1030\` in the four
-verified function ranges \`0x5150..0x515E\`, \`0x2900..0x2922\`,
-\`0x1F50..0x1F72\`, or \`0x15D0..0x16F0\`. Thus **this
+A bounded raw E8/rel32 call scan on the exact original `.text`
+found no **direct** calls to `0x1020` or `0x1030` in the four
+verified function ranges `0x5150..0x515E`, `0x2900..0x2922`,
+`0x1F50..0x1F72`, or `0x15D0..0x16F0`. Thus **this
 exported path does not locally acquire the driver's known lock**, unlike
 the documented Play/Stop wrappers. This is *not* a proof that external
 callers, device callbacks or other locks never synchronize it, and is
 not permission to hook any original function unsafely.
 
 **Important consequence for real ESC logs:** the owner's
-\`Rayman2Fix(20261115-084027).log\` contains three early ESC
+`Rayman2Fix(20261115-084027).log` contains three early ESC
 sessions whose matched source/Theme pairs report
-\`play_between=0 stop_between=0\` and stable *sampled* \`9:6\`
+`play_between=0 stop_between=0` and stable *sampled* `9:6`
 SXD provenance. Those zero counts only cover the instrumented
 export-facing callback routes, **not the internal inactive-cleanup
 retirement above**. They cannot validate a physical record epoch,
@@ -399,10 +399,10 @@ occurred in any of those three sessions.
 
 **Reproduce offline:**
 
-\`\`\`sh
+```sh
 python3 tools/audit_adpcm_lock_routes.py Rayman2Fix/dll/APMMXbvr.dll --json
 python3 -m unittest discover -s tests -p 'test_adpcm_lock_routes.py'
-\`\`\`
+```
 
 The auditor requires the owner's exact original SHA-256 and PE32
 fingerprint, verifies 21 byte anchors and 15 relative direct-call edges,
