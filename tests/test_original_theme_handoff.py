@@ -39,7 +39,7 @@ def synthetic_audit(source=b'synthetic CD only',cls=FakeCdPE):
 class OriginalControllerTests(unittest.TestCase):
     def test_exact_synthetic_original_switch_structure(self):
         out=synthetic_audit()
-        self.assertEqual(out['verified_opcode_windows'],15)
+        self.assertEqual(out['verified_opcode_windows'],16)
         self.assertEqual(out['verified_direct_call_edges'],5)
         self.assertTrue(out['original_pending_then_current_stage_proven_statically'])
         self.assertEqual(out['pending_flag_write_va'],'0x4595F6')
