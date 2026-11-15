@@ -845,3 +845,86 @@ assumed fixed delegate. An *unchanged* pointer, and even
 internal inactivation, reclamation or ABA reuse. All unresolved
 observations remain **NO-GO** for a synthetic early-ESC Resume
 or native Pause suppression. No release behavior was changed.
+
+## 15. Complete raw direct-call candidates for native query and primary helpers (15 November)
+
+I independently re-read the owner's exact **95,744-byte,
+SHA-256-pinned original** `APMMXbvr.dll` and disassembled its
+original `.text` section (RVA `0x1000`,
+`0xD800` raw bytes). The expanded read-only
+`tools/audit_adpcm_rel32_calls.py` now verifies the **entire raw**
+`E8+rel32` direct-call candidate set for eight internal targets:
+
+| Target RVA | Original raw direct-call sites | Meaning |
+| --- | --- | --- |
+| `0x13A0` | `0x27BE`, `0x3223` | Primary allocator used by two Play routes |
+| `0x15D0` | `0x172C`, `0x1C8D`, `0x1F68`, `0x2950` | Native record retirement, including internal cleanup |
+| `0x1FC0` | `0x14F9`, `0x21F3`, `0x22A3` | Shared primary/**auxiliary** record initializer |
+| `0x1F50` | **`0x290E`** | Conditional inactive cleanup inside TestIsPlaying |
+| `0x2320` | **`0x2A20`** | Position/progression reader inside GetPos |
+| `0x2480` | `0x15EB`, `0x170E`, `0x1C3F`, `0x1EDD`, `0x1F1D`, `0x1F8D`, `0x218E`, `0x2222`, `0x22DE`, `0x2355` | Shared handle validator |
+| `0x2900` | **`0x5155`** | Public APMMX TestIsPlaying entry |
+| `0x2A00` | **`0x51A5`** | Public APMMX GetPos entry |
+
+All **23** candidate instructions were verified in an independent
+`objdump -d -M intel` listing of the same SHA-pinned original.
+This provides a useful *static* bound: each of the two internal
+query helper functions `0x1F50` and `0x2320` has exactly **one
+raw direct-call candidate** in this original `.text` section.
+The existing original export stubs, in turn, are their sole
+raw direct-call candidates at the next level. This justifies
+targeting future external diagnostics at the existing query
+boundary, rather than invoking the side-effecting helpers.
+
+**Do not turn a single caller into a false runtime proof.**
+The byte scan cannot exclude indirect calls, tail jumps,
+nonstandard control transfer, alternate entries, concurrency or
+observational side effects from a debugger. It cannot show which
+calls executed in the owner's early-ESC session. The test suite
+uses only synthetic bytes, refuses extra/missing GetPos or
+TestIsPlaying caller sites, and preserves
+`native_generation_proven=False` and
+`permission_to_modify_audio=False`.
+
+### Fingerprint a resolved query delegate, but never call it
+
+A separate review of the exact APMMX export table and first
+16 machine-code bytes establishes these original callback entries:
+
+| Operation | Exact original APMMX export RVA |
+| --- | --- |
+| StopTransitionSxdADPCM | `0x54C0` |
+| PauseTransitionSxdADPCM | `0x54D0` |
+| ResumeTransitionSxdADPCM | `0x54E0` |
+| TestIsPlayingSxdADPCM | `0x5150` |
+| GetPosSxdADPCM | `0x51A0` |
+
+The existing **bounded and passive** render-thread delegate
+snapshot now reports
+`original_entry_fingerprint=0|1` for each of these
+five dynamic pointers. A positive value requires the owner
+`APMMXbvr.dll` basename, expected RVA, exact 1999 PE32
+timestamp and image size, and byte-for-byte matching first 16
+export-entry instructions. This is **not** a full-memory or
+SHA-256 check of the running DLL, nor proof that the game
+called any callback. An unrelated module or unexpected code
+gets fingerprint zero, never a positive provenance claim.
+
+`tools/audit_esc_adpcm_evidence.py` now distinguishes a
+**complete early/late pointer report** from a report in which
+**all five original entry fingerprints match** at both stages.
+A false, absent or mismatched provenance flag must never
+be promoted into a physical audio voice identity. Runtime
+behavior and audio forwarding are unchanged.
+
+```sh
+python3 tools/audit_adpcm_rel32_calls.py Rayman2Fix/dll/APMMXbvr.dll --json
+python3 -m unittest discover -s tests -p 'test_adpcm_rel32_calls.py'
+python3 -m unittest discover -s tests -p 'test_esc_adpcm_evidence.py'
+```
+
+A future log may show that five exact original query delegates
+were **available** before and after Theme synchronization, but
+**only an actual non-intrusive runtime call/retirement observer**
+could establish the timing and physical voice lifecycle.
+**No new Pause suppression is authorized; PR #10 remains draft.**
