@@ -69,8 +69,8 @@ class Rel32CallSiteTests(unittest.TestCase):
         self.assertFalse(report["permission_to_modify_audio"])
         self.assertEqual(len(report["direct_rel32_candidates"]["0x15D0"]),4)
         self.assertEqual(len(report["direct_rel32_candidates"]["0x1FC0"]),3)
-        self.assertEqual(report["direct_target_count"],11)
-        self.assertEqual(report["direct_callsite_count"],27)
+        self.assertEqual(report["direct_target_count"],13)
+        self.assertEqual(report["direct_callsite_count"],30)
         self.assertEqual(report["direct_rel32_candidates"]["0x1F50"],["0x290E"])
         self.assertEqual(report["direct_rel32_candidates"]["0x2320"],["0x2A20"])
         self.assertEqual(report["direct_rel32_candidates"]["0x13A0"],["0x27BE","0x3223"])
@@ -96,6 +96,29 @@ class Rel32CallSiteTests(unittest.TestCase):
         self.assertEqual(A.EXPECTED[0x1FC0], (0x14F9,0x21F3,0x22A3))
         # The shared initializer is not a top-level creation epoch.
         self.assertNotEqual(A.EXPECTED[0x13A0], A.EXPECTED[0x1FC0])
+
+    def test_original_mixer_fill_and_progress_have_exact_direct_sites(self):
+        # Normal buffer fill does not require the game to call GetPos
+        # or TestIsPlaying before the native active flag changes.
+        self.assertEqual(A.EXPECTED[0x18D0], (0x344C, 0x34F2))
+        self.assertEqual(A.EXPECTED[0x1740], (0x1AD1,))
+        self.assertNotIn(0x1AD1, A.EXPECTED[0x2320])
+        self.assertNotIn(0x1AD1, A.EXPECTED[0x1F50])
+
+    def test_extra_mixer_progress_direct_candidate_refused(self):
+        class ExtraMixer(SyntheticPE):
+            def __init__(self,data):
+                super().__init__(data)
+                site=0x7080
+                off=site-0x1000
+                self.text[off]=0xE8
+                struct.pack_into("<i",self.text,off+1,0x1740-(site+5))
+        fixture=b'synthetic extra audio buffer-fill caller'
+        with (patch.object(A,"OWNER_ORIGINAL_SHA256",
+                           hashlib.sha256(fixture).hexdigest()),
+              patch.object(A,"PE32",ExtraMixer)):
+            with self.assertRaisesRegex(A.PEFormatError,"differ from"):
+                A.audit(fixture)
 
     def test_query_helpers_each_have_one_direct_original_candidate(self):
         self.assertEqual(A.EXPECTED[0x1F50], (0x290E,))
