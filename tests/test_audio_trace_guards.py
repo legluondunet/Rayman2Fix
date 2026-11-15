@@ -475,6 +475,9 @@ class AudioTraceGuardTests(unittest.TestCase):
             "nt.OptionalHeader.SizeOfImage!=0x87000u",
             "expected_pause[7]", "std::memcmp(",
             "0x26A98u,0x26A9Cu,0x26AA0u,0x26A00u,0x26A14u",
+            "0x269FCu,0x26A88u",
+            "0x3410u,0x3B60u",
+            '"set-param","set-param-transition"',
             "0x3C50u,0x3C80u,0x3CB0u,0x3440u,0x3530u",
             '"stop","pause","resume","test-is-playing","get-pos"',
             "status=unresolved", "status=fallback",
@@ -515,9 +518,9 @@ class AudioTraceGuardTests(unittest.TestCase):
             "void log_adpcm_delegate_origins_readonly() {",1)[1].split(
             "// Owner's exact CD executable",1)[0]
         for token in (
-            "constexpr unsigned owner_rvas[5]",
+            "constexpr unsigned owner_rvas[7]",
             "0x54C0u,0x54D0u,0x54E0u,0x5150u,0x51A0u",
-            "constexpr BYTE owner_entry[5][16]",
+            "constexpr BYTE owner_entry[7][16]",
             'L"APMMXbvr.dll"',
             "target_rva==owner_rvas[i]",
             "original_nt.FileHeader.TimeDateStamp==0x38076F98u",
@@ -545,13 +548,13 @@ class AudioTraceGuardTests(unittest.TestCase):
         # Validate exact original 16-byte opcode signatures embedded in
         # the read-only diagnostic against their original E8 rel32 targets.
         # The game or DLL is never loaded by this synthetic source check.
-        code=self.runtime.split("constexpr BYTE owner_entry[5][16]{",1)[1].split(
+        code=self.runtime.split("constexpr BYTE owner_entry[7][16]{",1)[1].split(
             "};",1)[0]
         entries=re.findall(r"[{]([^}]*)[}]",code)
-        self.assertEqual(len(entries),5)
+        self.assertEqual(len(entries),7)
         original_rvas=(0x54C0,0x54D0,0x54E0,0x5150,0x51A0)
         targets=(0x3340,0x3380,0x33C0,0x2900,0x2A00)
-        for rva, destination, row in zip(original_rvas,targets,entries):
+        for rva, destination, row in zip(original_rvas,targets,entries[:5]):
             with self.subTest(rva=hex(rva)):
                 raw=bytes(int(byte,16) for byte in
                           re.findall(r"0x([0-9A-Fa-f]{2})",row))
@@ -562,6 +565,31 @@ class AudioTraceGuardTests(unittest.TestCase):
                 self.assertEqual(rva+10+relative,destination)
                 self.assertEqual(raw[10:],bytes((0x83,0xC4,0x04,0xC2,0x04,0x00)))
 
+    def test_original_setparam_export_stubs_use_guarded_double_arg_signature(self):
+        body=self.runtime.split(
+            "void log_adpcm_delegate_origins_readonly() {",1)[1].split(
+            "// Owner's exact CD executable",1)[0]
+        code=body.split("constexpr BYTE owner_entry[7][16]{",1)[1].split("};",1)[0]
+        entries=re.findall(r"[{]([^}]*)[}]",code)
+        self.assertEqual(len(entries),7)
+        for idx,rva,rel_lo,rel_hi in ((5,0x5120,0x8E,0xE9),
+                                      (6,0x5430,0x7E,0xE6)):
+            with self.subTest(rva=hex(rva)):
+                row=bytes(int(b,16) for b in
+                          re.findall(r"0x([0-9A-Fa-f]{2})",entries[idx]))
+                self.assertEqual(len(row),16)
+                self.assertEqual(row[:13],bytes((0x8B,0x4C,0x24,0x08,
+                    0x83,0xEC,0x08,0x8D,0x44,0x24,0x00,0x50,0x51)))
+                self.assertEqual(row[13:],bytes((0xE8,rel_lo,rel_hi)))
+        self.assertIn("0x5120u,0x5430u",body)
+        self.assertIn("0x269FCu,0x26A88u",body)
+        self.assertIn("0x3410u,0x3B60u",body)
+        self.assertIn('"set-param","set-param-transition"',body)
+        self.assertIn("for(unsigned i=0;i<7u;++i)",body)
+        for banned in ("GetProcAddress(", "LoadLibrary", "WriteProcessMemory(",
+                       "VirtualProtect(", "proto_dispatch(", "original("):
+            self.assertNotIn(banned,body)
+
     def test_adpcm_query_delegate_readout_has_no_new_native_side_effects(self):
         body=self.runtime.split("void log_adpcm_delegate_origins_readonly() {",1)[1].split(
             "// Owner's exact CD executable",1)[0]
@@ -569,7 +597,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("0x26A00u,0x26A14u",body)
         self.assertIn("0x3440u,0x3530u",body)
         self.assertIn('"test-is-playing","get-pos"',body)
-        self.assertIn("for(unsigned i=0;i<5u;++i)",body)
+        self.assertIn("for(unsigned i=0;i<7u;++i)",body)
         self.assertIn("ReadProcessMemory(",body)
         self.assertIn("status=fallback",body)
         self.assertIn("status=unresolved",body)
