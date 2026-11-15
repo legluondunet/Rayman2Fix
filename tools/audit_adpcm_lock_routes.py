@@ -154,11 +154,20 @@ WAVMW_SITES = {
     'dynamic_resolve': (0x57F0, 'e8 ab e7 ff ff'),
     'dynamic_pointer_published': (0x57F8, 'a3 00 6a 02 10'),
     'get_proc_address_import': (0x3FB9, 'ff 15 48 d0 01 10'),
+    'callback_zero_branch': (0x7BBC, '85 ff 75 3b'),
+    'wavmw_inner_invalidated': (0x7BED, 'c7 06 ff ff ff ff'),
+    'wavmw_inner_free_call': (0x7BF3, 'e8 58 f9 ff ff'),
+    'wavmw_outer_zero_branch': (0xB904, '85 f6 75 09'),
+    'wavmw_outer_free_call': (0xB909, 'e8 22 fd ff ff'),
+    'wavmw_inner_free_entry': (0x7550, '8b 44 24 04'),
+    'wavmw_outer_list_unlink': (0xB630, '8b 44 24 04 33 d2'),
 }
 WAVMW_EDGES = {
     'sxd_test_delegation': (0xB8CF, 0x7B90),
     'vtable_constructor_call': (0xBFB5, 0x7D10),
     'dynamic_resolve': (0x57F0, 0x3FA0),
+    'wavmw_inner_free_call': (0x7BF3, 0x7550),
+    'wavmw_outer_free_call': (0xB909, 0xB630),
 }
 
 
@@ -202,6 +211,8 @@ def audit_wavmw_bridge(data: bytes, adpcm_data: bytes) -> dict:
         'adpcm_lookup_symbol_rva': '0x21560',
         'adpcm_native_test_export_rva': '0x5150',
         'static_type4_dispatch_chain_verified': True,
+        'query_can_retire_wavmw_inner_on_zero_result': True,
+        'query_can_unlink_outer_sxd_node_on_zero_result': True,
         'actual_runtime_function_pointer_observed': False,
         'permission_to_change_audio': False,
         'caveat': ('WAVMW type-4 callback table and loader name statically verified on '
