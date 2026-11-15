@@ -1643,6 +1643,7 @@ struct ProtoAdpcmVoiceSnapshot {
     int sampled=0;
     int voice_index=-1;
     int pause=-1;
+    int active=-1;
     int other_gate=-1;
 };
 ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {
@@ -1713,21 +1714,32 @@ ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {
        std::uintptr_t(record)>=pool+std::uintptr_t(count)*record_stride ||
        (std::uintptr_t(record)-pool)%record_stride!=0u)return out;
     const auto record_address=std::uintptr_t(record);
-    DWORD recorded_handle=0,pause=0,other=0,record_after=0,count_after=0;
+    DWORD recorded_handle=0,pause=0,active=0,other=0;
+    DWORD record_after=0,count_after=0,pause_after=0,active_after=0;
     if(!read(reinterpret_cast<const void*>(record_address+0xD4u),
              &recorded_handle,sizeof(recorded_handle)) ||
        recorded_handle!=handle ||
        !read(reinterpret_cast<const void*>(record_address+0x1Cu),
              &pause,sizeof(pause)) ||
+       !read(reinterpret_cast<const void*>(record_address+0x28u),
+             &active,sizeof(active)) ||
        !read(reinterpret_cast<const void*>(record_address+0xDCu),
              &other,sizeof(other)) ||
        !read(reinterpret_cast<const void*>(std::uintptr_t(handle)),
              &record_after,sizeof(record_after)) ||
        !read(apm+0x24EC4u,&count_after,sizeof(count_after)) ||
-       record_after!=record || count_after!=count)return out;
+       !read(reinterpret_cast<const void*>(record_address+0x1Cu),
+             &pause_after,sizeof(pause_after)) ||
+       !read(reinterpret_cast<const void*>(record_address+0x28u),
+             &active_after,sizeof(active_after)) ||
+       record_after!=record || count_after!=count ||
+       pause_after!=pause || active_after!=active)return out;
+    // A coherent *sample* cannot rule out ABA (inactive -> reused
+    // -> identical handle and slot between the two reads).
     out.sampled=1;
     out.voice_index=int((record_address-pool)/record_stride);
     out.pause=pause==0u ? 0 : (pause==1u ? 1 : 2);
+    out.active=active==0u ? 0 : (active==1u ? 1 : 2);
     out.other_gate=other==0u ? 0 : 1;
     return out;
 }
@@ -1981,6 +1993,33 @@ void proto_flush_predriver_resume_report() {
         report.sxd_samples,report.sxd_changes,report.sxd_unknown,
         report.play_between,report.stop_between);
     log_line(resource_line);
+    // This is an additional *observation*, NEVER an extra native
+    // TestIsPlaying call (that query can retire the original ADPCM
+    // record). Use the transition object just seen by the unmodified
+    // native resume callback, after its wrapper and outside all audio
+    // callbacks, on the render thread only. The pointer is never
+    // persisted; a new allocation may still alias the same pool slot.
+    const bool unique_resume=report.lifetime_paired &&
+        probe.resume_count==2u && probe.unrelated_slots==0u &&
+        probe.other_handle_count==0u;
+    const int transition_type=unique_resume ?
+        proto_read_transition_type_post_wrapper(probe.first_handle) : -1;
+    const ProtoAdpcmVoiceSnapshot adpcm_voice=
+        unique_resume && transition_type==4 ?
+        proto_sample_adpcm_voice_after_dispatch(probe.first_handle) :
+        ProtoAdpcmVoiceSnapshot{};
+    char voice_line[380]{};
+    std::snprintf(voice_line,sizeof(voice_line),
+        "RUNTIME-ESC-ADPCM-RESUME: t_ms=%lu paired=%u "
+        "sampled=%d voice_index=%d paused=%d active=%d "
+        "other_gate=%d transition_type=%d snapshot=post-native-resume "
+        "(render-thread read-only, no native TestIsPlaying; "
+        "no raw pointers; ABA not excluded; no audio authorization)",
+        static_cast<unsigned long>(report.t_ms),
+        unsigned(report.lifetime_paired),adpcm_voice.sampled,
+        adpcm_voice.voice_index,adpcm_voice.pause,adpcm_voice.active,
+        adpcm_voice.other_gate,transition_type);
+    log_line(voice_line);
 }
 // Focus is a Win32/Wine activation event, not necessarily visible to
 // GetForegroundWindow() on the game's render thread. The renderer can be
@@ -2434,16 +2473,16 @@ void proto_menu_tick() {
         // The snapshot is from AFTER existing native audio dispatch.
         // Early rejected menus may retain Pause=1, while compensated
         // menus may show Pause=0; this is diagnostic only.
-        char adpcm_line[330]{};
+        char adpcm_line[370]{};
         std::snprintf(adpcm_line,sizeof(adpcm_line),
             "RUNTIME-ESC-ADPCM-VOICE: t_ms=%lu sampled=%d voice_index=%d "
-            "paused=%d other_gate=%d transition_type=%d "
+            "paused=%d active=%d other_gate=%d transition_type=%d "
             "snapshot=post-dispatch "
             "(original 1999 WAVMW/APMMX only; post-compensation read-only; "
-            "no raw pointers; no audio authorization)",
+            "no raw pointers; no audio authorization; ABA not excluded)",
             static_cast<unsigned long>(report.t_ms),
             adpcm_voice.sampled,adpcm_voice.voice_index,
-            adpcm_voice.pause,adpcm_voice.other_gate,
+            adpcm_voice.pause,adpcm_voice.active,adpcm_voice.other_gate,
             report.transition_type_post_pause);
         log_line(adpcm_line);
         // Read-only source-window audit. Snapshot the global native Play
