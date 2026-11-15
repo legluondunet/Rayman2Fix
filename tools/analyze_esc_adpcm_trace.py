@@ -62,7 +62,8 @@ def analyze(content: str) -> dict:
             if t < 0:
                 anomalies.append(f"line {lineno}: gate missing t_ms")
                 continue
-            if active is not None:
+            overlapping_open=active is not None
+            if overlapping_open:
                 active["overlap"]=True
                 anomalies.append(f"line {lineno}: new opening before confirmed prior close")
             entry = {
@@ -82,7 +83,7 @@ def analyze(content: str) -> dict:
                 "depth_before": integer(f,"depth_before"),
                 "depth_after": integer(f,"depth_after"),
                 "voice": None, "verdict": None, "resume": None,
-                "paired_lifetime": False, "overlap": False,
+                "paired_lifetime": False, "overlap": overlapping_open,
                 "phase6": False, "sxd_lifetime": None,
             }
             opens.append(entry)
