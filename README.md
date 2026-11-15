@@ -568,6 +568,13 @@ combined key is removed. Existing INIs retain unrelated settings,
 comments, BOM and line-ending format. Both new options are independent
 of `SkipCinematics`, aspect ratio, and one another.
 
+For troubleshooting, `[Debug] Log=1` also prints
+`RUNTIME-CONFIG: build=... RemoveDialogueBackgrounds=0/1 RemoveCinematicBars=0/1`
+directly in `Rayman2Fix.log`. If `RemoveCinematicBars=1` is requested
+but the runtime reports `0`, inspect the installed `Rayman2Fix.ini` or
+the launcher/version being used. It must print the effective value before
+any cinematic filtering starts.
+
 With `RemoveCinematicBars=1` and `[Debug] Log=1`, the experimental
 build also records **read-only, bounded** diagnostics in the existing
 `Rayman2Fix.log`: `RUNTIME-CINEMATIC-SOURCE` for broad GLI edge-shaped

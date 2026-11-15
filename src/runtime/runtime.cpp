@@ -4501,6 +4501,18 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_skip_cinematics=settings->skip_cinematics!=0;
     g_remove_dialogue_backgrounds=settings->remove_dialogue_backgrounds!=0;
     g_remove_cinematic_bars=settings->remove_cinematic_bars!=0;
+    // Always report BOTH effective feature flags, even when disabled.
+    // This distinguishes an INI opt-out from an old/wrong executable and
+    // makes user runtime logs useful without asking for installer logs.
+    if(g_log) {
+        char features[224]{};
+        std::snprintf(features,sizeof(features),
+            "RUNTIME-CONFIG: build=%s RemoveDialogueBackgrounds=%u RemoveCinematicBars=%u (launcher-supplied options)",
+            RAYMAN2FIX_BUILD_COMMIT,
+            unsigned(g_remove_dialogue_backgrounds),
+            unsigned(g_remove_cinematic_bars));
+        log_line(features);
+    }
     if(g_remove_dialogue_backgrounds)
         log_line("RUNTIME-FRAMES: RemoveDialogueBackgrounds=1 opt-in; verified GLI dialogue backdrop filter");
     if(g_remove_cinematic_bars)
