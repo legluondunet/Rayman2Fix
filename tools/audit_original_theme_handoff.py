@@ -34,6 +34,7 @@ ANCHORS = {
     'controller_pending_transfer_sequence': (0x59473, '8b 41 44 89 59 0c 3b c3 75 0e'),
     'callback_guard': (0x596E0, 'a1 18 96 4b 00 56 85 c0 75 67'),
     'callback_invokes_controller': (0x59707, 'e8 54 fd ff ff'),
+    'secondary_callback_invokes_controller': (0x596D3, 'e8 88 fd ff ff'),
     'theme_constructor_starts_switch': (0x599D5, 'e8 f6 fb ff ff'),
     'music_dispatch_to_theme_constructor': (0x57F38, 'e8 13 1a 00 00'),
     'register_controller_update_pointer': (0x59AE5, '68 e0 96 45 00'),
