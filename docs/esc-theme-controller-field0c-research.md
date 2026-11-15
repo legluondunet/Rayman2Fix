@@ -273,3 +273,178 @@ per-voice exclusivity, focus semantics and
 matched Resume suppression. Do not relax the
 production pointer-equality gate, or change
 native calls, from this evidence alone.
+
+## Further offline original-code/lifetime research — 15 November, 08:53–09:04 UTC
+
+**All evidence derives from the exact owner's 676,352-byte
+SHA-256-approved `Rayman2(3).exe`, SHA-256
+`7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`,
+and the previously supplied original sound-driver DLLs. No proprietary bytes
+were committed to GitHub or executed outside the game.**
+
+### Newly verified: a second path can REWRITE the pending target
+
+The original `0x4595D0` function sets a pending new
+Theme when the engine is explicitly asked to switch.
+However, static x86 disassembly found **another
+independent write path** inside original periodic
+update `0x459460`:
+
+```asm
+0x459521  cmp dword ptr [esi+0x20], 0
+0x459526  mov [ecx+0x10], eax      ; eax=1
+0x459529  mov [ecx+0x0C], eax      ; queue another pending switch
+0x45952C  mov edx, [esi+0x20]
+0x45952F  mov edx, [edx]
+0x459531  mov [ecx+0x3C], edx
+0x459534  mov edx, [0x4B949C]     ; *separate next-Theme source*
+0x45953A  mov [ecx+0x44], edx      ; REWRITE pending descriptor
+```
+
+This branch is reached from the original Theme
+progression code after a threshold/repeat comparison
+on the Theme's internal `+0x1C`, `+0x28`
+and controller counters `+0x24`, `+0x38`.
+The code is a **new-target queue on progress**,
+not proof that this path was actually executed
+during the user's specific ESC menu.
+
+The earlier original promotion code establishes
+another subtle ordering:
+
+```asm
+0x459467  mov eax, [ecx+0x0C]     ; pending flag
+0x459473  mov eax, [ecx+0x44]     ; pending target
+0x459476  mov [ecx+0x0C], ebx     ; ebx=0, clear flag FIRST
+...
+0x45948E  mov [ecx+0x14], eax     ; promote pending target LATER
+```
+
+These are **two separate writes**. Therefore
+`pending_switch_state=0` seen by a read-only
+observer does not atomically prove the current
+`+0x14` pointer has already been promoted.
+The existing diagnostic only observes; it does
+not acquire original game-player synchronization,
+and must not authorize a synthetic driver call.
+Furthermore, a one-off `+0x44` match to the
+active 9:5 Theme does not prove the target
+cannot be replaced *during* a menu. These
+are concrete lifetime/TOCTOU hazards, not
+merely hypothetical unknowns.
+
+15 original x86 instruction site fingerprints
+(including both distinct writes to `+0x44`,
+both writes to the `+0x0C` pending flag,
+promotion, and the periodic updater's
+call) are recorded in new, stdlib-only
+`tools/audit_original_cd_theme_switch.py`.
+It **refuses to interpret ANY of these RVAs**
+until the full input SHA-256 and PE
+timestamp/image-base/image-size match the owner's
+retail-CD original, and then verifies the
+actual original instruction bytes. Synthetic
+tests `tests/test_audit_original_cd_theme_switch.py`
+reject mismatched hashes, PE metadata, and opcodes.
+No executable patches, new audio callbacks,
+loaded DLLs or configuration changes are involved.
+
+### New empirical finding: ~4 seconds of *outside-menu* handoff time
+
+The locally available original Rayman2Fix
+owner logs (14–15 November) were independently
+reexamined, **accepting only an original source-
+identified pair of ESC native Pauses, a matching
+source-specific two-Resume wrapper, and a
+`paired=1 overlap=0` lifetime record for
+every interval lying between watcher samples
+`9:5 ref_class=3 field0c=1` and
+`9:5 ref_class=1 field0c=0`**.
+Missing or overlapping closes exclude an entire
+run. Only seven runs qualified:
+
+| Owner log timestamp | Pending wall time (s) | Fully paired ESC script windows (s) | Outside ESC (s) |
+| --- | ---: | ---: | ---: |
+| 20261114-191013 | 27.156 | 23.032 | **4.124** |
+| 20261114-192852 | 18.438 | 14.312 | **4.126** |
+| 20261114-201946 | 28.250 | 24.187 | **4.063** |
+| 20261114-211741 | 23.688 | 19.642 | **4.046** |
+| 20261114-213131 | 4.015 | 0 | **4.015** |
+| 20261115-075536 | 25.450 | 21.584 | **3.866** |
+| 20261115-084027 | 13.100 | 9.166 | **3.934** |
+
+Mean **4.025 seconds**, median **4.046 seconds**,
+range **3.866–4.126 seconds**, sample standard
+deviation ~**0.096 seconds**. These timings
+were derived from original log event timestamps,
+not a claimed audible listening measurement.
+Other older runs were **excluded** because a
+required complete source-specific Resume/lifetime
+pair was absent or source pairing was ambiguous;
+they must not influence the estimate.
+
+The regularity across an approximately
+**4–28 second wall-clock span** supports the
+hypothesis that the native Theme transition
+depends mainly on *progress that is suspended
+while the Escape menu has paused ADPCM music*.
+The already-verified original `APMMXbvr.dll`
+mixer skips the actual paused ADPCM record when
+its `+0x1C` flag is 1; this provides a
+mechanistically consistent explanation.
+
+**Limitations:** the native Theme watcher
+samples periodically (typically 50ms), and
+source-verified ESC script intervals are a
+proxy for physical ADPCM pause time, not direct
+sampling of the stream's decode clock. We
+cannot yet claim the original code has a
+wall-clock-free 4,000ms timer, nor rule out
+other internal clock sources or overlapping
+subresource changes. Most logs repeat the
+same early-level scenario under the same
+install, so this is not cross-game validation.
+
+For repeatability, `tools/analyze_theme_handoff_timing.py`
+now performs exactly this timing subtraction
+from original source-paired log events and
+**fails closed** on unmatched Pauses,
+Resumes, overlaps, missing previous Theme,
+or unclosed windows. It reports its uncertainty
+and never authorizes a native command.
+A synthetic unittest suite
+`tests/test_theme_handoff_timing.py`
+checks ordinary, long, overlapping and
+incomplete scenarios. The project CI invokes
+both this suite and the exact retail-CD
+opcode audit suite.
+
+### Consequence for proposed early-ESC bridge
+
+An early post-native synthetic Resume on a
+verified pending target would no longer just
+keep the *existing* 9:6 ADPCM record audible;
+it could permit the original Theme controller
+to **progress, promote 9:5, replace its
+pending descriptor again, and advance the
+inner 9:6→9:7 resource while the ESC menu
+remains open**. That exact sequence has a
+precedent: the owner logs already observed
+progression `9:7→9:8` and `phase=6` while
+a compensated menu remained open.
+
+The safe intervention would need to recognize
+record retirement/reallocation and script
+Resume/focus ownership *across* that promotion.
+The original ADPCM Stop invalidates the
+old handle and can compact the voice pool.
+Native controller `+0x44` equality and
+`voice_index=0` are demonstrably insufficient
+as durable stream-generation credentials.
+
+**Decision:** maintain the production
+`ref_class=1` gate and `phase=6`
+quarantine. No early synthetic Resume,
+native Pause suppression, deferred Resume
+replay or original DLL patch is justified
+by this timing correlation alone.
