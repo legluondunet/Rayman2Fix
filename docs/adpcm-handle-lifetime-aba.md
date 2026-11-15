@@ -1483,3 +1483,99 @@ directly observed reason the current coordinator
 rejects compensation; hidden native lifetime
 changes remain only *possible* alternate hazards,
 not proven causes in that log.
+
+## 22. Live owner log exposes overstrict closing observer gate (15 November, 15:13)
+
+The owner activated the explicit experimental ESC launcher correctly:
+`RUNTIME-ESC-PROTOTYPE: enabled=1` and
+`RUNTIME-AUDIO-TRACE: enabled=1 schema=2 prototype=1`.
+The uploaded 571-line log
+`Rayman2Fix(20261115-151318).log` contains **12 source-confirmed
+menu openings and 11 matching script-resume intervals**, one
+unfinished opening when the log stops. Every opening produces a valid
+original ADPCM voice snapshot (`sampled=1`, record slot 0,
+`active=1`), but **all 11 original closing snapshots are
+`sampled=0`, `transition_type=-1`, counters zero/UNKNOWN**.
+
+### The missing closing measurements were caused by our diagnostic gate
+
+The old closing observer (not the actual music policy) demanded
+`resume_count==2 && unrelated_slots==0 && other_handle_count==0`.
+The native script Resume normally performs **two
+`ResumeTransitionSxd` callbacks for the same music transition**
+*plus* **5–20 ordinary Sxd effect Resume callbacks**. Thus every
+real 15:13 interval has `resume_count=2`,
+`other_handle_count=0`, but **`unrelated_slots>0`**.
+The source check rejected these otherwise qualified observations
+without even reading the native transition object.
+
+The **diagnostic-only** gate now permits unrelated ordinary
+effect callbacks but still requires all of:
+
+- matched same-thread, same-generation, non-overlapping original ESC
+  Pause/Resume lifetime;
+- a source-verified, stable sampled SXD resource: valid baseline,
+  `sxd_changes=0` and `sxd_unknown=0`;
+- **exactly two** original transition Resume callbacks with the
+  **same** valid non-null handle and consistent callback counts;
+- both transition Resumes correctly accounted for as forwarded or
+  experimentally suppressed;
+- zero exported Play/Stop deltas both between wrappers and within the
+  original script Resume wrapper.
+
+The snapshot remains a **render-thread-only, after-native-dispatch,
+read-only** memory observation: no extra GetPos, TestIsPlaying,
+Pause, Resume, Stop, DLL hook or actual music decision is introduced.
+The original compensation policy is **unchanged**, and its strict
+current-Theme and physical-generation precautions remain active.
+The new diagnostic prints `gate=0|1` on
+`RUNTIME-ESC-ADPCM-RESUME`:
+`gate=0` means conservative observation filter refused;
+`gate=1 sampled=0` means filter passed but original native
+memory snapshot could not be verified. In both cases the
+physical voice state remains **unknown**.
+
+### What the 15:13 test actually proves
+
+| Menu opening | Original Theme reference | ADPCM flag after original Pause/prototype dispatch | Source-paired close |
+| --- | --- | --- | --- |
+| 1–4 | class 3, not matching current player | `paused=1, active=1`, compensation rejected | 4 native Resume pairs, no compensation |
+| 5 | class 1, matching | `paused=0, active=1`, compensation initially accepted | Native fallback after SXD 9:7→9:8 change |
+| 6–7 | class 1, matching | `paused=0, active=1` | Two verified Resume suppressions each |
+| 8 | class 1, matching | `paused=0, active=1` | Native fallback after SXD 9:8→9:9 change |
+| 9–11 | class 1, matching | `paused=0, active=1` | Two verified Resume suppressions each |
+| 12 | class 1, matching | `paused=0, active=1` | No matching close before log end; changing SXD triggered safety fallback |
+
+The **seven** resolved WAVMW→APMMX callback pointers
+(Stop/Pause/Resume/TestIsPlaying/GetPos/SetParam/SetParamTransition)
+have the owner's original PE/export-entry fingerprints before and
+after Theme synchronization, but their existence **does not prove**
+the game invoked a particular getter or driver retirement function.
+
+At each opening `mode0_output == mode1_output`, and the two
+global output-position counters increase **between menu openings**.
+Since the old close snapshots were not taken, these values
+**cannot establish progress during an open menu**. They
+are not song-specific or physical voice epoch counters.
+
+Eleven source-paired closing lifetimes show zero exported
+Play/Stop deltas, but internal GetPos, TestIsPlaying, output-buffer
+progression and reinitialization can operate without exported Stop.
+Consequently, the log neither proves native driver retirement
+nor continuous physical voice generation.
+
+The replacement observer should now be eligible on **nine**
+of the eleven completed intervals from this exact log's counters
+and SXD stability conditions, if the updated binary is rerun;
+the two stream-switch intervals `9:7→9:8` and
+`9:8→9:9` remain correctly filtered. This is a prediction
+based on source and recorded flags, **not a measured post-update
+success**. No actual closed-interval buffer-counter deltas
+can be asserted until a new Wine run of the updated prototype.
+
+Static source guards in `tests/test_audio_trace_guards.py`
+and four synthetic classifier regressions in
+`tests/test_esc_adpcm_evidence.py` confirm that incidental
+effect resumes no longer veto a legitimate observation and
+that a failed/blocked snapshot is never mistaken for missing
+music or driver retirement. PR #10 remains **DRAFT**.
