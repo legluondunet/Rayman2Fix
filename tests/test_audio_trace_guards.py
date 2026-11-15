@@ -213,7 +213,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("RUNTIME-ESC-SXD-LIFETIME:",self.runtime)
         observer=self.runtime.split(
             "void proto_note_sampled_sxd(const AudioThemeOwnerContext& owner,",1)[1].split(
-            "void proto_theme_transition_watch_tick() {",1)[0]
+            "void proto_audit_controller_code_references() {",1)[0]
         for token in (
             "if(!menu_visible || !g_log)return;",
             "owner.inner_bank_provenance.list_complete==1u",
