@@ -10,10 +10,13 @@ from audit_adpcm_primary_epoch import SyntheticEpochModel
 
 
 def fixture(stage='pending', cls=3, getpos='resolved', test='resolved',
-            fingerprint=None, module='APMMXbvr.dll'):
+            fingerprint=None, module='APMMXbvr.dll', params=False,
+            param_status='resolved'):
     data = [f'RUNTIME-AUDIO-ADPCM-DELEGATE-CONTEXT: ref_class={cls} stage={stage} (read-only)']
-    for op in A.OPS:
-        status = getpos if op == 'get-pos' else test if op == 'test-is-playing' else 'resolved'
+    for op in (A.ALL_OPS if params else A.OPS):
+        status = (param_status if op in A.PARAM_OPS else
+                  getpos if op == 'get-pos' else
+                  test if op == 'test-is-playing' else 'resolved')
         suffix = ('' if fingerprint is None else
                   f' original_entry_fingerprint={fingerprint}')
         data.append(f'RUNTIME-AUDIO-ADPCM-DELEGATE: op={op} status={status} '
@@ -105,6 +108,65 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(report['observations']['export_quiet_lifetimes'],1)
         self.assertFalse(report['can_prove_internal_retirement_absent'])
         self.assertFalse(report['can_prove_continuous_physical_voice_generation'])
+
+    def test_both_stages_fingerprint_all_seven_original_delegates(self):
+        report=A.classify(
+            fixture(fingerprint=1,params=True)+
+            fixture('synchronized',1,fingerprint=1,params=True))
+        self.assertTrue(report['stage_comparison']['available'])
+        self.assertTrue(report['stage_comparison']['parameter_comparison_available'])
+        self.assertEqual(report['stage_comparison']['changed_parameter_operations'],[])
+        self.assertTrue(report['stage_comparison'][
+            'all_seven_original_entry_fingerprints_both_stages'])
+        self.assertEqual(len(report['delegates']['pending']['entries']),7)
+        self.assertFalse(report['can_prove_query_invocation'])
+        self.assertFalse(report['can_prove_internal_retirement_absent'])
+
+    def test_legacy_five_pointer_stage_is_not_full_seven(self):
+        report=A.classify(fixture(fingerprint=1)+
+                          fixture('synchronized',1,fingerprint=1))
+        self.assertTrue(report['stage_comparison']['available'])
+        self.assertTrue(report['stage_comparison']['original_entry_fingerprints_both_stages'])
+        self.assertFalse(report['stage_comparison']['parameter_comparison_available'])
+        self.assertIsNone(report['stage_comparison']['changed_parameter_operations'])
+        self.assertFalse(report['stage_comparison'][
+            'all_seven_original_entry_fingerprints_both_stages'])
+        self.assertEqual(report['delegates']['pending']['missing_seven'],
+                         list(A.PARAM_OPS))
+
+    def test_changed_setparam_pointer_does_not_prove_that_it_was_invoked(self):
+        report=A.classify(
+            fixture(fingerprint=1,params=True)+
+            fixture('synchronized',1,fingerprint=1,params=True,
+                    param_status='fallback'))
+        self.assertTrue(report['stage_comparison']['available'])
+        self.assertEqual(report['stage_comparison']['changed_operations'],[])
+        self.assertTrue(report['stage_comparison']['parameter_comparison_available'])
+        self.assertEqual(report['stage_comparison']['changed_parameter_operations'],
+                         list(A.PARAM_OPS))
+        self.assertFalse(report['stage_comparison'][
+            'all_seven_original_entry_fingerprints_both_stages'])
+        self.assertFalse(report['stage_comparison']['proves_original_query_was_executed'])
+
+    def test_one_missing_setparam_prevents_complete_parameter_comparison(self):
+        first=fixture(params=True,fingerprint=1)
+        first=[line for line in first if 'op=set-param-transition ' not in line]
+        report=A.classify(first+fixture('synchronized',1,params=True,fingerprint=1))
+        self.assertTrue(report['stage_comparison']['available'])
+        self.assertFalse(report['stage_comparison']['parameter_comparison_available'])
+        self.assertIsNone(report['stage_comparison']['changed_parameter_operations'])
+        self.assertEqual(report['delegates']['pending']['missing_seven'],
+                         ['set-param-transition'])
+        self.assertFalse(report['can_prove_continuous_physical_voice_generation'])
+
+    def test_duplicate_parameter_pointer_fails_closed(self):
+        first=fixture(params=True,fingerprint=1)
+        report=A.classify(first+[first[-1]]+
+                          fixture('synchronized',1,params=True,fingerprint=1))
+        self.assertFalse(report['delegates']['pending']['complete_seven'])
+        self.assertFalse(report['stage_comparison']['parameter_comparison_available'])
+        self.assertFalse(report['stage_comparison'][
+            'all_seven_original_entry_fingerprints_both_stages'])
 
     def test_dynamic_fallback_is_a_change_not_a_proof_of_call(self):
         result=A.classify(fixture()+fixture('synchronized', 1, getpos='fallback'))
