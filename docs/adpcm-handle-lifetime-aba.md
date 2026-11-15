@@ -1223,3 +1223,94 @@ the game issued such a parameter operation during
 the first Escape, nor identify the retired voice.
 The experimental seven-pointer log probe observes
 bindings only, never calls setters itself.
+
+## 20. Native output-buffer fill can inactivate an ADPCM voice without game-issued queries (15 November)
+
+The owner-provided, SHA-256-pinned original `APMMXbvr.dll` has
+**another distinct route** to the native record active flag
+`[record+0x28]`. This route is the **ordinary audio
+output-buffer fill**, independent of any *game-issued* GetPos,
+TestIsPlaying, SetParam or exported Stop call:
+
+```text
+APMMX original output / mixer buffer-fill wrappers
+  0x3400:
+    0x342C -> 0x1020       acquire original driver lock
+    0x344C -> 0x18D0       fill buffer (mode=0)
+    0x3498 -> 0x1030       release original lock
+
+  0x34B0:
+    0x34CE -> 0x1020       acquire original driver lock
+    0x34F2 -> 0x18D0       fill buffer (mode=1)
+    0x353E -> 0x1030       release original lock
+
+APMMX common output-buffer fill
+  0x18D0                   fill/advance native ADPCM buffer
+    0x1AD1 -> 0x1740       progress an internal native record
+      0x174C               EDX = 0
+      0x1753 / 0x175F      inspect record +0x24 state
+      0x17A5 / 0x17A7      inspect record +0xD8 state
+      0x17BF / 0x17C4      inspect record +0x20 state
+      0x17CA               mov [record+0x28], EDX   (= 0)
+```
+
+The final write is **conditional**. In the verified original
+branches, the zero-write path is taken when the earlier
+`+0x24`, `+0xD8`, and `+0x20` gates are zero;
+other cases branch around it or handle a different form of
+record progression. This is **inactivation**, not a confirmed
+record retirement or handle generation change.
+
+This is significant because a hypothetical perfect trace
+of the *public* `GetPos`, `TestIsPlaying`, `SetParam`,
+`Play` and `Stop` APIs can still miss a native
+`active=1 -> active=0` transition originating from
+the buffer-fill path. Thus even finding that **no game query
+executed** in an early ESC window would not prove that
+the physical ADPCM voice remained continuously alive.
+The output-buffer fill is reached through native
+audio processing and may occur while gameplay rendering or
+script execution is paused. Its *actual occurrence during
+this owner's specific first ESC* remains **unobserved**.
+
+The two original buffer-fill wrappers **do use the known
+driver critical-section lock** (unlike the previously found
+GetPos and TestIsPlaying local chains). Hence a future
+lifetime observer must take into account **all** original
+active-flag writes and retirement/allocator routes, whether
+under the lock or from a different context. Interposing on
+the original mixer or acquiring its lock at an unsafe time
+could itself alter audio timing.
+
+### Reproducible SHA-pinned audit
+
+`tools/audit_adpcm_buffer_fill.py` verifies **16 native
+opcode windows, seven direct E8 call edges, three
+conditional branch targets**, and the exact original DLL
+SHA-256 and PE metadata, read-only without executing the DLL.
+The separate `tests/test_adpcm_buffer_fill.py` provides
+**10 synthetic regression tests**, covering all zero-flag
+gates, alternate branches, missing lock release and
+changed active-flag writer.
+
+`tools/audit_adpcm_rel32_calls.py` now also scans the **complete
+original raw `.text`** for direct calls to `0x18D0`
+(two sites `0x344C`, `0x34F2`) and `0x1740`
+(one site `0x1AD1`), raising the verified target list
+from 11 to **13** and the known raw direct-call candidates
+from 27 to **30**. Neither count is an exhaustive x86
+call graph.
+
+```sh
+python3 tools/audit_adpcm_buffer_fill.py Rayman2Fix/dll/APMMXbvr.dll --json
+python3 -m unittest discover -s tests -p 'test_adpcm_buffer_fill.py'
+python3 -m unittest discover -s tests -p 'test_adpcm_rel32_calls.py'
+```
+
+**Decision: NO-GO for pre-driver Pause suppression remains.**
+The ongoing research must distinguish normal ADPCM buffer
+progression, conditional inactivation, record retirement
+and in-place primary reuse; endpoint voice flags and public
+export counters do not uniquely identify those events.
+No live-driver query, dynamic hook, or runtime audio change
+was introduced by this audit.
