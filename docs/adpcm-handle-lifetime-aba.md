@@ -2120,3 +2120,131 @@ suppression conditional only on matching
 bank/index, a valid old descriptor, pending
 target, or advancing global buffer positions.
 PR #10 stays draft.
+
+## 25. A pre-driver Pause-only hypothesis: exact native semantics and the atomic-pair obstacle (original 1999 WAVMW/APMMX binaries, 15 November)
+
+An independent review of both owner-supplied original DLLs has
+identified a potentially **simpler experimental design** than
+the current late compensating native Resume:
+
+### Exact native control flow for type-4 transition sounds
+
+The original `WAVMWbvr.dll` public exports are
+`_SND_fn_vPauseTransitionSxd@4` at RVA
+`0xC7E0` and `_SND_fn_vResumeTransitionSxd@4`
+at RVA `0xC830`. Both dispatch on the
+sound-object type tag. For **type 4**:
+
+```text
+PauseTransitionSxd: 0xC7E0 -> 0xC800 -> 0x3C60
+    dynamic original APMMX delegate [WAVMW+0x26A9C]
+ResumeTransitionSxd: 0xC830 -> 0xC850 -> 0x3C90
+    dynamic original APMMX delegate [WAVMW+0x26AA0]
+```
+
+These are **single delegate calls** per type-4 public
+function, not calls to all the available sound backends.
+The delegate is only *available*, not assured to be
+the original provider in arbitrary non-owner installations;
+the existing ESC provenance sampler verifies the
+exact original delegate-entry signatures.
+
+The matched original `APMMXbvr.dll` exports are
+`vPauseTransitionSxdADPCM@4` at RVA
+`0x54D0` and `vResumeTransitionSxdADPCM@4`
+at RVA `0x54E0`. Each wrapper acquires the
+known original driver lock before calling its
+validated-handle helper and releases it afterward:
+
+```text
+Pause: 0x54D0 -> 0x3380 (lock) -> 0x1ED0
+   0x1EDD -> 0x2480  validates handle-to-record
+   0x1EF0             mov [record+0x1C], 1
+
+Resume: 0x54E0 -> 0x33C0 (lock) -> 0x1F10
+   0x1F1D -> 0x2480  validates handle-to-record
+   0x1F30             mov [record+0x1C], 0
+```
+
+**Important new fact:** on a valid, still-bound
+record, the original APMMX Resume does **not**
+read `[record+0x1C]` before clearing it.
+Consequently, the **pause flag** is
+idempotently cleared even if it was already
+zero. There is no source requirement that
+the same record first received a Pause.
+
+**But this is not proof of safety across generations.**
+If a native handle resolves to a different record
+generation by the time Resume executes, the write
+would affect the *new* record. There are also game
+and driver ownership invariants outside this
+single field; the observed APMMX lock does not
+make a game-level handle immutable.
+
+### Candidate: suppress only source-confirmed immediate Pauses
+
+A *hypothetical* one-way intervention would,
+while the actual original script's ESC Pause
+wrapper is currently running, suppress only the
+two **native type-4 music Pause callbacks** and
+let the original game issue and forward its
+normal two Resume calls on menu close.
+
+It would perform **no late synthetic Resume**,
+and thus avoid the previous lifetime-sensitive
+deferred command entirely. The original Resume
+would clear the existing pause bit if the current
+handle remains valid. This is fundamentally
+different from taking a later passive snapshot
+and issuing a synthetic driver Resume.
+
+**Outstanding blocking problem:** the current
+runtime confirms the pair of two matching
+transition Pause callbacks **after** the
+original Pause wrapper returns. To suppress
+the first physical Pause at the instant of
+dispatch, the implementation would need a
+source-qualified **pre-dispatch preflight** that
+proves both callbacks belong to one stable
+original Theme transition and validates their
+driver provenance *before either is run*.
+Discovering the second callback later is
+insufficient. If only one of the two is
+suppressed, the other still sets the flag
+to one and music stops; if an unrelated
+resource shares a recycled handle, a wrong
+skip can alter pause behavior. The policy
+also must not affect the six to eleven
+ordinary sound effects paused by the
+same game wrapper. No such atomic preflight
+or immutable native epoch witness has been
+proven.
+
+The new read-only, exact-SHA-pinned
+`tools/audit_adpcm_pause_resume_semantics.py`
+checks **10 WAVMW opcode windows,
+two type-4 branch targets and two delegate
+edges**, plus **18 APMMX opcode windows and
+ten call/lock edges**. Its 11 synthetic tests
+refuse changed modules, exports, native
+handle validation, lock paths or changed
+native Pause/Resume flag writes. It invokes
+no game or DLL function and installs no
+hooks or runtime mutations.
+
+```sh
+python3 tools/audit_adpcm_pause_resume_semantics.py \
+  Rayman2Fix/dll/WAVMWbvr.dll Rayman2Fix/dll/APMMXbvr.dll --json
+python3 -m unittest discover -s tests -p 'test_adpcm_pause_resume_semantics.py'
+```
+
+**Decision: source-qualified immediate-Pause-only
+bypass is a promising *research hypothesis*, not
+a permitted runtime change.** Do not merge or
+enable this behavior before demonstrating
+pre-dispatch dual-callback source identity,
+native lifetime safety, and the effect of
+leaving the original native Resume path
+unchanged on both Wine and Windows. Existing
+PR #10 remains draft.
