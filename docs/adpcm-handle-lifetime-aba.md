@@ -725,14 +725,14 @@ owner's early-ESC session or that the runtime-installed callback
 pointer was the expected original address. WAVMW can also return
 before calling the delegate if its inner state is uninitialized.
 
-The exact-hash offline audit now checks 12 WAVMW GetPos instruction
+The exact-hash offline audit now checks 13 WAVMW GetPos instruction
 windows, two additional direct-call edges, the type-4 conditional
 branch, both export names, dynamic symbol at RVA `0x21608`, and
-the nine-entry callback-table routing. Five additional
+the nine-entry callback-table routing. Six additional
 synthetic tests refuse stale DLL export names, modified callback
 slots, unexpected dynamic symbols and divergent branch opcodes.
 Combined with the ten new APMMX GetPos tests, the
-`test_adpcm_query_outcomes.py` suite now has **29 synthetic tests**.
+`test_adpcm_query_outcomes.py` suite now has **33 synthetic tests**.
 No native query is invoked by the auditor or by the experimental
 runtime monitor. Neither module is bundled in this repository.
 
