@@ -236,6 +236,50 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("PauseTransitionSxd(",sampler)
         self.assertNotIn("WriteProcessMemory(",sampler)
 
+    def test_original_theme_callback_gating_snapshot_is_read_only(self):
+        region=self.runtime.split(
+            "ProtoThemeCallbackGuardSnapshot proto_sample_theme_callback_guards() {",
+            1)[1].split("bool proto_read_depth(DWORD& out) {",1)[0]
+        for marker in ("!g_proto_enabled.load(",
+                       "!g_proto_callsites_installed.load(",
+                       "read(0xB95B8u,a,sizeof(a))",
+                       "read(0xB9618u,&global_a,sizeof(global_a))",
+                       "read(0xB95B8u,b,sizeof(b))",
+                       "read(0xB9618u,&global_b,sizeof(global_b))",
+                       "std::memcmp(a,b,sizeof(a))!=0",
+                       "global_a!=global_b",
+                       "out.controller_active=a[0]==0u ? 0",
+                       "out.controller4_nonzero=a[1]==0u ? 0 : 1",
+                       "out.pending=a[3]==0u ? 0",
+                       "out.global_nonzero=global_a==0u ? 0 : 1",
+                       "out.eligible_from_flags=int("):
+            self.assertIn(marker,region)
+        for forbidden in ("VirtualProtect(", "WriteProcessMemory(",
+                          "GetProcAddress(", "LoadLibrary", "proto_dispatch(",
+                          "PauseTransitionSxd(", "ResumeTransitionSxd(",
+                          "TestIsPlaying(", "GetPos("):
+            self.assertNotIn(forbidden,region)
+
+    def test_theme_callback_guard_readout_is_post_script_and_never_audio_policy(self):
+        tick=self.runtime.split("void proto_menu_tick() {",1)[1].split(
+            "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
+        self.assertIn("RUNTIME-ESC-THEME-CALLBACK-GUARDS: stage=open",tick)
+        self.assertIn("owner.theme_owned_driver==1u",tick)
+        self.assertIn("report.transition_type_post_pause==4",tick)
+        self.assertLess(tick.index("proto_dispatch(action);"),
+                        tick.index("RUNTIME-ESC-THEME-CALLBACK-GUARDS: stage=open"))
+        flush=self.runtime.split("void proto_flush_predriver_resume_report() {",1)[1].split(
+            "// Focus is a Win32",1)[0]
+        self.assertIn("RUNTIME-ESC-THEME-CALLBACK-GUARDS: stage=close",flush)
+        self.assertIn("report.lifetime_paired && !report.lifetime_overlap",flush)
+        self.assertLess(flush.index("log_line(resource_line);"),
+                        flush.index("RUNTIME-ESC-THEME-CALLBACK-GUARDS: stage=close"))
+        for body in (tick,flush):
+            self.assertNotIn("if(cb_guards.eligible_from_flags)",body)
+            self.assertNotIn("if(close_cb_guards.eligible_from_flags)",body)
+            self.assertNotIn("if(cb_guards.sampled)",body)
+            self.assertNotIn("if(close_cb_guards.sampled)",body)
+
     def test_adpcm_resume_snapshot_is_after_original_audio_and_on_render_thread(self):
         resume=self.runtime.split("void __cdecl proto_script_resume() {",1)[1].split(
             "void proto_flush_predriver_resume_report() {",1)[0]
