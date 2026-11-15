@@ -670,7 +670,7 @@ Neither step by itself proves completed native record retirement
 or a stable generation of music.
 
 **New regression coverage:** `tools/audit_adpcm_query_outcomes.py`
-now verifies the original `rGetPosSxdADPCM` export, **12 exact
+now verifies the original `rGetPosSxdADPCM` export, **17 exact
 instruction windows, three signed direct-call edges and two
 conditional branch targets**. The synthetic, fail-closed
 `model_position()` expresses only this conditional active-flag
@@ -742,6 +742,30 @@ internal ADPCM retirement` with no public Stop is established
 across the original binary implementations. Actual ordering and
 occurrence in the owner runtime remain unobserved, so no new
 native Pause suppression or synthetic Resume is permitted.
+
+### Original GetPos completion sentinel is not Stop
+
+Further exact byte-by-byte inspection of the same owner's original
+1999 APMMX DLL found a second distinction in the return path:
+
+- The internal position reader checks `[record+0x4C]` at RVA
+  `0x2449`, then checks `[record+0x28]` at `0x244E`.
+  When both the terminal position and inactive condition are met,
+  it returns the internal status **15** via `0x2453`.
+- The GetPos public core at `0x2A2C` maps that internal status
+  **15** to the signed return value **-2** (`0xFFFFFFFE`).
+  Other nonzero reader failures return **-1**, while status zero
+  follows the position-computation path.
+- Neither internal status 15 nor the exported -2 return is a
+  *successful ADPCM retirement event*. The record may still have a
+  valid handle until some later native cleanup.
+
+These are additional **original, hash-pinned opcode facts**;
+no claim is made that the owner saw the -2 sentinel during the
+early ESC session. A synthetic status classifier and three regression
+tests now explicitly prevent treating terminal position as Stop,
+reject malformed status values, and reject any change to the
+original status-translation instructions.
 
 ## 14. Query-delegate provenance before and after Theme sync (15 November)
 
