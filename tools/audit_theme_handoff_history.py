@@ -93,7 +93,9 @@ def classify(lines:list[str])->dict:
                 'first_later_current_matches_pending_target':later_same,
                 'snapshots_between_previous_and_pending':gap_to_prior,
                 'snapshots_between_pending_and_later':gap_to_later,
-                'observed_pending_to_matched_ms':None if following is None else
+                'observed_pending_to_next_current_ms':None if following is None else
+                    following['t_ms']-row['t_ms'],
+                'observed_pending_to_matched_ms':None if not later_same else
                     following['t_ms']-row['t_ms'],
                 'same_descriptor_pointer_proven':False,
                 'uninterrupted_pending_or_playback_proven':False,
