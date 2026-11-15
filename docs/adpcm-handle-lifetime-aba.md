@@ -418,3 +418,66 @@ callbacks and a borrowed lock is *not* a sufficient per-voice
 lifecycle monitor. Prove the full chain of original internal cleanup,
 primary recreation, and asynchronous callback synchronization before
 attempting early-ESC audio compensation.
+
+## 10. WAVMW type-4 TestIsPlaying dispatch reaches the ADPCM callback table (15 November)
+
+The owner provided **both** original 1999 modules; their file hashes,
+native exports and intermediate function bodies were audited directly,
+read-only and without executing either DLL:
+
+| Original | SHA-256 | Relevant export |
+| --- | --- | --- |
+| WAVMWbvr.dll | `cd0a0ad0a95880cd8e25e50844ec8e6f9d6725bbee7c09a8ab328cbbc953f016` | `_SND_fn_bTestIsPlayingSxd@4` at RVA `0xB8A0` |
+| APMMXbvr.dll | `ab2d7cc613fea6dd8b039e76f00a6f5d15c7ed37f2b93e0be7a86dbc6a0ee4cf` | `_SND_fn_bTestIsPlayingSxdADPCM@4` at RVA `0x5150` |
+
+Verified **static** dispatch chain in the WAVMW caller:
+
+1. `0xB8A0` branches on the original typed sound object.
+   The type-4 branch `0xB8B2 -> 0xB8C4` calls `0x7B90`.
+2. `0x7B90` uses callback slot `[ebx+0x4C]`. Its nine-entry
+   callback table is copied at `0x7DB4` to the object base `+0x2C`.
+   The ninth function pointer, constructed at `0xBFA7`,
+   is the existing WAVMW trampoline `0x3420`.
+3. `0x3420` dispatches via dynamic global pointer
+   `0x10026A00`. During loader setup, `0x57EA` supplies the
+   **exact embedded name** `_SND_fn_bTestIsPlayingSxdADPCM@4`
+   from RVA `0x21560`; the resolver at `0x3FA0` imports
+   `GetProcAddress`, and the returned function pointer is published
+   at `0x57F8`.
+4. On the owner's exact APMMX, that symbol exports RVA `0x5150`.
+   As proved in section 9, this reaches the original
+   `0x2900 -> 0x1F50 -> 0x15D0` *conditional* inactive cleanup
+   path that does **not** call exported Stop.
+
+This significantly narrows the missing-lifetime issue: **the type-4
+interface used for the actual owner-observed ESC ADPCM path can reach
+internal record retirement while public Stop-call counters stay zero**.
+It remains possible that a given invocation returns earlier, that
+another source is responsible for a particular call, or that a
+different function pointer is installed at runtime. These static
+facts do **not** prove that such retirement actually happened during
+any logged ESC session. No claims are made about an invariant
+runtime function-pointer address or lock ownership across threads.
+
+Reproduce the two-DLL cross-check locally:
+
+```sh
+python3 tools/audit_adpcm_lock_routes.py Rayman2Fix/dll/APMMXbvr.dll \
+  --wavmwbvr Rayman2Fix/dll/WAVMWbvr.dll --json
+python3 -m unittest discover -s tests -p 'test_adpcm_lock_routes.py'
+```
+
+The extended auditor validates **16 additional WAVMW opcode windows,
+three direct-call edges, both exact PE versions and export names,
+the embedded ADPCM symbol, and the original type-4 branch**. The
+synthetic test suite now has **14 tests**. It does not capture
+runtime function pointers or add any process hook; both DLLs remain
+owner-local and no game binaries are committed.
+
+**Next evidence gate:** a fully read-only, bounded test of **whether
+and when** the WAVMW type-4 TestIsPlaying delegate is invoked relative
+to early ESC and whether it triggers internal APMMX retirement.
+That would require a carefully version-pinned runtime research build
+with race-safe observation, *not* activating the proposed delayed
+Pause/Resume bridge. The existing native owner gate and quarantine
+passthrough remain in place.
