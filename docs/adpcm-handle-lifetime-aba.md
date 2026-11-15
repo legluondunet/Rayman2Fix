@@ -693,3 +693,52 @@ only bounded `ReadProcessMemory` snapshots after original actions.
 Those snapshots remain non-atomic and cannot exclude an ABA lifetime
 between samples. The feature's strict ref-class gate and original
 script-pause fallback remain unchanged.
+
+### WAVMW game-facing GetPos bridge (cross-DLL confirmation)
+
+The actual owner-provided `WAVMWbvr.dll` also exposes
+`_SND_fn_rGetPosSxd@4` (RVA `0xBD20`). Its ADPCM
+**type-4 branch** is a statically verified route to the same
+side-effecting APMMX getter:
+
+```text
+WAVMWbvr.dll (exact owner original)
+  0xBD20  _SND_fn_rGetPosSxd@4
+  0xBD30  type-4 branch -> 0xBD44
+  0xBD4F  direct call -> 0x7CD0
+  0x7CD0  checks inner [+0x30] state (can return early)
+  0x7CE2  indirect callback call [table+0x40]
+  0xBF8F  callback-table slot +0x40 built as trampoline 0x3510
+  0x3510  dynamic trampoline -> pointer [0x10026A14]
+  0x587E  loader resolves the exact symbol name
+          _SND_fn_rGetPosSxdADPCM@4 (stored at RVA 0x21608)
+  0x588C  publishes resolved pointer at [0x10026A14]
+APMMXbvr.dll (exact owner original)
+  0x51A0  _SND_fn_rGetPosSxdADPCM@4
+  0x51A5  -> 0x2A00 -> 0x2320 -> conditional [record+0x28]=0
+```
+
+This closes the **static call-graph bridge** between the game-facing
+WAVMW interface and the original ADPCM position getter. It does
+**not** prove that Rayman 2 called that interface during the
+owner's early-ESC session or that the runtime-installed callback
+pointer was the expected original address. WAVMW can also return
+before calling the delegate if its inner state is uninitialized.
+
+The exact-hash offline audit now checks 12 WAVMW GetPos instruction
+windows, two additional direct-call edges, the type-4 conditional
+branch, both export names, dynamic symbol at RVA `0x21608`, and
+the nine-entry callback-table routing. Five additional
+synthetic tests refuse stale DLL export names, modified callback
+slots, unexpected dynamic symbols and divergent branch opcodes.
+Combined with the ten new APMMX GetPos tests, the
+`test_adpcm_query_outcomes.py` suite now has **29 synthetic tests**.
+No native query is invoked by the auditor or by the experimental
+runtime monitor. Neither module is bundled in this repository.
+
+**Consequence for the first ESC:** the *possibility* of
+`WAVMW GetPos -> ADPCM active=0 -> WAVMW TestIsPlaying ->
+internal ADPCM retirement` with no public Stop is established
+across the original binary implementations. Actual ordering and
+occurrence in the owner runtime remain unobserved, so no new
+native Pause suppression or synthetic Resume is permitted.
