@@ -155,9 +155,11 @@ class LockRoutesTests(unittest.TestCase):
               patch.object(A, 'PE32', factory)):
             report = A.audit_wavmw_bridge(wave, primary)
         self.assertTrue(report['static_type4_dispatch_chain_verified'])
-        self.assertEqual(report['wavmw_opcode_anchors_verified'], 16)
-        self.assertEqual(report['wavmw_direct_edges_verified'], 3)
+        self.assertEqual(report['wavmw_opcode_anchors_verified'], 23)
+        self.assertEqual(report['wavmw_direct_edges_verified'], 5)
         self.assertFalse(report['actual_runtime_function_pointer_observed'])
+        self.assertTrue(report['query_can_retire_wavmw_inner_on_zero_result'])
+        self.assertTrue(report['query_can_unlink_outer_sxd_node_on_zero_result'])
         self.assertFalse(report['permission_to_change_audio'])
 
     def test_dual_dll_audit_refuses_unapproved_wavmw_before_pe_parse(self):
