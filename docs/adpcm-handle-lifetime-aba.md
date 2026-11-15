@@ -1682,3 +1682,124 @@ correct. No changes to driver forwarding,
 music compensation authorization, or
 runtime hooks are justified by this log.
 PR #10 remains **draft**.
+
+## 24. Two owner Wine sessions: Theme handoff wall-clock extension follows original ESC time
+
+The user supplied two complete, **actual opt-in Wine sessions**,
+`Rayman2Fix(20261115-151318).log` and
+`Rayman2Fix(20261115-153430).log`. Independently parsing
+their original, change-triggered Theme watcher and source-specific
+original script Pause/Resume/lifetime records produces a strong
+**cross-session timing correlation**.
+
+The original controller+0x14 points to the **previous**
+Theme's descriptor, verified by loaded-bank provenance as
+**9:12**, while the active outer Theme has already become
+**9:5**. Original controller+0x0C is **1** (pending)
+and +0x44 points to that verified 9:5 target.
+In both sessions the last independently observed
+pre-switch current Theme was **9:12**, and the next
+observed settled current Theme was **9:5**
+(`native_ref_class=1, ref_match=1, pending_state=0`).
+
+| Source-backed event | 15:13 Wine log | 15:34 Wine log |
+| --- | ---: | ---: |
+| Last verified previous current 9:12 (`t_ms`) | 30971 | 34849 |
+| First verified pending 9:12 → 9:5 (`t_ms`) | 31871 | 35749 |
+| First verified committed 9:5 (`t_ms`) | 50372 | 63549 |
+| **Pending-to-committed observed wall span** | **18501 ms** | **27800 ms** |
+| Verified source-specific early ESC intervals | 4 | 3 |
+| Source-paired menu durations | 5150 + 2400 + 4633 + 2449 ms | 6333 + 8217 + 9333 ms |
+| **Total observed ESC intervals** | **14632 ms** | **23883 ms** |
+| **Observed wall span minus paired ESC intervals** | **3869 ms** | **3917 ms** |
+
+The two pending-to-committed wall spans differ
+by **9299 ms**. The two total source-confirmed ESC
+menu durations differ by **9251 ms**. Their
+remaining, non-menu elapsed time differs by
+only **48 ms**, despite >9 seconds difference
+in the time spent within ESC menus. The native
+controller switch is therefore **consistent
+with an approximately four-second progression
+requirement outside script-ESC menu intervals**.
+That is a materially stronger explanation for
+the prolonged class-3 pending Theme handoff than
+the previous "few-frame synchronization race"
+interpretation. In the 15:34 session, the last
+of the three early menus closes at `t_ms=62868`,
+and the 9:5 current reference is first seen
+at `63549`—only **681 ms** later.
+
+**Limits:** the Theme watcher is change-triggered
+and sampled at finite cadence, not a continuous
+instruction-level trace. The subtracted periods
+are bounded original script Pause/Resume calls;
+unmeasured engine delays outside them may exist.
+The 3869/3917-ms remainders are **proxy
+durations**, not measurements of a native
+four-second timer, proof that the act of pausing
+*caused* the delay, or evidence of an immutable
+ADPCM voice. The two logs are observational
+and share the same environment, so causality
+and platform independence remain unproved.
+The global ADPCM output counters in the
+15:34 log **did advance during these early ESC
+intervals**, which provides evidence that
+**mixer clock progress and controller Theme
+commitment are distinct observables**.
+No first-ESC bypass is justified by this fact.
+
+### Repeatable offline evidence and negative controls
+
+The existing `tools/analyze_theme_handoff_timing.py`
+previously rejected real owner logs because it
+mistakenly demanded **zero ordinary sound effects**
+in the source wrapper and two adjacent
+Pause/Resume transition callbacks. Both logs
+actually contain two original music transition
+callbacks **plus several ordinary effect
+callbacks**. The tool now accepts this normal
+source order only if callback cardinalities,
+depth changes, same-handle count, and
+zero exported Play/Stop deltas all remain
+valid. Synthetic tests reject invalid cardinalities,
+overlapping intervals, missing closes and
+mismatched elapsed times.
+
+A second, more general
+`tools/audit_theme_handoff_timing.py`
+cross-checks the **original loaded-bank
+provenance of the former and pending Theme**,
+rather than assuming 9:12/9:5 by name. It
+demands a verified last previous current Theme,
+a class-3 pending pointer to that former Theme
+and an original pending target equal to the
+new outer Theme, and a new verified current
+Theme after all source-specific original
+ESC pairs close. It refuses ambiguous or
+missing endpoints; its output always has
+`pause_suspends_theme_switch_proven=false`
+and `native_music_generation_proven=false`.
+The CI `test_theme_handoff_timing.py`
+includes synthetic replicas of both measured
+sessions and explicit fail-closed counterexamples.
+
+```sh
+python3 tools/analyze_theme_handoff_timing.py \
+  'Rayman2Fix(20261115-151318).log' \
+  'Rayman2Fix(20261115-153430).log' --json
+
+python3 tools/audit_theme_handoff_timing.py \
+  'Rayman2Fix(20261115-151318).log' \
+  'Rayman2Fix(20261115-153430).log' --json
+```
+
+**Decision:** hold PR #10 as draft and
+keep the **class-3 pending Theme reference
+gate strict**. The next meaningful target is
+to identify the native controller transition
+condition which commits the 9:5 descriptor
+after the original paused game state has
+advanced sufficiently, without assuming
+a game-time counter or emitting synthetic
+driver Resume on the old 9:12 reference.
