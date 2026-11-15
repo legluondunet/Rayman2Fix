@@ -40,6 +40,17 @@ SITES = (
     ("record_becomes_inactive", 0x17CA, "89 53 28"),
     ("initialize_record_active", 0x2007, "c7 40 28 01 00 00 00"),
     ("record_backref_to_handle", 0x200E, "89 90 d4 00 00 00"),
+    # More original paths feed the same retirement function; observing
+    # just the exported StopTransition callback misses internal paths.
+    ("public_stop_calls_retirement", 0x172C, "e8 9f fe ff ff"),
+    ("active_transition_calls_retirement", 0x1C8D, "e8 3e f9 ff ff"),
+    ("inactive_cleanup_calls_retirement", 0x1F68, "e8 63 f6 ff ff"),
+    ("other_native_stop_calls_retirement", 0x2950, "e8 7b ec ff ff"),
+    # Two more direct calls to the shared original record initializer.
+    # These may initialize nested/sub-records; do not equate them with
+    # a new top-level music voice without further validation.
+    ("nested_record_init_call_one", 0x21F3, "e8 c8 fd ff ff"),
+    ("nested_record_init_call_two", 0x22A3, "e8 18 fd ff ff"),
 )
 
 
