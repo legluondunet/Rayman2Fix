@@ -928,3 +928,48 @@ were **available** before and after Theme synchronization, but
 **only an actual non-intrusive runtime call/retirement observer**
 could establish the timing and physical voice lifecycle.
 **No new Pause suppression is authorized; PR #10 remains draft.**
+
+## 16. Explicit NO-GO on hidden lifetime events in the unconnected ESC escrow model
+
+A consequence of sections 9–15 is that a possible deferred pre-driver
+Pause cannot be safely managed using **exported Stop counts alone**.
+The original `rGetPosSxd` path may mark a record inactive, a subsequent
+`bTestIsPlayingSxd` may retire it internally, and the primary allocator
+may reinitialize the same handle/record without an exported Stop. The
+original pre-driver research model previously covered explicit
+`native_stop()` and changed script identities, but lacked a
+corresponding **unclassified native lifetime event**.
+
+The **pure, unconnected** C++ research policy
+`include/rayman2fix/esc_pre_driver_pause_policy.hpp` now exposes
+`unknown_native_lifecycle_change()`. It is not invoked by the game
+and does not install a driver callback. Its sole effect on the
+synthetic ESC escrow is to fail closed:
+
+- When an original Pause is being held, clear the pending ledger,
+  refuse to replay it and explicitly report
+  `impossible_replay=true`.
+- When a menu has already been committed, invalidate all future
+  suppression of the original script Resume, **even if the new voice
+  reused the identical handle and Theme/SXD identity**.
+- Do nothing outside an active escrow; no future session is
+  silently armed or modified.
+
+Four C++ regressions now exercise hidden retirement with one Pause,
+hidden retirement with both original Pauses held, same-handle
+in-place reinitialization after menu confirmation, and unknown
+lifecycle signal outside ESC.
+
+**Crucial boundary:** having a safe invalidation method in an
+offline model is not proof that a running observer can *detect
+every* hidden lifetime transition at the right instant.
+The method is deliberately **not connected to**
+`src/runtime/runtime.cpp`, does not add a native hook, and
+does not authorize a first-ESC music bypass. Actual detection
+and synchronization remain the unresolved gate.
+
+```sh
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build --target esc_pre_driver_pause_tests
+ctest --test-dir build --output-on-failure -R esc-pre-driver-pause-research-model
+```
