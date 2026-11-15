@@ -167,6 +167,7 @@ WAVMW_SETPARAM_SITES = {
     'plain_dynamic_trampoline': (0x33E0, 'a1 fc 69 02 10 85 c0 75 06'),
     'plain_dynamic_indirect_call': (0x33F9, 'ff 15 fc 69 02 10'),
     'plain_resolver_symbol': (0x57C5, '68 40 15 02 10'),
+    'plain_resolver_call': (0x57CB, 'e8 d0 e7 ff ff'),
     'plain_resolver_publish': (0x57D3, 'a3 fc 69 02 10'),
     'plain_resolver_fallback': (0x57DC, 'c7 05 fc 69 02 10 10 34 00 10'),
     'transition_export': (0xC5D0, '83 ec 08 56 8b 74 24 10 8b 06'),
@@ -175,6 +176,7 @@ WAVMW_SETPARAM_SITES = {
     'transition_dynamic_trampoline': (0x3B30, 'a1 88 6a 02 10 85 c0 75 06'),
     'transition_dynamic_indirect_call': (0x3B49, 'ff 15 88 6a 02 10'),
     'transition_resolver_symbol': (0x5C8A, '68 20 1a 02 10'),
+    'transition_resolver_call': (0x5C90, 'e8 0b e3 ff ff'),
     'transition_resolver_publish': (0x5C98, 'a3 88 6a 02 10'),
     'transition_resolver_fallback': (0x5CA1, 'c7 05 88 6a 02 10 60 3b 00 10'),
 }
