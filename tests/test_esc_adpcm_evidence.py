@@ -247,6 +247,59 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(info['native_output_positions']['paired_counter_snapshots'],0)
         self.assertFalse(info['native_output_positions']['proves_original_mixer_callback_was_invoked'])
 
+    def test_closing_gate_passed_with_live_sample_is_counted(self):
+        result=A.classify([
+            'RUNTIME-ESC-ADPCM-VOICE: sampled=1 active=1 '
+            'mode0_output=100 mode1_output=100',
+            'RUNTIME-ESC-ADPCM-RESUME: paired=1 gate=1 sampled=1 '
+            'active=1 mode0_output=200 mode1_output=200',
+        ])
+        obs=result['observations']
+        self.assertEqual(obs['close_gates_open'],1)
+        self.assertEqual(obs['close_gates_blocked'],0)
+        self.assertEqual(obs['close_gate_passed_but_sample_unknown'],0)
+        self.assertEqual(obs['adpcm_close_samples'],1)
+        self.assertEqual(result['native_output_positions']['paired_counter_snapshots'],1)
+        self.assertFalse(result['can_prove_continuous_physical_voice_generation'])
+
+    def test_closing_gate_blocked_is_not_a_missing_audio_voice(self):
+        result=A.classify([
+            'RUNTIME-ESC-ADPCM-VOICE: sampled=1 active=1 '
+            'mode0_output=100 mode1_output=100',
+            'RUNTIME-ESC-ADPCM-RESUME: paired=1 gate=0 sampled=0 '
+            'active=-1 mode0_output=0 mode1_output=0',
+        ])
+        obs=result['observations']
+        self.assertEqual(obs['close_gates_open'],0)
+        self.assertEqual(obs['close_gates_blocked'],1)
+        self.assertEqual(obs['close_gate_passed_but_sample_unknown'],0)
+        self.assertEqual(obs['adpcm_close_samples'],0)
+        self.assertEqual(result['native_output_positions']['paired_counter_snapshots'],0)
+        self.assertFalse(result['can_prove_internal_retirement_absent'])
+
+    def test_closing_gate_passed_but_unreadable_voice_is_unknown(self):
+        result=A.classify([
+            'RUNTIME-ESC-ADPCM-VOICE: sampled=1 active=1',
+            'RUNTIME-ESC-ADPCM-RESUME: paired=1 gate=1 sampled=0 '
+            'voice_index=-1 active=-1',
+        ])
+        obs=result['observations']
+        self.assertEqual(obs['close_gates_open'],1)
+        self.assertEqual(obs['close_gate_passed_but_sample_unknown'],1)
+        self.assertEqual(obs['adpcm_close_samples'],0)
+        self.assertFalse(result['can_prove_continuous_physical_voice_generation'])
+
+    def test_legacy_close_without_gate_field_is_unknown_not_blocked(self):
+        result=A.classify([
+            'RUNTIME-ESC-ADPCM-VOICE: sampled=1 active=1',
+            'RUNTIME-ESC-ADPCM-RESUME: paired=1 sampled=0 active=-1',
+        ])
+        obs=result['observations']
+        self.assertEqual(obs['close_gates_open'],0)
+        self.assertEqual(obs['close_gates_blocked'],0)
+        self.assertEqual(obs['close_gate_passed_but_sample_unknown'],0)
+        self.assertEqual(obs['adpcm_close_samples'],0)
+
     def test_only_legacy_three_callbacks_never_claims_comparison(self):
         older = [f'RUNTIME-AUDIO-ADPCM-DELEGATE: op={op} status=resolved '
                  'module=APMMXbvr.dll callback_rva=0x000054D0'
