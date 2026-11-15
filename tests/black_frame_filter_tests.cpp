@@ -44,6 +44,17 @@ int main() {
     CHECK(cls(13,inf,90,95) == K::Preserve);
     CHECK(cls(13,80,90,-inf) == K::Preserve);
 
+    // The broader read-only candidate test does not authorize removal.
+    using E = r2fix::CinematicEdgeCandidate;
+    CHECK(r2fix::cinematic_edge_candidate(0,0,100,15)==E::Upper);
+    CHECK(r2fix::cinematic_edge_candidate(5,5,75,22)==E::Upper);
+    CHECK(r2fix::cinematic_edge_candidate(0,85,100,100)==E::Lower);
+    CHECK(r2fix::cinematic_edge_candidate(14,80,94,92)==E::Lower);
+    CHECK(r2fix::cinematic_edge_candidate(0,0,100,100)==E::None);
+    CHECK(r2fix::cinematic_edge_candidate(0,48,100,52)==E::None);
+    CHECK(r2fix::cinematic_edge_candidate(0,90,40,99)==E::None);
+    CHECK(r2fix::cinematic_edge_candidate(nan,0,100,5)==E::None);
+
     // Both opt-in AND source identity are required, independently of aspect.
     // Each opt-in controls its own class, never the other class.
     CHECK(!r2fix::remove_black_frame(false,false,true,13,81,88,94));

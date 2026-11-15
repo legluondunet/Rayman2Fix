@@ -49,6 +49,24 @@ inline BlackFrameKind black_frame_kind(float x0, float y0,
     return BlackFrameKind::Preserve;
 }
 
+// Broad, read-only source geometry classification for investigating cutscene
+// bands. These candidates can be ordinary UI; never suppress using this test.
+enum class CinematicEdgeCandidate { None, Upper, Lower };
+inline CinematicEdgeCandidate cinematic_edge_candidate(
+    float x0, float y0, float x1, float y1) {
+    if (!std::isfinite(x0) || !std::isfinite(y0) ||
+        !std::isfinite(x1) || !std::isfinite(y1) ||
+        x0 < -1.0f || x1 > 101.0f || y0 < -1.0f || y1 > 101.0f ||
+        x1 <= x0 || y1 <= y0 || x1-x0 < 55.0f ||
+        y1-y0 < 1.0f || y1-y0 > 43.0f)
+        return CinematicEdgeCandidate::None;
+    if (y0 <= 30.0f && y1 <= 48.0f)
+        return CinematicEdgeCandidate::Upper;
+    if (y0 >= 52.0f && y1 >= 70.0f)
+        return CinematicEdgeCandidate::Lower;
+    return CinematicEdgeCandidate::None;
+}
+
 inline bool remove_black_frame(bool remove_dialogue_backgrounds,
                                bool remove_cinematic_bars,
                                bool verified_frame_producer,

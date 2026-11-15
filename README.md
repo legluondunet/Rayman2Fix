@@ -568,6 +568,18 @@ combined key is removed. Existing INIs retain unrelated settings,
 comments, BOM and line-ending format. Both new options are independent
 of `SkipCinematics`, aspect ratio, and one another.
 
+With `RemoveCinematicBars=1` and `[Debug] Log=1`, the experimental
+build also records **read-only, bounded** diagnostics in the existing
+`Rayman2Fix.log`: `RUNTIME-CINEMATIC-SOURCE` for broad GLI edge-shaped
+quads (including unverified 2D routes), and `RUNTIME-GLIDE:
+CINEMATIC-CLIP`, `CINEMATIC-PASSTHRU` and
+`CINEMATIC-CLIP-SUMMARY` for GameFrame's clip-window and 2D passthrough
+transitions. These events do not identify a black fill or movie by
+themselves. They help distinguish a missed native frame from a clipped
+viewport or a separate video path. Only previously classified,
+SHA-locked native GLI frame quads can be suppressed; the diagnostic
+does not erase new geometry or modify Glide state.
+
 These are maximum frame rates, not guaranteed measured FPS: actual performance
 may be lower. Very high limits may affect classic-game timing and require
 in-game testing; 60 is the default setting to validate on real hardware.

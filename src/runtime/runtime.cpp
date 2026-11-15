@@ -196,6 +196,9 @@ bool g_remove_dialogue_backgrounds = false;
 bool g_remove_cinematic_bars = false;
 std::atomic<unsigned> g_hidden_dialogue_frames{0};
 std::atomic<unsigned> g_hidden_cinematic_bars{0};
+// Two passive samples per route/edge/time phase; no change to render output.
+std::atomic<unsigned> g_cinematic_edge_counts[4][2]{};
+std::atomic<unsigned> g_cinematic_edge_examples[16]{};
 std::atomic<void*> g_plain_sprite_original{nullptr};
 std::atomic<void*> g_uv_sprite_original{nullptr};
 std::atomic<void*> g_color_sprite_original{nullptr};
@@ -3132,6 +3135,37 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     record_bottom_2d_geometry(route,xmin,ymin,xmax,ymax);
     if(route==0u)
         probe_native_glyph_after_frame(xmin,ymin,xmax,ymax);
+    // Observe GLI edge shapes from all non-glyph producers, not only the
+    // Frame source that the opt-in suppression actually authorizes.
+    // Geometry is NOT proof of a black material or a cutscene.
+    if(g_remove_cinematic_bars &&
+       producer!=Native2DProducer::Glyph) {
+        const auto edge=r2fix::cinematic_edge_candidate(xmin,ymin,xmax,ymax);
+        const auto known=r2fix::black_frame_kind(xmin,ymin,xmax,ymax);
+        if(edge!=r2fix::CinematicEdgeCandidate::None &&
+           known!=r2fix::BlackFrameKind::DialogueBackdrop) {
+            const unsigned band=edge==r2fix::CinematicEdgeCandidate::Upper ? 0u : 1u;
+            g_cinematic_edge_counts[route][band].fetch_add(
+                1,std::memory_order_relaxed);
+            const DWORD started=g_native_2d_probe_start_ms.load(
+                std::memory_order_relaxed);
+            const bool later=started && GetTickCount()-started>=25000;
+            const unsigned index=route*2u+band+(later ? 8u:0u);
+            const unsigned sample=g_cinematic_edge_examples[index].fetch_add(
+                1,std::memory_order_relaxed);
+            if(sample<2u) {
+                const char* names[4]={"glyph","screen-image","frame","other"};
+                char message[280]{};
+                std::snprintf(message,sizeof(message),
+                    "RUNTIME-CINEMATIC-SOURCE: phase=%s route=%s edge=%s sample=%u x=%.2f..%.2f y=%.2f..%.2f kind=%u (read-only; material and cinematic ownership unknown)",
+                    later?"after25s":"before25s",names[route],
+                    band==0u?"upper":"lower",sample+1u,
+                    double(xmin),double(xmax),double(ymin),double(ymax),
+                    unsigned(known));
+                log_line(message);
+            }
+        }
+    }
     // Opt-in only. The EXACT approved native return site distinguishes
     // GLI_vDisplayFrame from font glyphs, UI images and world sprites.
     // Discard the selected source quad BEFORE the downstream draw; leave
