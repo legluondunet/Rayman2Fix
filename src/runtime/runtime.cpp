@@ -1707,6 +1707,10 @@ struct ProtoAdpcmVoiceSnapshot {
     int pause=-1;
     int active=-1;
     int other_gate=-1;
+    // Native APMMX mode-0/mode-1 global buffer-output positions.
+    // Neither is a per-voice stream epoch or a music-only counter.
+    DWORD mode0_output=0;
+    DWORD mode1_output=0;
 };
 ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {
     ProtoAdpcmVoiceSnapshot out{};
@@ -1778,7 +1782,10 @@ ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {
     const auto record_address=std::uintptr_t(record);
     DWORD recorded_handle=0,pause=0,active=0,other=0;
     DWORD record_after=0,count_after=0,pause_after=0,active_after=0;
-    if(!read(reinterpret_cast<const void*>(record_address+0xD4u),
+    DWORD mode0_output=0,mode1_output=0;
+    if(!read(apm+0xE82A0u,&mode0_output,sizeof(mode0_output)) ||
+       !read(apm+0x24ED0u,&mode1_output,sizeof(mode1_output)) ||
+       !read(reinterpret_cast<const void*>(record_address+0xD4u),
              &recorded_handle,sizeof(recorded_handle)) ||
        recorded_handle!=handle ||
        !read(reinterpret_cast<const void*>(record_address+0x1Cu),
@@ -1803,6 +1810,8 @@ ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {
     out.pause=pause==0u ? 0 : (pause==1u ? 1 : 2);
     out.active=active==0u ? 0 : (active==1u ? 1 : 2);
     out.other_gate=other==0u ? 0 : 1;
+    out.mode0_output=mode0_output;
+    out.mode1_output=mode1_output;
     return out;
 }
 void __cdecl proto_script_pause() {
@@ -2074,13 +2083,16 @@ void proto_flush_predriver_resume_report() {
     std::snprintf(voice_line,sizeof(voice_line),
         "RUNTIME-ESC-ADPCM-RESUME: t_ms=%lu paired=%u "
         "sampled=%d voice_index=%d paused=%d active=%d "
-        "other_gate=%d transition_type=%d snapshot=post-native-resume "
+        "other_gate=%d transition_type=%d "
+        "mode0_output=%lu mode1_output=%lu snapshot=post-native-resume "
         "(render-thread read-only, no native TestIsPlaying; "
         "no raw pointers; ABA not excluded; no audio authorization)",
         static_cast<unsigned long>(report.t_ms),
         unsigned(report.lifetime_paired),adpcm_voice.sampled,
         adpcm_voice.voice_index,adpcm_voice.pause,adpcm_voice.active,
-        adpcm_voice.other_gate,transition_type);
+        adpcm_voice.other_gate,transition_type,
+        static_cast<unsigned long>(adpcm_voice.mode0_output),
+        static_cast<unsigned long>(adpcm_voice.mode1_output));
     log_line(voice_line);
 }
 // Focus is a Win32/Wine activation event, not necessarily visible to
@@ -2539,13 +2551,15 @@ void proto_menu_tick() {
         std::snprintf(adpcm_line,sizeof(adpcm_line),
             "RUNTIME-ESC-ADPCM-VOICE: t_ms=%lu sampled=%d voice_index=%d "
             "paused=%d active=%d other_gate=%d transition_type=%d "
-            "snapshot=post-dispatch "
+            "mode0_output=%lu mode1_output=%lu snapshot=post-dispatch "
             "(original 1999 WAVMW/APMMX only; post-compensation read-only; "
             "no raw pointers; no audio authorization; ABA not excluded)",
             static_cast<unsigned long>(report.t_ms),
             adpcm_voice.sampled,adpcm_voice.voice_index,
             adpcm_voice.pause,adpcm_voice.active,adpcm_voice.other_gate,
-            report.transition_type_post_pause);
+            report.transition_type_post_pause,
+            static_cast<unsigned long>(adpcm_voice.mode0_output),
+            static_cast<unsigned long>(adpcm_voice.mode1_output));
         log_line(adpcm_line);
         // Read-only source-window audit. Snapshot the global native Play
         // and Stop call counts before/after the script wrapper and at the
