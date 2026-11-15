@@ -1,3 +1,9 @@
+## Sharper Rayman 2 introduction logo — experimental
+
+The original PC CD loads the opening title as eighteen 32×32 format-12 alpha-textured pieces. The exact eighteen source fingerprints were identified from the user's own captured GameFrame textures. Only those fingerprints receive a 4× premultiplied-RGBA bicubic interpolation inside GameFrame, just before the GPU upload. Original UVs, game texture resolution, alpha/transparency, animations, sprites, HUD, world geometry and cinematics stay unchanged. All mip levels of a recognized texture receive the same scale; unknown textures use their exact old upload path.
+
+No bitmap assets are embedded in this executable or source repository. This procedure reduces visible source pixelation, but does not recreate original art detail not present on the CD. It must be verified visually in Wine before the draft pull request can be merged. When active, the runtime log includes an INTRO-LOGO-UPSCALER entry for each recognized source fingerprint (maximum 18). No INI option was added.
+
 ## Music in the Escape pause menu — research build
 
 Requested future setting: `[Features] MusicInPauseMenu=0` (disabled by

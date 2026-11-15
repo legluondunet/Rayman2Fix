@@ -49,6 +49,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Pinned GameFrame color-path diagnostic patch failed' }
           python tools/gameframe/apply_loading_image_fix.py third_party/game-frame
           if ($LASTEXITCODE -ne 0) { throw 'Pinned GameFrame loading image correction failed' }
+          python tools/gameframe/apply_intro_logo_upscale.py third_party/game-frame
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned GameFrame title interpolation failed' }
           $env:RUSTFLAGS = "-C link-arg=/DEF:$def"
           cargo build -p glide --release --target i686-pc-windows-msvc --manifest-path $manifest
           if ($LASTEXITCODE -ne 0) { throw 'GameFrame x86 compilation failed' }
@@ -443,6 +445,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test pinned GameFrame limiter source integration
         run: python3 -m unittest discover -s tests -p 'test_fps_limit_patch.py'
+      - name: Verify original logo signature guard and interpolation patch
+        run: python3 -m unittest discover -s tests -p 'test_intro_logo_upscale_patch.py'
       - name: Verify Learn_10 safe fallback
         run: python3 -m unittest discover -s tests -p 'test_learn10_readonly.py'
       - name: Verify audio research trace stays out of normal builds
