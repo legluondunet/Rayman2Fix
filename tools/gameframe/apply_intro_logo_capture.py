@@ -17,15 +17,23 @@ use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 const MAX_DIMENSION: usize = 512;
 const MAX_CANDIDATES: usize = 96;
 const MAX_CAPTURE_BYTES: usize = 48 * 1024 * 1024;
+// Fixed 64x64 thumbnails of non-gold tiles broaden the capture to
+// translucent masks and other materials without flooding the disk.
+// A separate quota per time band ensures late logo tiles remain visible.
+const THUMB_SIDE: usize = 64;
+const MAX_THUMBNAILS_PER_PHASE: usize = 96;
 
 #[derive(Default)]
 struct Capture {
     hashes: HashSet<u64>,
     bytes: usize,
+    thumbnails: [usize; 4],
+    preview_hashes: HashSet<u64>,
 }
 
 fn enabled() -> bool {
@@ -62,6 +70,12 @@ fn gold_pixels(w: usize, h: usize, rgba: &[u8]) -> usize {
     }).count()
 }
 
+fn phase() -> usize {
+    static START: OnceLock<Instant> = OnceLock::new();
+    let elapsed=START.get_or_init(Instant::now).elapsed().as_secs();
+    match elapsed { 0..=19=>0,20..=59=>1,60..=119=>2,_=>3 }
+}
+
 fn fnv64(rgba: &[u8]) -> u64 {
     let mut result: u64 = 0xcbf29ce484222325;
     for &b in rgba {
@@ -93,34 +107,71 @@ fn write_bmp(path: &std::path::Path, w: usize, h: usize, rgba: &[u8]) -> std::io
     fs::write(path, bytes)
 }
 
+fn thumbnail(w: usize,h: usize,rgba: &[u8]) -> Vec<u8> {
+    let mut result=vec![0u8;THUMB_SIDE*THUMB_SIDE*4];
+    for y in 0..THUMB_SIDE {
+        let sy=y*h/THUMB_SIDE;
+        for x in 0..THUMB_SIDE {
+            let sx=x*w/THUMB_SIDE;
+            let offset=(sy*w+sx)*4;
+            let to=(y*THUMB_SIDE+x)*4;
+            result[to..to+4].copy_from_slice(&rgba[offset..offset+4]);
+        }
+    }
+    result
+}
+
 /// Called only after GameFrame's original texel decoder succeeded on
 /// the largest mip level. No pixel is modified, read across threads,
 /// or ever replaced at the OpenGL API boundary.
 pub fn inspect(w: usize, h: usize, format: u32, rgba: &[u8]) {
-    if !enabled() { return; }
-    let gold = gold_pixels(w,h,rgba);
-    if gold < 32 || gold * 100 < w * h { return; }
-    let hash = fnv64(rgba);
-    static STATE: OnceLock<Mutex<Capture>> = OnceLock::new();
-    let state = STATE.get_or_init(|| Mutex::new(Capture::default()));
-    let Ok(mut state) = state.lock() else { return };
-    if state.hashes.contains(&hash) || state.hashes.len() >= MAX_CANDIDATES
-       || state.bytes.saturating_add(rgba.len()) > MAX_CAPTURE_BYTES {
-        return;
+    if !enabled() || w<16 || h<16 || w>MAX_DIMENSION || h>MAX_DIMENSION ||
+       rgba.len()!=w*h*4 { return; }
+    let gold=gold_pixels(w,h,rgba);
+    let is_gold=gold>=32 && gold*100>=w*h;
+    let hash=fnv64(rgba);
+    let phase=phase();
+    static STATE: OnceLock<Mutex<Capture>>=OnceLock::new();
+    let state=STATE.get_or_init(|| Mutex::new(Capture::default()));
+    let Ok(mut state)=state.lock() else { return };
+    let gold_write=is_gold && !state.hashes.contains(&hash) &&
+        state.hashes.len()<MAX_CANDIDATES &&
+        state.bytes.saturating_add(rgba.len())<=MAX_CAPTURE_BYTES;
+    let preview_write=!state.preview_hashes.contains(&hash) &&
+        state.thumbnails[phase]<MAX_THUMBNAILS_PER_PHASE;
+    if !gold_write && !preview_write { return; }
+    let mut n=0;
+    let mut preview_n=0;
+    if gold_write {
+        state.hashes.insert(hash);
+        state.bytes+=rgba.len();
+        n=state.hashes.len();
     }
-    state.hashes.insert(hash);
-    state.bytes+=rgba.len();
-    let n = state.hashes.len();
+    if preview_write {
+        state.preview_hashes.insert(hash);
+        state.thumbnails[phase]+=1;
+        preview_n=state.thumbnails[phase];
+    }
     drop(state);
-    let Some(base) = parent() else { return };
-    let folder = base.join("Rayman2Fix_logo_capture");
+    let Some(base)=parent() else { return };
+    let folder=base.join("Rayman2Fix_logo_capture");
     if fs::create_dir_all(&folder).is_err() { return; }
-    let file = format!("tile_{n:03}_{w}x{h}_fmt{format}_{hash:016x}.bmp");
-    if write_bmp(&folder.join(&file),w,h,rgba).is_ok() {
-        if n == 1 {
-            log("opt-in texture sampling active; candidate BMPs are ORIGINAL copyrighted game pixels, not replacements");
+    if gold_write {
+        let file=format!("tile_{n:03}_{w}x{h}_fmt{format}_{hash:016x}.bmp");
+        if write_bmp(&folder.join(&file),w,h,rgba).is_ok() {
+            if n==1 {
+                log("capture enabled: source gold tiles and sampled non-gold thumbnails; NO texture replacement");
+            }
+            log(&format!("candidate={n} size={w}x{h} format={format} gold_pixels={gold} fnv64={hash:016x} file={file} (read-only; tile identity unknown)"));
         }
-        log(&format!("candidate={n} size={w}x{h} format={format} gold_pixels={gold} fnv64={hash:016x} file={file} (read-only; tile identity unknown)"));
+    }
+    if preview_write {
+        let file=format!("preview_p{phase}_{preview_n:03}_{w}x{h}_fmt{format}_{hash:016x}.bmp");
+        let pixels=thumbnail(w,h,rgba);
+        if write_bmp(&folder.join(&file),THUMB_SIDE,THUMB_SIDE,&pixels).is_ok() &&
+           preview_n==1 {
+            log(&format!("preview_phase={phase} capture first of {MAX_THUMBNAILS_PER_PHASE} allowed images; thumbnails are identification aids only"));
+        }
     }
 }
 
@@ -136,6 +187,9 @@ mod tests {
         let alpha_zero = vec![255u8,190u8,20u8,0u8].repeat(32*32);
         assert_eq!(gold_pixels(32,32,&alpha_zero),0);
         assert_eq!(gold_pixels(1,1024,&gold),0);
+        let scaled=thumbnail(32,32,&gold);
+        assert_eq!(scaled.len(),THUMB_SIDE*THUMB_SIDE*4);
+        assert_eq!(&scaled[..4],&gold[..4]);
     }
     #[test]
     fn bmp_header_and_rgb_to_bgr_are_stable() {

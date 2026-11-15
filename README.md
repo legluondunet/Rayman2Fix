@@ -15,8 +15,12 @@ RAYMAN2FIX_LOGO_CAPTURE=1 wine Rayman2Fix.exe
 ```
 
 GameFrame scans the already-decoded largest level of textures (16–512
-pixels, at most 96 unique gold-hued candidates and 48 MiB total) and
-writes original user-owned BMP source tiles under
+pixels, at most 96 unique gold-hued full-resolution candidates and 48 MiB
+of original texture data). It also records up to **96 tiny 64×64
+thumbnails in each of four elapsed time bands**, even for nongold
+textures, so white transparency masks are not overlooked. Sampling
+phases avoid exhausting the budget before the logo appears. Both sorts
+of user-owned BMP files are written under
 `Rayman2Fix_logo_capture/` beside `Rayman2Fix.log`. The log records
 `RUNTIME-GLIDE: LOGO-CAPTURE` candidate names, dimensions, formats and
 pixel hashes, never memory addresses. Only candidate tiles are captured;
