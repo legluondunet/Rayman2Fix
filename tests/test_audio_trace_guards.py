@@ -510,6 +510,37 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertLess(tick.index("proto_deferred_safety();"),
                         tick.index("log_adpcm_delegate_origins_readonly();"))
 
+    def test_five_adpcm_export_entry_fingerprints_are_read_only_and_fail_closed(self):
+        body=self.runtime.split(
+            "void log_adpcm_delegate_origins_readonly() {",1)[1].split(
+            "// Owner's exact CD executable",1)[0]
+        for token in (
+            "constexpr unsigned owner_rvas[5]",
+            "0x54C0u,0x54D0u,0x54E0u,0x5150u,0x51A0u",
+            "constexpr BYTE owner_entry[5][16]",
+            'L"APMMXbvr.dll"',
+            "target_rva==owner_rvas[i]",
+            "original_nt.FileHeader.TimeDateStamp==0x38076F98u",
+            "original_nt.OptionalHeader.SizeOfImage==0xEE000u",
+            "original_dos.e_lfanew<0x1000",
+            "read(owner_base+owner_rvas[i],actual_entry,sizeof(actual_entry))",
+            "std::memcmp(actual_entry,owner_entry[i],sizeof(actual_entry))==0",
+            "original_entry_fingerprint=%u",
+            "NOT full SHA",
+            "pointer is not invocation",
+        ):
+            self.assertIn(token,body)
+        self.assertIn("bool owner_fingerprint=false;",body)
+        self.assertIn("owner_fingerprint=true;",body)
+        self.assertLess(body.index("target_rva==owner_rvas[i]"),
+                        body.index("owner_fingerprint=true;"))
+        self.assertNotIn("GetProcAddress(",body)
+        self.assertNotIn("LoadLibrary",body)
+        self.assertNotIn("VirtualProtect(",body)
+        self.assertNotIn("WriteProcessMemory(",body)
+        self.assertNotIn("proto_dispatch(",body)
+        self.assertNotIn("original(",body)
+
     def test_adpcm_query_delegate_readout_has_no_new_native_side_effects(self):
         body=self.runtime.split("void log_adpcm_delegate_origins_readonly() {",1)[1].split(
             "// Owner's exact CD executable",1)[0]
