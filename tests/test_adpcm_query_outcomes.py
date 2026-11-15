@@ -14,9 +14,15 @@ from test_adpcm_lock_routes import FakeOwnerPE, FakeWavPE
 class SyntheticQueryApmPE(FakeOwnerPE):
     def __init__(self, raw):
         super().__init__(raw)
-        for rva, hex_bytes in A.APMMX_GATES.values():
+        for rva, hex_bytes in tuple(A.APMMX_GATES.values()) + tuple(A.APMMX_POSITION_SITES.values()):
             data = bytes.fromhex(hex_bytes)
             self.text[rva-0x1000:rva-0x1000+len(data)] = data
+
+    def exports(self):
+        return {
+            '_SND_fn_bTestIsPlayingSxdADPCM@4': 0x5150,
+            '_SND_fn_rGetPosSxdADPCM@4': 0x51A0,
+        }
 
 
 class SyntheticQueryWavPE(FakeWavPE):
@@ -46,6 +52,14 @@ class OriginalQueryGuardTests(unittest.TestCase):
         self.assertTrue(info['false_outcome_can_skip_apmmx_callback'])
         self.assertFalse(info['false_outcome_proves_completed_retirement'])
         self.assertFalse(info['permission_to_modify_audio'])
+        pos = info['getpos_side_effect']
+        self.assertEqual(pos['opcode_windows_verified'], 12)
+        self.assertEqual(pos['direct_call_edges_verified'], 3)
+        self.assertEqual(pos['conditional_branches_verified'], 2)
+        self.assertTrue(pos['getpos_is_not_guaranteed_pure'])
+        self.assertFalse(pos['getpos_called_during_owners_esc_log_proven'])
+        self.assertFalse(pos['completed_driver_retirement_proven'])
+
 
     def test_unknown_version_refused(self):
         with self.assertRaisesRegex(A.PEFormatError, 'SHA-256 mismatch'):
@@ -154,6 +168,87 @@ class OriginalQueryGuardTests(unittest.TestCase):
         for case in cases:
             with self.subTest(case=case):
                 self.assertFalse(A.model(**case).verified_physical_retirement)
+
+
+    def test_position_getter_conditional_write_does_not_imply_retirement(self):
+        x = A.model_position(active_before=True, gate_dc_nonzero=True,
+                             fpu_comparison_skips=False)
+        self.assertFalse(x.active_after)
+        self.assertTrue(x.active_flag_cleared)
+        self.assertFalse(x.native_retirement_proven)
+
+    def test_position_getter_gate_zero_skips_inactivation(self):
+        x = A.model_position(active_before=True, gate_dc_nonzero=False,
+                             fpu_comparison_skips=False)
+        self.assertTrue(x.active_after)
+        self.assertFalse(x.active_flag_cleared)
+
+    def test_position_getter_fpu_status_can_skip_inactivation(self):
+        x = A.model_position(active_before=True, gate_dc_nonzero=True,
+                             fpu_comparison_skips=True)
+        self.assertTrue(x.active_after)
+        self.assertFalse(x.active_flag_cleared)
+
+    def test_position_getter_already_inactive_is_not_new_retirement(self):
+        x = A.model_position(active_before=False, gate_dc_nonzero=True,
+                             fpu_comparison_skips=False)
+        self.assertFalse(x.active_after)
+        self.assertFalse(x.active_flag_cleared)
+        self.assertFalse(x.native_retirement_proven)
+
+    def test_position_getter_missing_branch_evidence_fails_closed(self):
+        for before, dc, fpu in ((1, True, False), (True, None, False),
+                                (True, True, None), (True, True, 0)):
+            with self.subTest(values=(before, dc, fpu)):
+                with self.assertRaises(ValueError):
+                    A.model_position(active_before=before,
+                                     gate_dc_nonzero=dc,
+                                     fpu_comparison_skips=fpu)
+
+    def test_position_getter_rejects_modified_writer(self):
+        class BadApm(SyntheticQueryApmPE):
+            def __init__(self, raw):
+                super().__init__(raw)
+                self.text[0x2446-0x1000] = 0x90
+        with self.assertRaisesRegex(A.PEFormatError, 'reader_inactive_write'):
+            A.audit_position_getter(BadApm(b'synthetic-only'))
+
+    def test_position_getter_rejects_modified_direct_call(self):
+        class BadApm(SyntheticQueryApmPE):
+            def __init__(self, raw):
+                super().__init__(raw)
+                self.text[0x2A20-0x1000+1] = 0
+        with self.assertRaisesRegex(A.PEFormatError, 'getpos_calls_reader|direct-call'):
+            A.audit_position_getter(BadApm(b'synthetic-only'))
+
+    def test_position_getter_rejects_modified_branch(self):
+        class BadApm(SyntheticQueryApmPE):
+            def __init__(self, raw):
+                super().__init__(raw)
+                # Branch must continue to skip the write when +0xDC=0.
+                self.text[0x240B-0x1000+1] = 0x3B
+        with self.assertRaisesRegex(A.PEFormatError, 'reader_condition_dc|conditional-branch'):
+            A.audit_position_getter(BadApm(b'synthetic-only'))
+
+    def test_position_getter_rejects_unexpected_export(self):
+        class BadApm(SyntheticQueryApmPE):
+            def exports(self):
+                return {'_SND_fn_rGetPosSxdADPCM@4': 0x5200}
+        with self.assertRaisesRegex(A.PEFormatError, 'GetPosSxd export mismatch'):
+            A.audit_position_getter(BadApm(b'synthetic-only'))
+
+    def test_position_getter_has_no_native_stop_or_play_invocation(self):
+        import inspect
+        src = inspect.getsource(A.audit_position_getter)
+        self.assertNotIn('TestIsPlayingSxd(', src)
+        self.assertNotIn('StopTransitionSxd(', src)
+        self.assertNotIn('ResumeTransitionSxd(', src)
+        self.assertNotIn('WriteProcessMemory(', src)
+        self.assertEqual(A.APMMX_POSITION_EDGES['getpos_export_to_core'],
+                         (0x51A5, 0x2A00))
+        self.assertEqual(A.APMMX_POSITION_EDGES['getpos_core_to_reader'],
+                         (0x2A20, 0x2320))
+
 
 
 if __name__ == '__main__':
