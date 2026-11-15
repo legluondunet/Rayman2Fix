@@ -2070,25 +2070,41 @@ void proto_flush_predriver_resume_report() {
     // native resume callback, after its wrapper and outside all audio
     // callbacks, on the render thread only. The pointer is never
     // persisted; a new allocation may still alias the same pool slot.
-    const bool unique_resume=report.lifetime_paired &&
-        probe.resume_count==2u && probe.unrelated_slots==0u &&
-        probe.other_handle_count==0u;
-    const int transition_type=unique_resume ?
+    // The ORIGINAL script-resume wrapper restarts ordinary sound
+    // effects as well as exactly two calls to the same music transition.
+    // The old unrelated_slots==0 filter rejected *every* real owner
+    // close (5-20 ordinary resumes) despite a valid same-handle pair.
+    // Ignore unrelated SOUND slots for observation only. Still refuse
+    // changed/unknown SXD streams, Play/Stop deltas, mismatched handles,
+    // incomplete callbacks and overlapping/non-paired script intervals.
+    // This gate never authorizes a native Pause/Resume/Stop command.
+    const bool source_pair=report.lifetime_paired &&
+        !report.lifetime_overlap && report.sxd_baseline_valid &&
+        report.sxd_changes==0u && report.sxd_unknown==0u &&
+        probe.resume_count==2u && probe.other_handle_count==0u &&
+        probe.callback_count==probe.resume_count+probe.unrelated_slots &&
+        probe.forwarded_count+probe.suppressed_count==2u &&
+        probe.first_handle>=0x10000u &&
+        probe.first_handle!=0xffffffffu &&
+        report.play_between==0u && report.stop_between==0u &&
+        report.play_during_resume==0u && report.stop_during_resume==0u;
+    const int transition_type=source_pair ?
         proto_read_transition_type_post_wrapper(probe.first_handle) : -1;
     const ProtoAdpcmVoiceSnapshot adpcm_voice=
-        unique_resume && transition_type==4 ?
+        source_pair && transition_type==4 ?
         proto_sample_adpcm_voice_after_dispatch(probe.first_handle) :
         ProtoAdpcmVoiceSnapshot{};
     char voice_line[480]{};
     std::snprintf(voice_line,sizeof(voice_line),
-        "RUNTIME-ESC-ADPCM-RESUME: t_ms=%lu paired=%u "
+        "RUNTIME-ESC-ADPCM-RESUME: t_ms=%lu paired=%u gate=%u "
         "sampled=%d voice_index=%d paused=%d active=%d "
         "other_gate=%d transition_type=%d "
         "mode0_output=%lu mode1_output=%lu snapshot=post-native-resume "
         "(render-thread read-only, no native TestIsPlaying; "
         "no raw pointers; ABA not excluded; no audio authorization)",
         static_cast<unsigned long>(report.t_ms),
-        unsigned(report.lifetime_paired),adpcm_voice.sampled,
+        unsigned(report.lifetime_paired),unsigned(source_pair),
+        adpcm_voice.sampled,
         adpcm_voice.voice_index,adpcm_voice.pause,adpcm_voice.active,
         adpcm_voice.other_gate,transition_type,
         static_cast<unsigned long>(adpcm_voice.mode0_output),
