@@ -31,9 +31,9 @@ class SyntheticVerifiedPE:
 
 class AdpcmHandleLifetimeTests(unittest.TestCase):
     def test_exact_original_static_sites_cover_all_three_alias_paths(self):
-        self.assertEqual(len(A.SITES),16)
-        self.assertEqual(len({name for name,_,_ in A.SITES}),16)
-        self.assertEqual(len({rva for _,rva,_ in A.SITES}),16)
+        self.assertEqual(len(A.SITES),22)
+        self.assertEqual(len({name for name,_,_ in A.SITES}),22)
+        self.assertEqual(len({rva for _,rva,_ in A.SITES}),22)
         names={name for name,_,_ in A.SITES}
         for required in ("recycle_existing_record_handle",
                          "first_free_handle_table",
@@ -41,7 +41,12 @@ class AdpcmHandleLifetimeTests(unittest.TestCase):
                          "rebase_moved_record_pointer_by_0xe4",
                          "record_becomes_inactive",
                          "record_backref_to_handle",
-                         "compact_record_array"):
+                         "compact_record_array",
+                         "active_transition_calls_retirement",
+                         "inactive_cleanup_calls_retirement",
+                         "other_native_stop_calls_retirement",
+                         "nested_record_init_call_one",
+                         "nested_record_init_call_two"):
             self.assertIn(required,names)
 
     def test_wrong_hash_prevents_any_version_dependent_code_read(self):
@@ -55,7 +60,7 @@ class AdpcmHandleLifetimeTests(unittest.TestCase):
         checksum=hashlib.sha256(data).hexdigest()
         with patch.object(A,"PE32",SyntheticVerifiedPE):
             report=A.static_audit(data,expected_sha256=checksum)
-        self.assertEqual(report["original_sites_verified"],16)
+        self.assertEqual(report["original_sites_verified"],22)
         self.assertEqual(report["max_handle_slots"],30)
         self.assertEqual(report["record_stride_bytes"],0xE4)
         self.assertFalse(report["permission_to_change_original_audio"])
