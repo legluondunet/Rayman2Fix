@@ -1173,3 +1173,53 @@ original Stop/Play counters and five-pointer snapshots are
 insufficient, not that the missing retirement actually
 occurred. PR #10 remains draft; no physical driver
 compensation bypass is authorized.
+
+### Exact WAVMW type-4 SetParam dispatch and outer SXD cleanup
+
+The SHA-256-pinned owner-provided `WAVMWbvr.dll` does not
+merely resolve these two APMMX names: the real type-4
+game-facing exports enter the matching dynamic callbacks.
+
+For ordinary `_SND_fn_bSetParamSxd@8` at WAVMW
+RVA `0xB7F0`, a type-4 sound object takes the conditional
+branch `0xB805 -> 0xB817`, calls the helper
+`0xB827 -> 0x7AF0`, and dispatches via callback
+table slot `[ebp+0x34]` at `0x7B16`.
+The original nine-function table has exactly the
+`0x33E0` thunk in that slot (`0xBF77`).
+This thunk invokes the dynamically resolved original
+APMMX SetParam callback through `[0x100269FC]`
+at `0x33F9`. If the WAVMW call returns **false**,
+the caller can additionally unlink the **outer WAVMW SXD**
+node via `0xB87F -> 0xB630`, without an exported Stop.
+
+For `_SND_fn_bSetParamTransitionSxd@8` at
+WAVMW RVA `0xC5D0`, the type-4 branch
+`0xC5E3 -> 0xC5FA` enters the
+`0xC603 -> 0x3B30` dynamic trampoline.
+The thunk at `0x3B49` invokes the original
+`[0x10026A88]` APMMX SetParamTransition callback.
+This type-4 branch does **not** have the
+same WAVMW outer-list cleanup evidenced in the
+ordinary SetParam caller; do not generalize it.
+
+Both resolver symbols, pointer publications, fallback
+functions, both public exports, type-4 branches,
+indirect callback sites, and the conditional outer
+cleanup are now checked by
+`audit_wavmw_setparam_bridge()` inside
+`tools/audit_adpcm_query_outcomes.py`. This adds
+**19 WAVMW exact opcode windows, five rel32 call
+edges, two conditional branches** and six synthetic
+negative/positive tests. The larger
+`test_adpcm_query_outcomes.py` suite now contains
+**39** synthetic cases.
+
+This establishes a complete *possible* game-facing
+path `WAVMW SetParam -> APMMX SetParam -> internal
+inactive record retire`, with possible secondary
+WAVMW outer SXD unlink. It does **not** show that
+the game issued such a parameter operation during
+the first Escape, nor identify the retired voice.
+The experimental seven-pointer log probe observes
+bindings only, never calls setters itself.
