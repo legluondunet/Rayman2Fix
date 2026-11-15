@@ -2248,3 +2248,128 @@ native lifetime safety, and the effect of
 leaving the original native Resume path
 unchanged on both Wine and Windows. Existing
 PR #10 remains draft.
+
+## 26. Exact original ESC script enumerates all source Pause candidates before dispatch
+
+A separate exact-hash check of the original
+`Rayman2(3).exe` (owner CD original, SHA-256
+`7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`)
+clarifies **where** a future safe, source-qualified
+pre-dispatch check might be placed.
+
+### Source-side Pause enumeration
+
+The original ESC script wrapper at `0x4536D0`
+calls `0x4580B0` from `0x4536ED`.
+The latter walks exactly **64** original
+game-audio table entries, each **0x20 bytes**,
+beginning at VA **`0x4B8C98`**:
+
+```text
+original global source Pause scan (0x4580B0)
+  candidate source = 0x4B8C98 + 0x20 * i, i = 0..63
+  field +0x14 != 0                  [0x4580BC] active slot
+  field +0x08 == 0                  [0x4580C3] not excluded
+  field +0x1C == 0                  [0x4580CA] unpaused by source
+  field +0x1C = old global depth    [0x4580D4]
+  if field +0x10 != 0:
+      0x4580E1 -> 0x4584A0          original transition Pause
+  else:
+      0x4580EF -> 0x458070          original ordinary Pause
+  i++; repeat 64 [0x4580F4]
+  global depth++ [0x458100]
+```
+
+The symmetric original ESC Resume wrapper
+`0x453700 → 0x458110` first decrements
+the **original global pause depth**. It walks
+the same 64 table entries and checks
+`+0x14`, `+0x08`, and the recorded
+`+0x1C` depth eligibility; qualified
+entries have their source `+0x1C=0` reset,
+then route via transition `0x458470` or
+ordinary `0x458090`.
+
+**Important distinction:** source table
+`+0x1C` is the **game's source pause-depth
+stamp**. APMMX native ADPCM
+`record+0x1C` is the **separate driver
+voice pause bit** established in section 25.
+They occupy numerically identical offsets
+but are in different structures and
+must never be conflated.
+
+The source-code path proves that a passive
+scan at the **original script entry** can
+predict the number of eligible transition
+and ordinary Pause candidates *at that
+moment*. This is materially more useful
+than discovering that two transition
+callbacks happened only after the original
+Pause wrapper returned.
+
+### What the source-side preflight still cannot guarantee
+
+The original game mutates the global
+source-table `+0x1C` and pause depth
+as it processes the entries. A passive
+preflight would have to prove that:
+both expected transition candidates
+remain valid; their nested original
+WAVMW type-4 sound objects and handles
+have not changed; no unrelated callback
+has interleaved; and the physical
+original ADPCM voice generation remains
+the intended one before the native
+Pause is skipped. The original ADPCM
+30-slot allocator can reuse an in-place
+handle, and source-table identity does
+not eliminate that ABA hazard.
+
+An incorrect decision after the first
+Pause has been skipped but before the
+second would yield a **half-suppressed
+pair**, potentially still pausing the
+music while breaking the expectations
+of the experiment. The source-table
+scan is **not an atomic reservation** of
+future native callbacks or sound
+generations. It cannot authorize a
+runtime skip by itself.
+
+### Reproducible offline source verifier
+
+`tools/audit_original_cd_esc_sound_table.py`
+uses the original SHA and PE metadata to
+verify **14 source-Pause opcode windows,
+12 source-Resume opcode windows and
+eight source-call edges**. Its pure
+`projected_pause()` independently
+models the 64-record input predicates,
+splitting transition and ordinary
+candidates without claiming future
+native handle identity. Ten synthetic
+tests in
+`tests/test_original_cd_esc_sound_table.py`
+reject modified branches, mutated call
+targets, invalid table records, wrong
+versions, incomplete arrays and
+false permission to suppress Pause.
+
+```sh
+python3 tools/audit_original_cd_esc_sound_table.py \
+ 'Rayman2(3).exe' --json
+python3 -m unittest discover -s tests \
+ -p 'test_original_cd_esc_sound_table.py'
+```
+
+**Current decision:** the original source
+script is predictable enough to design a
+*future* fully opted-in, no-deferred-command
+pre-driver experiment. However, neither a
+complete atomic pre-dispatch identity
+witness nor live native generation proof
+exists. Keep current first-ESC class-3
+rejection and all native Pause/Resume
+forwarding unchanged, and keep PR #10
+in draft status.
