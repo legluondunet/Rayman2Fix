@@ -1303,6 +1303,24 @@ a concrete *possible* cross-module callback
 registration route from APMMX into WAVMW rather
 than direct game-side invocation.
 
+The cross-DLL audit can additionally read the original
+SHA-256-pinned `WAVMWbvr.dll`. Its exported
+`_SND_fn_lCreateNewBufferExSxd@16` entry
+is RVA `0xC3F0`. The original WAVMW code checks
+the buffer object's first type field at `0xC3FA`
+and routes the creation through one of two
+internal backends, `0xCB00` or `0xD180`.
+This call-graph link is verified by **seven WAVMW
+opcode windows and two direct-call edges**.
+It confirms that a genuinely exported original
+WAVMW buffer-creation implementation corresponds
+to the name dynamically resolved in APMMX.
+Four additional synthetic regressions guard the
+module SHA, export RVA and backend branches.
+It still does not establish which backend executes
+in a particular owner session or the eventual
+thread that invokes the registered callback.
+
 The audit verifies the resolver name and exact
 fallback, but does not read the **runtime**
 resolved module pointer. It cannot assert whether
@@ -1344,7 +1362,7 @@ opcode windows, ten direct E8 call edges, three
 conditional branch targets**, and the exact original DLL
 SHA-256 and PE metadata, read-only without executing the DLL.
 The separate `tests/test_adpcm_buffer_fill.py` provides
-**16 synthetic regression tests**, covering all zero-flag
+**20 synthetic regression tests**, covering all zero-flag
 gates, alternate branches, missing lock release and
 changed active-flag writer.
 
@@ -1357,7 +1375,8 @@ from 27 to **30**. Neither count is an exhaustive x86
 call graph.
 
 ```sh
-python3 tools/audit_adpcm_buffer_fill.py Rayman2Fix/dll/APMMXbvr.dll --json
+python3 tools/audit_adpcm_buffer_fill.py Rayman2Fix/dll/APMMXbvr.dll \
+  --wavmwbvr Rayman2Fix/dll/WAVMWbvr.dll --json
 python3 -m unittest discover -s tests -p 'test_adpcm_buffer_fill.py'
 python3 -m unittest discover -s tests -p 'test_adpcm_rel32_calls.py'
 ```
