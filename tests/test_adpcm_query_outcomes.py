@@ -28,9 +28,17 @@ class SyntheticQueryApmPE(FakeOwnerPE):
 class SyntheticQueryWavPE(FakeWavPE):
     def __init__(self, raw):
         super().__init__(raw)
-        for rva, hex_bytes in A.WAVMW_GATES.values():
+        for rva, hex_bytes in tuple(A.WAVMW_GATES.values()) + tuple(A.WAVMW_GETPOS_SITES.values()):
             data = bytes.fromhex(hex_bytes)
             self.text[rva:rva+len(data)] = data
+        symbol = b'_SND_fn_rGetPosSxdADPCM@4\0'
+        self.text[0x21608:0x21608+len(symbol)] = symbol
+
+    def exports(self):
+        return {
+            '_SND_fn_bTestIsPlayingSxd@4': 0xB8A0,
+            '_SND_fn_rGetPosSxd@4': 0xBD20,
+        }
 
 
 class OriginalQueryGuardTests(unittest.TestCase):
@@ -59,6 +67,12 @@ class OriginalQueryGuardTests(unittest.TestCase):
         self.assertTrue(pos['getpos_is_not_guaranteed_pure'])
         self.assertFalse(pos['getpos_called_during_owners_esc_log_proven'])
         self.assertFalse(pos['completed_driver_retirement_proven'])
+        bridge = info['wavmw_getpos_bridge']
+        self.assertTrue(bridge['type4_adpcm_dispatch_path_verified'])
+        self.assertEqual(bridge['wavmw_opcode_windows_verified'], 12)
+        self.assertEqual(bridge['wavmw_direct_edges_verified'], 2)
+        self.assertFalse(bridge['getpos_called_during_esc_proven'])
+        self.assertFalse(bridge['runtime_audio_change_authorized'])
 
 
     def test_unknown_version_refused(self):
@@ -248,6 +262,53 @@ class OriginalQueryGuardTests(unittest.TestCase):
                          (0x51A5, 0x2A00))
         self.assertEqual(A.APMMX_POSITION_EDGES['getpos_core_to_reader'],
                          (0x2A20, 0x2320))
+
+
+
+    def test_wavmw_getpos_rejects_changed_dynamic_symbol(self):
+        class BadWav(SyntheticQueryWavPE):
+            def __init__(self, raw):
+                super().__init__(raw)
+                self.text[0x21608] = 0
+        with self.assertRaisesRegex(A.PEFormatError, 'GetPos ADPCM symbol'):
+            A.audit_wavmw_position_bridge(
+                BadWav(b'synthetic-only'), SyntheticQueryApmPE(b'synthetic-only'))
+
+    def test_wavmw_getpos_rejects_changed_type4_branch(self):
+        class BadWav(SyntheticQueryWavPE):
+            def __init__(self, raw):
+                super().__init__(raw)
+                self.text[0xBD31] = 0x11
+        with self.assertRaisesRegex(A.PEFormatError, 'type4_getpos_branch|branch target'):
+            A.audit_wavmw_position_bridge(
+                BadWav(b'synthetic-only'), SyntheticQueryApmPE(b'synthetic-only'))
+
+    def test_wavmw_getpos_rejects_rewired_indirect_callback_slot(self):
+        class BadWav(SyntheticQueryWavPE):
+            def __init__(self, raw):
+                super().__init__(raw)
+                self.text[0x7CE2+2] = 0x44
+        with self.assertRaisesRegex(A.PEFormatError, 'getpos_indirect_callback_slot'):
+            A.audit_wavmw_position_bridge(
+                BadWav(b'synthetic-only'), SyntheticQueryApmPE(b'synthetic-only'))
+
+    def test_wavmw_getpos_rejects_wrong_export(self):
+        class BadWav(SyntheticQueryWavPE):
+            def exports(self):
+                return {'_SND_fn_rGetPosSxd@4': 0xB000}
+        with self.assertRaisesRegex(A.PEFormatError, 'WAVMW GetPosSxd export'):
+            A.audit_wavmw_position_bridge(
+                BadWav(b'synthetic-only'), SyntheticQueryApmPE(b'synthetic-only'))
+
+    def test_wavmw_getpos_type4_edge_and_dynamic_callback_are_not_observation(self):
+        x = A.audit_wavmw_position_bridge(
+            SyntheticQueryWavPE(b'synthetic-only'), SyntheticQueryApmPE(b'synthetic-only'))
+        self.assertEqual(x['dynamic_function_pointer_rva'], '0x26A14')
+        self.assertEqual(x['wavmw_getpos_callback_slot'], '0x40')
+        self.assertEqual(A.WAVMW_GETPOS_EDGES['type4_to_position_helper'],
+                         (0xBD4F, 0x7CD0))
+        self.assertFalse(x['runtime_dynamic_pointer_currently_observed'])
+        self.assertFalse(x['getpos_called_during_esc_proven'])
 
 
 
