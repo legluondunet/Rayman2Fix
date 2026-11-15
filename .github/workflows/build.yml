@@ -458,6 +458,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_adpcm_handle_lifetime.py'
       - name: Verify ADPCM direct retirement and initializer call-site candidates
         run: python3 -m unittest discover -s tests -p 'test_adpcm_rel32_calls.py'
+      - name: Verify original ADPCM audio buffer-fill completion and inactive flag writer
+        run: python3 -m unittest discover -s tests -p 'test_adpcm_buffer_fill.py'
       - name: Verify original ADPCM primary commit vs auxiliary initialization
         run: python3 -m unittest discover -s tests -p 'test_adpcm_primary_epoch.py'
       - name: Verify original ADPCM hidden retire and driver-lock route audits
