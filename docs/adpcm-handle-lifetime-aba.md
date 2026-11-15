@@ -294,3 +294,53 @@ described as exhaustive x86 control-flow proof.
 **Status: NO-GO on activating a new first-ESC bypass.** Native
 Theme/SXD ownership checks and passthrough stay unchanged. No
 proprietary DLL bytes or game executable are committed.
+
+## 8. Primary allocator commit is distinct from a record initializer call (15 November)
+
+A further SHA-256-pinned static audit on the owner's exact original
+`APMMXbvr.dll` inspected **24 opcode anchors and six linked relative
+control-flow edges**. The results refine, but do not lift, the NO-GO
+in section 7:
+
+| Original RVA | Verified effect | Implication for a hypothetical epoch observer |
+| --- | --- | --- |
+| `0x13A0` | Primary allocator entry, consults live count | Do not assume arbitrary nested initialization is a new voice |
+| `0x14A1` / `0x14BE` | First-free handle or inactive-record reuse | The address of a handle alone cannot identify an epoch |
+| `0x14C4` / `0x14CF` | Binds handle, clears the 0xE4-byte target record | Record memory is mutated *before* success is known |
+| `0x14F9` | Calls shared record initializer `0x1FC0` | The initializer itself is **not** a per-voice creation event |
+| `0x1557` / `0x1569` / `0x1572` / `0x1585` | Can allocate/attach a child, switch the record argument and **loop back to 0x14CF** | Even the `0x14F9` call site can execute twice during one allocator invocation |
+| `0x158A` | Error path clears the bound handle | Failed destructive reinitialization must invalidate any previously assumed epoch |
+| `0x1599` / `0x15AD` | Writes output handle and returns zero on success | Better *logical* primary-publication boundary than an initializer call, but not an atomic physical-generation proof |
+| `0x159F` / `0x15A7` | Increments live count only if a primary record was not reused | Successful in-place reuse can change a voice without changing count |
+| `0x21F3` / `0x22A3` | Two additional initializer callers use a validated primary's handle for auxiliary storage | Do not miscount those as new primary voice epochs |
+
+The original `0x1585` jump is a **backward jump** to `0x14CF`.
+The original `0x1503` failure branch targets `0x158A`. Together
+with the child pointer switch and the final handle-output assignment,
+this rules out a naïve `generation++` on any common initializer entry,
+including calls originating at `0x14F9`. It does **not** show a safe
+thread-atomic event stream or prove the game will enter any particular
+path during an early ESC.
+
+A new *synthetic-only* `SyntheticEpochModel` records a conceptual
+generation at a successful primary publication, not on child setup.
+It invalidates on retirement, destructive init failure, or unknown
+lifecycle events, and makes same-address primary reuse replace the
+conceptual generation. No native record has been shown to store this
+counter, and the model cannot authorize a real Pause/Resume/Stop call.
+
+Reproduce on the owner's original DLL **locally**, without distributing
+it or executing it:
+
+```sh
+python3 tools/audit_adpcm_primary_epoch.py Rayman2Fix/dll/APMMXbvr.dll --json
+python3 -m unittest discover -s tests -p 'test_adpcm_primary_epoch.py'
+```
+
+**Current decision:** PR #10 remains draft. Keep the existing strict
+`ref_class=1` and `phase=6` native pass-through protection. Before
+any audio interception, native code must establish complete primary
+creation, retirement, failed/reused creation and synchronization
+coverage **including indirect paths**, plus exact Theme/SXD ownership
+throughout the ESC pair. The tool is read-only and makes no
+runtime-policy change.
