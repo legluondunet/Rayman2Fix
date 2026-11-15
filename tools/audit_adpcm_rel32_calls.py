@@ -19,6 +19,11 @@ from pathlib import Path
 from audit_apmmxbvr import PE32, PEFormatError, OWNER_ORIGINAL_SHA256
 
 EXPECTED = {
+    # The native audio BUFFER-FILL path progresses music and can
+    # mark the same record [+0x28] inactive. It need not be called
+    # through GetPos/TestIsPlaying/Stop exported functions.
+    0x1740: (0x1AD1,),
+    0x18D0: (0x344C, 0x34F2),
     # Original primary voice allocator; both play entry routes.
     0x13A0: (0x27BE, 0x3223),
     # Original retirement: exported Stop and internal cleanup routes.
