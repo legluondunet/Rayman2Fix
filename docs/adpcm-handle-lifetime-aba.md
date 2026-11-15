@@ -189,8 +189,50 @@ python3 tools/audit_adpcm_handle_lifetime.py "Rayman2Fix/dll/APMMXbvr.dll" --jso
 python3 -m unittest discover -s tests -p 'test_adpcm_handle_lifetime.py'
 ```
 
-The SHA-pinned tool checks **16 original instruction fingerprints**,
+The SHA-pinned tool checks **22 original instruction fingerprints**,
 demonstrates the two ABA pathways using explicitly **synthetic**
 track identities, and never loads the original DLL as executable code.
 These are proofs of *possible* aliases from the original code, **not
 claims that a given alias occurred in the user's latest runtime log**.
+
+## 6. Other internal retirement and reinitialization paths
+
+A further exact-original x86 direct-call audit shows that the
+retirement function `0x100015D0` can be reached from **multiple
+independent code paths**, not just the exported
+`StopTransitionSxdADPCM`:
+
+| Direct call address | Called address | Observed context |
+| --- | --- | --- |
+| `0x1000172C` | `0x100015D0` | StopTransition's validated-stop leaf |
+| `0x10001C8D` | `0x100015D0` | transition/fade-related path when the record becomes inactive |
+| `0x10001F68` | `0x100015D0` | inactive-record cleanup when `[record+0x28]=0` |
+| `0x10002950` | `0x100015D0` | another original Stop path, under the original driver critical section |
+
+There are also **two additional calls** to the common
+original `0x10001FC0` record initialization helper:
+
+- `0x100021F3 → 0x10001FC0`
+- `0x100022A3 → 0x10001FC0`
+
+These are associated with nested/secondary record handling,
+including fade/transition operations. They do **not**
+necessarily mean a whole top-level voice was newly created,
+and cannot be treated as such without examining the context.
+However, this confirms that **monitoring only the exported
+PlayTransition and StopTransition functions would not be
+an exhaustive lifecycle observer**.
+
+All six additional call instructions were verified
+byte-for-byte on the owner's exact SHA-pinned DLL.
+The offline tool now verifies **22** original instruction
+sites (rather than 16); the synthetic test suite checks
+the additional fingerprints. Only read-only source
+inspection was performed.
+
+**Strengthened NO-GO:** a future per-voice generation
+observer must cover internal retirement and record
+initialization paths or deliberately refuse to act
+when coverage is incomplete. It must never assume that
+a matching source-scoped ESC pair, Theme target and
+valid ADPCM backlink constitute an unchanging generation.
