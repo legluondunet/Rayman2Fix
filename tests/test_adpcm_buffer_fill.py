@@ -20,7 +20,7 @@ class SyntheticMixerPE:
     image_size = 0xEE000
 
     def __init__(self, raw):
-        self.code = bytearray(b'\x90' * 0xD800)
+        self.code = bytearray(bytes([0x90]) * 0x1E000)
         for rva, hex_bytes in A.ANCHORS.values():
             op = bytes.fromhex(hex_bytes)
             self.code[rva-0x1000:rva-0x1000+len(op)] = op
