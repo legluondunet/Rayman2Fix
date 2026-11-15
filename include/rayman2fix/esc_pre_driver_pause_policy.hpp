@@ -145,6 +145,25 @@ public:
         state_=State::retired;
         return {false,0,lost_held_pause};
     }
+    // A future, complete native-lifetime observer may report an
+    // internal TestIsPlaying cleanup, an in-place primary reinitialization,
+    // a GetPos-origin inactivation, or an event whose source cannot be
+    // classified. Any such *possible* physical lifetime change invalidates
+    // the escrow even with zero exported Stop callbacks. We cannot replay
+    // a previously withheld Pause on an unproven handle generation.
+    // This isolated method is NOT wired to the game or native DLL.
+    Decision unknown_native_lifecycle_change() noexcept {
+        if(state_==State::idle || state_==State::retired ||
+           state_==State::original_passthrough)return {};
+        const bool unreplayable=held_!=0u &&
+            (state_==State::holding_one || state_==State::holding_pair);
+        held_=0;
+        suppressed_resumes_=0;
+        identity_={};
+        state_=State::retired;
+        return {false,0,unreplayable};
+    }
+
     void exit_script_resume() noexcept {
         // A missing second Resume is not evidence for synthesizing a
         // driver call. Prefer native passthrough for subsequent events.
