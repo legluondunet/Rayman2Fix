@@ -25,6 +25,12 @@ EXPECTED = {
     0x15D0: (0x172C, 0x1C8D, 0x1F68, 0x2950),
     # Shared record initializer: primary and *auxiliary* records.
     0x1FC0: (0x14F9, 0x21F3, 0x22A3),
+    # Parameter updates can retire *inactive* records without an
+    # exported Stop. Both callers use original driver locking.
+    0x1C30: (0x28D3, 0x3278),
+    # Exports SetParamSxd@8 and SetParamTransitionSxd@8.
+    0x28B0: (0x513C,),
+    0x3250: (0x544C,),
     # Internal inactive record cleanup, reached directly by TestIsPlaying.
     0x1F50: (0x290E,),
     # Internal position/progression reader, reached directly by GetPos.
@@ -84,6 +90,12 @@ def audit(data: bytes) -> dict:
         "query_internal_helpers_have_one_direct_candidate_each": (
             verified["0x1F50"] == ["0x290E"] and
             verified["0x2320"] == ["0x2A20"]
+        ),
+        "setparam_hidden_retire_rva": "0x1C8D",
+        "setparam_entry_routes_verified": (
+            verified["0x1C30"] == ["0x28D3", "0x3278"] and
+            verified["0x28B0"] == ["0x513C"] and
+            verified["0x3250"] == ["0x544C"]
         ),
         "unique_original_query_runtime_invocation_proven": False,
         "indirect_or_dynamic_call_paths_exhausted": False,
