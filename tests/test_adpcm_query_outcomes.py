@@ -61,7 +61,9 @@ class OriginalQueryGuardTests(unittest.TestCase):
         self.assertFalse(info['false_outcome_proves_completed_retirement'])
         self.assertFalse(info['permission_to_modify_audio'])
         pos = info['getpos_side_effect']
-        self.assertEqual(pos['opcode_windows_verified'], 12)
+        self.assertEqual(pos['opcode_windows_verified'], 17)
+        self.assertTrue(pos['terminal_reader_status_15_returned_by_getter_as_minus_two'])
+        self.assertTrue(pos['terminal_status_is_not_retirement'])
         self.assertEqual(pos['direct_call_edges_verified'], 3)
         self.assertEqual(pos['conditional_branches_verified'], 2)
         self.assertTrue(pos['getpos_is_not_guaranteed_pure'])
@@ -183,6 +185,30 @@ class OriginalQueryGuardTests(unittest.TestCase):
             with self.subTest(case=case):
                 self.assertFalse(A.model(**case).verified_physical_retirement)
 
+
+    def test_original_getpos_terminal_status_is_not_retirement(self):
+        self.assertEqual(A.classify_original_position_status(15),
+                         'completed-sentinel-minus-two-not-retired')
+        self.assertEqual(A.classify_original_position_status(0),
+                         'position-computed-not-proof-of-lifetime')
+        self.assertEqual(A.classify_original_position_status(11),
+                         'error-minus-one-not-proof-of-lifetime')
+        self.assertEqual(A.classify_original_position_status(1),
+                         'error-minus-one-not-proof-of-lifetime')
+
+    def test_position_status_parser_rejects_unknown_bool_or_out_of_range(self):
+        for status in (None, True, False, -1, 0x100000000, '15', 15.0):
+            with self.subTest(status=status):
+                with self.assertRaises(ValueError):
+                    A.classify_original_position_status(status)
+
+    def test_getpos_terminal_opcode_must_match_original(self):
+        class BadApm(SyntheticQueryApmPE):
+            def __init__(self, raw):
+                super().__init__(raw)
+                self.text[0x2A31-0x1000] = 0x90
+        with self.assertRaisesRegex(A.PEFormatError, 'getter_status_15_maps_minus_two'):
+            A.audit_position_getter(BadApm(b'only synthetic bytes'))
 
     def test_position_getter_conditional_write_does_not_imply_retirement(self):
         x = A.model_position(active_before=True, gate_dc_nonzero=True,
