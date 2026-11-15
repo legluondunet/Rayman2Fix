@@ -39,10 +39,14 @@ class MixerPathTests(unittest.TestCase):
                            hashlib.sha256(fixture).hexdigest()),
               patch.object(A, 'PE32', SyntheticMixerPE)):
             report=A.audit(fixture)
-        self.assertEqual(report['verified_opcode_windows'],16)
-        self.assertEqual(report['verified_direct_call_edges'],7)
+        self.assertEqual(report['verified_opcode_windows'],22)
+        self.assertEqual(report['verified_direct_call_edges'],9)
         self.assertEqual(report['verified_conditional_branches'],3)
         self.assertTrue(report['normal_buffer_fill_can_mark_voice_inactive'])
+        self.assertTrue(
+            report['original_two_callbacks_registered_through_indirect_output_interface'])
+        self.assertFalse(report['actual_callback_execution_during_esc_observed'])
+        self.assertFalse(report['registered_callbacks_always_run_on_a_separate_thread_proven'])
         self.assertTrue(report['mixer_wrappers_hold_known_driver_lock'])
         self.assertFalse(report['getpos_testisplaying_stop_required_for_this_write'])
         self.assertFalse(report['occurred_during_owners_first_esc_proven'])
@@ -112,6 +116,44 @@ class MixerPathTests(unittest.TestCase):
                            hashlib.sha256(fixture).hexdigest()),
               patch.object(A, 'PE32', Bad)):
             with self.assertRaisesRegex(A.PEFormatError, 'mixer_second_unlock'):
+                A.audit(fixture)
+
+    def test_original_output_registration_binds_two_distinct_mix_callbacks(self):
+        self.assertEqual(A.EDGES['first_register_callback'], (0x2B41,0x3A50))
+        self.assertEqual(A.EDGES['second_register_callback'], (0x2B74,0x3A50))
+        self.assertEqual(bytes.fromhex(
+            A.ANCHORS['first_callback_registration_address'][1])[-4:],
+                         (0x10003400).to_bytes(4,'little'))
+        self.assertEqual(bytes.fromhex(
+            A.ANCHORS['second_callback_registration_address'][1])[-4:],
+                         (0x100034B0).to_bytes(4,'little'))
+        self.assertIn('ff 15',A.ANCHORS['native_callback_registration_indirect_call'][1])
+        # Even two registrations never prove the host thread or timing.
+
+    def test_mutated_output_registration_pointer_refused(self):
+        fixture=b'synthetic bad callback function ptr'
+        class Bad(SyntheticMixerPE):
+            def __init__(self,raw):
+                super().__init__(raw)
+                self.code[0x2B3D-0x1000]=0x10
+        with (patch.object(A, 'OWNER_ORIGINAL_SHA256',
+                           hashlib.sha256(fixture).hexdigest()),
+              patch.object(A, 'PE32', Bad)):
+            with self.assertRaisesRegex(A.PEFormatError,
+                                        'first_callback_registration_address'):
+                A.audit(fixture)
+
+    def test_removed_indirect_registration_call_refused(self):
+        fixture=b'synthetic no external callback registration'
+        class Bad(SyntheticMixerPE):
+            def __init__(self,raw):
+                super().__init__(raw)
+                self.code[0x3A73-0x1000]=0x90
+        with (patch.object(A, 'OWNER_ORIGINAL_SHA256',
+                           hashlib.sha256(fixture).hexdigest()),
+              patch.object(A, 'PE32', Bad)):
+            with self.assertRaisesRegex(A.PEFormatError,
+                                        'native_callback_registration_indirect_call'):
                 A.audit(fixture)
 
     def test_progress_conditional_must_have_all_three_zero_gates(self):
