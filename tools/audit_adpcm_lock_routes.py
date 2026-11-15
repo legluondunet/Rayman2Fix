@@ -135,13 +135,92 @@ def audit(data: bytes) -> dict:
     }
 
 
+
+WAVMW_OWNER_SHA256 = 'cd0a0ad0a95880cd8e25e50844ec8e6f9d6725bbee7c09a8ab328cbbc953f016'
+WAVMW_SITES = {
+    'sxd_test_is_playing_export': (0xB8A0, '56 57 8b 7c 24 0c 8b 47 08 48'),
+    'sxd_type4_branch': (0xB8AF, '83 e8 02 74 10'),
+    'sxd_adpcm_case': (0xB8C4, '8b 47 04 8b 0d b0 7e 02 10 50 51'),
+    'sxd_test_delegation': (0xB8CF, 'e8 bc c2 ff ff'),
+    'indirect_test_vtable_call': (0x7BB0, 'ff 53 4c'),
+    'vtable_destination_offset': (0x7D7E, '8d 78 2c'),
+    'vtable_copy_count': (0x7DAF, 'b9 09 00 00 00'),
+    'vtable_copy_instruction': (0x7DB4, 'f3 a5'),
+    'vtable_setup_callback9': (0xBFA7, 'c7 44 24 2c 20 34 00 10'),
+    'vtable_constructor_call': (0xBFB5, 'e8 56 bd ff ff'),
+    'adpcm_test_wrapper': (0x3420, 'a1 00 6a 02 10 85 c0 75 06'),
+    'adpcm_test_indirect_jump': (0x3434, 'ff 15 00 6a 02 10'),
+    'dynamic_adpcm_symbol': (0x57EA, '68 60 15 02 10'),
+    'dynamic_resolve': (0x57F0, 'e8 ab e7 ff ff'),
+    'dynamic_pointer_published': (0x57F8, 'a3 00 6a 02 10'),
+    'get_proc_address_import': (0x3FB9, 'ff 15 48 d0 01 10'),
+}
+WAVMW_EDGES = {
+    'sxd_test_delegation': (0xB8CF, 0x7B90),
+    'vtable_constructor_call': (0xBFB5, 0x7D10),
+    'dynamic_resolve': (0x57F0, 0x3FA0),
+}
+
+
+def audit_wavmw_bridge(data: bytes, adpcm_data: bytes) -> dict:
+    """Static two-DLL type-4 bridge, *not* proof of live runtime dispatch."""
+    adpcm = audit(adpcm_data)  # exact original input and no native writes
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != WAVMW_OWNER_SHA256:
+        raise PEFormatError('original WAVMW SHA-256 mismatch')
+    pe = PE32(data)
+    if (pe.machine != 0x14C or pe.timestamp != 0x38076FB4
+            or pe.image_base != 0x10000000 or pe.image_size != 0x87000):
+        raise PEFormatError('original WAVMW PE metadata mismatch')
+    if pe.exports().get('_SND_fn_bTestIsPlayingSxd@4') != 0xB8A0:
+        raise PEFormatError('original WAVMW TestIsPlaying export mismatch')
+    if PE32(adpcm_data).exports().get('_SND_fn_bTestIsPlayingSxdADPCM@4') != 0x5150:
+        raise PEFormatError('original APMMX TestIsPlaying export mismatch')
+    symbol = b'_SND_fn_bTestIsPlayingSxdADPCM@4\0'
+    if pe.read_rva(0x21560, len(symbol)) != symbol:
+        raise PEFormatError('original WAVMW ADPCM resolver symbol mismatch')
+    for name, (rva, hex_bytes) in WAVMW_SITES.items():
+        if pe.read_rva(rva, len(bytes.fromhex(hex_bytes))) != bytes.fromhex(hex_bytes):
+            raise PEFormatError(f'original WAVMW opcode mismatch: {name}')
+    for name, (site, target) in WAVMW_EDGES.items():
+        opcode = pe.read_rva(site, 5)
+        actual = site + 5 + int.from_bytes(opcode[1:], 'little', signed=True)
+        if opcode[0] != 0xE8 or actual != target:
+            raise PEFormatError(f'original WAVMW call-edge mismatch: {name}')
+    if pe.read_rva(0xB8B2, 2) != b'\x74\x10':
+        raise PEFormatError('original WAVMW type-4 jump mismatch')
+    if 0xB8B2 + 2 + 0x10 != 0xB8C4:
+        raise PEFormatError('WAVMW type-4 target mismatch')
+    return {
+        'wavmw_original_sha256': digest,
+        'apmmx_original_sha256': adpcm['owner_sha256'],
+        'wavmw_opcode_anchors_verified': len(WAVMW_SITES),
+        'wavmw_direct_edges_verified': len(WAVMW_EDGES),
+        'sxd_type4_test_export_rva': '0xB8A0',
+        'sxd_test_vtable_dispatch_rva': '0x7B90',
+        'sxd_test_dynamic_delegate_rva': '0x3420',
+        'adpcm_lookup_symbol_rva': '0x21560',
+        'adpcm_native_test_export_rva': '0x5150',
+        'static_type4_dispatch_chain_verified': True,
+        'actual_runtime_function_pointer_observed': False,
+        'permission_to_change_audio': False,
+        'caveat': ('WAVMW type-4 callback table and loader name statically verified on '
+                   'two hash-locked owner originals; runtime pointer, callers, and '
+                   'absence of external synchronization are not established.'),
+    }
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('owner_dll', type=Path)
     parser.add_argument('--json', action='store_true')
+    parser.add_argument('--wavmwbvr', type=Path, default=None,
+                        help='optional exact original WAVMWbvr.dll for cross-DLL static chain')
     args = parser.parse_args(argv)
     try:
-        result = audit(args.owner_dll.read_bytes())
+        original_bytes = args.owner_dll.read_bytes()
+        result = audit(original_bytes)
+        if args.wavmwbvr is not None:
+            result['wavmw_bridge'] = audit_wavmw_bridge(args.wavmwbvr.read_bytes(), original_bytes)
     except (OSError, PEFormatError, OverflowError) as exc:
         print(f'APMMX route audit refused: {exc}', file=sys.stderr)
         return 2
