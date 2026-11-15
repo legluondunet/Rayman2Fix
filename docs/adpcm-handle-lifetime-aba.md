@@ -1808,3 +1808,124 @@ after the original paused game state has
 advanced sufficiently, without assuming
 a game-time counter or emitting synthetic
 driver Resume on the old 9:12 reference.
+
+## 25. Exact CD Theme callback registration and its eligibility gates (15 November)
+
+After independently locating the owner's previously uploaded
+**approved unprotected retail CD executable**
+`Rayman2(3).exe` (676,352 bytes; SHA-256
+`7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`),
+the original 1999 PE32 instruction stream was fully
+reopened and disassembled read-only with `objdump -d -Mintel`.
+
+The native Theme controller is **explicitly registered as a
+callback argument** during original audio object creation:
+
+```text
+0x459ADF  push controller descriptor/working argument
+0x459AE0  push 0x004B95B8                ; original Theme controller
+0x459AE5  push 0x004596E0                ; original Theme update callback
+0x459AEA  push audio creation arguments
+0x459AEC  call 0x00458220               ; original audio-create route
+
+0x4596E0  Theme update callback entry
+0x4596E0  read original global 0x004B9618
+0x4596E6  if global != 0 -> return (0x459751)
+0x4596EE  if [controller+0x00] == 0 -> return
+0x4596F3  if [controller+0x04] != 0 -> return
+0x459707  call 0x459460
+
+0x459460  original Theme progression/commit
+0x459467  read [controller+0x0C] (pending flag)
+0x459471  if no pending -> normal part progression
+0x459473  read [controller+0x44] (pending target)
+0x459476  clear [controller+0x0C]
+0x45948E  copy pending target to [controller+0x14]
+```
+
+The native audio-create route at `0x458220` makes a
+type-specific dispatch through original functions
+`0x4556F0`/`0x455280` and `0x457570`; its
+exact scheduling and callback execution thread
+are **not established** solely by this registration.
+The updater's global gate `0x4B9618` and
+controller `+0x04` gate were not sampled by the
+older owner logs. Thus it would be wrong to
+conclude *which* gate delayed the first Theme
+commit, or that exactly four seconds are
+hard-coded in this function.
+
+This establishes an important distinction:
+when `0x459460` is **called while pending is
+still set**, the new target is promoted at the
+start of the update; no separate four-second
+countdown is visible on this specific branch.
+The observed **3.869 / 3.917 / 3.934 seconds**
+outside ESC must relate to *when* such
+callback/progress updates are permitted or
+received (or to upstream scheduling), not
+a proved local constant-time wait in
+`0x459460`. Native controller `+0x38` also
+increments on a separate part-progression
+path at `0x4594F6`; part progression and
+the pending pointer transition must not
+be conflated.
+
+### Source-gated passive follow-up diagnostics
+
+The research runtime now adds a **bounded, double-read,
+read-only** snapshot of four original controller
+DWORDs (beginning `0x004B95B8`) and the
+global DWORD at `0x004B9618`, after the already
+hooked original *script* Pause and Resume.
+It emits one additional line at each relevant
+source-backed original menu boundary:
+
+```text
+RUNTIME-ESC-THEME-CALLBACK-GUARDS: stage=open t_ms=...
+  sampled=0|1 active=... ctrl4_nonzero=... pending=...
+  global_nonzero=... eligible_from_flags=...
+RUNTIME-ESC-THEME-CALLBACK-GUARDS: stage=close t_ms=...
+  sampled=0|1 active=... ctrl4_nonzero=... pending=...
+  global_nonzero=... eligible_from_flags=...
+```
+
+An accepted read requires both bounded readings
+to agree; `sampled=0` means **unknown**, not
+an absent callback. `eligible_from_flags=1`
+only means the *sampled* flags would not trigger
+the three obvious guards; it does **not**
+prove that the original callback was invoked
+or that any physical voice was alive or
+reused. Snapshot content **never** authorizes
+or changes a driver Pause, Resume, Stop or
+Theme commit. No additional native DLL hook,
+callback call, or update of the game's memory
+was introduced by this diagnostic.
+
+`tools/audit_original_cd_theme_callback.py`
+performs the independent SHA-locked offline
+verification of **16 original instruction
+windows, four direct-call edges and four
+branch targets**. Its synthetic regression
+tests validate the callback registration,
+controller argument, early-return gates
+and exact pending promotion; all code and
+tests are source-only with no proprietary
+binaries committed.
+
+```sh
+python3 tools/audit_original_cd_theme_callback.py \
+  'Rayman2(3).exe' --json
+python3 -m unittest discover -s tests -p 'test_audit_original_cd_theme_callback.py'
+```
+
+**Open question:** During an early ESC, are the
+global/controller gates ever in an excluding
+state, or is the original player simply not
+scheduled to receive its next update callback?
+A future owner log from the separately
+opted-in prototype can narrow this distinction,
+but even that result is not an immutable ADPCM
+stream identity or permission to bypass
+the class-3 safeguard. PR #10 stays DRAFT.
