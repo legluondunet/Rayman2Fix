@@ -547,7 +547,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         # The game or DLL is never loaded by this synthetic source check.
         code=self.runtime.split("constexpr BYTE owner_entry[5][16]{",1)[1].split(
             "};",1)[0]
-        entries=re.findall(r"\\{([^}]*)\\}",code)
+        entries=re.findall(r"[{]([^}]*)[}]",code)
         self.assertEqual(len(entries),5)
         original_rvas=(0x54C0,0x54D0,0x54E0,0x5150,0x51A0)
         targets=(0x3340,0x3380,0x33C0,0x2900,0x2A00)
