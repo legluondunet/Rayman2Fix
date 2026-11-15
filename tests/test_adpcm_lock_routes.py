@@ -66,14 +66,17 @@ class LockRoutesTests(unittest.TestCase):
         with (patch.object(A, 'OWNER_ORIGINAL_SHA256', hashlib.sha256(fixture).hexdigest()),
               patch.object(A, 'PE32', FakeOwnerPE)):
             result = A.audit(fixture)
-        self.assertEqual(result['opcode_anchors_verified'], 21)
-        self.assertEqual(result['relative_call_edges_verified'], 15)
+        self.assertEqual(result['opcode_anchors_verified'], 33)
+        self.assertEqual(result['relative_call_edges_verified'], 24)
         self.assertEqual(result['local_lockless_ranges_verified'], 7)
         self.assertTrue(result['position_query_has_no_direct_original_driver_lock_calls'])
         self.assertFalse(result['external_or_indirect_serialization_proven_absent'])
-        self.assertEqual(len(result['known_locked_routes']), 4)
+        self.assertEqual(len(result['known_locked_routes']), 6)
         self.assertFalse(result['all_retirement_synchronized_proven'])
         self.assertTrue(result['exported_stop_count_cannot_prove_no_retirement'])
+        self.assertTrue(result['setparam_may_retire_inactive_without_exported_stop'])
+        self.assertTrue(result['setparam_both_routes_use_known_driver_lock'])
+        self.assertFalse(result['setparam_currently_observed_in_owner_esc_log'])
         self.assertFalse(result['runtime_audio_change_authorized'])
 
     def test_wrong_sha_blocks_parse(self):
@@ -100,6 +103,43 @@ class LockRoutesTests(unittest.TestCase):
         with (patch.object(A, 'OWNER_ORIGINAL_SHA256', hashlib.sha256(fixture).hexdigest()),
               patch.object(A, 'PE32', Bad)):
             with self.assertRaisesRegex(A.PEFormatError, 'cleanup_can_retire'):
+                A.audit(fixture)
+
+    def test_setparam_original_both_export_calls_use_driver_lock(self):
+        self.assertEqual(A.EDGES['setparam_sxd_export_call'],(0x513C,0x28B0))
+        self.assertEqual(A.EDGES['setparam_transition_export_call'],(0x544C,0x3250))
+        self.assertEqual(A.EDGES['setparam_sxd_lock'],(0x28C1,0x1020))
+        self.assertEqual(A.EDGES['setparam_sxd_inner'],(0x28D3,0x1C30))
+        self.assertEqual(A.EDGES['setparam_sxd_unlock'],(0x28E9,0x1030))
+        self.assertEqual(A.EDGES['setparam_transition_lock'],(0x326A,0x1020))
+        self.assertEqual(A.EDGES['setparam_transition_inner'],(0x3278,0x1C30))
+        self.assertEqual(A.EDGES['setparam_transition_unlock'],(0x328C,0x1030))
+        self.assertEqual(A.EDGES['setparam_inner_retire'],(0x1C8D,0x15D0))
+        self.assertIn('setparam_sxd',A.LOCKED_ROUTES)
+        self.assertIn('setparam_transition',A.LOCKED_ROUTES)
+
+    def test_mutated_setparam_inner_active_gate_fails_closed(self):
+        fixture=b'synthetic SetParam active conditional mutation'
+        class Bad(FakeOwnerPE):
+            def __init__(self,raw):
+                super().__init__(raw)
+                self.text[0x1C59-0x1000]=0x90
+        with (patch.object(A,'OWNER_ORIGINAL_SHA256',hashlib.sha256(fixture).hexdigest()),
+              patch.object(A,'PE32',Bad)):
+            with self.assertRaisesRegex(A.PEFormatError,
+                                        'setparam_inner_tests_active'):
+                A.audit(fixture)
+
+    def test_mutated_setparam_native_lock_release_fails_closed(self):
+        fixture=b'synthetic SetParam lock release corrupted'
+        class Bad(FakeOwnerPE):
+            def __init__(self,raw):
+                super().__init__(raw)
+                self.text[0x328C-0x1000]=0x90
+        with (patch.object(A,'OWNER_ORIGINAL_SHA256',hashlib.sha256(fixture).hexdigest()),
+              patch.object(A,'PE32',Bad)):
+            with self.assertRaisesRegex(A.PEFormatError,
+                                        'setparam_transition_unlock'):
                 A.audit(fixture)
 
     def test_new_direct_lock_call_in_cleanup_path_blocks_claim(self):
