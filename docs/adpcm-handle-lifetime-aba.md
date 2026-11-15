@@ -1752,6 +1752,71 @@ intervals**, which provides evidence that
 commitment are distinct observables**.
 No first-ESC bypass is justified by this fact.
 
+### A 4.8-second original SXD part boundary explains the 3.9-second remainder
+
+An additional read of the **original** Theme watcher
+series makes the correlation much more specific.
+While Theme **9:12** is current, its verified
+native inner SXD segment advances from
+`239:11` to `239:12` at a **4800-ms
+sampled interval in each owner session**.
+The new Theme 9:5 is requested 850–900 ms
+*after* the watcher first observes 239:12,
+and the new Theme becomes current after
+a measured remainder outside all original
+paired ESC intervals:
+
+| Original session | Last 239:11 → 239:12 observation | 239:12 → pending request | Wall-minus-ESC time until 9:5 commit | Sampled 239:12-to-commit minus ESC |
+| --- | ---: | ---: | ---: | ---: |
+| 08:40 | 4800 ms | 850 ms | 3934 ms | **4784 ms** |
+| 15:13 | 4800 ms | 900 ms | 3869 ms | **4769 ms** |
+| 15:34 | 4800 ms | 900 ms | 3917 ms | **4817 ms** |
+
+Thus the **three** observed values for the
+sampled `239:12` part-to-commit interval
+*after removing verified ESC script Pause
+time* fall in the **4769–4817 ms**
+range: only **48 ms** apart, matching
+the preceding `239:11 → 239:12`
+4800-ms observation. This strongly supports
+the interpretation that the original Theme
+handoff is deferred **until the end of
+the current original musical part**,
+and that the original menu suspends this
+part's progress, while the **global**
+APMMX mixer output continues advancing.
+
+This is an unusually strong **source-correlated
+timing observation**, not a direct capture
+of the exact native callback invocation.
+The watcher samples only on changes, its
+timestamps have bounded jitter, and it
+cannot prove that the segment's physical
+ADPCM voice generation persisted
+continuously or that the callback is invoked
+on an audio worker thread. It also does
+not identify a magic four-second timer.
+The original approved-CD callback routing
+in §25 is consistent with an end-of-part
+callback, but does not directly establish
+the callback's invocation in these
+three owner runs. No runtime command
+should be changed on that basis.
+
+`tools/audit_theme_handoff_timing.py`
+now reports the previous and prior native
+SXD part indices, the observed prior part
+interval, the time from the latest part
+observation to a verified pending request,
+and the closing residual from that part
+observation after the verified menu time
+is subtracted. It explicitly returns
+`part_boundary_callback_execution_proven=false`.
+Two new synthetic tests verify the three
+session alignments and reject absent
+prior-part evidence rather than inventing
+a segment timer.
+
 ### Repeatable offline evidence and negative controls
 
 The existing `tools/analyze_theme_handoff_timing.py`
