@@ -39,14 +39,18 @@ class MixerPathTests(unittest.TestCase):
                            hashlib.sha256(fixture).hexdigest()),
               patch.object(A, 'PE32', SyntheticMixerPE)):
             report=A.audit(fixture)
-        self.assertEqual(report['verified_opcode_windows'],22)
-        self.assertEqual(report['verified_direct_call_edges'],9)
+        self.assertEqual(report['verified_opcode_windows'],27)
+        self.assertEqual(report['verified_direct_call_edges'],10)
         self.assertEqual(report['verified_conditional_branches'],3)
         self.assertTrue(report['normal_buffer_fill_can_mark_voice_inactive'])
         self.assertTrue(
             report['original_two_callbacks_registered_through_indirect_output_interface'])
         self.assertFalse(report['actual_callback_execution_during_esc_observed'])
         self.assertFalse(report['registered_callbacks_always_run_on_a_separate_thread_proven'])
+        self.assertEqual(report['dynamic_output_provider_symbol'],
+                         '_SND_fn_lCreateNewBufferExSxd@16')
+        self.assertTrue(report['dynamic_output_provider_resolution_proven'])
+        self.assertFalse(report['specific_runtime_provider_module_observed'])
         self.assertTrue(report['mixer_wrappers_hold_known_driver_lock'])
         self.assertFalse(report['getpos_testisplaying_stop_required_for_this_write'])
         self.assertFalse(report['occurred_during_owners_first_esc_proven'])
@@ -154,6 +158,44 @@ class MixerPathTests(unittest.TestCase):
               patch.object(A, 'PE32', Bad)):
             with self.assertRaisesRegex(A.PEFormatError,
                                         'native_callback_registration_indirect_call'):
+                A.audit(fixture)
+
+    def test_output_provider_indirect_import_is_expected_original_symbol(self):
+        self.assertEqual(A.EDGES['output_provider_lookup'],(0x4B83,0x3B00))
+        self.assertEqual(A.ANCHORS['output_provider_fallback_returns_error'],
+                         (0x3A80, '83 c8 ff c2 10 00'))
+        self.assertEqual(bytes.fromhex(
+            A.ANCHORS['output_provider_symbol_push'][1])[-4:],
+            (0x10012010).to_bytes(4,'little'))
+
+    def test_modified_original_output_provider_name_refused(self):
+        fixture=b'synthetic invalid backend API name'
+        class Bad(SyntheticMixerPE):
+            def read_rva(self,rva,n):
+                if rva==0x12010:
+                    return b'X'*n
+                return super().read_rva(rva,n)
+        with (patch.object(A, 'OWNER_ORIGINAL_SHA256',
+                           hashlib.sha256(fixture).hexdigest()),
+              patch.object(A, 'PE32', Bad)):
+            with self.assertRaisesRegex(A.PEFormatError, 'provider dynamic symbol'):
+                A.audit(fixture)
+
+    def test_output_provider_resolver_must_match_original(self):
+        fixture=b'synthetic bad output resolver'
+        class Bad(SyntheticMixerPE):
+            def __init__(self,raw):
+                super().__init__(raw)
+                self.code[0x4B83-0x1000]=0x90
+            def read_rva(self,rva,n):
+                if rva==0x12010:
+                    return b'_SND_fn_lCreateNewBufferExSxd@16\0'
+                return super().read_rva(rva,n)
+        with (patch.object(A, 'OWNER_ORIGINAL_SHA256',
+                           hashlib.sha256(fixture).hexdigest()),
+              patch.object(A, 'PE32', Bad)):
+            with self.assertRaisesRegex(A.PEFormatError,
+                                        'output_provider_resolver_call'):
                 A.audit(fixture)
 
     def test_progress_conditional_must_have_all_three_zero_gates(self):
