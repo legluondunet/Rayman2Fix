@@ -43,6 +43,23 @@ def fields(s: str) -> dict[str, str]:
     return dict(KEY_VAL.findall(s))
 
 
+def checked_output_positions(info: dict[str, str]) -> tuple[int, int] | None:
+    """A bounded pair of observed global positions, never a voice generation."""
+    values = []
+    for key in ('mode0_output', 'mode1_output'):
+        try:
+            raw = info[key]
+            if not raw.isdecimal():
+                return None
+            value = int(raw, 10)
+        except (ValueError, KeyError):
+            return None
+        if not 0 <= value <= 0xFFFFFFFF:
+            return None
+        values.append(value)
+    return (values[0], values[1])
+
+
 def classify(lines: list[str]) -> dict:
     groups: dict[str, dict] = {k: {'entries': {}, 'warnings': []} for k in (*STAGES, 'legacy')}
     current: str | None = None
@@ -52,6 +69,19 @@ def classify(lines: list[str]) -> dict:
                     'export_quiet_lifetimes': 0, 'inactive_open_samples': 0,
                     'inactive_close_samples': 0}
     warnings: list[str] = []
+    # One single open->paired-close interval at a time. Overlapping
+    # opens make attribution ambiguous; never compare across them.
+    pending_output: tuple[int, int] | None = None
+    output_open_ambiguous = False
+    output = {
+        'paired_counter_snapshots': 0,
+        'mode0_increased_pairs': 0,
+        'mode1_increased_pairs': 0,
+        'counter_decreased_or_wrapped_pairs': 0,
+        'overlapping_open_pairs_refused': 0,
+        'proves_original_mixer_callback_was_invoked': False,
+        'proves_music_voice_progressed': False,
+    }
     for raw in lines:
         line = raw.strip()
         if PREFIX_CONTEXT in line:
@@ -93,6 +123,14 @@ def classify(lines: list[str]) -> dict:
             observations['esc_gate_count'] += 1
         if PREFIX_OPEN in line:
             info = fields(line.split(PREFIX_OPEN, 1)[1])
+            candidate=checked_output_positions(info) if info.get('sampled')=='1' else None
+            if pending_output is not None:
+                output_open_ambiguous = True
+                output['overlapping_open_pairs_refused'] += 1
+            if not output_open_ambiguous:
+                pending_output=candidate
+            else:
+                pending_output=None
             if info.get('sampled') == '1':
                 observations['adpcm_open_samples'] += 1
                 if info.get('active') == '0':
@@ -103,6 +141,20 @@ def classify(lines: list[str]) -> dict:
                 observations['adpcm_close_samples'] += 1
                 if info.get('active') == '0':
                     observations['inactive_close_samples'] += 1
+                last=checked_output_positions(info)
+                if pending_output is not None and last is not None and not output_open_ambiguous:
+                    output['paired_counter_snapshots'] += 1
+                    if last[0] < pending_output[0] or last[1] < pending_output[1]:
+                        # The counter can wrap or reset on reinitialization.
+                        # A decrease is NOT proof of negative playback.
+                        output['counter_decreased_or_wrapped_pairs'] += 1
+                    else:
+                        if last[0] > pending_output[0]:
+                            output['mode0_increased_pairs'] += 1
+                        if last[1] > pending_output[1]:
+                            output['mode1_increased_pairs'] += 1
+            pending_output=None
+            output_open_ambiguous=False
         if PREFIX_PAIR in line:
             info = fields(line.split(PREFIX_PAIR, 1)[1])
             if info.get('paired') == '1' and info.get('overlap') == '0':
@@ -162,6 +214,7 @@ def classify(lines: list[str]) -> dict:
             'proves_original_query_was_executed': False,
         },
         'observations': observations,
+        'native_output_positions': output,
         'warnings': warnings,
         'can_prove_query_invocation': False,
         'can_prove_internal_retirement_absent': False,
