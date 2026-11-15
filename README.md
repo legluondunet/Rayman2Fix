@@ -1,3 +1,36 @@
+## Investigating low-resolution Rayman 2 intro logo (issue #16)
+
+The `Rayman 2 — The Great Escape` title that briefly appears during the
+opening 3D cinematic uses visibly low-resolution source artwork. We are
+investigating its **PC CD** source textures without modifying
+`Data/Textures.cnt`, creating an unverified per-scene rule or importing
+copyrighted artwork into the launcher.
+
+For an **opt-in diagnostic run**, set the process environment variable
+`RAYMAN2FIX_LOGO_CAPTURE=1` and start the normal Rayman2Fix executable
+with the usual INI options. On Linux/Wine, for example:
+
+```bash
+RAYMAN2FIX_LOGO_CAPTURE=1 wine Rayman2Fix.exe
+```
+
+GameFrame scans the already-decoded largest level of textures (16–512
+pixels, at most 96 unique gold-hued candidates and 48 MiB total) and
+writes original user-owned BMP source tiles under
+`Rayman2Fix_logo_capture/` beside `Rayman2Fix.log`. The log records
+`RUNTIME-GLIDE: LOGO-CAPTURE` candidate names, dimensions, formats and
+pixel hashes, never memory addresses. Only candidate tiles are captured;
+other textures, masks and the logo's exact material binding are **not**
+yet identified. The dump can be shared for research after reviewing it
+for content the user is entitled to provide.
+
+No texture is replaced, upscaled, stretched, sharpened, or passed
+differently to OpenGL by this diagnostic build. If the exact logo source
+cannot be found among candidates, further read-only tracing is needed.
+Without the opt-in environment variable the scanner returns immediately
+and writes nothing. Keep the standalone issue #16 and do not merge
+before a proper, fingerprint-specific replacement is developed.
+
 ## Music in the Escape pause menu — research build
 
 Requested future setting: `[Features] MusicInPauseMenu=0` (disabled by
