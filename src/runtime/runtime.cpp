@@ -2079,7 +2079,7 @@ void proto_flush_predriver_resume_report() {
         unique_resume && transition_type==4 ?
         proto_sample_adpcm_voice_after_dispatch(probe.first_handle) :
         ProtoAdpcmVoiceSnapshot{};
-    char voice_line[380]{};
+    char voice_line[480]{};
     std::snprintf(voice_line,sizeof(voice_line),
         "RUNTIME-ESC-ADPCM-RESUME: t_ms=%lu paired=%u "
         "sampled=%d voice_index=%d paused=%d active=%d "
@@ -2547,7 +2547,7 @@ void proto_menu_tick() {
         // The snapshot is from AFTER existing native audio dispatch.
         // Early rejected menus may retain Pause=1, while compensated
         // menus may show Pause=0; this is diagnostic only.
-        char adpcm_line[370]{};
+        char adpcm_line[470]{};
         std::snprintf(adpcm_line,sizeof(adpcm_line),
             "RUNTIME-ESC-ADPCM-VOICE: t_ms=%lu sampled=%d voice_index=%d "
             "paused=%d active=%d other_gate=%d transition_type=%d "
