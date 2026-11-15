@@ -248,6 +248,63 @@ void verified_9_12_to_9_5_mismatch_needs_no_player_pointer_bypass() {
     CHECK(!p.script_resume(kAltInner,true).suppress_current);
     CHECK(p.state()==State::retired);
 }
+void hidden_native_cleanup_cannot_replay_one_held_pause() {
+    Policy p;
+    CHECK(p.begin(true,true,true));
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    // GetPos can make an ADPCM record inactive and TestIsPlaying can
+    // retire it without the exported Stop observer seeing a callback.
+    const auto invalid=p.unknown_native_lifecycle_change();
+    CHECK(invalid.impossible_replay);
+    CHECK(!invalid.suppress_current && invalid.replay_held_pauses==0);
+    CHECK(p.held_pauses()==0);
+    CHECK(p.state()==State::retired);
+    CHECK(!p.script_resume(kOriginal,true).suppress_current);
+}
+
+void hidden_native_retire_cannot_replay_a_matched_held_pair() {
+    Policy p;
+    CHECK(p.begin(true,true,true));
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    p.end_script_pause();
+    const auto invalid=p.unknown_native_lifecycle_change();
+    CHECK(invalid.impossible_replay);
+    CHECK(invalid.replay_held_pauses==0);
+    CHECK(p.state()==State::retired);
+    CHECK(!p.script_resume(kOriginal,true).suppress_current);
+}
+
+void in_place_same_handle_reuse_invalidates_committed_resume_suppression() {
+    Policy p;
+    CHECK(p.begin(true,true,true));
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    p.end_script_pause();
+    p.menu_observation(true,true,true,true,1);
+    CHECK(p.state()==State::menu_committed);
+    // In-place native reinitialization may reuse *identical* handle,
+    // record index and current resource while changing physical epoch.
+    const auto invalid=p.unknown_native_lifecycle_change();
+    CHECK(!invalid.suppress_current);
+    CHECK(invalid.replay_held_pauses==0);
+    CHECK(p.state()==State::retired);
+    CHECK(!p.script_resume(kOriginal,true).suppress_current);
+    CHECK(p.suppressed_resumes()==0);
+}
+
+void hidden_lifetime_signal_is_noop_when_not_in_esc_escrow() {
+    Policy p;
+    CHECK(!p.unknown_native_lifecycle_change().impossible_replay);
+    CHECK(p.state()==State::idle);
+    CHECK(p.begin(true,true,true));
+    CHECK(p.script_pause(kOriginal,true).suppress_current);
+    p.unknown_native_lifecycle_change();
+    CHECK(p.state()==State::retired);
+    CHECK(!p.unknown_native_lifecycle_change().impossible_replay);
+    p.reset();
+    CHECK(p.begin(true,true,true));
+}
 int main() {
     confirmed_pair_has_no_physical_pause_or_resume();
     paired_script_resumes_are_swallowed_once();
@@ -262,6 +319,10 @@ int main() {
     native_stop_invalidates_unreplayable_held_pauses();
     native_stop_during_one_pending_pause_is_also_unreplayable();
     verified_9_12_to_9_5_mismatch_needs_no_player_pointer_bypass();
+    hidden_native_cleanup_cannot_replay_one_held_pause();
+    hidden_native_retire_cannot_replay_a_matched_held_pair();
+    in_place_same_handle_reuse_invalidates_committed_resume_suppression();
+    hidden_lifetime_signal_is_noop_when_not_in_esc_escrow();
     std::cout<<"pre-driver ESC model: pair, rollback, provenance, focus, Stop OK\n";
     return 0;
 }
