@@ -42,6 +42,7 @@ class ThemeHistoryTests(unittest.TestCase):
         self.assertTrue(match['last_known_current_matches_pending_alternative'])
         self.assertTrue(match['first_later_current_matches_pending_target'])
         self.assertEqual(match['observed_pending_to_matched_ms'],27800)
+        self.assertEqual(match['observed_pending_to_next_current_ms'],27800)
         self.assertEqual(match['snapshots_between_previous_and_pending'],1)
         self.assertEqual(match['snapshots_between_pending_and_later'],0)
         self.assertFalse(match['same_descriptor_pointer_proven'])
@@ -61,6 +62,8 @@ class ThemeHistoryTests(unittest.TestCase):
         result=A.classify(rows)['reconciliations'][0]
         self.assertFalse(result['first_later_current_matches_pending_target'])
         self.assertEqual(result['next_active_outer_resource'],'9:6')
+        self.assertIsNone(result['observed_pending_to_matched_ms'])
+        self.assertEqual(result['observed_pending_to_next_current_ms'],27800)
 
     def test_unverified_pending_target_never_qualifies(self):
         rows=self.owner_shaped()
