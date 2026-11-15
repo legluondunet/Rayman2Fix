@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 
 OPS = ('stop', 'pause', 'resume', 'test-is-playing', 'get-pos')
+PARAM_OPS = ('set-param', 'set-param-transition')
+ALL_OPS = OPS + PARAM_OPS
 # These are independently verified exported RVAs in the owner's exact
 # 1999 APMMX DLL, not physical voice identities or evidence of a call.
 ORIGINAL_CALLBACK_RVAS = {
@@ -23,6 +25,8 @@ ORIGINAL_CALLBACK_RVAS = {
     'resume': '0x000054E0',
     'test-is-playing': '0x00005150',
     'get-pos': '0x000051A0',
+    'set-param': '0x00005120',
+    'set-param-transition': '0x00005430',
 }
 
 STAGES = {'pending': 3, 'synchronized': 1}
@@ -70,12 +74,12 @@ def classify(lines: list[str]) -> dict:
             info = fields(line.split(PREFIX_DELEGATE, 1)[1])
             group = current if current is not None else 'legacy'
             op = info.get('op')
-            if op not in OPS:
+            if op not in ALL_OPS:
                 groups[group]['warnings'].append('unknown native callback operation')
                 continue
             current_count += 1
-            if current_count > len(OPS) and group != 'legacy':
-                groups[group]['warnings'].append('more than five delegate rows in a context')
+            if current_count > len(ALL_OPS) and group != 'legacy':
+                groups[group]['warnings'].append('more than seven delegate rows in a context')
             if op in groups[group]['entries']:
                 groups[group]['warnings'].append('duplicate callback entry: '+op)
                 continue
@@ -108,8 +112,11 @@ def classify(lines: list[str]) -> dict:
 
     for name, group in groups.items():
         missing = [op for op in OPS if op not in group['entries']]
-        group['missing'] = missing
+        missing_seven = [op for op in ALL_OPS if op not in group['entries']]
+        group['missing'] = missing  # legacy core-five schema preserved
+        group['missing_seven'] = missing_seven
         group['complete'] = not missing and not group['warnings']
+        group['complete_seven'] = not missing_seven and not group['warnings']
         group['trusted_for_comparison'] = (group['complete'] and name != 'legacy')
         group['original_fingerprinted_operations'] = [
             op for op, entry in group['entries'].items()
@@ -121,13 +128,21 @@ def classify(lines: list[str]) -> dict:
         ]
         group['all_five_original_entry_fingerprints'] = (
             group['complete'] and name != 'legacy' and
-            len(group['original_fingerprinted_operations']) == len(OPS))
+            all(op in group['original_fingerprinted_operations'] for op in OPS))
+        group['all_seven_original_entry_fingerprints'] = (
+            group['complete_seven'] and name != 'legacy' and
+            all(op in group['original_fingerprinted_operations'] for op in ALL_OPS))
 
     p, s = groups['pending'], groups['synchronized']
     if p['trusted_for_comparison'] and s['trusted_for_comparison']:
         changed = [op for op in OPS if p['entries'][op] != s['entries'][op]]
     else:
         changed = None  # never call a missing pair unchanged
+    if p['complete_seven'] and s['complete_seven']:
+        changed_params = [op for op in PARAM_OPS
+                          if p['entries'][op] != s['entries'][op]]
+    else:
+        changed_params = None
     return {
         'schema': 'rayman2fix-adpcm-log-evidence-v1',
         'read_only': True,
@@ -139,6 +154,11 @@ def classify(lines: list[str]) -> dict:
             'original_entry_fingerprints_both_stages': (
                 p['all_five_original_entry_fingerprints'] and
                 s['all_five_original_entry_fingerprints']),
+            'parameter_comparison_available': changed_params is not None,
+            'changed_parameter_operations': changed_params,
+            'all_seven_original_entry_fingerprints_both_stages': (
+                p['all_seven_original_entry_fingerprints'] and
+                s['all_seven_original_entry_fingerprints']),
             'proves_original_query_was_executed': False,
         },
         'observations': observations,
@@ -167,8 +187,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         for stage, group in result['delegates'].items():
-            print(f'{stage}: {len(group["entries"])}/5 callbacks, '
-                  f'complete={group["complete"]}, missing={",".join(group["missing"])}')
+            print(f'{stage}: {len(group["entries"])}/7 callbacks, '
+                  f'core_complete={group["complete"]}, '
+                  f'seven_complete={group["complete_seven"]}, '
+                  f'missing={",".join(group["missing_seven"])}')
         print('Early/late comparison: ', result['stage_comparison'])
         print(result['assessment'])
     return 0
