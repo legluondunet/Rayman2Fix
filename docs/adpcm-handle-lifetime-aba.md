@@ -1843,6 +1843,21 @@ callback argument** during original audio object creation:
 0x45948E  copy pending target to [controller+0x14]
 ```
 
+The **global guard at 0x4B9618** is visibly written
+by the original Theme creation and teardown routines:
+`0x45999D` and `0x459BE5` set it to 1,
+then `0x459B2C` and `0x459C23` clear
+it to 0. The original pending-request routine
+also sets the controller's `+0x04` state
+to 0 at `0x4595F9`.
+This favors interpreting both fields as
+operational guards rather than a *known*
+four-second pause timer, but does not prove
+their values were stable during the owner's
+ESC menus. Our new diagnostic samples both
+only after original audio operations, not inside
+an original callback or critical section.
+
 The native audio-create route at `0x458220` makes a
 type-specific dispatch through original functions
 `0x4556F0`/`0x455280` and `0x457570`; its
@@ -1905,7 +1920,7 @@ was introduced by this diagnostic.
 
 `tools/audit_original_cd_theme_callback.py`
 performs the independent SHA-locked offline
-verification of **16 original instruction
+verification of **21 original instruction
 windows, four direct-call edges and four
 branch targets**. Its synthetic regression
 tests validate the callback registration,
