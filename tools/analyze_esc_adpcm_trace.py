@@ -86,7 +86,7 @@ def analyze(content: str) -> dict:
                 "depth_before": integer(f,"depth_before"),
                 "depth_after": integer(f,"depth_after"),
                 "voice": None, "verdict": None, "resume": None,
-                "owner_diag": None,
+                "owner_diag": None, "owner_diag_invalid": False,
                 "paired_lifetime": False, "overlap": overlapping_open,
                 "phase6": False, "sxd_lifetime": None,
             }
@@ -101,6 +101,8 @@ def analyze(content: str) -> dict:
             # and one-time for the first accepted owner. Never carry
             # its fields forward across later ESC openings.
             if active is None or active["owner_diag"] is not None:
+                if active is not None:
+                    active["owner_diag_invalid"]=True
                 anomalies.append(f"line {lineno}: unmatched/duplicate owner diagnosis")
                 continue
             active["owner_diag"]={
@@ -243,7 +245,8 @@ def analyze(content: str) -> dict:
         )
         owner=entry["owner_diag"]
         entry["direct_pending_target_confirmed"]=bool(
-            owner is not None and owner["event"]=="rejected" and
+            owner is not None and not entry["owner_diag_invalid"] and
+            owner["event"]=="rejected" and
             entry["ref_class"]==3 and entry["ref_match"]==0 and
             entry["verdict"]=="live-theme-ref-not-verified" and
             valid_voice and voice["paused"]==1 and voice["other_gate"]==0 and
