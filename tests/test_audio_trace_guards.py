@@ -248,8 +248,23 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("g_proto_predriver_resume_report.ready=false;",flush)
         self.assertIn("report.lifetime_paired &&",flush)
         self.assertIn("probe.resume_count==2u",flush)
-        self.assertIn("probe.unrelated_slots==0u",flush)
+        self.assertNotIn("probe.unrelated_slots==0u",flush)
         self.assertIn("probe.other_handle_count==0u",flush)
+        self.assertIn("probe.callback_count==probe.resume_count+probe.unrelated_slots",flush)
+        self.assertIn("probe.forwarded_count+probe.suppressed_count==2u",flush)
+        self.assertIn("probe.first_handle>=0x10000u",flush)
+        self.assertIn("probe.first_handle!=0xffffffffu",flush)
+        self.assertIn("!report.lifetime_overlap",flush)
+        self.assertIn("report.sxd_baseline_valid",flush)
+        self.assertIn("report.sxd_changes==0u",flush)
+        self.assertIn("report.sxd_unknown==0u",flush)
+        for token in ("report.play_between==0u",
+                      "report.stop_between==0u",
+                      "report.play_during_resume==0u",
+                      "report.stop_during_resume==0u"):
+            self.assertIn(token,flush)
+        self.assertIn("unsigned(source_pair)",flush)
+        self.assertIn("RUNTIME-ESC-ADPCM-RESUME: t_ms=%lu paired=%u gate=%u",flush)
         self.assertIn("transition_type==4",flush)
         self.assertIn("proto_read_transition_type_post_wrapper(probe.first_handle)",flush)
         self.assertIn("proto_sample_adpcm_voice_after_dispatch(probe.first_handle)",flush)
@@ -263,6 +278,33 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("WriteProcessMemory(",flush)
         self.assertLess(flush.index("log_line(resource_line);"),
                         flush.index("RUNTIME-ESC-ADPCM-RESUME:"))
+
+    def test_resume_closing_probe_is_not_blocked_by_ordinary_sxd_effects(self):
+        resume=self.runtime.split("void proto_flush_predriver_resume_report() {",1)[1].split(
+            "// Focus is a Win32",1)[0]
+        gate=resume.split("const bool source_pair=",1)[1].split(
+            "const int transition_type=source_pair ?",1)[0]
+        # Owner log 2026-11-15 15:13: each of 11 closings had TWO
+        # matching music transition resumes, but 5..20 unrelated
+        # effect resumes. These must not be considered second handles.
+        self.assertIn("probe.resume_count==2u",gate)
+        self.assertIn("probe.other_handle_count==0u",gate)
+        self.assertNotIn("probe.unrelated_slots==0u",gate)
+        self.assertIn("probe.callback_count==probe.resume_count+probe.unrelated_slots",gate)
+        # A stream switch in two owner intervals remains a hard
+        # rejection; all other audio safety gates are unchanged.
+        self.assertIn("report.sxd_changes==0u",gate)
+        self.assertIn("report.sxd_unknown==0u",gate)
+        self.assertIn("report.lifetime_paired",gate)
+        self.assertIn("!report.lifetime_overlap",gate)
+        self.assertIn("report.play_between==0u",gate)
+        self.assertIn("report.stop_between==0u",gate)
+        self.assertIn("report.play_during_resume==0u",gate)
+        self.assertIn("report.stop_during_resume==0u",gate)
+        self.assertNotIn("proto_dispatch(",gate)
+        self.assertNotIn("proto_record_resume(",gate)
+        self.assertLess(resume.index("log_line(resource_line);"),
+                        resume.index("const bool source_pair="))
 
     def test_adpcm_open_and_close_samples_never_authorize_audio_actions(self):
         tick=self.runtime.split("void proto_menu_tick() {",1)[1].split(
