@@ -161,6 +161,11 @@ APMMX_POSITION_SITES = {
     'reader_threshold': (0x243C, 'f6 c4 01 dd 5d 00 dd d8 75 03'),
     'reader_inactive_write': (0x2446, '89 5e 28'),
     'reader_compare_inactive': (0x244E, '39 5e 28'),
+    'reader_terminal_position_check': (0x2449, '3b 4e 4c 75 14'),
+    'reader_terminal_inactive_check': (0x244E, '39 5e 28 75 0f'),
+    'reader_terminal_status_15': (0x2453, 'bf 0f 00 00 00'),
+    'getter_status_15_maps_minus_two': (0x2A2C, '83 f8 0f 75 1d be fe ff ff ff'),
+    'getter_default_error_minus_one': (0x2A09, '83 ce ff'),
     'normal_playback_can_inactivate': (0x17CA, '89 53 28'),
     'primary_initializer_sets_active': (0x2007, 'c7 40 28 01 00 00 00'),
 }
@@ -203,11 +208,30 @@ def audit_position_getter(apm: PE32) -> dict:
         'direct_call_edges_verified': len(APMMX_POSITION_EDGES),
         'conditional_branches_verified': len(APMMX_POSITION_SHORT_BRANCHES),
         'getpos_is_not_guaranteed_pure': True,
+        'terminal_reader_status_15_returned_by_getter_as_minus_two': True,
+        'terminal_status_is_not_retirement': True,
         'getpos_will_always_make_voice_inactive': False,
         'getpos_called_during_owners_esc_log_proven': False,
         'completed_driver_retirement_proven': False,
         'runtime_audio_change_authorized': False,
     }
+
+
+def classify_original_position_status(reader_status: int) -> str:
+    """Conservative status mapping of exact APMMX GetPos wrapper.
+
+    Original 0x2A2C..0x2A31 maps native reader status 15 to -2.
+    Status zero returns a computed position; other errors map to -1.
+    The computed position and successful physical retirement are NOT
+    derivable from the status alone.
+    """
+    if type(reader_status) is not int or not 0 <= reader_status <= 0xffffffff:
+        raise ValueError('unknown native GetPos reader status')
+    if reader_status == 15:
+        return 'completed-sentinel-minus-two-not-retired'
+    if reader_status == 0:
+        return 'position-computed-not-proof-of-lifetime'
+    return 'error-minus-one-not-proof-of-lifetime'
 
 
 @dataclass(frozen=True)
