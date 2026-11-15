@@ -120,7 +120,7 @@ def audit_wavmw_registration(data: bytes) -> dict:
         'direct_call_edges_verified': len(WAVMW_BUFFER_EDGES),
         'original_callback_provider_link_verified': True,
         'wavmw_type2_can_wrap_lower_layer_callback': True,
-        'wamw_indirect_callback_target_generation_proven': False,
+        'wavmw_indirect_callback_target_generation_proven': False,
         'runtime_provider_selected_or_invoked_proven': False,
         'callback_executed_during_esc_proven': False,
         'permission_to_change_audio': False,
