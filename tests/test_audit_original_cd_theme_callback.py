@@ -47,7 +47,9 @@ class OriginalThemeCallbackTests(unittest.TestCase):
     def test_original_cd_callback_path_is_complete_but_not_live_evidence(self):
         report=synthetic_audit()
         self.assertTrue(report['original_pe_verified'])
-        self.assertEqual(report['verified_opcodes'],16)
+        self.assertEqual(report['verified_opcodes'],21)
+        self.assertTrue(report['create_and_teardown_set_and_clear_global_guard'])
+        self.assertTrue(report['pending_request_clears_controller_state4'])
         self.assertEqual(report['verified_direct_call_edges'],4)
         self.assertEqual(report['verified_conditional_branches'],4)
         self.assertEqual(report['callback_entry_va'],'0x004596E0')
@@ -135,6 +137,28 @@ class OriginalThemeCallbackTests(unittest.TestCase):
                 super().__init__(data)
                 self.text[0x5948E+2]=0x18
         with self.assertRaisesRegex(A.PEFormatError,'update_promotes_target'):
+            synthetic_audit(Mutated)
+
+    def test_create_and_teardown_guard_writes_are_original_and_bounded(self):
+        for on,off in (('create_sets_global_guard',
+                        'create_clears_global_guard'),
+                       ('teardown_sets_global_guard',
+                        'teardown_clears_global_guard')):
+            self.assertLess(A.SITES[on][0],A.SITES[off][0])
+            self.assertEqual(bytes.fromhex(A.SITES[on][1])[-4:],
+                             (1).to_bytes(4,'little'))
+            self.assertEqual(bytes.fromhex(A.SITES[off][1])[-4:],
+                             (0).to_bytes(4,'little'))
+
+    def test_pending_request_clears_early_controller_state(self):
+        self.assertEqual(A.SITES['pending_request_clears_state4'],
+                         (0x595F9, '89 71 04'))
+        class Mutated(FakeOriginalCD):
+            def __init__(self,data):
+                super().__init__(data)
+                self.text[0x595F9+2]=0x08
+        with self.assertRaisesRegex(A.PEFormatError,
+                                    'pending_request_clears_state4'):
             synthetic_audit(Mutated)
 
     def test_pending_clear_must_precede_current_promotion(self):
