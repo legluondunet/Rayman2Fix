@@ -1031,3 +1031,44 @@ diagnostic is safer for gathering preliminary evidence,
 but remains a **provenance and endpoint** observation only.
 The pre-driver Pause escrow stays disconnected from
 the game and native driver. PR #10 remains a draft.
+
+## 18. Identical observations, different physical ADPCM epochs — synthetic counterexample
+
+The new, stricter five-delegate original-entry fingerprints
+still cannot establish a native musical epoch. A regression in
+`tests/test_esc_adpcm_evidence.py` explicitly constructs
+**two different physical histories producing exactly the same
+observable ESC log**:
+
+| Observation | Continuous voice | Native in-place ABA reuse |
+| --- | --- | --- |
+| Five query/Play/Stop/Pause/Resume callbacks fingerprint the original APMMX | Yes | Yes |
+| Original native driver handle at opening and closing | Same | Same |
+| Active voice slot `0` at both endpoints | Yes | Yes |
+| Original driver active flag `1` at both endpoints | Yes | Yes |
+| Native exported Play/Stop counts during ESC | 0 / 0 | 0 / 0 |
+| Physical voice generation changed internally | **No** | **Yes** |
+
+The second history represents the original allocator's proven
+in-place record reuse path. A successful internal allocation can
+reuse the native handle and record without calling exported Stop.
+The first history contains no such internal change. Both are
+compatible with **one identical set of endpoint measurements**.
+The log classifier correctly leaves
+`can_prove_continuous_physical_voice_generation=False` in
+both cases even when all five DLL callback entry fingerprints
+match. A newer source/richer sample cannot change that logical
+limitation without directly observing original creation/retirement
+events.
+
+The source guard suites now include:
+- **10** synthetic original direct-call candidate tests;
+- **16** original WAVMW/APMMX lock-route synthetic tests;
+- **17** offline ESC pointer/log-evidence tests, including this
+  indistinguishability witness;
+- C++ policy cases for unknown native lifetime invalidation.
+
+No original DLL bytes or executable were committed to these fixtures.
+The original WAVMW/APMMX audio functions remain uncalled by the
+diagnostics; the experimental early-ESC physical driver bypass
+remains **NO-GO**.
