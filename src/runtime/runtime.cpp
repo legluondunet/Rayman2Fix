@@ -10,6 +10,7 @@
 #include "rayman2fix/fov_math.hpp"
 #include "rayman2fix/hud_math.hpp"
 #include "rayman2fix/black_frame_filter.hpp"
+#include "rayman2fix/cinematic_black_polygon.hpp"
 #include "rayman2fix/screen_camera.hpp"
 #include "rayman2fix/superimposed_math.hpp"
 #include "rayman2fix/intro_skip.hpp"
@@ -196,6 +197,12 @@ bool g_remove_dialogue_backgrounds = false;
 bool g_remove_cinematic_bars = false;
 std::atomic<unsigned> g_hidden_dialogue_frames{0};
 std::atomic<unsigned> g_hidden_cinematic_bars{0};
+// Native GLI viewport masks are a separate producer from 2D percent quads.
+// Hook only when RemoveCinematicBars=1, at the validated 32-bit driver slot.
+std::atomic<void*> g_black_polygon_original{nullptr};
+std::atomic<unsigned> g_black_polygon_source_samples[4]{};
+std::atomic<unsigned> g_hidden_native_black_bars[2]{};
+
 // Two passive samples per route/edge/time phase; no change to render output.
 std::atomic<unsigned> g_cinematic_edge_counts[4][2]{};
 std::atomic<unsigned> g_cinematic_edge_examples[16]{};
@@ -3817,6 +3824,10 @@ void initialize_native_intro_skip() {
 // retail executable supported by this project. Unlike a Glide-wide heuristic,
 // these callbacks are used for sprites, not every 3D triangle. The additional
 // xOoZ=1 check preserves perspective-projected world sprites.
+// VA 0x50483C is loaded from "GLI_DRV_vAddBlackPolygon" by the
+// game's GetProcAddress table at VA 0x421BC2. The original callsites
+// at 0x420827, 0x420841, 0x420858, 0x420872 use cdecl (4 int args).
+constexpr uintptr_t kBlackPolygonSlotRva = 0x10483C;
 constexpr uintptr_t kPlainSpriteSlotRva = 0x104530; // VA 0x504530
 constexpr uintptr_t kUvSpriteSlotRva = 0x104524;    // VA 0x504524
 // The colored variant is used by the GLI font/sprite path in Rayman 2.
@@ -4031,6 +4042,57 @@ void probe_unrouted_lower_sprite(const r2fix::HudVertex* quad,
         double(b.min_reciprocal_z),double(b.max_reciprocal_z),
         unsigned(r2fix::is_screen_sprite_quad(quad)));
     log_line(message);
+}
+
+using BlackPolygonFn=void (__cdecl*)(int,int,int,int);
+void __cdecl cinematic_black_polygon(int top,int left,int bottom,int right) {
+    const auto original=reinterpret_cast<BlackPolygonFn>(
+        g_black_polygon_original.load(std::memory_order_acquire));
+    if(!original)return;
+    // Intentionally precise: an equivalent-looking rectangle drawn by
+    // another game route must not be suppressed.
+    std::uint32_t source_rva=0;
+    const bool game_source=r2fix::executable_callsite_rva(
+        reinterpret_cast<std::uintptr_t>(_ReturnAddress()),
+        g_approved_exe_base.load(std::memory_order_acquire),
+        g_approved_exe_size.load(std::memory_order_acquire),source_rva);
+    const r2fix::CinematicBlackPolygon candidate=game_source ?
+        r2fix::classify_cinematic_black_polygon(
+            source_rva,top,left,bottom,right,1024,768) :
+        r2fix::CinematicBlackPolygon::Preserve;
+    unsigned site=4;
+    switch(source_rva) {
+    case 0x2082Du: site=0;break; // native left mask
+    case 0x20847u: site=1;break; // native right mask
+    case 0x2085Eu: site=2;break; // native upper mask
+    case 0x20878u: site=3;break; // native lower mask
+    default:break;
+    }
+    const bool skip=g_remove_cinematic_bars && g_hud_scale<0.9999f &&
+        candidate!=r2fix::CinematicBlackPolygon::Preserve;
+    if(site<4u && g_log) {
+        const unsigned n=g_black_polygon_source_samples[site].fetch_add(
+            1,std::memory_order_relaxed);
+        if(n<3u) {
+            char msg[290]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-GLIDRV-BLACK-POLYGON: source_rva=0x%08X sample=%u rect_top_left_bottom_right=%d,%d,%d,%d candidate=%u suppressed=%u (native viewport mask; experimental)",
+                unsigned(source_rva),n+1,top,left,bottom,right,
+                unsigned(candidate),unsigned(skip));
+            log_line(msg);
+        }
+    }
+    if(skip) {
+        const unsigned kind=candidate==r2fix::CinematicBlackPolygon::Upper ?
+            0u:1u;
+        if(g_hidden_native_black_bars[kind].fetch_add(
+            1,std::memory_order_relaxed)==0)
+            log_line(kind==0 ?
+                "RUNTIME-GLIDRV-BLACK-POLYGON: first upper full-width mask suppressed (opt-in; video ownership not yet confirmed)" :
+                "RUNTIME-GLIDRV-BLACK-POLYGON: first lower full-width mask suppressed (opt-in; video ownership not yet confirmed)");
+        return;
+    }
+    original(top,left,bottom,right);
 }
 
 void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
@@ -4248,6 +4310,9 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
         const_cast<BYTE*>(module + kUvSpriteSlotRva));
     auto* colors = reinterpret_cast<void* volatile*>(
         const_cast<BYTE*>(module + kColorSpriteSlotRva));
+    auto* black_polygon = reinterpret_cast<void* volatile*>(
+        const_cast<BYTE*>(module + kBlackPolygonSlotRva));
+    bool black_polygon_logged = false;
     bool plain_logged = false;
     bool uv_logged = false;
     bool color_logged = false;
@@ -4292,6 +4357,15 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                 ++glyph_relative_reports;
             }
         }
+        // The game registers its GLI driver exports after DLL injection.
+        // Keep the native black-polygon hook installed across driver reloads.
+        // The path is strictly opt-in and never touches 4:3 side masks.
+        if(g_remove_cinematic_bars)
+            install_callback(black_polygon,
+                reinterpret_cast<void*>(&cinematic_black_polygon),
+                g_black_polygon_original,
+                "RUNTIME-GLIDRV-BLACK-POLYGON: callback installed (source-filtered opt-in)",
+                black_polygon_logged);
         install_callback(plain, reinterpret_cast<void*>(&hud_plain_sprite),
                          g_plain_sprite_original,
                          "RUNTIME-HUD: centered 4:3 screen-space sprites enabled",
@@ -4555,7 +4629,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     if(g_remove_dialogue_backgrounds)
         log_line("RUNTIME-FRAMES: RemoveDialogueBackgrounds=1 opt-in; verified GLI dialogue backdrop filter");
     if(g_remove_cinematic_bars)
-        log_line("RUNTIME-FRAMES: RemoveCinematicBars=1 opt-in; experimental GLI cinematic bar filter (may not cover video paths)");
+        log_line("RUNTIME-FRAMES: RemoveCinematicBars=1 opt-in; experimental GLI source quads and native GLIDRV horizontal black masks (video ownership unconfirmed)");
     // This hook is also used for the targeted intro-skip poll on 4:3.
     // For narrow monitors camera_hor_plus leaves the FOV unchanged.
     const DWORD camera_status = install_camera_hook();
