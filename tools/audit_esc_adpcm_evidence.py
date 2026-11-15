@@ -15,6 +15,16 @@ import sys
 from pathlib import Path
 
 OPS = ('stop', 'pause', 'resume', 'test-is-playing', 'get-pos')
+# These are independently verified exported RVAs in the owner's exact
+# 1999 APMMX DLL, not physical voice identities or evidence of a call.
+ORIGINAL_CALLBACK_RVAS = {
+    'stop': '0x000054C0',
+    'pause': '0x000054D0',
+    'resume': '0x000054E0',
+    'test-is-playing': '0x00005150',
+    'get-pos': '0x000051A0',
+}
+
 STAGES = {'pending': 3, 'synchronized': 1}
 PREFIX_CONTEXT = 'RUNTIME-AUDIO-ADPCM-DELEGATE-CONTEXT:'
 PREFIX_DELEGATE = 'RUNTIME-AUDIO-ADPCM-DELEGATE:'
@@ -73,6 +83,7 @@ def classify(lines: list[str]) -> dict:
                 'status': info.get('status', 'unknown'),
                 'module': info.get('module'),
                 'callback_rva': info.get('callback_rva'),
+                'original_entry_fingerprint': info.get('original_entry_fingerprint'),
             }
         if PREFIX_GATE in line:
             observations['esc_gate_count'] += 1
@@ -100,6 +111,18 @@ def classify(lines: list[str]) -> dict:
         group['missing'] = missing
         group['complete'] = not missing and not group['warnings']
         group['trusted_for_comparison'] = (group['complete'] and name != 'legacy')
+        group['original_fingerprinted_operations'] = [
+            op for op, entry in group['entries'].items()
+            if (entry['status'] == 'resolved'
+                and (entry.get('module') or '').casefold() == 'apmmxbvr.dll'
+                and (entry.get('callback_rva') or '').lower()
+                    == ORIGINAL_CALLBACK_RVAS[op].lower()
+                and entry.get('original_entry_fingerprint') == '1')
+        ]
+        group['all_five_original_entry_fingerprints'] = (
+            group['complete'] and name != 'legacy' and
+            len(group['original_fingerprinted_operations']) == len(OPS))
+
     p, s = groups['pending'], groups['synchronized']
     if p['trusted_for_comparison'] and s['trusted_for_comparison']:
         changed = [op for op in OPS if p['entries'][op] != s['entries'][op]]
@@ -110,8 +133,14 @@ def classify(lines: list[str]) -> dict:
         'read_only': True,
         'observer_not_invoker': True,
         'delegates': groups,
-        'stage_comparison': {'available': changed is not None,
-                             'changed_operations': changed},
+        'stage_comparison': {
+            'available': changed is not None,
+            'changed_operations': changed,
+            'original_entry_fingerprints_both_stages': (
+                p['all_five_original_entry_fingerprints'] and
+                s['all_five_original_entry_fingerprints']),
+            'proves_original_query_was_executed': False,
+        },
         'observations': observations,
         'warnings': warnings,
         'can_prove_query_invocation': False,
