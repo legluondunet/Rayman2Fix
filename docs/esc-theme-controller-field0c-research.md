@@ -192,3 +192,84 @@ build.
 - No queued pre-driver Pause or late Resume replay
   may cross a Stop, focus transition or new
   Theme generation.
+
+## Owner follow-up, 15 November 2026 at 08:40 — pending descriptor hypothesis confirmed
+
+The owner ran the **same original SHA-approved executable** with
+the passive pending-Theme diagnostics; submitted
+`Rayman2Fix(20261115-084027).log` (157 lines).
+This is the *first direct original-engine runtime confirmation*
+of the two-pointer disassembly, rather than a code-only hypothesis.
+
+The exact source log reports:
+
+| Event | Time (ms) | Original controller and sound evidence |
+| --- | ---: | --- |
+| Previous Theme active | 9,106–33,067 | current reference class 1, Theme `9:12`; `controller_field0c=0` |
+| Overlapping transition | 33,867 | `controller_field0c=1`, two outer Theme candidates, so target still **unverified** |
+| New Theme becomes uniquely active | 33,917 | current reference still the readable old `9:12` (`ref_class=3`); active Theme `9:5`, inner `9:6`; **`pending_switch_state=1 pending_target_matches_outer=1 pending_target_differs_current=1`** |
+| First early ESC | 34,367 | two same-object native `PauseTransitionSxd` callbacks, ADPCM type 4, depth `1→2`; valid original ADPCM record `paused=1 other_gate=0`; no compensation |
+| Owner diagnosis of this rejected opening | approximately 34,368 | original live pointer class 3, **pending state 1 and target pointer equal to active outer Theme**; native owner/driver and bank `9:5/9:6` verified |
+| Second early ESC | 37,350 | same source-qualified native paired Pauses; ADPCM `paused=1`; rejected; **no new direct owner diagnosis was logged** |
+| Third early ESC | 42,734 | same source-qualified native paired Pauses; ADPCM `paused=1`; rejected; **no new direct owner diagnosis was logged** |
+| Pending transition completed | 47,017 | `controller_field0c=0`, current reference now exact active Theme `9:5`, inner `9:7` |
+| Later ESC | 47,600 | two native Pauses, followed by existing two synthetic Resumes; ADPCM post-dispatch `paused=0 other_gate=0` |
+| Safety fallback | 51,817 | active inner SXD changes to `9:8` while menu=1, triggering existing `phase=6`; no source-qualified close before this log ends |
+
+**Closing pairs:** the first three source-qualified ESC
+Resume wrappers occurred at **35,817**, **41,733**
+and **46,067 ms**, each with exactly two native
+Resume callbacks fully forwarded and an original
+script depth `2→1`; all three lifetime reports have
+`paired=1 overlap=0` with unchanged logical inner
+SXD `9:6`. There is **no matching script Resume** for
+the fourth, compensated menu. Do not count it
+as a completed ESC cycle or conclude it was stuck.
+
+**Precise conclusion:** the original controller's
+`+0x44` pointer identifies the **already active, unique**
+Theme `9:5` while `+0x14` still holds the old `9:12`.
+This is proven both by hash-pinned retail-CD
+disassembly and by two independent read-only
+runtime checks near the first menu (the watcher
+at 33,917 ms and the post-verdict diagnosis near
+34,368 ms). It explains the strict
+`native_theme_player_ref_matches_outer==1`
+rejection at early ESC.
+
+**Evidence boundary:** the source log has only **one
+direct owner diagnosis for an early rejected ESC**;
+subsequent rejections confirm the ADPCM pause gate
+but are not independent direct observations of
+`controller+0x44`. The previous change-triggered
+watcher snapshot cannot prove that its pointer
+remained stable in between. The ADPCM voice index
+`0` is temporary and not a music-generation
+identifier. Zero observed global Play/Stop counts
+during the paired windows do not prove there
+were no native internal stream transitions.
+
+**Implementation/next gate:** update the offline
+`tools/analyze_esc_adpcm_trace.py` to distinguish
+`direct_pending_target_confirmed` from
+`last_watcher_pending_target_match_at_ms`.
+Never copy a one-time owner diagnosis across
+subsequent ESC openings; reject contradictory
+and duplicate reports. Add synthetic tests
+and keep `audio_intervention_authorized=false`
+by design.
+
+**Next engineering question:** what exactly
+happens to the **same ADPCM handle** when the
+original player transitions from pending
+`9:5` to current `9:5`, while the ESC menu
+is still active? The engine may update or retire
+a voice asynchronously (original APMMX Stop can
+invalidate and compact its record pool).
+A narrowly gated *experimental* early
+compensation might be feasible, but this log
+does not yet establish safe lifetime handling,
+per-voice exclusivity, focus semantics and
+matched Resume suppression. Do not relax the
+production pointer-equality gate, or change
+native calls, from this evidence alone.
