@@ -775,6 +775,64 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("VirtualProtect(",probe)
         self.assertNotIn("std::filesystem",probe)
 
+    def test_cd_theme_controller_code_literal_probe_is_one_time_and_readonly(self):
+        # The original retail-CD Theme transition field (+0x0C) is
+        # not understood yet. Look for literal-address candidates in
+        # approved EXE code once, not memory writes or new audio calls.
+        probe=self.runtime.split(
+            "void proto_audit_controller_code_references() {",1)[1].split(
+            "void proto_theme_transition_watch_tick() {",1)[0]
+        for code in (
+            "g_proto_enabled.load(std::memory_order_acquire)",
+            "GetModuleHandleW(nullptr)",
+            "GetCurrentProcess()", "ReadProcessMemory(",
+            "nt.FileHeader.TimeDateStamp!=kOriginalTimestamp",
+            "IMAGE_FILE_MACHINE_I386",
+            "nt.OptionalHeader.SizeOfImage<0x9B1D0u",
+            "kCodeStart=0x1000u", "kCodeEnd=0x9B1D0u",
+            "std::vector<BYTE> code(kCodeEnd-kCodeStart)",
+            '{"active_00",0xB95B8u}',
+            '{"state_0c",0xB95C4u}',
+            '{"player_ref_14",0xB95CCu}',
+            "kMaxEmitted=12u",
+            "addr_byte?'?':kHex[code[j]>>4u]",
+            "RUNTIME-ESC-CONTROLLER-XREF:",
+            "status=literal-candidate-only",
+            "RUNTIME-ESC-CONTROLLER-XREF-SUMMARY:",
+            "zero does not rule out register-relative access",
+        ):
+            self.assertIn(code,probe)
+        for unsafe in (
+            "VirtualProtect(", "WriteProcessMemory(", "GetProcAddress(",
+            "LoadLibrary", "CreateFile", "WriteFile", "proto_dispatch(",
+            "proto_allow_resume(", "std::thread(", "Sleep(",
+        ):
+            self.assertNotIn(unsafe,probe)
+        init=self.runtime.split(
+            "DWORD WINAPI Rayman2Fix_Initialize(void* input) {",1)[1].split(
+            "BOOL APIENTRY DllMain(",1)[0]
+        self.assertEqual(init.count("proto_audit_controller_code_references();"),1)
+        self.assertIn("if (camera_status == 1) {",init)
+        self.assertIn("#if RAYMAN2FIX_ESC_MUSIC_ACTIVE",init)
+        self.assertGreater(
+            init.index("proto_audit_controller_code_references();"),
+            init.index("if (camera_status == 1) {"))
+        self.assertLess(
+            init.index("proto_audit_controller_code_references();"),
+            init.index("install_approved_overlay_source_patch();"))
+        callback=self.runtime.split(
+            "void audio_trace_forward(unsigned slot,DWORD arg) {",1)[1].split(
+            "void __stdcall audio_pause_sxd(",1)[0]
+        self.assertNotIn("proto_audit_controller_code_references();",callback)
+        pause=self.runtime.split(
+            "void __cdecl proto_script_pause() {",1)[1].split(
+            "void __cdecl proto_script_resume() {",1)[0]
+        self.assertNotIn("proto_audit_controller_code_references();",pause)
+        tick=self.runtime.split(
+            "void proto_menu_tick() {",1)[1].split(
+            "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
+        self.assertNotIn("proto_audit_controller_code_references();",tick)
+
     def test_cpa_ini_audit_reads_only_original_game_config_at_initialization(self):
         audit=self.runtime.split("void log_cpa_sound_configuration() {",1)[1].split(
             "bool game_window_is_foreground() {",1)[0]
