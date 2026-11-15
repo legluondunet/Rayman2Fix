@@ -1360,6 +1360,11 @@ DWORD __stdcall audio_play_transition_ex(DWORD a,DWORD b,DWORD c,DWORD d,DWORD e
 namespace proto=r2fix::esc_proto;
 std::atomic<bool> g_proto_enabled{false};
 std::atomic<bool> g_proto_callsites_installed{false};
+// Only an ESC script-attempt/session token, incremented when we begin
+// a source-confirmed menu Pause wrapper. NOT the original APMMX ADPCM
+// record's creation/reinitialization generation. The owner-verified
+// 1999 ADPCM allocator can reuse a handle+record without native Stop.
+// Do not treat this token as permission for an early synthetic Resume.
 std::atomic<unsigned> g_proto_generation{0};
 // Purely diagnostic: every observed native SXD Stop callback advances this
 // monotonic counter. Unlike the coordinator's generation, it also covers
