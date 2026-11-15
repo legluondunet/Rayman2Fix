@@ -16,6 +16,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Instant;
 
 static OPENS: AtomicU32 = AtomicU32::new(0);
 static MODES: AtomicU32 = AtomicU32::new(0);
@@ -25,6 +26,17 @@ static POINTERS: AtomicU32 = AtomicU32::new(0);
 static PICTURES: AtomicU32 = AtomicU32::new(0);
 static TEXTURES: AtomicU32 = AtomicU32::new(0);
 static PALETTES: AtomicU32 = AtomicU32::new(0);
+
+// Opt-in cinematic path investigation; all counters are passive and capped.
+static CINEMATIC_START: OnceLock<Instant> = OnceLock::new();
+static CLIP_CALLS: AtomicU32 = AtomicU32::new(0);
+static VERTICAL_CLIP_CANDIDATES: AtomicU32 = AtomicU32::new(0);
+static VERTICAL_CLIP_CHANGES: AtomicU32 = AtomicU32::new(0);
+static LAST_CLIP_KEY: AtomicU32 = AtomicU32::new(u32::MAX);
+static CLIP_PHASE_SAMPLES: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
+static PASSTHRU_CHANGES: AtomicU32 = AtomicU32::new(0);
+static LAST_PASSTHRU: AtomicU32 = AtomicU32::new(u32::MAX);
+static CINEMATIC_REPORT: AtomicU32 = AtomicU32::new(0);
 
 fn active() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
@@ -37,6 +49,66 @@ fn line(message: &str) {
     let log = parent.join("Rayman2Fix.log");
     if let Ok(mut file) = OpenOptions::new().append(true).open(log) {
         let _ = writeln!(file, "RUNTIME-GLIDE: {message}");
+    }
+}
+fn cinematic_active() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    active() && *ENABLED.get_or_init(|| {
+        std::env::var("RAYMAN2FIX_CINEMATIC_PROBE").ok().as_deref() == Some("1")
+    })
+}
+fn cinematic_elapsed_secs() -> u32 {
+    CINEMATIC_START.get_or_init(Instant::now).elapsed().as_secs().min(u32::MAX as u64) as u32
+}
+pub fn cinematic_clip(minx: u32, miny: u32, maxx: u32, maxy: u32) {
+    if !cinematic_active() { return; }
+    CLIP_CALLS.fetch_add(1, Ordering::Relaxed);
+    let (w, h) = crate::api::sst::screen();
+    if w < 320 || h < 200 || maxx <= minx || maxy <= miny ||
+       maxx > w || maxy > h || maxx-minx < w/2 {
+        return;
+    }
+    // Vertically inset clipping can produce unused top/bottom regions.
+    // It is only a hypothesis: these events are not cinematic ownership.
+    if miny < h/50 && h.saturating_sub(maxy) < h/50 { return; }
+    VERTICAL_CLIP_CANDIDATES.fetch_add(1, Ordering::Relaxed);
+    let key = minx.wrapping_mul(0x9e3779b9)
+        ^ miny.rotate_left(7) ^ maxx.rotate_left(13) ^ maxy.rotate_left(19);
+    if LAST_CLIP_KEY.swap(key, Ordering::Relaxed) == key { return; }
+    VERTICAL_CLIP_CHANGES.fetch_add(1, Ordering::Relaxed);
+    let phase = (cinematic_elapsed_secs()/20).min(5) as usize;
+    let sample = CLIP_PHASE_SAMPLES[phase].fetch_add(1, Ordering::Relaxed);
+    if sample < 4 {
+        line(&format!(
+            "CINEMATIC-CLIP: phase={} sample={} screen={}x{} clip={}..{} x {}..{} inset_y0={} inset_y1={} (read-only)",
+            phase, sample+1, w, h, minx, maxx, miny, maxy,
+            miny, h.saturating_sub(maxy)));
+    }
+}
+pub fn cinematic_passthru(mode: u32) {
+    if !cinematic_active() { return; }
+    if LAST_PASSTHRU.swap(mode, Ordering::Relaxed) == mode { return; }
+    let n = PASSTHRU_CHANGES.fetch_add(1, Ordering::Relaxed);
+    if n < 8 {
+        line(&format!("CINEMATIC-PASSTHRU: change={} mode={} elapsed_s={} (read-only)",
+            n+1, mode, cinematic_elapsed_secs()));
+    }
+}
+pub fn cinematic_swap() {
+    if !cinematic_active() { return; }
+    let secs = cinematic_elapsed_secs();
+    const CHECKPOINTS: [u32; 6] = [10, 25, 45, 75, 120, 180];
+    let index = CINEMATIC_REPORT.load(Ordering::Relaxed) as usize;
+    if index >= CHECKPOINTS.len() || secs < CHECKPOINTS[index] { return; }
+    if CINEMATIC_REPORT.compare_exchange(
+        index as u32, (index+1) as u32, Ordering::Relaxed, Ordering::Relaxed
+    ).is_ok() {
+        line(&format!(
+            "CINEMATIC-CLIP-SUMMARY: at={}s clip_calls={} vertical_candidates={} unique_inset_changes={} passthru_changes={} (read-only; no ownership inferred)",
+            secs, CLIP_CALLS.load(Ordering::Relaxed),
+            VERTICAL_CLIP_CANDIDATES.load(Ordering::Relaxed),
+            VERTICAL_CLIP_CHANGES.load(Ordering::Relaxed),
+            PASSTHRU_CHANGES.load(Ordering::Relaxed)));
     }
 }
 pub fn loading_corrected() {
@@ -109,6 +181,14 @@ def install(root: pathlib.Path) -> None:
     b = substitute(b, "    let (ow, oh) = crate::config::get().output(w, h);",
                    "    crate::render_probe::opened(w, h, format, origin);\n"
                    "    let (ow, oh) = crate::config::get().output(w, h);", 2)
+    b = substitute(b, "    super::movie::frame();",
+                   "    super::movie::frame();\n    crate::render_probe::cinematic_swap();")
+    b = substitute(b, "    super::shadow::clip([minx, miny, maxx, maxy]);",
+                   "    super::shadow::clip([minx, miny, maxx, maxy]);\n"
+                   "    crate::render_probe::cinematic_clip(minx, miny, maxx, maxy);")
+    b = substitute(b, '    log!("grSstPassthruMode {mode}");',
+                   '    log!("grSstPassthruMode {mode}");\n'
+                   '    crate::render_probe::cinematic_passthru(mode);')
     c = substitute(c, "    shim::call!(\"grLfbWriteMode\", mode);",
                    "    shim::call!(\"grLfbWriteMode\", mode);\n"
                    "    crate::render_probe::write_mode(mode);")

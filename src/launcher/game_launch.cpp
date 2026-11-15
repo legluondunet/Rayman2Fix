@@ -199,8 +199,14 @@ ChildProcessResult run_child_process(
     ScopedChildEnvironment glide_size(L"GLIDE_SIZE");
     ScopedChildEnvironment fps_limit(L"RAYMAN2FIX_FPS_LIMIT");
     ScopedChildEnvironment glide_probe(L"RAYMAN2FIX_GLIDE_PROBE");
+    ScopedChildEnvironment cinematic_probe(L"RAYMAN2FIX_CINEMATIC_PROBE");
     if (!glide_probe.set(display.log_enabled ? L"1" : L"0"))
         return {false, 0, glide_probe.error()};
+    // The existing cinematic feature is also the opt-in for read-only
+    // GameFrame geometry diagnostics; no additional user INI setting.
+    if (!cinematic_probe.set(
+            display.log_enabled && display.remove_cinematic_bars ? L"1" : L"0"))
+        return {false, 0, cinematic_probe.error()};
     if (display.borderless) {
         if (!display.output_width || !display.output_height ||
             display.output_width > 16384 || display.output_height > 8640 ||
@@ -220,6 +226,7 @@ ChildProcessResult run_child_process(
                                         nullptr, nullptr, FALSE, 0, nullptr,
                                         cwd.c_str(), &startup, &raw);
     const DWORD spawn_error = created ? 0 : GetLastError();
+    cinematic_probe.restore();
     glide_probe.restore();
     fps_limit.restore();
     glide_size.restore();
