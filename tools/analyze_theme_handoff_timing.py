@@ -6,6 +6,10 @@ the computed "outside ESC menus" time is a proxy, not a driver clock,
 proof of sample decoding, or authorization to bypass native Pause.
 Only source-verified original paired ESC script windows are subtracted.
 Unknown/overlapping/unclosed intervals FAIL CLOSED for that run.
+The original ESC script also pauses/resumes ordinary sound effects:
+these are expected; only the two original same-handle music transition
+callbacks must be source-matched, consistent and forwarded unchanged.
+
 
 The tool only reads log text; no Windows process, game DLL, or EXE is
 loaded or modified. Python standard library only.
@@ -80,9 +84,15 @@ def evaluate(content: str) -> dict:
         if kind=="open":
             if active is not None or pending is not None:
                 errors.append(f"line {lineno}: overlapping or unclosed prior script Pause")
-            if (number(f,"callbacks")!=2 or number(f,"transition_pauses")!=2 or
-                number(f,"other_slots")!=0 or number(f,"different_handles")!=0 or
-                not f.get("slots","").startswith("2,2,") or
+            # The original script Pause also pauses ordinary sound effects.
+            # Two music transition callbacks need not be consecutive:
+            # owner trace has slots=2,0,0,0, other_slots=6, for example.
+            if (number(f,"transition_pauses")!=2 or
+                number(f,"other_slots")<0 or
+                number(f,"callbacks")!=2+number(f,"other_slots") or
+                number(f,"different_handles")!=0 or
+                number(f,"depth_before")!=1 or number(f,"depth_after")!=2 or
+                number(f,"owner_driver")!=1 or
                 number(f,"native_ref_class")!=3 or
                 number(f,"native_ref_match")!=0):
                 errors.append(f"line {lineno}: invalid original source Pause pair")
@@ -91,9 +101,11 @@ def evaluate(content: str) -> dict:
             if active is None or pending is not None:
                 errors.append(f"line {lineno}: unpaired Resume")
             else:
-                if (number(f,"callbacks")!=2 or number(f,"transition_resumes")!=2 or
-                    number(f,"other_slots")!=0 or number(f,"different_handles")!=0 or
-                    not f.get("slots","").startswith("3,3,") or
+                if (number(f,"transition_resumes")!=2 or
+                    number(f,"other_slots")<0 or
+                    number(f,"callbacks")!=2+number(f,"other_slots") or
+                    number(f,"different_handles")!=0 or
+                    number(f,"depth_before")!=2 or number(f,"depth_after")!=1 or
                     number(f,"native_forwarded")!=2 or
                     number(f,"native_suppressed")!=0):
                     errors.append(f"line {lineno}: invalid source Resume pair")
@@ -103,7 +115,9 @@ def evaluate(content: str) -> dict:
             if pending is None:
                 errors.append(f"line {lineno}: lifetime without just-closed Resume")
             else:
-                if number(f,"paired")!=1 or number(f,"overlap")!=0:
+                if (number(f,"paired")!=1 or number(f,"overlap")!=0 or
+                    number(f,"elapsed_ms")!=pending[1]-pending[0] or
+                    number(f,"play_between")!=0 or number(f,"stop_between")!=0):
                     errors.append(f"line {lineno}: ambiguous source-specific lifetime")
                 else:
                     intervals.append(pending)
