@@ -45,11 +45,15 @@ int main() {
     CHECK(cls(13,80,90,-inf) == K::Preserve);
 
     // Both opt-in AND source identity are required, independently of aspect.
-    CHECK(!r2fix::remove_black_frame(false,true,13,81,88,94));
-    CHECK(!r2fix::remove_black_frame(true,false,13,81,88,94));
-    CHECK(r2fix::remove_black_frame(true,true,13,81,88,94));
-    CHECK(r2fix::remove_black_frame(true,true,0,0,100,15));
-    CHECK(!r2fix::remove_black_frame(true,true,0,0,100,100));
-    CHECK(!r2fix::remove_black_frame(true,true,10,40,90,60));
+    // Each opt-in controls its own class, never the other class.
+    CHECK(!r2fix::remove_black_frame(false,false,true,13,81,88,94));
+    CHECK(!r2fix::remove_black_frame(true,true,false,13,81,88,94));
+    CHECK(r2fix::remove_black_frame(true,false,true,13,81,88,94));
+    CHECK(!r2fix::remove_black_frame(true,false,true,0,0,100,15));
+    CHECK(!r2fix::remove_black_frame(false,true,true,13,81,88,94));
+    CHECK(r2fix::remove_black_frame(false,true,true,0,0,100,15));
+    CHECK(r2fix::remove_black_frame(true,true,true,0,85,100,100));
+    CHECK(!r2fix::remove_black_frame(true,true,true,0,0,100,100));
+    CHECK(!r2fix::remove_black_frame(true,true,true,10,40,90,60));
     return 0;
 }

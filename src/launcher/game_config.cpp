@@ -237,8 +237,11 @@ bool configured_force_4_3(const fs::path& ini) {
 bool configured_skip_cinematics(const fs::path& ini) {
     return read_ini_flag(ini,"Features","SkipCinematics");
 }
-bool configured_remove_black_frames(const fs::path& ini) {
-    return read_ini_flag(ini,"Features","RemoveBlackFrames");
+bool configured_remove_dialogue_backgrounds(const fs::path& ini) {
+    return read_ini_flag(ini,"Features","RemoveDialogueBackgrounds");
+}
+bool configured_remove_cinematic_bars(const fs::path& ini) {
+    return read_ini_flag(ini,"Features","RemoveCinematicBars");
 }
 std::pair<std::uint32_t,std::uint32_t> configured_render_resolution(
         const fs::path& ini) {
@@ -270,7 +273,8 @@ std::uint32_t configured_fps_limit(const fs::path& ini) {
 void ensure_rayman2fix_ini_options(const fs::path& ini) {
     const auto raw=lines_of(ini);
     std::string current;
-    bool graphics=false,features=false,force=false,skip=false,remove=false;
+    bool graphics=false,features=false,force=false,skip=false;
+    bool dialogue=false,cinematic=false,legacy=false;
     for(const auto& text:raw) {
         std::string next;
         if(section(text,next)) {
@@ -286,12 +290,19 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         const auto key=upper(trim(t.substr(0,p)));
         if(current=="GRAPHICS" && key=="FORCE4X3")force=true;
         if(current=="FEATURES" && key=="SKIPCINEMATICS")skip=true;
-        if(current=="FEATURES" && key=="REMOVEBLACKFRAMES")remove=true;
+        if(current=="FEATURES" && key=="REMOVEDIALOGUEBACKGROUNDS")dialogue=true;
+        if(current=="FEATURES" && key=="REMOVECINEMATICBARS")cinematic=true;
+        if(current=="FEATURES" && key=="REMOVEBLACKFRAMES")legacy=true;
     }
-    if(force && skip && remove)return;
+    // Existing opt-in users retain BOTH former behaviors. If only one new
+    // setting is present, its explicit value always takes precedence.
+    // Invalid legacy values are rejected before editing the user's INI.
+    const bool inherited=legacy &&
+        read_ini_flag(ini,"Features","RemoveBlackFrames");
+    if(force && skip && dialogue && cinematic && !legacy)return;
     std::vector<std::string> output;
     std::string active;
-    bool added_force=false,added_skip=false,added_remove=false;
+    bool added_force=false,added_skip=false,added_dialogue=false,added_cinematic=false;
     const auto inject=[&]() {
         if(active=="GRAPHICS" && !force && !added_force) {
             output.emplace_back("; 1 = centered 4:3 picture with black sidebars");
@@ -304,11 +315,16 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
             output.emplace_back("SkipCinematics=0");
             added_skip=true;
         }
-        if(active=="FEATURES" && !remove && !added_remove) {
-            output.emplace_back("; 1 = hide dialogue backdrops and game-drawn cinematic letterbox frames");
-            output.emplace_back("; Original glyphs, movies, menus and Force4x3 sidebars remain");
-            output.emplace_back("RemoveBlackFrames=0");
-            added_remove=true;
+        if(active=="FEATURES" && !dialogue && !added_dialogue) {
+            output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
+            output.emplace_back(std::string("RemoveDialogueBackgrounds=")+(inherited?"1":"0"));
+            added_dialogue=true;
+        }
+        if(active=="FEATURES" && !cinematic && !added_cinematic) {
+            output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
+            output.emplace_back("; Does not affect GameFrame Force4x3 sidebars");
+            output.emplace_back(std::string("RemoveCinematicBars=")+(inherited?"1":"0"));
+            added_cinematic=true;
         }
     };
     for(const auto& text:raw) {
@@ -317,6 +333,13 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
             inject();
             active=next;
         }
+        // Retire the obsolete combined flag after migrating its value.
+        // All unrelated lines, comments and custom sections are preserved.
+        const auto t=trim(text);
+        const auto eq=t.find('=');
+        if(active=="FEATURES" && eq!=std::string::npos &&
+           upper(trim(t.substr(0,eq)))=="REMOVEBLACKFRAMES")
+            continue;
         output.push_back(text);
     }
     inject();
@@ -334,9 +357,11 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 only");
         output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
         output.emplace_back("SkipCinematics=0");
-        output.emplace_back("; 1 = hide dialogue backdrops and game-drawn cinematic letterbox frames");
-        output.emplace_back("; Original glyphs, movies, menus and Force4x3 sidebars remain");
-        output.emplace_back("RemoveBlackFrames=0");
+        output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
+        output.emplace_back("RemoveDialogueBackgrounds=0");
+        output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
+        output.emplace_back("; Does not affect GameFrame Force4x3 sidebars");
+        output.emplace_back("RemoveCinematicBars=0");
     }
     // Retain original BOM, comments, unrelated keys and EOL type.
     std::ifstream old(ini,std::ios::binary);

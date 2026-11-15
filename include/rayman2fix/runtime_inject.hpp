@@ -21,5 +21,6 @@ FovHookResult initialize_game_fov(
     std::uintptr_t process_handle, unsigned long process_id,
     const std::filesystem::path& dll,
     std::uint32_t width, std::uint32_t height, bool log_enabled,
-    bool skip_cinematics, bool remove_black_frames = false);
+    bool skip_cinematics, bool remove_dialogue_backgrounds = false,
+    bool remove_cinematic_bars = false);
 }

@@ -49,10 +49,19 @@ inline BlackFrameKind black_frame_kind(float x0, float y0,
     return BlackFrameKind::Preserve;
 }
 
-inline bool remove_black_frame(bool opt_in, bool verified_frame_producer,
+inline bool remove_black_frame(bool remove_dialogue_backgrounds,
+                               bool remove_cinematic_bars,
+                               bool verified_frame_producer,
                                float x0, float y0, float x1, float y1) {
-    return opt_in && verified_frame_producer &&
-           black_frame_kind(x0, y0, x1, y1) != BlackFrameKind::Preserve;
+    if (!verified_frame_producer) return false;
+    switch (black_frame_kind(x0, y0, x1, y1)) {
+        case BlackFrameKind::DialogueBackdrop:
+            return remove_dialogue_backgrounds;
+        case BlackFrameKind::CinematicLetterbox:
+            return remove_cinematic_bars;
+        default:
+            return false;
+    }
 }
 
 } // namespace r2fix
