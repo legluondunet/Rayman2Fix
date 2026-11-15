@@ -151,11 +151,13 @@ class MixerPathTests(unittest.TestCase):
                            hashlib.sha256(fixture).hexdigest()),
               patch.object(A, 'PE32', SyntheticWavePE)):
             info=A.audit_wavmw_registration(fixture)
-        self.assertEqual(info['opcode_windows_verified'],7)
-        self.assertEqual(info['direct_call_edges_verified'],2)
+        self.assertEqual(info['opcode_windows_verified'],11)
+        self.assertEqual(info['direct_call_edges_verified'],3)
         self.assertTrue(info['original_callback_provider_link_verified'])
         self.assertFalse(info['runtime_provider_selected_or_invoked_proven'])
         self.assertFalse(info['callback_executed_during_esc_proven'])
+        self.assertTrue(info['wavmw_type2_can_wrap_lower_layer_callback'])
+        self.assertFalse(info['wavmw_indirect_callback_target_generation_proven'])
         self.assertFalse(info['permission_to_change_audio'])
 
     def test_unrecognized_wavmw_provider_refused(self):
@@ -173,6 +175,29 @@ class MixerPathTests(unittest.TestCase):
                            hashlib.sha256(fixture).hexdigest()),
               patch.object(A,'PE32',Bad)):
             with self.assertRaisesRegex(A.PEFormatError,'CreateNewBufferEx export'):
+                A.audit_wavmw_registration(fixture)
+
+    def test_native_wavmw_type2_callback_wrapper_has_verified_link(self):
+        self.assertEqual(A.WAVMW_BUFFER_EDGES['type2_register_lower_layer_buffer'],
+                         (0xCB94,0xC3F0))
+        self.assertEqual(bytes.fromhex(
+            A.WAVMW_BUFFER_SITES['wavmw_type2_lower_callback_address'][1])[-4:],
+            (0x1000C980).to_bytes(4,'little'))
+        self.assertIn('ff 55 18',
+                      A.WAVMW_BUFFER_SITES[
+                          'wavmw_type2_indirect_callback_invocation'][1])
+
+    def test_unexpected_wavmw_indirect_callback_target_rejected(self):
+        fixture=b'synthetic mutated WAVMW type2 callback'
+        class Bad(SyntheticWavePE):
+            def __init__(self,raw):
+                super().__init__(raw)
+                self.code[0xCA27] = 0x56
+        with (patch.object(A,'WAVMW_OWNER_SHA256',
+                           hashlib.sha256(fixture).hexdigest()),
+              patch.object(A,'PE32',Bad)):
+            with self.assertRaisesRegex(A.PEFormatError,
+                                        'wavmw_type2_indirect_callback_invocation'):
                 A.audit_wavmw_registration(fixture)
 
     def test_modified_wavmw_backend_dispatch_refused(self):
