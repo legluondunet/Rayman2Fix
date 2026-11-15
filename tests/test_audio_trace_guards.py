@@ -184,6 +184,38 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("pre_driver_pause::Policy",self.runtime)
         self.assertNotIn("RUNTIME-ESC-PREDRIVER-WINDOW:",wrapper)
 
+    def test_native_output_buffer_progress_counters_are_only_passive_diagnostics(self):
+        # Original APMMX mixer mode-0 writes at RVA E82A0 and mode-1
+        # at 24ED0. These are global 32-bit output positions, never a
+        # per-song generation or proof that buffer fill ran in a menu.
+        sample=self.runtime.split(
+            "ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {",
+            1)[1].split("void __cdecl proto_script_pause() {",1)[0]
+        for token in ("DWORD mode0_output=0;","DWORD mode1_output=0;",
+                      "read(apm+0xE82A0u,&mode0_output,sizeof(mode0_output))",
+                      "read(apm+0x24ED0u,&mode1_output,sizeof(mode1_output))",
+                      "out.mode0_output=mode0_output;",
+                      "out.mode1_output=mode1_output;"):
+            self.assertIn(token,self.runtime if token.startswith("DWORD") else sample)
+        self.assertNotIn("GetPos(",sample)
+        self.assertNotIn("TestIsPlaying(",sample)
+        self.assertNotIn("PauseTransitionSxd(",sample)
+        self.assertNotIn("ResumeTransitionSxd(",sample)
+        self.assertNotIn("WriteProcessMemory(",sample)
+        tick=self.runtime.split("void proto_menu_tick() {",1)[1].split(
+            "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
+        self.assertIn(
+            "mode0_output=%lu mode1_output=%lu snapshot=post-dispatch",tick)
+        self.assertLess(tick.index("proto_dispatch(action);"),
+                        tick.index("mode0_output=%lu mode1_output=%lu"))
+        flush=self.runtime.split("void proto_flush_predriver_resume_report() {",1)[1].split(
+            "// Focus is a Win32",1)[0]
+        self.assertIn(
+            "mode0_output=%lu mode1_output=%lu snapshot=post-native-resume",flush)
+        self.assertNotIn("proto_dispatch(",flush)
+        self.assertNotIn("TestIsPlaying(",flush)
+        self.assertNotIn("GetPos(",flush)
+
     def test_adpcm_pause_snapshot_rechecks_active_and_pause_state(self):
         # The original active flag at record+0x28 is a better diagnostic
         # than source-only Play/Stop counts, but it is NOT an epoch token.
