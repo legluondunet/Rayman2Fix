@@ -69,6 +69,14 @@ class Rel32CallSiteTests(unittest.TestCase):
         self.assertFalse(report["permission_to_modify_audio"])
         self.assertEqual(len(report["direct_rel32_candidates"]["0x15D0"]),4)
         self.assertEqual(len(report["direct_rel32_candidates"]["0x1FC0"]),3)
+        self.assertEqual(report["direct_target_count"],8)
+        self.assertEqual(report["direct_callsite_count"],23)
+        self.assertEqual(report["direct_rel32_candidates"]["0x1F50"],["0x290E"])
+        self.assertEqual(report["direct_rel32_candidates"]["0x2320"],["0x2A20"])
+        self.assertEqual(report["direct_rel32_candidates"]["0x13A0"],["0x27BE","0x3223"])
+        self.assertTrue(report["query_internal_helpers_have_one_direct_candidate_each"])
+        self.assertFalse(report["unique_original_query_runtime_invocation_proven"])
+        self.assertFalse(report["indirect_or_dynamic_call_paths_exhausted"])
 
     def test_missing_or_extra_candidate_is_fail_closed(self):
         class MissingCandidate(SyntheticPE):
@@ -78,6 +86,45 @@ class Rel32CallSiteTests(unittest.TestCase):
         fixture=b"synthetic missing one"
         with (patch.object(A,"OWNER_ORIGINAL_SHA256",hashlib.sha256(fixture).hexdigest()),
               patch.object(A,"PE32",MissingCandidate)):
+            with self.assertRaisesRegex(A.PEFormatError,"differ from"):
+                A.audit(fixture)
+
+    def test_primary_allocator_is_only_a_two_site_direct_call_target(self):
+        self.assertEqual(A.EXPECTED[0x13A0], (0x27BE,0x3223))
+        self.assertEqual(A.EXPECTED[0x1FC0], (0x14F9,0x21F3,0x22A3))
+        # The shared initializer is not a top-level creation epoch.
+        self.assertNotEqual(A.EXPECTED[0x13A0], A.EXPECTED[0x1FC0])
+
+    def test_query_helpers_each_have_one_direct_original_candidate(self):
+        self.assertEqual(A.EXPECTED[0x1F50], (0x290E,))
+        self.assertEqual(A.EXPECTED[0x2320], (0x2A20,))
+        self.assertEqual(A.EXPECTED[0x2900], (0x5155,))
+        self.assertEqual(A.EXPECTED[0x2A00], (0x51A5,))
+        self.assertEqual(len(A.EXPECTED[0x2480]),10)
+
+    def test_extra_direct_getpos_candidate_rejected_even_with_original_sites(self):
+        class ExtraGetPos(SyntheticPE):
+            def __init__(self,data):
+                super().__init__(data)
+                pos=0x70F0-0x1000
+                self.text[pos]=0xE8
+                struct.pack_into("<i",self.text,pos+1,0x2320-(0x70F0+5))
+        fixture=b"synthetic extra GetPos call"
+        with (patch.object(A,"OWNER_ORIGINAL_SHA256",hashlib.sha256(fixture).hexdigest()),
+              patch.object(A,"PE32",ExtraGetPos)):
+            with self.assertRaisesRegex(A.PEFormatError,"differ from"):
+                A.audit(fixture)
+
+    def test_extra_direct_cleanup_candidate_rejected_even_with_original_sites(self):
+        class ExtraCleanup(SyntheticPE):
+            def __init__(self,data):
+                super().__init__(data)
+                pos=0x7A10-0x1000
+                self.text[pos]=0xE8
+                struct.pack_into("<i",self.text,pos+1,0x1F50-(0x7A10+5))
+        fixture=b"synthetic extra TestIsPlaying cleanup"
+        with (patch.object(A,"OWNER_ORIGINAL_SHA256",hashlib.sha256(fixture).hexdigest()),
+              patch.object(A,"PE32",ExtraCleanup)):
             with self.assertRaisesRegex(A.PEFormatError,"differ from"):
                 A.audit(fixture)
 
