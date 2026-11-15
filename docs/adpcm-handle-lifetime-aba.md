@@ -1072,3 +1072,104 @@ No original DLL bytes or executable were committed to these fixtures.
 The original WAVMW/APMMX audio functions remain uncalled by the
 diagnostics; the experimental early-ESC physical driver bypass
 remains **NO-GO**.
+
+## 19. Parameter updates are another hidden native retirement route (15 November)
+
+Further exact-original APMMX disassembly found a third native
+lifecycle route not covered by the existing exported Stop,
+TestIsPlaying or GetPos counters. Both exported parameter setters
+can reach the **same private record-retirement function**:
+
+```text
+APMMX: _SND_fn_bSetParamSxdADPCM@8
+    0x5120 -> 0x513C -> 0x28B0
+    0x28C1 -> 0x1020  [driver lock acquire]
+    0x28D3 -> 0x1C30  [internal parameter operation]
+    0x28E9 -> 0x1030  [driver lock release]
+
+APMMX: _SND_fn_bSetParamTransitionSxdADPCM@8
+    0x5430 -> 0x544C -> 0x3250
+    0x326A -> 0x1020  [driver lock acquire]
+    0x3278 -> 0x1C30  [same internal parameter operation]
+    0x328C -> 0x1030  [driver lock release]
+
+Internal:
+    0x1C54   test original record [+0x28] active flag
+    0x1C59   if already inactive -> 0x1C8C
+    0x1C8D -> 0x15D0  [internal record-retirement call]
+```
+
+The internal operation updates parameters of active records
+through `0x1DC0`, and invokes `0x15D0` instead if its
+validated native record is already inactive. This means a
+**game-issued parameter update may retire a prior ADPCM record**
+without any exported Stop call. Unlike the GetPos and
+TestIsPlaying paths, **both original SetParam wrappers use the
+known driver lock**; acquiring that lock does not make their
+side effect visible to our Stop counter.
+
+A complete SHA-256-pinned `.text` raw `E8+rel32` scan
+finds precisely the two `0x1C30` callers `0x28D3` and
+`0x3278`, reached by the two exported stubs `0x513C` and
+`0x544C`. Thus the verified target set in
+`tools/audit_adpcm_rel32_calls.py` expands to **11 original
+internal targets and 27 direct call candidates**. The
+`tools/audit_adpcm_lock_routes.py` now verifies **33 exact
+opcode windows, 24 direct call edges and six lock-bracketed
+routes**, including both SetParam wrappers. Its synthetic
+tests fail closed on modified conditional instructions, extra
+SetParam call sites and missing lock release. These counts
+describe only the listed target set, not every x86 call
+throughout the DLL.
+
+### Seven dynamically resolved native ADPCM delegates
+
+The original owner-provided WAVMW module loads the two
+parameter callbacks by name just like the previous five:
+
+| Callback | WAVMW pointer RVA | WAVMW original fallback RVA | APMMX original entry RVA |
+| --- | --- | --- | --- |
+| Stop | `0x26A98` | `0x3C50` | `0x54C0` |
+| Pause | `0x26A9C` | `0x3C80` | `0x54D0` |
+| Resume | `0x26AA0` | `0x3CB0` | `0x54E0` |
+| TestIsPlaying | `0x26A00` | `0x3440` | `0x5150` |
+| GetPos | `0x26A14` | `0x3530` | `0x51A0` |
+| **SetParam** | **`0x269FC`** | **`0x3410`** | **`0x5120`** |
+| **SetParamTransition** | **`0x26A88`** | **`0x3B60`** | **`0x5430`** |
+
+The exact original WAVMW resolver at `0x57C5` reads
+`_SND_fn_bSetParamSxdADPCM@8` from original RVA
+`0x21540`, publishes the callback to `0x269FC`
+at `0x57D3`, or installs fallback `0x3410`.
+The resolver at `0x5C8A` loads
+`_SND_fn_bSetParamTransitionSxdADPCM@8` from
+original RVA `0x21A20`, publishes to `0x26A88`
+at `0x5C98`, or installs fallback `0x3B60`.
+
+The existing **opt-in render-thread read-only pointer observer**
+now reports **seven instead of five** original delegate bindings.
+The last two export entries have **two-argument stdcall signatures**,
+but no delegate is called by the observer; their first 16
+native machine bytes and expected export addresses are checked
+alongside the previous five. Nothing changes in production audio,
+or in the experimental Pause/Resume/Stop forwarding.
+
+The offline log classifier retains the original **five-callback
+core** comparison so logs from earlier builds remain readable.
+It separately reports `complete_seven`,
+`changed_parameter_operations`, and
+`all_seven_original_entry_fingerprints_both_stages`
+only when both pending and synchronized Theme stages have
+unambiguous complete seven-pointer evidence. Missing parameter
+pointers remain **unknown**, never unchanged. Even all seven
+resolved fingerprints prove only callback *availability*, not
+the execution or outcome of a parameter operation.
+
+**Crucial limit:** nobody has yet observed a SetParam-triggered
+retirement, a GetPos-triggered inactivation or a
+TestIsPlaying-triggered retirement during an actual early
+ESC session. The newly discovered paths show why the
+original Stop/Play counters and five-pointer snapshots are
+insufficient, not that the missing retirement actually
+occurred. PR #10 remains draft; no physical driver
+compensation bypass is authorized.
