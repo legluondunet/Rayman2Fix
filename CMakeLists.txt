@@ -262,6 +262,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME exact-native-black-polygon-callsite-guards
     COMMAND cinematic_black_polygon_tests)
+  add_executable(cinematic_viewport_fill_tests
+    tests/cinematic_viewport_fill_tests.cpp)
+  target_include_directories(cinematic_viewport_fill_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME guarded-native-cinematic-viewport-fill
+    COMMAND cinematic_viewport_fill_tests)
 
   add_executable(screen_camera_tests tests/screen_camera_tests.cpp)
   target_include_directories(screen_camera_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

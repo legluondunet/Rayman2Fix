@@ -11,6 +11,7 @@
 #include "rayman2fix/hud_math.hpp"
 #include "rayman2fix/black_frame_filter.hpp"
 #include "rayman2fix/cinematic_black_polygon.hpp"
+#include "rayman2fix/cinematic_viewport_fill.hpp"
 #include "rayman2fix/screen_camera.hpp"
 #include "rayman2fix/superimposed_math.hpp"
 #include "rayman2fix/intro_skip.hpp"
@@ -201,7 +202,13 @@ std::atomic<unsigned> g_hidden_cinematic_bars{0};
 // Hook only when RemoveCinematicBars=1, at the validated 32-bit driver slot.
 std::atomic<void*> g_black_polygon_original{nullptr};
 std::atomic<unsigned> g_black_polygon_source_samples[4]{};
-std::atomic<unsigned> g_hidden_native_black_bars[2]{};
+// Source-based fix: rebuild normal GLI viewport bounds BEFORE draw.
+// BlackPolygon callback remains a read-only route diagnostic, never hides
+// colored clear pixels in place of rendering real scene content.
+std::atomic<bool> g_cinematic_viewport_fill_installed{false};
+std::atomic<unsigned> g_cinematic_viewport_fill_samples{0};
+std::atomic<unsigned> g_cinematic_viewport_fill_calls{0};
+
 
 // Two passive samples per route/edge/time phase; no change to render output.
 std::atomic<unsigned> g_cinematic_edge_counts[4][2]{};
@@ -221,6 +228,15 @@ constexpr BYTE kNative2DExpected[7]={
 };
 using Native2DSprite=void (__cdecl*)(void*,float,float,float,float,void*);
 Native2DSprite g_original_2d_sprite=nullptr;
+// Native GLI viewport setup at VA 0x420660; arguments are
+// (screen_dimensions, GLI viewport) in approved retail CD executable.
+using NativeViewportCalc=void (__cdecl*)(void*,void*);
+NativeViewportCalc g_original_cinematic_viewport_calc=nullptr;
+constexpr uintptr_t kCinematicViewportCalcRva=0x20660u;
+constexpr BYTE kCinematicViewportCalcExpected[6]={
+    0x83,0xEC,0x08,0x53,0x55,0x56
+};
+
 thread_local unsigned g_native_2d_call_depth=0;
 std::atomic<unsigned> g_native_2d_calls{0};
 std::atomic<unsigned> g_native_2d_passthrough_plain{0};
@@ -3731,6 +3747,112 @@ DWORD install_camera_hook() {
 }
 
 
+// Source-side alternative to hiding post-render GLI masks.
+// The game computes the top/bottom screen limits at VA 0x420660 from
+// the source viewport's thousandth coefficients at +0x48/+0x4C.
+// The regular 3D and UV sources then consume the derived limits at
+// +0x38/+0x3C. Filter only a full-width, moderately inset viewport.
+// This must run before the native original recalculates the limits.
+// Restore the user's source coefficients immediately afterward, so
+// the original animated letterbox state does not get overwritten.
+void __cdecl cinematic_viewport_calc(void* dimensions,void* viewport) {
+    const auto original=g_original_cinematic_viewport_calc;
+    if(!original)return;
+    if(!dimensions || !viewport || !g_remove_cinematic_bars ||
+       g_hud_scale>=0.9999f) {
+        original(dimensions,viewport);
+        return;
+    }
+    const auto* screen=static_cast<const BYTE*>(dimensions);
+    auto* view=static_cast<BYTE*>(viewport);
+    std::int32_t h=0,w=0,y0=0,y1=0,x0=0,x1=0;
+    std::memcpy(&h,screen,sizeof(h));
+    std::memcpy(&w,screen+4,sizeof(w));
+    std::memcpy(&y0,view+0x48,sizeof(y0));
+    std::memcpy(&y1,view+0x4c,sizeof(y1));
+    std::memcpy(&x0,view+0x50,sizeof(x0));
+    std::memcpy(&x1,view+0x54,sizeof(x1));
+    const auto fill=r2fix::calculate_cinematic_viewport_fill(
+        w,h,x0,x1,y0,y1);
+    if(!fill.change) {
+        original(dimensions,viewport);
+        return;
+    }
+    const std::int32_t full_y0=fill.top, full_y1=fill.bottom;
+    std::memcpy(view+0x48,&full_y0,sizeof(full_y0));
+    std::memcpy(view+0x4c,&full_y1,sizeof(full_y1));
+    original(dimensions,viewport);
+    // This source viewport's native render limits (+0x38/+0x3c) were
+    // recalculated for the full canvas; preserve them, but restore the
+    // state machine's requested margins (+0x48/+0x4c).
+    std::int32_t derived_y0=0,derived_y1=0;
+    std::memcpy(&derived_y0,view+0x38,sizeof(derived_y0));
+    std::memcpy(&derived_y1,view+0x3c,sizeof(derived_y1));
+    std::memcpy(view+0x48,&y0,sizeof(y0));
+    std::memcpy(view+0x4c,&y1,sizeof(y1));
+    g_cinematic_viewport_fill_calls.fetch_add(1,std::memory_order_relaxed);
+    if(g_log && g_cinematic_viewport_fill_samples.fetch_add(
+        1,std::memory_order_relaxed)<8u) {
+        char line[260]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-CINEMATIC-VIEWPORT: native recalculated original_y=%d..%d permille full_y=0..1000 derived_y=%d..%d dimensions=%dx%d (source-side, opt-in; still needs visual validation)",
+            y0,y1,derived_y0,derived_y1,w,h);
+        log_line(line);
+    }
+}
+
+void install_cinematic_viewport_hook() {
+    if(!g_remove_cinematic_bars || g_hud_scale>=0.9999f ||
+       g_original_cinematic_viewport_calc)return;
+    auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+    if(!base)return;
+    const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if(dos->e_magic!=IMAGE_DOS_SIGNATURE || dos->e_lfanew<=0 ||
+       dos->e_lfanew>=0x1000)return;
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+        base+dos->e_lfanew);
+    if(pe->Signature!=IMAGE_NT_SIGNATURE ||
+       pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
+       pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       pe->OptionalHeader.Magic!=IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
+       pe->OptionalHeader.SizeOfImage<
+           kCinematicViewportCalcRva+sizeof(kCinematicViewportCalcExpected))
+        return;
+    BYTE* entry=base+kCinematicViewportCalcRva;
+    if(std::memcmp(entry,kCinematicViewportCalcExpected,
+                   sizeof(kCinematicViewportCalcExpected))!=0) {
+        log_line("RUNTIME-CINEMATIC-VIEWPORT: original calc bytes unknown; source hook disabled (black polygons preserved)");
+        return;
+    }
+    BYTE* gateway=static_cast<BYTE*>(VirtualAlloc(nullptr,64,
+        MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    if(!gateway)return;
+    std::memcpy(gateway,entry,sizeof(kCinematicViewportCalcExpected));
+    write_jump(gateway+sizeof(kCinematicViewportCalcExpected),
+               entry+sizeof(kCinematicViewportCalcExpected));
+    DWORD old=0;
+    if(!VirtualProtect(gateway,64,PAGE_EXECUTE_READ,&old)) {
+        VirtualFree(gateway,0,MEM_RELEASE);return;
+    }
+    DWORD original_protect=0;
+    if(!VirtualProtect(entry,sizeof(kCinematicViewportCalcExpected),
+                       PAGE_EXECUTE_READWRITE,&original_protect)) {
+        VirtualFree(gateway,0,MEM_RELEASE);return;
+    }
+    g_original_cinematic_viewport_calc=
+        reinterpret_cast<NativeViewportCalc>(gateway);
+    write_jump(entry,reinterpret_cast<void*>(&cinematic_viewport_calc));
+    entry[5]=0x90;
+    FlushInstructionCache(GetCurrentProcess(),entry,
+                          sizeof(kCinematicViewportCalcExpected));
+    DWORD ignored=0;
+    VirtualProtect(entry,sizeof(kCinematicViewportCalcExpected),
+                   original_protect,&ignored);
+    g_cinematic_viewport_fill_installed.store(
+        true,std::memory_order_release);
+    log_line("RUNTIME-CINEMATIC-VIEWPORT: native source-side fill installed (full-width inset viewports only; opt-in)");
+}
+
 void install_native_2d_percent_hook() {
     // Only call after the SHA/PE/byte validated camera hook was
     // installed for our exact supported, unprotected executable.
@@ -4071,8 +4193,10 @@ void __cdecl cinematic_black_polygon(int x0,int y0,int x1,int y1) {
     case 0x20878u: site=3;break; // native RIGHT mask
     default:break;
     }
-    const bool skip=g_remove_cinematic_bars && g_hud_scale<0.9999f &&
-        candidate!=r2fix::CinematicBlackPolygon::Preserve;
+    // Blue-background regression was confirmed with direct mask hiding.
+    // NEVER suppress these downstream masks now. In source-side mode,
+    // native viewport bounds are extended BEFORE the scene is drawn.
+    constexpr bool skip=false;
     if(site<4u && g_log) {
         const unsigned n=g_black_polygon_source_samples[site].fetch_add(
             1,std::memory_order_relaxed);
@@ -4084,16 +4208,6 @@ void __cdecl cinematic_black_polygon(int x0,int y0,int x1,int y1) {
                 unsigned(candidate),unsigned(skip));
             log_line(msg);
         }
-    }
-    if(skip) {
-        const unsigned kind=candidate==r2fix::CinematicBlackPolygon::Upper ?
-            0u:1u;
-        if(g_hidden_native_black_bars[kind].fetch_add(
-            1,std::memory_order_relaxed)==0)
-            log_line(kind==0 ?
-                "RUNTIME-GLIDRV-BLACK-POLYGON: first upper full-width mask suppressed (opt-in; video ownership not yet confirmed)" :
-                "RUNTIME-GLIDRV-BLACK-POLYGON: first lower full-width mask suppressed (opt-in; video ownership not yet confirmed)");
-        return;
     }
     original(x0,y0,x1,y1);
 }
@@ -4367,7 +4481,7 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
             install_callback(black_polygon,
                 reinterpret_cast<void*>(&cinematic_black_polygon),
                 g_black_polygon_original,
-                "RUNTIME-GLIDRV-BLACK-POLYGON: callback installed (source-filtered opt-in)",
+                "RUNTIME-GLIDRV-BLACK-POLYGON: passive callback monitor installed (native source-side fill; no downstream suppression)",
                 black_polygon_logged);
         install_callback(plain, reinterpret_cast<void*>(&hud_plain_sprite),
                          g_plain_sprite_original,
@@ -4632,7 +4746,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     if(g_remove_dialogue_backgrounds)
         log_line("RUNTIME-FRAMES: RemoveDialogueBackgrounds=1 opt-in; verified GLI dialogue backdrop filter");
     if(g_remove_cinematic_bars)
-        log_line("RUNTIME-FRAMES: RemoveCinematicBars=1 opt-in; experimental GLI source quads and native GLIDRV horizontal black masks (video ownership unconfirmed)");
+        log_line("RUNTIME-FRAMES: RemoveCinematicBars=1 opt-in; native GLI viewport source fill (legacy mask hiding disabled after blue-band regression)");
     // This hook is also used for the targeted intro-skip poll on 4:3.
     // For narrow monitors camera_hor_plus leaves the FOV unchanged.
     const DWORD camera_status = install_camera_hook();
@@ -4651,6 +4765,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         // Read-only hook at VA 0x4710C0 is not part of the actual fix.
         if(g_hud_scale<0.9999f)install_superimposed_proc_probe();
 #endif
+        if(g_remove_cinematic_bars)
+            install_cinematic_viewport_hook();
         initialize_native_intro_skip();
         start_hud_monitor();
     }
