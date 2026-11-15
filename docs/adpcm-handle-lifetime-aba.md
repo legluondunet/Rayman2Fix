@@ -1261,6 +1261,36 @@ other cases branch around it or handle a different form of
 record progression. This is **inactivation**, not a confirmed
 record retirement or handle generation change.
 
+### Where the buffer-fill callbacks come from
+
+The same exact original APMMX initialization routine
+`0x2AE0` registers the two callback function addresses
+with an **external output-interface registration function**:
+
+```text
+0x2B39:  mov [esp+0x1C], 0x10003400    ; output callback A
+0x2B41:  call 0x3A50                  ; register callback
+0x2B68:  mov [esp+0x1C], 0x100034B0    ; output callback B
+0x2B74:  call 0x3A50                  ; register callback
+
+0x3A50:  original registration wrapper
+0x3A73:  call dword [0x100E849C]     ; resolved output provider
+```
+
+Unlike the public game-facing queries, these functions are
+passed as **function pointers** to another original audio
+component. Therefore a raw E8-only caller scan cannot
+account for each invocation of the mixer wrappers: the
+registration wrapper hands their pointers to an
+indirectly dispatched provider. The static code establishes
+the **callback registration**, not how often or on which
+thread those callbacks actually run. The identity,
+scheduling policy and concurrency of the provider remain
+unverified. The auditor verifies these two exact pointer
+constants, both registration calls and the provider's
+indirect dispatch, and the synthetic tests detect altered
+registration instructions.
+
 This is significant because a hypothetical perfect trace
 of the *public* `GetPos`, `TestIsPlaying`, `SetParam`,
 `Play` and `Stop` APIs can still miss a native
@@ -1284,12 +1314,12 @@ could itself alter audio timing.
 
 ### Reproducible SHA-pinned audit
 
-`tools/audit_adpcm_buffer_fill.py` verifies **16 native
-opcode windows, seven direct E8 call edges, three
+`tools/audit_adpcm_buffer_fill.py` verifies **22 native
+opcode windows, nine direct E8 call edges, three
 conditional branch targets**, and the exact original DLL
 SHA-256 and PE metadata, read-only without executing the DLL.
 The separate `tests/test_adpcm_buffer_fill.py` provides
-**10 synthetic regression tests**, covering all zero-flag
+**13 synthetic regression tests**, covering all zero-flag
 gates, alternate branches, missing lock release and
 changed active-flag writer.
 
