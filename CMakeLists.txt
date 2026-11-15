@@ -248,6 +248,13 @@ if(BUILD_TESTING)
   target_include_directories(hud_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME centered-hud-4-by-3-math COMMAND hud_math_tests)
 
+  # Opt-in native GLI source-frame filter; test only synthetic percentage
+  # rectangles on Linux/Windows, without launching Rayman or changing INI.
+  add_executable(black_frame_filter_tests tests/black_frame_filter_tests.cpp)
+  target_include_directories(black_frame_filter_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME optional-black-frame-geometry COMMAND black_frame_filter_tests)
+
   add_executable(screen_camera_tests tests/screen_camera_tests.cpp)
   target_include_directories(screen_camera_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME native-4-by-3-screen-world-camera COMMAND screen_camera_tests)
