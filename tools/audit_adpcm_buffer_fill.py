@@ -39,6 +39,11 @@ ANCHORS = {
     'second_callback_registration_call': (0x2B74, 'e8 d7 0e 00 00'),
     'native_callback_registration_helper_entry': (0x3A50, 'a1 9c 84 0e 10 85 c0'),
     'native_callback_registration_indirect_call': (0x3A73, 'ff 15 9c 84 0e 10'),
+    'output_provider_symbol_push': (0x4B7D, '68 10 20 01 10'),
+    'output_provider_resolver_call': (0x4B83, 'e8 78 ef ff ff'),
+    'output_provider_global_publication': (0x4B8B, 'a3 9c 84 0e 10'),
+    'output_provider_fallback': (0x4B94, 'c7 05 9c 84 0e 10 80 3a 00 10'),
+    'output_provider_fallback_returns_error': (0x3A80, '83 c8 ff c2 10 00'),
 }
 EDGES = {
     'progress_through_buffer_fill': (0x1AD1, 0x1740),
@@ -50,6 +55,7 @@ EDGES = {
     'mixer_second_unlock': (0x353E, 0x1030),
     'first_register_callback': (0x2B41, 0x3A50),
     'second_register_callback': (0x2B74, 0x3A50),
+    'output_provider_lookup': (0x4B83, 0x3B00),
 }
 BRANCHES = {
     'progress_no_record24_skip_to_terminal': (0x175F, 0x17A5),
@@ -72,6 +78,9 @@ def audit(data: bytes) -> dict:
     if (pe.machine != 0x14C or pe.timestamp != 0x38076F98
             or pe.image_base != 0x10000000 or pe.image_size != 0xEE000):
         raise PEFormatError('original APMMX PE metadata mismatch')
+    provider_symbol = b'_SND_fn_lCreateNewBufferExSxd@16\0'
+    if pe.read_rva(0x12010, len(provider_symbol)) != provider_symbol:
+        raise PEFormatError('original audio output provider dynamic symbol mismatch')
     for name, (rva, hex_bytes) in ANCHORS.items():
         expected = bytes.fromhex(hex_bytes)
         if pe.read_rva(rva, len(expected)) != expected:
@@ -103,6 +112,9 @@ def audit(data: bytes) -> dict:
         'native_active_zero_write_rva': '0x17CA',
         'normal_buffer_fill_can_mark_voice_inactive': True,
         'original_two_callbacks_registered_through_indirect_output_interface': True,
+        'dynamic_output_provider_symbol': '_SND_fn_lCreateNewBufferExSxd@16',
+        'dynamic_output_provider_resolution_proven': True,
+        'specific_runtime_provider_module_observed': False,
         'actual_callback_execution_during_esc_observed': False,
         'registered_callbacks_always_run_on_a_separate_thread_proven': False,
         'mixer_wrappers_hold_known_driver_lock': True,
