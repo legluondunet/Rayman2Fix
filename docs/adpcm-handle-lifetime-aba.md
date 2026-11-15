@@ -1310,8 +1310,8 @@ is RVA `0xC3F0`. The original WAVMW code checks
 the buffer object's first type field at `0xC3FA`
 and routes the creation through one of two
 internal backends, `0xCB00` or `0xD180`.
-This call-graph link is verified by **seven WAVMW
-opcode windows and two direct-call edges**.
+This call-graph link is verified by **eleven WAVMW
+opcode windows and three direct-call edges**.
 It confirms that a genuinely exported original
 WAVMW buffer-creation implementation corresponds
 to the name dynamically resolved in APMMX.
@@ -1320,6 +1320,27 @@ module SHA, export RVA and backend branches.
 It still does not establish which backend executes
 in a particular owner session or the eventual
 thread that invokes the registered callback.
+
+The type-2 backend `0xCB00` has another
+**verified, indirect callback layer**. At
+`0xCB88` it supplies original WAVMW function
+`0xC980` as a lower-layer callback, then
+`0xCB94` calls `0xC3F0` again to create
+that lower-layer buffer. The WAVMW function at
+`0xC980` contains an indirect call through
+`[ebp+0x18]` at `0xCA27`. This confirms
+that **a direct-call-only static graph is
+insufficient** for callback scheduling, and
+that the wrapper can delegate further through
+a stored function pointer. The audit checks
+both callback constants and the indirect opcode.
+
+This does **not** establish that `[ebp+0x18]`
+held one of the two APMMX callbacks in the
+owner's actual ESC session, nor when and on
+which thread the lower callback executed.
+The possible player-voice write remains a
+static native path, not a witnessed live event.
 
 The audit verifies the resolver name and exact
 fallback, but does not read the **runtime**
@@ -1362,7 +1383,7 @@ opcode windows, ten direct E8 call edges, three
 conditional branch targets**, and the exact original DLL
 SHA-256 and PE metadata, read-only without executing the DLL.
 The separate `tests/test_adpcm_buffer_fill.py` provides
-**20 synthetic regression tests**, covering all zero-flag
+**22 synthetic regression tests**, covering all zero-flag
 gates, alternate branches, missing lock release and
 changed active-flag writer.
 
