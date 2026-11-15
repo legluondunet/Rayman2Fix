@@ -236,3 +236,61 @@ initialization paths or deliberately refuse to act
 when coverage is incomplete. It must never assume that
 a matching source-scoped ESC pair, Theme target and
 valid ADPCM backlink constitute an unchanging generation.
+
+
+## 7. Independent direct-call scan and auxiliary record initializers (15 November)
+
+A second SHA-pinned, read-only check of the owner's exact original
+1999 APMMXbvr.dll traversed every raw byte of its .text section
+(RVA 0x1000, 0xD800 on-disk bytes). For each candidate E8 disp32
+opcode, it computed the signed relative target. The scan found exactly
+these raw *direct-call candidates* to two original helpers:
+
+| Target RVA | Raw E8/rel32 caller RVAs | Role |
+| --- | --- | --- |
+| 0x15D0 | 0x172C, 0x1C8D, 0x1F68, 0x2950 | Record retirement |
+| 0x1FC0 | 0x14F9, 0x21F3, 0x22A3 | Record initialization |
+
+The seven candidate locations are actual calls in an independent
+`objdump -d -M intel` disassembly. No other raw E8/rel32 candidate
+inside this exact original .text section targets those two helpers.
+This is **not** complete interception coverage: indirect calls,
+alternate branches, function-pointer dispatch, and concurrency remain
+outside the byte scan.
+
+Further exact original x86 inspection distinguishes auxiliary
+initialization from creation of a physical top-level music voice:
+
+- At 0x2180..0x21F3, a parent handle is validated at 0x2480;
+  the code allocates or reuses a subsidiary block under
+  [primary_record+0xC4], clears its 0xE4 bytes, then calls 0x1FC0
+  with the **existing parent's handle**.
+- At 0x2210..0x22A3, the validated parent receives
+  [primary_record+0x2C]=1; its subsidiary +0xC4 points to the
+  fixed object 0x100E65A0, that object is reset and global flag
+  0x100E6678=1 is set before calling 0x1FC0 with the **same
+  primary handle**.
+
+Consequently, **incrementing a generation counter on every 0x1FC0
+call would be incorrect**: these nested helpers can reset auxiliary
+records without creating a new top-level handle. Equally, observing
+only exported Stop callbacks misses internal retirement and primary
+in-place reuse. A future observer needs a verified distinction
+between primary and auxiliary records and all relevant mutation
+routes under the original driver's lock. That is not proven yet.
+
+Reproducibility (the original proprietary DLL remains local):
+
+```sh
+python3 tools/audit_adpcm_rel32_calls.py Rayman2Fix/dll/APMMXbvr.dll --json
+python3 -m unittest discover -s tests -p 'test_adpcm_rel32_calls.py'
+```
+
+The auditor checks the exact owner SHA-256, PE layout and expected
+call-site candidates; the six tests use only synthetic data. An E8
+byte scan can also find undecoded byte patterns, so it must not be
+described as exhaustive x86 control-flow proof.
+
+**Status: NO-GO on activating a new first-ESC bypass.** Native
+Theme/SXD ownership checks and passthrough stay unchanged. No
+proprietary DLL bytes or game executable are committed.
