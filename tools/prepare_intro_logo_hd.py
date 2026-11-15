@@ -16,8 +16,21 @@ import io
 import pathlib
 import struct
 import urllib.request
+import urllib.error
 
 SOURCE_URL="https://raymanpc.com/wiki/script-en/images/b/bb/Rayman_2_Logo.png"
+SOURCE_PAGE="https://raymanpc.com/wiki/script-en/index.php?title=File:Rayman_2_Logo.png"
+
+def find_local_logo(home:pathlib.Path, cwd:pathlib.Path) -> pathlib.Path | None:
+    """Prefer a logo saved in the user's browser over another HTTP request."""
+    names=("Rayman_2_Logo.png","Rayman 2 Logo.png")
+    for directory in (cwd, home/"Téléchargements", home/"Downloads"):
+        for name in names:
+            candidate=directory/name
+            if candidate.is_file():
+                return candidate
+    return None
+
 MAGIC=b"R2LOGOHD"
 WIDTH,HEIGHT=768,384
 MARGIN_X,MARGIN_Y=16,12
@@ -56,15 +69,32 @@ def main() -> None:
     except ImportError as exc:
         raise SystemExit("Pillow is required (Manjaro: sudo pacman -S python-pillow)") from exc
     if args.download:
-        try:
-            req=urllib.request.Request(SOURCE_URL,headers={"User-Agent":"Mozilla/5.0 (Rayman2Fix research; personal use)"})
-            with urllib.request.urlopen(req,timeout=30) as res:
-                data=res.read(8*1024*1024+1)
-            if len(data)>8*1024*1024:raise ValueError("Image download is unexpectedly large")
-            image=Image.open(io.BytesIO(data))
+        local=find_local_logo(pathlib.Path.home(),pathlib.Path.cwd())
+        if local is not None:
+            print(f"Using browser-downloaded logo: {local}")
+            image=Image.open(local)
             image.load()
-        except Exception as exc:
-            raise SystemExit(f"Could not download RayWiki reference: {exc}. Download the PNG in your browser, then run --png <file> instead.") from exc
+        else:
+            try:
+                req=urllib.request.Request(SOURCE_URL,headers={
+                    "User-Agent":"Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0",
+                    "Referer":SOURCE_PAGE,
+                    "Accept":"image/png,image/*;q=0.9,*/*;q=0.5",
+                })
+                with urllib.request.urlopen(req,timeout=30) as res:
+                    data=res.read(8*1024*1024+1)
+                if len(data)>8*1024*1024:
+                    raise ValueError("Image download is unexpectedly large")
+                image=Image.open(io.BytesIO(data))
+                image.load()
+            except (urllib.error.HTTPError,urllib.error.URLError,ValueError,OSError) as exc:
+                raise SystemExit(
+                    f"RayWiki refused automated download ({exc}).\n"
+                    f"Open this full-resolution PNG in your browser:\n{SOURCE_URL}\n"
+                    "Save as Rayman_2_Logo.png beside the launcher or in Downloads/Téléchargements.\n"
+                    "Then rerun: python prepare_intro_logo_hd.py --download\n"
+                    "Or use: python prepare_intro_logo_hd.py --png /path/to/logo.png"
+                ) from exc
     else:
         image=Image.open(args.png)
         image.load()

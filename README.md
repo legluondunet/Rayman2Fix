@@ -35,9 +35,16 @@ curl -fL -o prepare_intro_logo_hd.py \
 python prepare_intro_logo_hd.py --download
 ```
 
-If the source cannot be downloaded automatically, download the
-transparent PNG through the browser and run
-`python prepare_intro_logo_hd.py --png /path/to/logo.png` instead.
+RayWiki sometimes returns HTTP 403 to automated requests. Open the
+[1582×676 original PNG](https://raymanpc.com/wiki/script-en/images/b/bb/Rayman_2_Logo.png)
+in a normal browser. Save it as `Rayman_2_Logo.png` beside the launcher,
+or in `~/Downloads/` or `~/Téléchargements/`. Re-run
+`python prepare_intro_logo_hd.py --download`: the updated helper
+detects the local file before attempting another network download.
+Alternatively use `python prepare_intro_logo_hd.py --png /path/to/logo.png`.
+Never silently fall back to a different, lower-quality logo; only
+the user-provided original or a successfully downloaded original is used.
+The renderer and bootstrap remain unchanged; no Windows rebuild is needed.
 The helper writes `Rayman2Fix_logo_hd.rgba` next to the launcher.
 
 The pinned GameFrame renderer loads that exact-size/header atlas on
