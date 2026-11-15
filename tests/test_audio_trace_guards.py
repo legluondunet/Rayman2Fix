@@ -474,9 +474,9 @@ class AudioTraceGuardTests(unittest.TestCase):
             "nt.FileHeader.TimeDateStamp!=0x38076FB4u",
             "nt.OptionalHeader.SizeOfImage!=0x87000u",
             "expected_pause[7]", "std::memcmp(",
-            "0x26A98u,0x26A9Cu,0x26AA0u",
-            "0x3C50u,0x3C80u,0x3CB0u",
-            '"stop","pause","resume"',
+            "0x26A98u,0x26A9Cu,0x26AA0u,0x26A00u,0x26A14u",
+            "0x3C50u,0x3C80u,0x3CB0u,0x3440u,0x3530u",
+            '"stop","pause","resume","test-is-playing","get-pos"',
             "status=unresolved", "status=fallback",
             "status=resolved", "callback_rva=0x%08X",
             "ReadProcessMemory(", "executable_page(",
@@ -497,8 +497,56 @@ class AudioTraceGuardTests(unittest.TestCase):
             "void proto_menu_tick() {",1)[1].split(
             "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
         self.assertIn("report.transition_type_post_pause==4",tick)
-        self.assertIn("static bool adpcm_targets_logged=false",tick)
+        self.assertIn("static bool adpcm_targets_logged_pending=false",tick)
+        self.assertIn("static bool adpcm_targets_logged_synced=false",tick)
+        self.assertIn("report.transition_type_post_pause==4",tick)
+        self.assertIn("cls==3 && !adpcm_targets_logged_pending",tick)
+        self.assertIn("cls==1 && !adpcm_targets_logged_synced",tick)
+        self.assertIn("RUNTIME-AUDIO-ADPCM-DELEGATE-CONTEXT:",tick)
+        self.assertIn("stage=%s",tick)
         self.assertEqual(tick.count("log_adpcm_delegate_origins_readonly();"),1)
+        self.assertLess(tick.index("proto_dispatch(action);"),
+                        tick.index("log_adpcm_delegate_origins_readonly();"))
+        self.assertLess(tick.index("proto_deferred_safety();"),
+                        tick.index("log_adpcm_delegate_origins_readonly();"))
+
+    def test_adpcm_query_delegate_readout_has_no_new_native_side_effects(self):
+        body=self.runtime.split("void log_adpcm_delegate_origins_readonly() {",1)[1].split(
+            "// Owner's exact CD executable",1)[0]
+        # The two NEW read-only query pointers (not functions invoked).
+        self.assertIn("0x26A00u,0x26A14u",body)
+        self.assertIn("0x3440u,0x3530u",body)
+        self.assertIn('"test-is-playing","get-pos"',body)
+        self.assertIn("for(unsigned i=0;i<5u;++i)",body)
+        self.assertIn("ReadProcessMemory(",body)
+        self.assertIn("status=fallback",body)
+        self.assertIn("status=unresolved",body)
+        self.assertIn("status=resolved",body)
+        self.assertIn("callback_rva=0x%08X",body)
+        # Exact original driver native queries have side effects:
+        # never call them or acquire any extra driver hooks.
+        for prohibited in (
+            "GetProcAddress(", "LoadLibrary", "TestIsPlaying(", "GetPos(",
+            "VirtualProtect(", "WriteProcessMemory(", "InterlockedExchange",
+            "InterlockedCompareExchange", "proto_dispatch(",
+        ):
+            self.assertNotIn(prohibited,body)
+
+    def test_delegate_pre_post_pair_is_source_qualified_and_bounded(self):
+        tick=self.runtime.split("void proto_menu_tick() {",1)[1].split(
+            "#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE",1)[0]
+        section=tick.split("// Compare native delegate provenance at most twice:",1)[1].split(
+            "    }\n    if(phase==proto::Phase::pending_menu",1)[0]
+        self.assertIn("owner.native_theme_player_ref_class",section)
+        self.assertIn("report.transition_type_post_pause==4",section)
+        self.assertIn("adpcm_targets_logged_pending=true",section)
+        self.assertIn("adpcm_targets_logged_synced=true",section)
+        self.assertIn('stage=%s',section)
+        self.assertIn("resolution is NOT invocation",section)
+        self.assertEqual(section.count("log_adpcm_delegate_origins_readonly();"),1)
+        self.assertNotIn("TestIsPlaying(",section)
+        self.assertNotIn("GetPos(",section)
+        self.assertNotIn("audio_trace_forward(",section)
         self.assertLess(tick.index("proto_dispatch(action);"),
                         tick.index("log_adpcm_delegate_origins_readonly();"))
         self.assertLess(tick.index("proto_deferred_safety();"),
