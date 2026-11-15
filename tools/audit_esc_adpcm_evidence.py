@@ -67,7 +67,10 @@ def classify(lines: list[str]) -> dict:
     observations = {'esc_gate_count': 0, 'adpcm_open_samples': 0,
                     'adpcm_close_samples': 0, 'paired_menu_lifetimes': 0,
                     'export_quiet_lifetimes': 0, 'inactive_open_samples': 0,
-                    'inactive_close_samples': 0}
+                    'inactive_close_samples': 0,
+                    'close_gates_open': 0,
+                    'close_gates_blocked': 0,
+                    'close_gate_passed_but_sample_unknown': 0}
     warnings: list[str] = []
     # One single open->paired-close interval at a time. Overlapping
     # opens make attribution ambiguous; never compare across them.
@@ -137,6 +140,15 @@ def classify(lines: list[str]) -> dict:
                     observations['inactive_open_samples'] += 1
         if PREFIX_CLOSE in line:
             info = fields(line.split(PREFIX_CLOSE, 1)[1])
+            # The optional new gate distinguishes a conservative
+            # safety-filter refusal from an unsuccessful native read.
+            # Older logs have no gate field and remain UNKNOWN.
+            if info.get('gate') == '1':
+                observations['close_gates_open'] += 1
+                if info.get('sampled') != '1':
+                    observations['close_gate_passed_but_sample_unknown'] += 1
+            elif info.get('gate') == '0':
+                observations['close_gates_blocked'] += 1
             if info.get('sampled') == '1' and info.get('paired') == '1':
                 observations['adpcm_close_samples'] += 1
                 if info.get('active') == '0':
