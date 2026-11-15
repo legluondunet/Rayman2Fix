@@ -19,6 +19,9 @@ struct Dispatch {
     Command command=Command::none;
     std::uint32_t handle=0;
     unsigned count=0;
+    // ESC script-attempt token only, NOT an original ADPCM record epoch.
+    // Native handle slots can be recycled after Stop or reinitialized
+    // IN PLACE without Stop, without changing this token during the menu.
     std::uint64_t generation=0;
     // Bind every synthetic driver command to the native stream captured
     // on the two original script-pause callbacks. A driver handle can be
@@ -31,6 +34,8 @@ struct Identity {
     std::uint32_t handle=0;
     std::uint32_t native_theme_key=0;
     std::uint32_t native_inner_key=0;
+    // Group a single source-verified ESC attempt, not a physical voice
+    // lifetime. Equality here does NOT establish ADPCM stream generation.
     std::uint64_t generation=0;
     bool valid() const noexcept {
         return handle!=0 && handle!=0xffffffffu && generation!=0 &&
