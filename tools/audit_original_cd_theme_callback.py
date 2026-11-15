@@ -39,6 +39,11 @@ SITES = {
     'update_promotes_target': (0x5948E, '89 41 14'),
     'set_pending_flag': (0x595F6, '89 41 0c'),
     'set_pending_target': (0x595FC, '89 51 44'),
+    'pending_request_clears_state4': (0x595F9, '89 71 04'),
+    'create_sets_global_guard': (0x5999D, 'c7 05 18 96 4b 00 01 00 00 00'),
+    'create_clears_global_guard': (0x59B2C, 'c7 05 18 96 4b 00 00 00 00 00'),
+    'teardown_sets_global_guard': (0x59BE5, 'c7 05 18 96 4b 00 01 00 00 00'),
+    'teardown_clears_global_guard': (0x59C23, 'c7 05 18 96 4b 00 00 00 00 00'),
 }
 DIRECT = {
     'player_create_registers_callback': (0x59AEC, 0x58220),
@@ -90,6 +95,8 @@ def audit(original_bytes: bytes) -> dict:
         'verified_conditional_branches': len(SHORT_BRANCHES),
         'pending_target_committed_on_eligible_callback': True,
         'controller_global_and_state_gates_exist': True,
+        'create_and_teardown_set_and_clear_global_guard': True,
+        'pending_request_clears_controller_state4': True,
         'callback_invoked_during_owner_menu_proven': False,
         'global_guard_was_nonzero_during_esc_proven': False,
         'controller_state_was_nonzero_during_esc_proven': False,
