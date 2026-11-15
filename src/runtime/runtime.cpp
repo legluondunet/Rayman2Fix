@@ -9,6 +9,9 @@
 #include <intrin.h>
 #include "rayman2fix/fov_math.hpp"
 #include "rayman2fix/hud_math.hpp"
+#include "rayman2fix/black_frame_filter.hpp"
+#include "rayman2fix/cinematic_black_polygon.hpp"
+#include "rayman2fix/cinematic_viewport_fill.hpp"
 #include "rayman2fix/screen_camera.hpp"
 #include "rayman2fix/superimposed_math.hpp"
 #include "rayman2fix/intro_skip.hpp"
@@ -191,6 +194,29 @@ bool g_installed = false;
 bool g_log = false;
 float g_hud_scale = 1.0f;
 bool g_skip_cinematics = false;
+bool g_remove_dialogue_backgrounds = false;
+bool g_remove_cinematic_bars = false;
+std::atomic<unsigned> g_hidden_dialogue_frames{0};
+std::atomic<unsigned> g_hidden_cinematic_bars{0};
+// Native GLI viewport masks are a separate producer from 2D percent quads.
+// Hook only when RemoveCinematicBars=1, at the validated 32-bit driver slot.
+std::atomic<void*> g_black_polygon_original{nullptr};
+std::atomic<unsigned> g_black_polygon_source_samples[4]{};
+// Source-based fix: rebuild normal GLI viewport bounds BEFORE draw.
+// BlackPolygon callback remains a read-only route diagnostic, never hides
+// colored clear pixels in place of rendering real scene content.
+std::atomic<bool> g_cinematic_viewport_fill_installed{false};
+std::atomic<unsigned> g_cinematic_viewport_fill_samples{0};
+std::atomic<unsigned> g_cinematic_viewport_input_samples[2]{};
+std::atomic<unsigned> g_cinematic_viewport_fill_calls{0};
+
+
+// Two passive samples per route/edge/time phase; no change to render output.
+std::atomic<unsigned> g_cinematic_edge_counts[4][2]{};
+std::atomic<unsigned> g_cinematic_edge_examples[16]{};
+// Diagnostic only: bounded full-width, vertically inset UV submissions.
+// These are NOT identified as the source of black bars.
+std::atomic<unsigned> g_cinematic_uv_phase_samples[4]{};
 std::atomic<void*> g_plain_sprite_original{nullptr};
 std::atomic<void*> g_uv_sprite_original{nullptr};
 std::atomic<void*> g_color_sprite_original{nullptr};
@@ -203,6 +229,15 @@ constexpr BYTE kNative2DExpected[7]={
 };
 using Native2DSprite=void (__cdecl*)(void*,float,float,float,float,void*);
 Native2DSprite g_original_2d_sprite=nullptr;
+// Native GLI viewport setup at VA 0x420660; arguments are
+// (screen_dimensions, GLI viewport) in approved retail CD executable.
+using NativeViewportCalc=void (__cdecl*)(void*,void*);
+NativeViewportCalc g_original_cinematic_viewport_calc=nullptr;
+constexpr uintptr_t kCinematicViewportCalcRva=0x20660u;
+constexpr BYTE kCinematicViewportCalcExpected[6]={
+    0x83,0xEC,0x08,0x53,0x55,0x56
+};
+
 thread_local unsigned g_native_2d_call_depth=0;
 std::atomic<unsigned> g_native_2d_calls{0};
 std::atomic<unsigned> g_native_2d_passthrough_plain{0};
@@ -311,6 +346,8 @@ struct RuntimeOptions {
     DWORD output_height;
     DWORD logging;
     DWORD skip_cinematics;
+    DWORD remove_dialogue_backgrounds;
+    DWORD remove_cinematic_bars;
 };
 
 bool valid_angle(float v) {
@@ -3125,6 +3162,57 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     record_bottom_2d_geometry(route,xmin,ymin,xmax,ymax);
     if(route==0u)
         probe_native_glyph_after_frame(xmin,ymin,xmax,ymax);
+    // Observe GLI edge shapes from all non-glyph producers, not only the
+    // Frame source that the opt-in suppression actually authorizes.
+    // Geometry is NOT proof of a black material or a cutscene.
+    if(g_remove_cinematic_bars &&
+       producer!=Native2DProducer::Glyph) {
+        const auto edge=r2fix::cinematic_edge_candidate(xmin,ymin,xmax,ymax);
+        const auto known=r2fix::black_frame_kind(xmin,ymin,xmax,ymax);
+        if(edge!=r2fix::CinematicEdgeCandidate::None &&
+           known!=r2fix::BlackFrameKind::DialogueBackdrop) {
+            const unsigned band=edge==r2fix::CinematicEdgeCandidate::Upper ? 0u : 1u;
+            g_cinematic_edge_counts[route][band].fetch_add(
+                1,std::memory_order_relaxed);
+            const DWORD started=g_native_2d_probe_start_ms.load(
+                std::memory_order_relaxed);
+            const bool later=started && GetTickCount()-started>=25000;
+            const unsigned index=route*2u+band+(later ? 8u:0u);
+            const unsigned sample=g_cinematic_edge_examples[index].fetch_add(
+                1,std::memory_order_relaxed);
+            if(sample<2u) {
+                const char* names[4]={"glyph","screen-image","frame","other"};
+                char message[280]{};
+                std::snprintf(message,sizeof(message),
+                    "RUNTIME-CINEMATIC-SOURCE: phase=%s route=%s edge=%s sample=%u x=%.2f..%.2f y=%.2f..%.2f kind=%u (read-only; material and cinematic ownership unknown)",
+                    later?"after25s":"before25s",names[route],
+                    band==0u?"upper":"lower",sample+1u,
+                    double(xmin),double(xmax),double(ymin),double(ymax),
+                    unsigned(known));
+                log_line(message);
+            }
+        }
+    }
+    // Opt-in only. The EXACT approved native return site distinguishes
+    // GLI_vDisplayFrame from font glyphs, UI images and world sprites.
+    // Discard the selected source quad BEFORE the downstream draw; leave
+    // glyphs and other layers in their original order and geometry.
+    if((g_remove_dialogue_backgrounds || g_remove_cinematic_bars) &&
+       producer==Native2DProducer::Frame) {
+        const auto kind=r2fix::black_frame_kind(xmin,ymin,xmax,ymax);
+        if(kind==r2fix::BlackFrameKind::DialogueBackdrop &&
+           g_remove_dialogue_backgrounds) {
+            if(g_hidden_dialogue_frames.fetch_add(1,std::memory_order_relaxed)==0)
+                log_line("RUNTIME-FRAMES: suppressing verified GLI dialogue backdrop quads (opt-in; source-frame geometry)");
+            return;
+        }
+        if(kind==r2fix::BlackFrameKind::CinematicLetterbox &&
+           g_remove_cinematic_bars) {
+            if(g_hidden_cinematic_bars.fetch_add(1,std::memory_order_relaxed)==0)
+                log_line("RUNTIME-FRAMES: suppressing verified GLI screen-edge letterbox quads (opt-in; source-frame geometry)");
+            return;
+        }
+    }
     const DWORD started=g_native_2d_probe_start_ms.load(
         std::memory_order_acquire);
     const DWORD elapsed=started ? GetTickCount()-started : 0;
@@ -3660,6 +3748,132 @@ DWORD install_camera_hook() {
 }
 
 
+// Source-side alternative to hiding post-render GLI masks.
+// The game computes the top/bottom screen limits at VA 0x420660 from
+// the source viewport's thousandth coefficients at +0x48/+0x4C.
+// The regular 3D and UV sources then consume the derived limits at
+// +0x38/+0x3C. Filter only a full-width, moderately inset viewport.
+// This must run before the native original recalculates the limits.
+// Restore the user's source coefficients immediately afterward, so
+// the original animated letterbox state does not get overwritten.
+void __cdecl cinematic_viewport_calc(void* dimensions,void* viewport) {
+    const auto original=g_original_cinematic_viewport_calc;
+    if(!original)return;
+    if(!dimensions || !viewport || !g_remove_cinematic_bars ||
+       g_hud_scale>=0.9999f) {
+        original(dimensions,viewport);
+        return;
+    }
+    const auto* screen=static_cast<const BYTE*>(dimensions);
+    auto* view=static_cast<BYTE*>(viewport);
+    std::int32_t h=0,w=0,y0=0,y1=0,x0=0,x1=0;
+    std::memcpy(&h,screen,sizeof(h));
+    std::memcpy(&w,screen+4,sizeof(w));
+    std::memcpy(&y0,view+0x48,sizeof(y0));
+    std::memcpy(&y1,view+0x4c,sizeof(y1));
+    std::memcpy(&x0,view+0x50,sizeof(x0));
+    std::memcpy(&x1,view+0x54,sizeof(x1));
+    const auto fill=r2fix::calculate_cinematic_viewport_fill(
+        w,h,x0,x1,y0,y1);
+    // Even rejected input can explain why a movie still has bars.
+    // Log at most 4 candidate insets in each time phase; never scan
+    // scene state, texture names or raw pointers.
+    if(g_log && w==1024 && h==768 &&
+       (y0>0 || y1<1000) &&
+       y0>=-100 && y1<=1100) {
+        const DWORD started=g_native_2d_probe_start_ms.load(
+            std::memory_order_acquire);
+        const unsigned phase=started &&
+            (GetTickCount()-started)>=25000 ? 1u:0u;
+        const unsigned sample=g_cinematic_viewport_input_samples[phase]
+            .fetch_add(1,std::memory_order_relaxed);
+        if(sample<4u) {
+            char line[250]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-CINEMATIC-VIEWPORT-INPUT: phase=%u sample=%u x=%d..%d y=%d..%d permille fill_candidate=%u (source, read-only decision)",
+                phase,sample+1u,x0,x1,y0,y1,unsigned(fill.change));
+            log_line(line);
+        }
+    }
+    if(!fill.change) {
+        original(dimensions,viewport);
+        return;
+    }
+    const std::int32_t full_y0=fill.top, full_y1=fill.bottom;
+    std::memcpy(view+0x48,&full_y0,sizeof(full_y0));
+    std::memcpy(view+0x4c,&full_y1,sizeof(full_y1));
+    original(dimensions,viewport);
+    // This source viewport's native render limits (+0x38/+0x3c) were
+    // recalculated for the full canvas; preserve them, but restore the
+    // state machine's requested margins (+0x48/+0x4c).
+    std::int32_t derived_y0=0,derived_y1=0;
+    std::memcpy(&derived_y0,view+0x38,sizeof(derived_y0));
+    std::memcpy(&derived_y1,view+0x3c,sizeof(derived_y1));
+    std::memcpy(view+0x48,&y0,sizeof(y0));
+    std::memcpy(view+0x4c,&y1,sizeof(y1));
+    g_cinematic_viewport_fill_calls.fetch_add(1,std::memory_order_relaxed);
+    if(g_log && g_cinematic_viewport_fill_samples.fetch_add(
+        1,std::memory_order_relaxed)<8u) {
+        char line[260]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-CINEMATIC-VIEWPORT: native recalculated original_y=%d..%d permille full_y=0..1000 derived_y=%d..%d dimensions=%dx%d (source-side, opt-in; still needs visual validation)",
+            y0,y1,derived_y0,derived_y1,w,h);
+        log_line(line);
+    }
+}
+
+void install_cinematic_viewport_hook() {
+    if(!g_remove_cinematic_bars || g_hud_scale>=0.9999f ||
+       g_original_cinematic_viewport_calc)return;
+    auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+    if(!base)return;
+    const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if(dos->e_magic!=IMAGE_DOS_SIGNATURE || dos->e_lfanew<=0 ||
+       dos->e_lfanew>=0x1000)return;
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+        base+dos->e_lfanew);
+    if(pe->Signature!=IMAGE_NT_SIGNATURE ||
+       pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
+       pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       pe->OptionalHeader.Magic!=IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
+       pe->OptionalHeader.SizeOfImage<
+           kCinematicViewportCalcRva+sizeof(kCinematicViewportCalcExpected))
+        return;
+    BYTE* entry=base+kCinematicViewportCalcRva;
+    if(std::memcmp(entry,kCinematicViewportCalcExpected,
+                   sizeof(kCinematicViewportCalcExpected))!=0) {
+        log_line("RUNTIME-CINEMATIC-VIEWPORT: original calc bytes unknown; source hook disabled (black polygons preserved)");
+        return;
+    }
+    BYTE* gateway=static_cast<BYTE*>(VirtualAlloc(nullptr,64,
+        MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    if(!gateway)return;
+    std::memcpy(gateway,entry,sizeof(kCinematicViewportCalcExpected));
+    write_jump(gateway+sizeof(kCinematicViewportCalcExpected),
+               entry+sizeof(kCinematicViewportCalcExpected));
+    DWORD old=0;
+    if(!VirtualProtect(gateway,64,PAGE_EXECUTE_READ,&old)) {
+        VirtualFree(gateway,0,MEM_RELEASE);return;
+    }
+    DWORD original_protect=0;
+    if(!VirtualProtect(entry,sizeof(kCinematicViewportCalcExpected),
+                       PAGE_EXECUTE_READWRITE,&original_protect)) {
+        VirtualFree(gateway,0,MEM_RELEASE);return;
+    }
+    g_original_cinematic_viewport_calc=
+        reinterpret_cast<NativeViewportCalc>(gateway);
+    write_jump(entry,reinterpret_cast<void*>(&cinematic_viewport_calc));
+    entry[5]=0x90;
+    FlushInstructionCache(GetCurrentProcess(),entry,
+                          sizeof(kCinematicViewportCalcExpected));
+    DWORD ignored=0;
+    VirtualProtect(entry,sizeof(kCinematicViewportCalcExpected),
+                   original_protect,&ignored);
+    g_cinematic_viewport_fill_installed.store(
+        true,std::memory_order_release);
+    log_line("RUNTIME-CINEMATIC-VIEWPORT: native source-side fill installed (full-width inset viewports only; opt-in)");
+}
+
 void install_native_2d_percent_hook() {
     // Only call after the SHA/PE/byte validated camera hook was
     // installed for our exact supported, unprotected executable.
@@ -3753,6 +3967,13 @@ void initialize_native_intro_skip() {
 // retail executable supported by this project. Unlike a Glide-wide heuristic,
 // these callbacks are used for sprites, not every 3D triangle. The additional
 // xOoZ=1 check preserves perspective-projected world sprites.
+// VA 0x50483C is loaded from "GLI_DRV_vAddBlackPolygon" by the
+// game's GetProcAddress table at VA 0x421BC2. The original callsites
+// at 0x420827, 0x420841, 0x420858, 0x420872 use cdecl (4 int args).
+// Confirmed Wine log: VA 0x420827 -> (0,0,1024,1) = TOP mask;
+// VA 0x420841 -> (0,763,1024,768) = BOTTOM mask.
+// Earlier prototype wrongly read arguments as (top,left,bottom,right).
+constexpr uintptr_t kBlackPolygonSlotRva = 0x10483C;
 constexpr uintptr_t kPlainSpriteSlotRva = 0x104530; // VA 0x504530
 constexpr uintptr_t kUvSpriteSlotRva = 0x104524;    // VA 0x504524
 // The colored variant is used by the GLI font/sprite path in Rayman 2.
@@ -3802,6 +4023,41 @@ void probe_native_2d_driver(const r2fix::HudVertex* quad,
         double(min_x),double(max_x),double(min_y),double(max_y));
     log_line(line);
 }
+// Narrow, passive probe of the second renderer path seen in the owner's
+// 18:36 Wine trace: x=0..1024, y=34..618, reciprocal_z=0.
+// The callback's return RVA is logged to locate its game-side producer;
+//// the sprite is never suppressed, stretched or reprojected.
+void probe_cinematic_uv_source(const r2fix::HudVertex* quad,
+                               const void* caller) {
+    if(!g_log || !g_remove_cinematic_bars || !quad)return;
+    r2fix::ScreenQuadGeometry b{};
+    if(!r2fix::inspect_screen_quad_geometry(quad,b) ||
+       !r2fix::is_inset_full_width_uv_probe(b,1024.0f,768.0f))
+        return;
+    const DWORD started=g_native_2d_probe_start_ms.load(
+        std::memory_order_relaxed);
+    const DWORD elapsed=started ? GetTickCount()-started : 0;
+    const unsigned phase=elapsed<25000 ? 0u : elapsed<75000 ? 1u :
+                         elapsed<140000 ? 2u : 3u;
+    const unsigned n=g_cinematic_uv_phase_samples[phase].fetch_add(
+        1,std::memory_order_relaxed);
+    if(n>=4u)return;
+    std::uint32_t rva=0;
+    const bool game_source=r2fix::executable_callsite_rva(
+        reinterpret_cast<std::uintptr_t>(caller),
+        g_approved_exe_base.load(std::memory_order_acquire),
+        g_approved_exe_size.load(std::memory_order_acquire),rva);
+    char msg[320]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-CINEMATIC-UV: phase=%u sample=%u caller_rva=0x%08X game_source=%u x=%.1f..%.1f y=%.1f..%.1f gaps_top=%.1f bottom=%.1f reciprocal_z=%.4f..%.4f (read-only; not identified as a movie)",
+        phase,n+1u,game_source ? unsigned(rva) : 0u,
+        unsigned(game_source),double(b.left),double(b.right),
+        double(b.top),double(b.bottom),
+        double(b.top),double(768.0f-b.bottom),
+        double(b.min_reciprocal_z),double(b.max_reciprocal_z));
+    log_line(msg);
+}
+
 // Read-only: sample sprites which bypass GLI_vDraw2DSpriteWithPercent.
 // The native 2D font/panel quads are already verified at driver level.
 // The unknown UV path may have reciprocal-Z=0; do NOT auto-scale it.
@@ -3934,6 +4190,49 @@ void probe_unrouted_lower_sprite(const r2fix::HudVertex* quad,
     log_line(message);
 }
 
+using BlackPolygonFn=void (__cdecl*)(int,int,int,int);
+void __cdecl cinematic_black_polygon(int x0,int y0,int x1,int y1) {
+    const auto original=reinterpret_cast<BlackPolygonFn>(
+        g_black_polygon_original.load(std::memory_order_acquire));
+    if(!original)return;
+    // Intentionally precise: an equivalent-looking rectangle drawn by
+    // another game route must not be suppressed.
+    std::uint32_t source_rva=0;
+    const bool game_source=r2fix::executable_callsite_rva(
+        reinterpret_cast<std::uintptr_t>(_ReturnAddress()),
+        g_approved_exe_base.load(std::memory_order_acquire),
+        g_approved_exe_size.load(std::memory_order_acquire),source_rva);
+    const r2fix::CinematicBlackPolygon candidate=game_source ?
+        r2fix::classify_cinematic_black_polygon(
+            source_rva,x0,y0,x1,y1,1024,768) :
+        r2fix::CinematicBlackPolygon::Preserve;
+    unsigned site=4;
+    switch(source_rva) {
+    case 0x2082Du: site=0;break; // native TOP mask
+    case 0x20847u: site=1;break; // native BOTTOM mask
+    case 0x2085Eu: site=2;break; // native LEFT mask
+    case 0x20878u: site=3;break; // native RIGHT mask
+    default:break;
+    }
+    // Blue-background regression was confirmed with direct mask hiding.
+    // NEVER suppress these downstream masks now. In source-side mode,
+    // native viewport bounds are extended BEFORE the scene is drawn.
+    constexpr bool skip=false;
+    if(site<4u && g_log) {
+        const unsigned n=g_black_polygon_source_samples[site].fetch_add(
+            1,std::memory_order_relaxed);
+        if(n<3u) {
+            char msg[290]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-GLIDRV-BLACK-POLYGON: source_rva=0x%08X sample=%u rect_x0_y0_x1_y1=%d,%d,%d,%d candidate=%u suppressed=%u (native viewport mask; experimental)",
+                unsigned(source_rva),n+1,x0,y0,x1,y1,
+                unsigned(candidate),unsigned(skip));
+            log_line(msg);
+        }
+    }
+    original(x0,y0,x1,y1);
+}
+
 void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
     const auto original = reinterpret_cast<PlainSpriteFn>(
         g_plain_sprite_original.load(std::memory_order_acquire));
@@ -3971,6 +4270,7 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
         original(quad,uv,z,globals);
         return;
     }
+    probe_cinematic_uv_source(quad,_ReturnAddress());
     probe_unrouted_lower_sprite(quad,1,_ReturnAddress());
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, uv, z, globals);
@@ -4148,6 +4448,9 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
         const_cast<BYTE*>(module + kUvSpriteSlotRva));
     auto* colors = reinterpret_cast<void* volatile*>(
         const_cast<BYTE*>(module + kColorSpriteSlotRva));
+    auto* black_polygon = reinterpret_cast<void* volatile*>(
+        const_cast<BYTE*>(module + kBlackPolygonSlotRva));
+    bool black_polygon_logged = false;
     bool plain_logged = false;
     bool uv_logged = false;
     bool color_logged = false;
@@ -4192,6 +4495,15 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
                 ++glyph_relative_reports;
             }
         }
+        // The game registers its GLI driver exports after DLL injection.
+        // Keep the native black-polygon hook installed across driver reloads.
+        // The path is strictly opt-in and never touches 4:3 side masks.
+        if(g_remove_cinematic_bars)
+            install_callback(black_polygon,
+                reinterpret_cast<void*>(&cinematic_black_polygon),
+                g_black_polygon_original,
+                "RUNTIME-GLIDRV-BLACK-POLYGON: passive callback monitor installed (native source-side fill; no downstream suppression)",
+                black_polygon_logged);
         install_callback(plain, reinterpret_cast<void*>(&hud_plain_sprite),
                          g_plain_sprite_original,
                          "RUNTIME-HUD: centered 4:3 screen-space sprites enabled",
@@ -4433,8 +4745,29 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     if (g_log) log_line(kResearchProbes ?
         "RUNTIME-CONFIG: research_probes=1 (read-only experimental trace build)" :
         "RUNTIME-CONFIG: research_probes=0 (standard release instrumentation)");
-    if(settings->skip_cinematics>1u)return 5;
+    if(settings->skip_cinematics>1u ||
+       settings->remove_dialogue_backgrounds>1u ||
+       settings->remove_cinematic_bars>1u)
+        return 5;
     g_skip_cinematics=settings->skip_cinematics!=0;
+    g_remove_dialogue_backgrounds=settings->remove_dialogue_backgrounds!=0;
+    g_remove_cinematic_bars=settings->remove_cinematic_bars!=0;
+    // Always report BOTH effective feature flags, even when disabled.
+    // This distinguishes an INI opt-out from an old/wrong executable and
+    // makes user runtime logs useful without asking for installer logs.
+    if(g_log) {
+        char features[224]{};
+        std::snprintf(features,sizeof(features),
+            "RUNTIME-CONFIG: build=%s RemoveDialogueBackgrounds=%u RemoveCinematicBars=%u (launcher-supplied options)",
+            RAYMAN2FIX_BUILD_COMMIT,
+            unsigned(g_remove_dialogue_backgrounds),
+            unsigned(g_remove_cinematic_bars));
+        log_line(features);
+    }
+    if(g_remove_dialogue_backgrounds)
+        log_line("RUNTIME-FRAMES: RemoveDialogueBackgrounds=1 opt-in; verified GLI dialogue backdrop filter");
+    if(g_remove_cinematic_bars)
+        log_line("RUNTIME-FRAMES: RemoveCinematicBars=1 opt-in; native GLI viewport source fill (legacy mask hiding disabled after blue-band regression)");
     // This hook is also used for the targeted intro-skip poll on 4:3.
     // For narrow monitors camera_hor_plus leaves the FOV unchanged.
     const DWORD camera_status = install_camera_hook();
@@ -4447,11 +4780,14 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         // Hook the common native 2D entry before the game draws any
         // UI; the downstream driver callback monitor still handles
         // screen sprites submitted through other engine paths.
-        if(g_hud_scale<0.9999f)install_native_2d_percent_hook();
+        if(g_hud_scale<0.9999f || g_remove_dialogue_backgrounds || g_remove_cinematic_bars)
+            install_native_2d_percent_hook();
 #if RAYMAN2FIX_RESEARCH_PROBES
         // Read-only hook at VA 0x4710C0 is not part of the actual fix.
         if(g_hud_scale<0.9999f)install_superimposed_proc_probe();
 #endif
+        if(g_remove_cinematic_bars)
+            install_cinematic_viewport_hook();
         initialize_native_intro_skip();
         start_hud_monitor();
     }

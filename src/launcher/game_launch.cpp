@@ -199,8 +199,14 @@ ChildProcessResult run_child_process(
     ScopedChildEnvironment glide_size(L"GLIDE_SIZE");
     ScopedChildEnvironment fps_limit(L"RAYMAN2FIX_FPS_LIMIT");
     ScopedChildEnvironment glide_probe(L"RAYMAN2FIX_GLIDE_PROBE");
+    ScopedChildEnvironment cinematic_probe(L"RAYMAN2FIX_CINEMATIC_PROBE");
     if (!glide_probe.set(display.log_enabled ? L"1" : L"0"))
         return {false, 0, glide_probe.error()};
+    // The existing cinematic feature is also the opt-in for read-only
+    // GameFrame geometry diagnostics; no additional user INI setting.
+    if (!cinematic_probe.set(
+            display.log_enabled && display.remove_cinematic_bars ? L"1" : L"0"))
+        return {false, 0, cinematic_probe.error()};
     if (display.borderless) {
         if (!display.output_width || !display.output_height ||
             display.output_width > 16384 || display.output_height > 8640 ||
@@ -220,6 +226,7 @@ ChildProcessResult run_child_process(
                                         nullptr, nullptr, FALSE, 0, nullptr,
                                         cwd.c_str(), &startup, &raw);
     const DWORD spawn_error = created ? 0 : GetLastError();
+    cinematic_probe.restore();
     glide_probe.restore();
     fps_limit.restore();
     glide_size.restore();
@@ -233,7 +240,8 @@ ChildProcessResult run_child_process(
             reinterpret_cast<std::uintptr_t>(process.handle),
             raw.dwProcessId, working_directory / "Rayman2Fix.dll",
             display.output_width, display.output_height, display.log_enabled,
-            display.skip_cinematics);
+            display.skip_cinematics, display.remove_dialogue_backgrounds,
+            display.remove_cinematic_bars);
     }
 
     if (display.borderless) {
@@ -301,6 +309,10 @@ int launch_verified_game(Startup& startup, bool verify) {
     display.output_height = content.second;
     display.skip_cinematics = !unchecked_without_ini &&
         configured_skip_cinematics(startup.ini_path());
+    display.remove_dialogue_backgrounds = !unchecked_without_ini &&
+        configured_remove_dialogue_backgrounds(startup.ini_path());
+    display.remove_cinematic_bars = !unchecked_without_ini &&
+        configured_remove_cinematic_bars(startup.ini_path());
     display.enable_fov = true;
     display.fps_limit = unchecked_without_ini
         ? 60u : configured_fps_limit(startup.ini_path());
@@ -337,6 +349,10 @@ int launch_verified_game(Startup& startup, bool verify) {
     startup.log(configured_force_4_3(startup.ini_path()) ?
                 "WIDESCREEN: 4:3 mode selected; world Hor+ inactive, internal and output aspect 4:3" :
                 "WIDESCREEN: native output configured; game camera/Hor+ FOV patch not yet validated (do not confuse output scaling with Hor+)");
+    startup.log(std::string("FEATURES: RemoveDialogueBackgrounds=") +
+                (display.remove_dialogue_backgrounds ? "1 (verified native dialogue filter)" : "0"));
+    startup.log(std::string("FEATURES: RemoveCinematicBars=") +
+                (display.remove_cinematic_bars ? "1 (experimental GLI letterbox filter)" : "0"));
     startup.log("FPS: limiter=" + std::to_string(display.fps_limit) +
                 (display.fps_limit ? " cap at GameFrame.grBufferSwap"
                                    : " unlimited (GameFrame pacing disabled)"));

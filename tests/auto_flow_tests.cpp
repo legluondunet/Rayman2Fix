@@ -149,8 +149,10 @@ int main() {
         check(fs::exists(root / "Rayman2Fix" / "Rayman2Fix.ini"),
               "bootstrap initialization must create INI when absent");
         check(contents(root / "Rayman2Fix" / "Rayman2Fix.ini").find("Force4x3=0") != std::string::npos &&
-              contents(root / "Rayman2Fix" / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos,
-              "bootstrap provides two disabled options");
+              contents(root / "Rayman2Fix" / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos &&
+              contents(root / "Rayman2Fix" / "Rayman2Fix.ini").find("RemoveDialogueBackgrounds=0") != std::string::npos &&
+              contents(root / "Rayman2Fix" / "Rayman2Fix.ini").find("RemoveCinematicBars=0") != std::string::npos,
+              "bootstrap provides independent disabled visual options");
         write(root / "Rayman2Fix" / "Rayman2Fix.dll", "BOOTSTRAP");
         write(root / "Rayman2Fix" / "Rayman2Fix.ini",
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\n");
@@ -180,6 +182,22 @@ int main() {
         check(r2fix::configured_force_4_3(user_ini) &&
               r2fix::configured_skip_cinematics(user_ini),
               "4:3 and cinematic skip opt-in recognized");
+        check(!r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
+              !r2fix::configured_remove_cinematic_bars(user_ini),
+              "both visual filters disabled when absent");
+        write(user_ini,"[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+                       "[Features]\nSkipCinematics=1\nRemoveDialogueBackgrounds=1\n"
+                       "RemoveCinematicBars=0\n");
+        check(r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
+              !r2fix::configured_remove_cinematic_bars(user_ini),
+              "dialogue-only opt-in does not enable cinematic filter");
+        write(user_ini,"[Features]\nRemoveDialogueBackgrounds=0\nRemoveCinematicBars=1\n");
+        check(!r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
+              r2fix::configured_remove_cinematic_bars(user_ini),
+              "cinematic-only opt-in does not enable dialogue filter");
+        write(user_ini,"[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+                       "[Features]\nSkipCinematics=1\nRemoveDialogueBackgrounds=1\n"
+                       "RemoveCinematicBars=1\n");
         check(r2fix::configured_render_resolution(user_ini) ==
               std::make_pair(1440u,1080u),"1920x1080: 4:3 content area 1440x1080");
         write(user_ini, "[Graphics]\nResolution=1280x800\nForce4x3=1\n");
@@ -199,6 +217,16 @@ int main() {
             try{(void)r2fix::configured_skip_cinematics(user_ini);}
             catch(const std::exception&){refused=true;}
             check(refused,"invalid cinematic flag rejected");
+            write(user_ini,std::string("[Features]\nRemoveDialogueBackgrounds=")+bad+"\n");
+            refused=false;
+            try{(void)r2fix::configured_remove_dialogue_backgrounds(user_ini);}
+            catch(const std::exception&){refused=true;}
+            check(refused,"invalid dialogue flag rejected");
+            write(user_ini,std::string("[Features]\nRemoveCinematicBars=")+bad+"\n");
+            refused=false;
+            try{(void)r2fix::configured_remove_cinematic_bars(user_ini);}
+            catch(const std::exception&){refused=true;}
+            check(refused,"invalid cinematic bars flag rejected");
         }
         const std::string bom="\xef\xbb\xbf";
         write(user_ini,bom+"[Debug]\r\nLog=0\r\n"
@@ -212,10 +240,36 @@ int main() {
               migrated.find("; comment\r\n")!=std::string::npos &&
               migrated.find("Force4x3=0\r\n")!=std::string::npos &&
               migrated.find("[Features]\r\n")!=std::string::npos &&
-              migrated.find("SkipCinematics=0\r\n")!=std::string::npos,
+              migrated.find("SkipCinematics=0\r\n")!=std::string::npos &&
+              migrated.find("RemoveDialogueBackgrounds=0\r\n")!=std::string::npos &&
+              migrated.find("RemoveCinematicBars=0\r\n")!=std::string::npos,
               "existing INI migration retains BOM, CRLF, custom values");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
         check(contents(user_ini)==migrated,"migration is idempotent");
+        write(user_ini,"[Features]\nRemoveBlackFrames=1\n"
+                       "RemoveCinematicBars=0\n; user setting retained\n");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        const auto legacy_migrated=contents(user_ini);
+        check(legacy_migrated.find("RemoveBlackFrames=")==std::string::npos &&
+              legacy_migrated.find("RemoveDialogueBackgrounds=1")!=std::string::npos &&
+              legacy_migrated.find("RemoveCinematicBars=0")!=std::string::npos &&
+              legacy_migrated.find("; user setting retained")!=std::string::npos &&
+              r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
+              !r2fix::configured_remove_cinematic_bars(user_ini),
+              "legacy combined opt-in migrated, explicit cinematic override kept");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        check(contents(user_ini)==legacy_migrated,"legacy migration is idempotent");
+        write(user_ini,"[Features]\nRemoveBlackFrames=1\n");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        check(r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
+              r2fix::configured_remove_cinematic_bars(user_ini),
+              "legacy enabled setting migrates to both enabled");
+        write(user_ini,"[Features]\nRemoveBlackFrames=bogus\n");
+        bool legacy_refused=false;
+        try{r2fix::ensure_rayman2fix_ini_options(user_ini);}
+        catch(const std::exception&){legacy_refused=true;}
+        check(legacy_refused && contents(user_ini).find("RemoveBlackFrames=bogus")!=std::string::npos,
+              "invalid legacy setting rejected without altering INI");
         write(user_ini,
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n");
         check(r2fix::run_automatic(app) == 2,

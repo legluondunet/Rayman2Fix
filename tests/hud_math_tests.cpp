@@ -83,6 +83,21 @@ int main() {
     assert(near(g.top,610.0f) && near(g.bottom,660.0f));
     assert(near(g.min_reciprocal_z,0.0f) &&
            near(g.max_reciprocal_z,0.0f));
+    // The owner's observed 0..1024 × 34..618 UV quad is inset but
+    // its texture, color and cinematic role remain unknown.
+    r2fix::ScreenQuadGeometry cinematic_uv{
+        0.0f,1024.0f,34.0f,618.0f,0.0f,0.0f
+    };
+    assert(r2fix::is_inset_full_width_uv_probe(cinematic_uv,1024,768));
+    cinematic_uv.top=0.0f;
+    cinematic_uv.bottom=768.0f;
+    assert(!r2fix::is_inset_full_width_uv_probe(cinematic_uv,1024,768));
+    cinematic_uv.top=34.0f;
+    cinematic_uv.bottom=618.0f;
+    cinematic_uv.right=450.0f;
+    assert(!r2fix::is_inset_full_width_uv_probe(cinematic_uv,1024,768));
+    cinematic_uv.right=1024.0f;
+    assert(!r2fix::is_inset_full_width_uv_probe(cinematic_uv,0,768));
     assert(r2fix::is_lower_screen_probe(g));
     assert(r2fix::screen_quad_probe_sector(g,1024.0f)==2);
     assert(!r2fix::is_screen_sprite_quad(unknown_uv));

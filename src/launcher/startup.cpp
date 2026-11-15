@@ -230,7 +230,12 @@ void Startup::initialize(bool provision_files) {
                "[Features]\n"
                "; 1 = allow Space/Enter/Esc to skip jail_20 only\n"
                "; Learn_10 skip remains disabled (unsafe)\n"
-               "SkipCinematics=0\n";
+               "SkipCinematics=0\n"
+               "; 1 = hide native rectangles behind in-game dialogue\n"
+               "RemoveDialogueBackgrounds=0\n"
+               "; 1 = experimental game-drawn cinematic letterbox removal\n"
+               "; GameFrame Force4x3 sidebars remain unchanged\n"
+               "RemoveCinematicBars=0\n";
         if (!ini) throw std::runtime_error("failed writing Rayman2Fix.ini");
     }
 
@@ -319,6 +324,10 @@ void Startup::initialize(bool provision_files) {
         (have_ini && configured_force_4_3(ini_path_) ? "1" : "0"));
     log(std::string("CONFIG: Features.SkipCinematics=") +
         (have_ini && configured_skip_cinematics(ini_path_) ? "1" : "0"));
+    log(std::string("CONFIG: Features.RemoveDialogueBackgrounds=") +
+        (have_ini && configured_remove_dialogue_backgrounds(ini_path_) ? "1" : "0"));
+    log(std::string("CONFIG: Features.RemoveCinematicBars=") +
+        (have_ini && configured_remove_cinematic_bars(ini_path_) ? "1" : "0"));
 
     if (provision_files) {
         log("RUNTIME: Rayman2Fix.dll=" +

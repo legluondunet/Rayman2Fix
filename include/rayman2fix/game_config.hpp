@@ -28,6 +28,11 @@ std::pair<std::uint32_t, std::uint32_t> configured_render_resolution(
 // Only user-triggered jail_20 skip is supported; Learn_10 remains safe.
 bool configured_skip_cinematics(const std::filesystem::path& rayman2fix_ini);
 
+// Independently opt in to native GLI dialogue backdrops or experimental
+// game-drawn cinematic letterbox strips (not GameFrame Force4x3 sidebars).
+bool configured_remove_dialogue_backgrounds(const std::filesystem::path& rayman2fix_ini);
+bool configured_remove_cinematic_bars(const std::filesystem::path& rayman2fix_ini);
+
 // Add missing new options to existing INIs without discarding user settings.
 void ensure_rayman2fix_ini_options(const std::filesystem::path& rayman2fix_ini);
 

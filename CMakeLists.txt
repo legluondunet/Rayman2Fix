@@ -82,7 +82,9 @@ if(WIN32)
   endif()
   add_library(Rayman2FixRuntime SHARED src/runtime/runtime.cpp)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME Rayman2Fix)
-  target_compile_definitions(Rayman2FixRuntime PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_compile_definitions(Rayman2FixRuntime PRIVATE
+    WIN32_LEAN_AND_MEAN NOMINMAX
+    RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}")
   if(RAYMAN2FIX_RESEARCH_PROBES)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
   endif()
@@ -247,6 +249,25 @@ if(BUILD_TESTING)
   add_executable(hud_math_tests tests/hud_math_tests.cpp)
   target_include_directories(hud_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME centered-hud-4-by-3-math COMMAND hud_math_tests)
+
+  # Opt-in native GLI source-frame filter; test only synthetic percentage
+  # rectangles on Linux/Windows, without launching Rayman or changing INI.
+  add_executable(black_frame_filter_tests tests/black_frame_filter_tests.cpp)
+  target_include_directories(black_frame_filter_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME optional-black-frame-geometry COMMAND black_frame_filter_tests)
+  add_executable(cinematic_black_polygon_tests
+    tests/cinematic_black_polygon_tests.cpp)
+  target_include_directories(cinematic_black_polygon_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME exact-native-black-polygon-callsite-guards
+    COMMAND cinematic_black_polygon_tests)
+  add_executable(cinematic_viewport_fill_tests
+    tests/cinematic_viewport_fill_tests.cpp)
+  target_include_directories(cinematic_viewport_fill_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME guarded-native-cinematic-viewport-fill
+    COMMAND cinematic_viewport_fill_tests)
 
   add_executable(screen_camera_tests tests/screen_camera_tests.cpp)
   target_include_directories(screen_camera_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
