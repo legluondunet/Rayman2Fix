@@ -487,3 +487,73 @@ That would require a carefully version-pinned runtime research build
 with race-safe observation, *not* activating the proposed delayed
 Pause/Resume bridge. The existing native owner gate and quarantine
 passthrough remain in place.
+
+
+## 11. A false TestIsPlaying result is not a retirement witness (15 November)
+
+Further read-only, **exact SHA-256 verified** disassembly of the two
+owner-supplied 1999 DLLs has resolved the possible outcomes of the
+WAVMW type-4 `TestIsPlayingSxd` path. The original WAVMW
+`0xB8A0 -> 0x7B90` helper contains *two decision gates before*
+its indirect `0x7BB0` TestIsPlaying callback:
+
+| Original path | WAVMW result | APMMX Test callback? | ADPCM retirement call? |
+| --- | --- | --- | --- |
+| Inner record `[+0x34]` nonzero (`0x7B9B..0x7BA4`) | 0 (false) | **No** | **No** |
+| `[+0x34]=0`, `[+0x30]=0` (`0x7BA6..0x7BB7`) | 1 (true) | **No** | **No** |
+| APMMX resolver missing, original WAVMW fallback at `0x5801 -> 0x3440` | 0 | Stub only | **No** |
+| Native APMMX module disabled (`0x2900..0x2920`) | 0 | Yes | **No** |
+| Native APMMX handle null (`0x1F50..0x1F70`) | 0 | Yes | **No** |
+| Native record active, `[record+0x28]!=0` (`0x1F58..0x1F66`) | 1 | Yes | **No** |
+| Native record inactive, `[record+0x28]=0` (`0x1F5F -> 0x1F67`) | 0 | Yes | `0x15D0` called, **not proven successful** |
+
+A false result also triggers WAVMW's conditional cleanup of the inner
+wrapper and outer SXD list entry, as shown in section 10.
+**Neither WAVMW's cleanup nor a false result establishes that the
+physical ADPCM record was retired.** Even on the last row the original
+`0x15D0` retirement validates the supplied handle and can return
+without freeing anything. In particular, neither return-value logging
+nor an exported Stop-call count can serve as a trustworthy monotonic
+physical voice generation.
+
+The original WAVMW resolver can point to the local always-false
+trampoline `0x3440` when the native symbol is absent. For the
+owner's observed runtime the APMMX delegates seen in earlier logs
+were resolved for Stop/Pause/Resume; that alone is **not evidence**
+that the separate `TestIsPlaying` delegate is currently installed
+or has actually executed. Do not infer a fallback occurred merely
+from static code.
+
+**New offline-only test equipment:**
+`tools/audit_adpcm_query_outcomes.py` requires the exact original
+pair, independently repeats the two-DLL bridge audit, then verifies
+10 WAVMW and 9 APMMX instruction windows and 7 conditional branch
+targets. Its synthetic `model()` intentionally never reports a
+completed physical retirement; unknown state is rejected rather than
+coerced to zero. `tests/test_adpcm_query_outcomes.py` adds
+14 synthetic branch regression cases (including no delegate,
+inactive record, null handle, missing data and version rejection).
+CI runs these separately from the 14 prior lock-route tests.
+
+```sh
+python3 tools/audit_adpcm_query_outcomes.py \
+  Rayman2Fix/dll/WAVMWbvr.dll Rayman2Fix/dll/APMMXbvr.dll --json
+python3 -m unittest discover -s tests -p 'test_adpcm_query_outcomes.py'
+```
+
+**Limits of existing owner Wine evidence:** the user-supplied
+`Rayman2Fix(20261115-084027).log` has three early ESC openings
+whose two native Pause callbacks are source-paired and whose
+post-dispatch ADPCM sample is `paused=1`. Their matching
+source-paired Resume lifetimes say `play_between=0 stop_between=0`.
+Those counters did *not* trace WAVMW TestIsPlaying or original
+internal ADPCM retire, so the log cannot distinguish the above
+branches and does not establish that hidden retirement happened.
+
+**Decision unchanged:** no synthetic native Resume, no suppression
+of original Pause, no direct call to native TestIsPlaying for
+observation, no relaxation of strict Theme/SXD ownership. A future
+research probe would have to observe existing call/return boundaries
+*passively*, with exact original DLL provenance, generation-safe
+record retirement/creation coverage, concurrency handling and bounded
+event buffering. Any missing coverage remains fail-closed.
