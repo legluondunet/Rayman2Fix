@@ -81,9 +81,92 @@ def audit(wav_data: bytes, apm_data: bytes) -> dict:
         'zero_exported_stop_count_proves_no_retire': False,
         'permission_to_modify_audio': False,
         'runtime_callback_observed': False,
+        'getpos_side_effect': audit_position_getter(apm),
         'caveat': ('Static original-DLL outcome classification only. Native '
                    'TestIsPlaying can itself mutate state; never call it as an observer.'),
     }
+
+
+# _SND_fn_rGetPosSxdADPCM@4 (RVA 0x51A0) is a query with
+# a *conditional write* to the SAME original +0x28 active flag
+# that bTestIsPlaying's internal cleanup later inspects.
+# All opcode windows checked on the exact owner original.
+APMMX_POSITION_SITES = {
+    'getpos_export': (0x51A0, '8b 44 24 04 50 e8 56 d8 ff ff 83 c4 04 c2 04 00'),
+    'getpos_core': (0x2A00, 'a1 a8 82 0e 10 83 ec 08 56'),
+    'getpos_calls_reader': (0x2A1D, '50 51 52 e8 fb f8 ff ff'),
+    'reader_entry': (0x2320, '83 ec 08 53 55 8b 6c 24 18'),
+    'reader_validates_handle': (0x2353, '50 56 e8 26 01 00 00'),
+    'reader_zero_register': (0x238C, '33 db'),
+    'reader_condition_dc': (0x2405, '39 9e dc 00 00 00 74 3c'),
+    'reader_threshold': (0x243C, 'f6 c4 01 dd 5d 00 dd d8 75 03'),
+    'reader_inactive_write': (0x2446, '89 5e 28'),
+    'reader_compare_inactive': (0x244E, '39 5e 28'),
+    'normal_playback_can_inactivate': (0x17CA, '89 53 28'),
+    'primary_initializer_sets_active': (0x2007, 'c7 40 28 01 00 00 00'),
+}
+APMMX_POSITION_EDGES = {
+    'getpos_export_to_core': (0x51A5, 0x2A00),
+    'getpos_core_to_reader': (0x2A20, 0x2320),
+    'reader_to_handle_validator': (0x2355, 0x2480),
+}
+APMMX_POSITION_SHORT_BRANCHES = {
+    'no_dc_skip_mutation': (0x240B, 0x2449),
+    'fpu_status_skip_mutation': (0x2444, 0x2449),
+}
+
+
+def audit_position_getter(apm: PE32) -> dict:
+    """Proof of a possible query-side write, not that a real game call did so."""
+    if apm.exports().get('_SND_fn_rGetPosSxdADPCM@4') != 0x51A0:
+        raise PEFormatError('original ADPCM GetPosSxd export mismatch')
+    for name, (rva, raw_hex) in APMMX_POSITION_SITES.items():
+        raw = bytes.fromhex(raw_hex)
+        if apm.read_rva(rva, len(raw)) != raw:
+            raise PEFormatError(f'GetPos original opcode mismatch: {name}')
+    for name, (site, expected_target) in APMMX_POSITION_EDGES.items():
+        raw = apm.read_rva(site, 5)
+        actual = site + 5 + int.from_bytes(raw[1:], 'little', signed=True)
+        if raw[0] != 0xE8 or actual != expected_target:
+            raise PEFormatError(f'GetPos original direct-call mismatch: {name}')
+    for name, (site, expected_target) in APMMX_POSITION_SHORT_BRANCHES.items():
+        raw = apm.read_rva(site, 2)
+        actual = site + 2 + int.from_bytes(raw[1:], 'little', signed=True)
+        if raw[0] not in (0x74, 0x75) or actual != expected_target:
+            raise PEFormatError(f'GetPos original conditional-branch mismatch: {name}')
+    return {
+        'getter_export_rva': '0x51A0',
+        'internal_position_reader_rva': '0x2320',
+        'conditional_record_active_clear_rva': '0x2446',
+        'reinitialization_active_set_rva': '0x2007',
+        'other_inactive_writer_rva': '0x17CA',
+        'opcode_windows_verified': len(APMMX_POSITION_SITES),
+        'direct_call_edges_verified': len(APMMX_POSITION_EDGES),
+        'conditional_branches_verified': len(APMMX_POSITION_SHORT_BRANCHES),
+        'getpos_is_not_guaranteed_pure': True,
+        'getpos_will_always_make_voice_inactive': False,
+        'getpos_called_during_owners_esc_log_proven': False,
+        'completed_driver_retirement_proven': False,
+        'runtime_audio_change_authorized': False,
+    }
+
+
+@dataclass(frozen=True)
+class PositionOutcome:
+    active_after: bool
+    active_flag_cleared: bool
+    native_retirement_proven: bool = False
+
+
+def model_position(*, active_before: bool, gate_dc_nonzero: bool,
+                   fpu_comparison_skips: bool) -> PositionOutcome:
+    """Only the audited +0xDC/conditional-active-clear path; not playback."""
+    if any(type(x) is not bool for x in
+           (active_before, gate_dc_nonzero, fpu_comparison_skips)):
+        raise ValueError('unknown position-query branch provenance')
+    should_clear = gate_dc_nonzero and not fpu_comparison_skips
+    return PositionOutcome(active_before and not should_clear,
+                           active_before and should_clear)
 
 @dataclass(frozen=True)
 class Outcome:
