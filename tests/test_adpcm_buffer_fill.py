@@ -34,6 +34,27 @@ class SyntheticMixerPE:
         return bytes(self.code[i:i+n])
 
 
+class SyntheticWavePE:
+    machine = 0x14C
+    timestamp = 0x38076FB4
+    image_base = 0x10000000
+    image_size = 0x87000
+
+    def __init__(self, data):
+        self.code = bytearray(b'\\x90' * 0x1E000)
+        for rva, hex_bytes in A.WAVMW_BUFFER_SITES.values():
+            op = bytes.fromhex(hex_bytes)
+            self.code[rva:rva+len(op)] = op
+
+    def read_rva(self, rva, n):
+        if rva < 0 or n < 0 or rva+n > len(self.code):
+            raise A.PEFormatError('synthetic WAVMW bounds')
+        return bytes(self.code[rva:rva+n])
+
+    def exports(self):
+        return {'_SND_fn_lCreateNewBufferExSxd@16': 0xC3F0}
+
+
 class MixerPathTests(unittest.TestCase):
     def test_complete_synthetic_mixer_path(self):
         fixture=b'synthetic original mixer shape only'
@@ -123,6 +144,48 @@ class MixerPathTests(unittest.TestCase):
               patch.object(A, 'PE32', Bad)):
             with self.assertRaisesRegex(A.PEFormatError, 'mixer_second_unlock'):
                 A.audit(fixture)
+
+    def test_original_wavmw_export_and_two_backend_routes(self):
+        fixture=b'synthetic WAVMW backend only'
+        with (patch.object(A, 'WAVMW_OWNER_SHA256',
+                           hashlib.sha256(fixture).hexdigest()),
+              patch.object(A, 'PE32', SyntheticWavePE)):
+            info=A.audit_wavmw_registration(fixture)
+        self.assertEqual(info['opcode_windows_verified'],7)
+        self.assertEqual(info['direct_call_edges_verified'],2)
+        self.assertTrue(info['original_callback_provider_link_verified'])
+        self.assertFalse(info['runtime_provider_selected_or_invoked_proven'])
+        self.assertFalse(info['callback_executed_during_esc_proven'])
+        self.assertFalse(info['permission_to_change_audio'])
+
+    def test_unrecognized_wavmw_provider_refused(self):
+        with patch.object(A,'PE32') as constructor:
+            with self.assertRaisesRegex(A.PEFormatError,'WAVMW SHA-256 mismatch'):
+                A.audit_wavmw_registration(b'not the owner WAVMW')
+            constructor.assert_not_called()
+
+    def test_modified_wavmw_buffer_export_refused(self):
+        fixture=b'synthetic bad exported buffer name'
+        class Bad(SyntheticWavePE):
+            def exports(self):
+                return {'_SND_fn_lCreateNewBufferExSxd@16': 0xC400}
+        with (patch.object(A,'WAVMW_OWNER_SHA256',
+                           hashlib.sha256(fixture).hexdigest()),
+              patch.object(A,'PE32',Bad)):
+            with self.assertRaisesRegex(A.PEFormatError,'CreateNewBufferEx export'):
+                A.audit_wavmw_registration(fixture)
+
+    def test_modified_wavmw_backend_dispatch_refused(self):
+        fixture=b'synthetic changed WAVMW buffer backend'
+        class Bad(SyntheticWavePE):
+            def __init__(self, data):
+                super().__init__(data)
+                self.code[0xC41E] = 0x90
+        with (patch.object(A,'WAVMW_OWNER_SHA256',
+                           hashlib.sha256(fixture).hexdigest()),
+              patch.object(A,'PE32',Bad)):
+            with self.assertRaisesRegex(A.PEFormatError,'wavmw_backend_other_call'):
+                A.audit_wavmw_registration(fixture)
 
     def test_original_output_registration_binds_two_distinct_mix_callbacks(self):
         self.assertEqual(A.EDGES['first_register_callback'], (0x2B41,0x3A50))
