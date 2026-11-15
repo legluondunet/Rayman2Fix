@@ -83,6 +83,7 @@ def audit(wav_data: bytes, apm_data: bytes) -> dict:
         'runtime_callback_observed': False,
         'getpos_side_effect': audit_position_getter(apm),
         'wavmw_getpos_bridge': audit_wavmw_position_bridge(wav, apm),
+        'wavmw_setparam_bridge': audit_wavmw_setparam_bridge(wav, apm),
         'caveat': ('Static original-DLL outcome classification only. Native '
                    'TestIsPlaying can itself mutate state; never call it as an observer.'),
     }
@@ -151,6 +152,95 @@ def audit_wavmw_position_bridge(wav: PE32, apm: PE32) -> dict:
         'getpos_called_during_esc_proven': False,
         'runtime_audio_change_authorized': False,
     }
+
+# Two additional original game-facing parameter routes. A successful
+# exported SetParam call is NOT a Stop, but the native APMMX helper
+# may internally retire a handle if its record was already inactive.
+# This verification is static and never runs any driver callback.
+WAVMW_SETPARAM_SITES = {
+    'plain_export': (0xB7F0, '83 ec 08 56 57 8b 7c 24 14'),
+    'plain_type4_branch': (0xB802, '83 e8 02 74 10'),
+    'plain_type4_call': (0xB827, 'e8 c4 c2 ff ff'),
+    'plain_on_false_unlinks_outer': (0xB87A, '85 f6 75 09 57 e8 ac fd ff ff'),
+    'plain_indirect_parameter_callback': (0x7B12, '8b 06 57 50 ff 55 34'),
+    'plain_callback_table_entry': (0xBF77, 'c7 44 24 14 e0 33 00 10'),
+    'plain_dynamic_trampoline': (0x33E0, 'a1 fc 69 02 10 85 c0 75 06'),
+    'plain_dynamic_indirect_call': (0x33F9, 'ff 15 fc 69 02 10'),
+    'plain_resolver_symbol': (0x57C5, '68 40 15 02 10'),
+    'plain_resolver_publish': (0x57D3, 'a3 fc 69 02 10'),
+    'plain_resolver_fallback': (0x57DC, 'c7 05 fc 69 02 10 10 34 00 10'),
+    'transition_export': (0xC5D0, '83 ec 08 56 8b 74 24 10 8b 06'),
+    'transition_type4_branch': (0xC5E0, '83 e8 02 74 15'),
+    'transition_type4_call': (0xC603, 'e8 28 75 ff ff'),
+    'transition_dynamic_trampoline': (0x3B30, 'a1 88 6a 02 10 85 c0 75 06'),
+    'transition_dynamic_indirect_call': (0x3B49, 'ff 15 88 6a 02 10'),
+    'transition_resolver_symbol': (0x5C8A, '68 20 1a 02 10'),
+    'transition_resolver_publish': (0x5C98, 'a3 88 6a 02 10'),
+    'transition_resolver_fallback': (0x5CA1, 'c7 05 88 6a 02 10 60 3b 00 10'),
+}
+WAVMW_SETPARAM_EDGES = {
+    'plain_type4_helper': (0xB827, 0x7AF0),
+    'plain_false_cleanup': (0xB87F, 0xB630),
+    'transition_type4_helper': (0xC603, 0x3B30),
+    'plain_symbol_resolver': (0x57CB, 0x3FA0),
+    'transition_symbol_resolver': (0x5C90, 0x3FA0),
+}
+WAVMW_SETPARAM_BRANCHES = {
+    'plain_type4_entry': (0xB805, 0xB817),
+    'transition_type4_entry': (0xC5E3, 0xC5FA),
+}
+
+
+def audit_wavmw_setparam_bridge(wav: PE32, apm: PE32) -> dict:
+    """Two original parameter routes; no actual native operation observed."""
+    wav_exports = wav.exports()
+    apm_exports = apm.exports()
+    names = (
+        ('_SND_fn_bSetParamSxd@8', 0xB7F0,
+         '_SND_fn_bSetParamSxdADPCM@8', 0x5120,
+         0x21540, 0x269FC, 0x3410),
+        ('_SND_fn_bSetParamTransitionSxd@8', 0xC5D0,
+         '_SND_fn_bSetParamTransitionSxdADPCM@8', 0x5430,
+         0x21A20, 0x26A88, 0x3B60),
+    )
+    for wn, wr, an, ar, symbol_rva, slot_rva, fallback_rva in names:
+        if wav_exports.get(wn) != wr or apm_exports.get(an) != ar:
+            raise PEFormatError('original SetParam export identity mismatch')
+        symbol = an.encode('ascii') + b'\0'
+        if wav.read_rva(symbol_rva, len(symbol)) != symbol:
+            raise PEFormatError('original SetParam dynamic symbol mismatch')
+        if not (0 < slot_rva < 0x87000 and 0 < fallback_rva < 0x87000):
+            raise PEFormatError('SetParam pointer layout unapproved')
+    for name, (rva, hex_bytes) in WAVMW_SETPARAM_SITES.items():
+        expected = bytes.fromhex(hex_bytes)
+        if wav.read_rva(rva, len(expected)) != expected:
+            raise PEFormatError(f'original WAVMW SetParam opcode mismatch: {name}')
+    for name, (site, target) in WAVMW_SETPARAM_EDGES.items():
+        b = wav.read_rva(site, 5)
+        found = site + 5 + int.from_bytes(b[1:], 'little', signed=True)
+        if b[0] != 0xE8 or found != target:
+            raise PEFormatError(f'original WAVMW SetParam call edge mismatch: {name}')
+    for name, (site, target) in WAVMW_SETPARAM_BRANCHES.items():
+        b = wav.read_rva(site, 2)
+        found = site + 2 + int.from_bytes(b[1:], 'little', signed=True)
+        if b[0] != 0x74 or found != target:
+            raise PEFormatError(f'original WAVMW SetParam branch mismatch: {name}')
+    return {
+        'wavmw_opcode_anchors_verified': len(WAVMW_SETPARAM_SITES),
+        'wavmw_direct_call_edges_verified': len(WAVMW_SETPARAM_EDGES),
+        'wavmw_conditional_branches_verified': len(WAVMW_SETPARAM_BRANCHES),
+        'game_facing_setparam_export_rva': '0xB7F0',
+        'game_facing_setparam_transition_export_rva': '0xC5D0',
+        'adpcm_setparam_export_rva': '0x5120',
+        'adpcm_setparam_transition_export_rva': '0x5430',
+        'plain_setparam_dynamic_slot_rva': '0x269FC',
+        'transition_setparam_dynamic_slot_rva': '0x26A88',
+        'plain_setparam_can_unlink_wavmw_outer_on_false': True,
+        'hidden_apmmx_retirement_during_esc_observed': False,
+        'native_query_or_setter_was_executed': False,
+        'runtime_audio_change_authorized': False,
+    }
+
 
 APMMX_POSITION_SITES = {
     'getpos_export': (0x51A0, '8b 44 24 04 50 e8 56 d8 ff ff 83 c4 04 c2 04 00'),
