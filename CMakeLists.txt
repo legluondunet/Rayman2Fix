@@ -84,7 +84,7 @@ if(WIN32)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME Rayman2Fix)
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
-    RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT"}")
+    RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}")
   if(RAYMAN2FIX_RESEARCH_PROBES)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
   endif()
