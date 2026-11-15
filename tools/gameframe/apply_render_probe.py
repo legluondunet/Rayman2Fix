@@ -37,6 +37,9 @@ static CLIP_PHASE_SAMPLES: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
 static PASSTHRU_CHANGES: AtomicU32 = AtomicU32::new(0);
 static LAST_PASSTHRU: AtomicU32 = AtomicU32::new(u32::MAX);
 static CINEMATIC_REPORT: AtomicU32 = AtomicU32::new(0);
+static CINEMATIC_CLEARS: AtomicU32 = AtomicU32::new(0);
+static CINEMATIC_BLACK_CLEARS: AtomicU32 = AtomicU32::new(0);
+static CLEAR_PHASE_SAMPLES: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
 
 fn active() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
@@ -94,6 +97,20 @@ pub fn cinematic_passthru(mode: u32) {
             n+1, mode, cinematic_elapsed_secs()));
     }
 }
+pub fn cinematic_clear(color_argb: u32, alpha: u32, depth: u32) {
+    if !cinematic_active() { return; }
+    CINEMATIC_CLEARS.fetch_add(1, Ordering::Relaxed);
+    if color_argb & 0x00ffffff == 0 {
+        CINEMATIC_BLACK_CLEARS.fetch_add(1, Ordering::Relaxed);
+    }
+    let phase=(cinematic_elapsed_secs()/20).min(5) as usize;
+    let sample=CLEAR_PHASE_SAMPLES[phase].fetch_add(1, Ordering::Relaxed);
+    if sample < 2 {
+        line(&format!(
+            "CINEMATIC-CLEAR: phase={} sample={} color_argb=0x{:08X} alpha={} depth={} (read-only; fill ownership unknown)",
+            phase,sample+1,color_argb,alpha,depth));
+    }
+}
 pub fn cinematic_swap() {
     if !cinematic_active() { return; }
     let secs = cinematic_elapsed_secs();
@@ -104,11 +121,13 @@ pub fn cinematic_swap() {
         index as u32, (index+1) as u32, Ordering::Relaxed, Ordering::Relaxed
     ).is_ok() {
         line(&format!(
-            "CINEMATIC-CLIP-SUMMARY: at={}s clip_calls={} vertical_candidates={} unique_inset_changes={} passthru_changes={} (read-only; no ownership inferred)",
+            "CINEMATIC-CLIP-SUMMARY: at={}s clip_calls={} vertical_candidates={} unique_inset_changes={} passthru_changes={} clears={} black_clears={} (read-only; no ownership inferred)",
             secs, CLIP_CALLS.load(Ordering::Relaxed),
             VERTICAL_CLIP_CANDIDATES.load(Ordering::Relaxed),
             VERTICAL_CLIP_CHANGES.load(Ordering::Relaxed),
-            PASSTHRU_CHANGES.load(Ordering::Relaxed)));
+            PASSTHRU_CHANGES.load(Ordering::Relaxed),
+            CINEMATIC_CLEARS.load(Ordering::Relaxed),
+            CINEMATIC_BLACK_CLEARS.load(Ordering::Relaxed)));
     }
 }
 pub fn loading_corrected() {
@@ -183,6 +202,9 @@ def install(root: pathlib.Path) -> None:
                    "    let (ow, oh) = crate::config::get().output(w, h);", 2)
     b = substitute(b, "    super::movie::frame();",
                    "    super::movie::frame();\n    crate::render_probe::cinematic_swap();")
+    b = substitute(b, "    push(Cmd::Clear { color: argb(color), alpha: alpha & 0xff, depth: depth & 0xffff });",
+                   "    crate::render_probe::cinematic_clear(argb(color), alpha, depth);\n"
+                   "    push(Cmd::Clear { color: argb(color), alpha: alpha & 0xff, depth: depth & 0xffff });")
     b = substitute(b, "    super::shadow::clip([minx, miny, maxx, maxy]);",
                    "    super::shadow::clip([minx, miny, maxx, maxy]);\n"
                    "    crate::render_probe::cinematic_clip(minx, miny, maxx, maxy);")

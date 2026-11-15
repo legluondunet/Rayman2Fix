@@ -107,6 +107,21 @@ inline bool inspect_screen_quad_geometry(const HudVertex* quad,
     out=bounds;
     return true;
 }
+// Read-only diagnostic, not a cinematic selector or permission to modify
+// vertices. A full-width UV quad inset vertically can leave screen bands
+// unpainted, but may equally be an ordinary sprite/world layer.
+inline bool is_inset_full_width_uv_probe(
+    const ScreenQuadGeometry& b, float width, float height) {
+    return std::isfinite(width) && std::isfinite(height) &&
+        width>=320.0f && height>=200.0f &&
+        std::isfinite(b.left) && std::isfinite(b.right) &&
+        std::isfinite(b.top) && std::isfinite(b.bottom) &&
+        b.left>=-32.0f && b.right<=width+32.0f &&
+        b.right-b.left>=width*0.93f &&
+        b.top>=-32.0f && b.bottom<=height+32.0f &&
+        b.bottom-b.top>=height*0.5f &&
+        (b.top>=8.0f || b.bottom<=height-8.0f);
+}
 inline bool is_lower_screen_probe(const ScreenQuadGeometry& b) {
     return b.top>=540.0f && b.bottom<=850.0f;
 }

@@ -12,6 +12,7 @@ class RenderProbePatchTests(unittest.TestCase):
         (base / "api/sst.rs").write_text(
             "    let (ow, oh) = crate::config::get().output(w, h);\n" * 2 +
             "    super::movie::frame();\n"
+            "    push(Cmd::Clear { color: argb(color), alpha: alpha & 0xff, depth: depth & 0xffff });\n"
             "    super::shadow::clip([minx, miny, maxx, maxy]);\n"
             '    log!("grSstPassthruMode {mode}");\n')
         (base / "api/lfb.rs").write_text(
@@ -33,12 +34,14 @@ class RenderProbePatchTests(unittest.TestCase):
             self.assertIn("render_probe::opened", (src / "api/sst.rs").read_text())
             self.assertIn("render_probe::cinematic_swap()", (src / "api/sst.rs").read_text())
             self.assertIn("render_probe::cinematic_clip", (src / "api/sst.rs").read_text())
+            self.assertIn("render_probe::cinematic_clear", (src / "api/sst.rs").read_text())
             self.assertIn("render_probe::cinematic_passthru", (src / "api/sst.rs").read_text())
             self.assertIn("render_probe::region", (src / "api/lfb.rs").read_text())
             self.assertIn("render_probe::texture", (src / "api/tex.rs").read_text())
             self.assertIn("RAYMAN2FIX_GLIDE_PROBE", MODULE)
             self.assertIn("RAYMAN2FIX_CINEMATIC_PROBE", MODULE)
             self.assertIn("CINEMATIC-CLIP-SUMMARY", MODULE)
+            self.assertIn("CINEMATIC-CLEAR", MODULE)
             self.assertIn('parent.join("Rayman2Fix.log")', MODULE)
             self.assertIn("WRITES.fetch_add", MODULE)
             with self.assertRaises(SystemExit):

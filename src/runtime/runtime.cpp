@@ -199,6 +199,9 @@ std::atomic<unsigned> g_hidden_cinematic_bars{0};
 // Two passive samples per route/edge/time phase; no change to render output.
 std::atomic<unsigned> g_cinematic_edge_counts[4][2]{};
 std::atomic<unsigned> g_cinematic_edge_examples[16]{};
+// Diagnostic only: bounded full-width, vertically inset UV submissions.
+// These are NOT identified as the source of black bars.
+std::atomic<unsigned> g_cinematic_uv_phase_samples[4]{};
 std::atomic<void*> g_plain_sprite_original{nullptr};
 std::atomic<void*> g_uv_sprite_original{nullptr};
 std::atomic<void*> g_color_sprite_original{nullptr};
@@ -3863,6 +3866,41 @@ void probe_native_2d_driver(const r2fix::HudVertex* quad,
         double(min_x),double(max_x),double(min_y),double(max_y));
     log_line(line);
 }
+// Narrow, passive probe of the second renderer path seen in the owner's
+// 18:36 Wine trace: x=0..1024, y=34..618, reciprocal_z=0.
+// The callback's return RVA is logged to locate its game-side producer;
+//// the sprite is never suppressed, stretched or reprojected.
+void probe_cinematic_uv_source(const r2fix::HudVertex* quad,
+                               const void* caller) {
+    if(!g_log || !g_remove_cinematic_bars || !quad)return;
+    r2fix::ScreenQuadGeometry b{};
+    if(!r2fix::inspect_screen_quad_geometry(quad,b) ||
+       !r2fix::is_inset_full_width_uv_probe(b,1024.0f,768.0f))
+        return;
+    const DWORD started=g_native_2d_probe_start_ms.load(
+        std::memory_order_relaxed);
+    const DWORD elapsed=started ? GetTickCount()-started : 0;
+    const unsigned phase=elapsed<25000 ? 0u : elapsed<75000 ? 1u :
+                         elapsed<140000 ? 2u : 3u;
+    const unsigned n=g_cinematic_uv_phase_samples[phase].fetch_add(
+        1,std::memory_order_relaxed);
+    if(n>=4u)return;
+    std::uint32_t rva=0;
+    const bool game_source=r2fix::executable_callsite_rva(
+        reinterpret_cast<std::uintptr_t>(caller),
+        g_approved_exe_base.load(std::memory_order_acquire),
+        g_approved_exe_size.load(std::memory_order_acquire),rva);
+    char msg[320]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-CINEMATIC-UV: phase=%u sample=%u caller_rva=0x%08X game_source=%u x=%.1f..%.1f y=%.1f..%.1f gaps_top=%.1f bottom=%.1f reciprocal_z=%.4f..%.4f (read-only; not identified as a movie)",
+        phase,n+1u,game_source ? unsigned(rva) : 0u,
+        unsigned(game_source),double(b.left),double(b.right),
+        double(b.top),double(b.bottom),
+        double(b.top),double(768.0f-b.bottom),
+        double(b.min_reciprocal_z),double(b.max_reciprocal_z));
+    log_line(msg);
+}
+
 // Read-only: sample sprites which bypass GLI_vDraw2DSpriteWithPercent.
 // The native 2D font/panel quads are already verified at driver level.
 // The unknown UV path may have reciprocal-Z=0; do NOT auto-scale it.
@@ -4032,6 +4070,7 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
         original(quad,uv,z,globals);
         return;
     }
+    probe_cinematic_uv_source(quad,_ReturnAddress());
     probe_unrouted_lower_sprite(quad,1,_ReturnAddress());
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, uv, z, globals);
