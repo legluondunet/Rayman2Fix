@@ -69,14 +69,16 @@ class Rel32CallSiteTests(unittest.TestCase):
         self.assertFalse(report["permission_to_modify_audio"])
         self.assertEqual(len(report["direct_rel32_candidates"]["0x15D0"]),4)
         self.assertEqual(len(report["direct_rel32_candidates"]["0x1FC0"]),3)
-        self.assertEqual(report["direct_target_count"],8)
-        self.assertEqual(report["direct_callsite_count"],23)
+        self.assertEqual(report["direct_target_count"],11)
+        self.assertEqual(report["direct_callsite_count"],27)
         self.assertEqual(report["direct_rel32_candidates"]["0x1F50"],["0x290E"])
         self.assertEqual(report["direct_rel32_candidates"]["0x2320"],["0x2A20"])
         self.assertEqual(report["direct_rel32_candidates"]["0x13A0"],["0x27BE","0x3223"])
         self.assertTrue(report["query_internal_helpers_have_one_direct_candidate_each"])
         self.assertFalse(report["unique_original_query_runtime_invocation_proven"])
         self.assertFalse(report["indirect_or_dynamic_call_paths_exhausted"])
+        self.assertTrue(report["setparam_entry_routes_verified"])
+        self.assertEqual(report["setparam_hidden_retire_rva"],"0x1C8D")
 
     def test_missing_or_extra_candidate_is_fail_closed(self):
         class MissingCandidate(SyntheticPE):
@@ -101,6 +103,30 @@ class Rel32CallSiteTests(unittest.TestCase):
         self.assertEqual(A.EXPECTED[0x2900], (0x5155,))
         self.assertEqual(A.EXPECTED[0x2A00], (0x51A5,))
         self.assertEqual(len(A.EXPECTED[0x2480]),10)
+
+    def test_both_setparam_exports_reach_one_internal_inactive_retire_helper(self):
+        # The ORIGINAL exported operation is SetParam, *not* Stop:
+        # an inactive +0x28 record enters 0x1C8D -> 0x15D0.
+        self.assertEqual(A.EXPECTED[0x28B0],(0x513C,))
+        self.assertEqual(A.EXPECTED[0x3250],(0x544C,))
+        self.assertEqual(A.EXPECTED[0x1C30],(0x28D3,0x3278))
+        self.assertIn(0x1C8D,A.EXPECTED[0x15D0])
+        self.assertNotIn(0x513C,A.EXPECTED[0x15D0])
+        self.assertNotIn(0x544C,A.EXPECTED[0x15D0])
+
+    def test_extra_setparam_direct_candidate_fails_closed(self):
+        class ExtraSetParam(SyntheticPE):
+            def __init__(self,data):
+                super().__init__(data)
+                site=0x7010
+                pos=site-0x1000
+                self.text[pos]=0xE8
+                struct.pack_into("<i",self.text,pos+1,0x1C30-(site+5))
+        fixture=b"synthetic extra SetParam caller"
+        with (patch.object(A,"OWNER_ORIGINAL_SHA256",hashlib.sha256(fixture).hexdigest()),
+              patch.object(A,"PE32",ExtraSetParam)):
+            with self.assertRaisesRegex(A.PEFormatError,"differ from"):
+                A.audit(fixture)
 
     def test_extra_direct_getpos_candidate_rejected_even_with_original_sites(self):
         class ExtraGetPos(SyntheticPE):
