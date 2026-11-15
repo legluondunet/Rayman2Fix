@@ -9,6 +9,7 @@
 #include <intrin.h>
 #include "rayman2fix/fov_math.hpp"
 #include "rayman2fix/hud_math.hpp"
+#include "rayman2fix/black_frame_filter.hpp"
 #include "rayman2fix/screen_camera.hpp"
 #include "rayman2fix/superimposed_math.hpp"
 #include "rayman2fix/intro_skip.hpp"
@@ -191,6 +192,9 @@ bool g_installed = false;
 bool g_log = false;
 float g_hud_scale = 1.0f;
 bool g_skip_cinematics = false;
+bool g_remove_black_frames = false;
+std::atomic<unsigned> g_hidden_dialogue_frames{0};
+std::atomic<unsigned> g_hidden_cinematic_bars{0};
 std::atomic<void*> g_plain_sprite_original{nullptr};
 std::atomic<void*> g_uv_sprite_original{nullptr};
 std::atomic<void*> g_color_sprite_original{nullptr};
@@ -311,6 +315,7 @@ struct RuntimeOptions {
     DWORD output_height;
     DWORD logging;
     DWORD skip_cinematics;
+    DWORD remove_black_frames;
 };
 
 bool valid_angle(float v) {
@@ -3125,6 +3130,23 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     record_bottom_2d_geometry(route,xmin,ymin,xmax,ymax);
     if(route==0u)
         probe_native_glyph_after_frame(xmin,ymin,xmax,ymax);
+    // Opt-in only. The EXACT approved native return site distinguishes
+    // GLI_vDisplayFrame from font glyphs, UI images and world sprites.
+    // Discard the selected source quad BEFORE the downstream draw; leave
+    // glyphs and other layers in their original order and geometry.
+    if(g_remove_black_frames && producer==Native2DProducer::Frame) {
+        const auto kind=r2fix::black_frame_kind(xmin,ymin,xmax,ymax);
+        if(kind==r2fix::BlackFrameKind::DialogueBackdrop) {
+            if(g_hidden_dialogue_frames.fetch_add(1,std::memory_order_relaxed)==0)
+                log_line("RUNTIME-FRAMES: suppressing verified GLI dialogue backdrop quads (opt-in; source-frame geometry)");
+            return;
+        }
+        if(kind==r2fix::BlackFrameKind::CinematicLetterbox) {
+            if(g_hidden_cinematic_bars.fetch_add(1,std::memory_order_relaxed)==0)
+                log_line("RUNTIME-FRAMES: suppressing verified GLI screen-edge letterbox quads (opt-in; source-frame geometry)");
+            return;
+        }
+    }
     const DWORD started=g_native_2d_probe_start_ms.load(
         std::memory_order_acquire);
     const DWORD elapsed=started ? GetTickCount()-started : 0;
@@ -4433,8 +4455,12 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     if (g_log) log_line(kResearchProbes ?
         "RUNTIME-CONFIG: research_probes=1 (read-only experimental trace build)" :
         "RUNTIME-CONFIG: research_probes=0 (standard release instrumentation)");
-    if(settings->skip_cinematics>1u)return 5;
+    if(settings->skip_cinematics>1u || settings->remove_black_frames>1u)
+        return 5;
     g_skip_cinematics=settings->skip_cinematics!=0;
+    g_remove_black_frames=settings->remove_black_frames!=0;
+    if(g_remove_black_frames)
+        log_line("RUNTIME-FRAMES: RemoveBlackFrames=1 opt-in; GLI source-frame backdrop and letterbox filter requested (experimental visual classification)");
     // This hook is also used for the targeted intro-skip poll on 4:3.
     // For narrow monitors camera_hor_plus leaves the FOV unchanged.
     const DWORD camera_status = install_camera_hook();
@@ -4447,7 +4473,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         // Hook the common native 2D entry before the game draws any
         // UI; the downstream driver callback monitor still handles
         // screen sprites submitted through other engine paths.
-        if(g_hud_scale<0.9999f)install_native_2d_percent_hook();
+        if(g_hud_scale<0.9999f || g_remove_black_frames)
+            install_native_2d_percent_hook();
 #if RAYMAN2FIX_RESEARCH_PROBES
         // Read-only hook at VA 0x4710C0 is not part of the actual fix.
         if(g_hud_scale<0.9999f)install_superimposed_proc_probe();
