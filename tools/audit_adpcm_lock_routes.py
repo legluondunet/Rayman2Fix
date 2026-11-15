@@ -61,8 +61,15 @@ EDGES = {
 }
 # Original bounded function ranges (end-exclusive). Raw scan explicitly
 # checks only direct E8 calls to the known lock handlers, not all x86 paths.
+# Only direct E8 calls to the original known driver lock functions
+# within exact original function boundaries. Caller-side/indirect locking
+# cannot be excluded by this byte scan, so never infer thread safety.
 NO_LOCAL_LOCK = ((0x5150, 0x515F), (0x2900, 0x2923),
-                 (0x1F50, 0x1F73), (0x15D0, 0x16F1))
+                 (0x1F50, 0x1F73), (0x15D0, 0x16F1),
+                 # Original GetPos export, core and progression reader,
+                 # the latter can mutate [record+0x28] while queried.
+                 (0x51A0, 0x51B0), (0x2A00, 0x2A55),
+                 (0x2320, 0x247E))
 LOCKED_ROUTES = {
     "transition_play": (0x2780, 0x283D),
     "regular_play": (0x31E0, 0x324A),
@@ -119,6 +126,8 @@ def audit(data: bytes) -> dict:
         'opcode_anchors_verified': len(ANCHORS),
         'relative_call_edges_verified': len(EDGES),
         'local_lockless_ranges_verified': len(NO_LOCAL_LOCK),
+        'position_query_has_no_direct_original_driver_lock_calls': True,
+        'external_or_indirect_serialization_proven_absent': False,
         'known_locked_routes': locked,
         'exported_test_is_playing_rva': '0x5150',
         'internal_inactive_cleanup_rva': '0x1F50',
