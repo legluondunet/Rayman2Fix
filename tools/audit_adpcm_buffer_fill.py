@@ -33,6 +33,12 @@ ANCHORS = {
     'mixer_second_lock': (0x34CE, 'e8 4d db ff ff'),
     'mixer_second_fill_call': (0x34ED, '50 57 56 6a 01 e8 d9 e3 ff ff'),
     'mixer_second_unlock': (0x353E, 'e8 ed da ff ff'),
+    'first_callback_registration_address': (0x2B39, 'c7 44 24 1c 00 34 00 10'),
+    'first_callback_registration_call': (0x2B41, 'e8 0a 0f 00 00'),
+    'second_callback_registration_address': (0x2B68, 'c7 44 24 1c b0 34 00 10'),
+    'second_callback_registration_call': (0x2B74, 'e8 d7 0e 00 00'),
+    'native_callback_registration_helper_entry': (0x3A50, 'a1 9c 84 0e 10 85 c0'),
+    'native_callback_registration_indirect_call': (0x3A73, 'ff 15 9c 84 0e 10'),
 }
 EDGES = {
     'progress_through_buffer_fill': (0x1AD1, 0x1740),
@@ -42,6 +48,8 @@ EDGES = {
     'mixer_second_lock': (0x34CE, 0x1020),
     'mixer_second_fill': (0x34F2, 0x18D0),
     'mixer_second_unlock': (0x353E, 0x1030),
+    'first_register_callback': (0x2B41, 0x3A50),
+    'second_register_callback': (0x2B74, 0x3A50),
 }
 BRANCHES = {
     'progress_no_record24_skip_to_terminal': (0x175F, 0x17A5),
@@ -94,6 +102,9 @@ def audit(data: bytes) -> dict:
         'buffer_progress_rva': '0x1740',
         'native_active_zero_write_rva': '0x17CA',
         'normal_buffer_fill_can_mark_voice_inactive': True,
+        'original_two_callbacks_registered_through_indirect_output_interface': True,
+        'actual_callback_execution_during_esc_observed': False,
+        'registered_callbacks_always_run_on_a_separate_thread_proven': False,
         'mixer_wrappers_hold_known_driver_lock': True,
         'getpos_testisplaying_stop_required_for_this_write': False,
         'occurred_during_owners_first_esc_proven': False,
