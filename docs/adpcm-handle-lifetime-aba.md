@@ -1284,7 +1284,32 @@ account for each invocation of the mixer wrappers: the
 registration wrapper hands their pointers to an
 indirectly dispatched provider. The static code establishes
 the **callback registration**, not how often or on which
-thread those callbacks actually run. The identity,
+thread those callbacks actually run.
+
+The output provider is not simply an arbitrary inferred
+function name. Original APMMX RVA `0x4B7D` supplies the
+**exact embedded string**
+`_SND_fn_lCreateNewBufferExSxd@16` (RVA
+`0x12010`) to its dynamic resolver at `0x4B83`.
+The function pointer is stored at native VA
+`0x100E849C` by `0x4B8B`, and falls back
+to `0x3A80` (returns `-1`) if unresolved.
+At `0x3A73`, the callback registration thunk
+calls this **resolved** output interface. The
+original `WAVMWbvr.dll` exports that named
+`CreateNewBufferExSxd` function, independently
+confirmed from its export table. This establishes
+a concrete *possible* cross-module callback
+registration route from APMMX into WAVMW rather
+than direct game-side invocation.
+
+The audit verifies the resolver name and exact
+fallback, but does not read the **runtime**
+resolved module pointer. It cannot assert whether
+the provider actually accepted the callback, ran
+it on a separate thread, or invoked it during
+the first Escape; those are independent live
+questions. The identity,
 scheduling policy and concurrency of the provider remain
 unverified. The auditor verifies these two exact pointer
 constants, both registration calls and the provider's
@@ -1314,12 +1339,12 @@ could itself alter audio timing.
 
 ### Reproducible SHA-pinned audit
 
-`tools/audit_adpcm_buffer_fill.py` verifies **22 native
-opcode windows, nine direct E8 call edges, three
+`tools/audit_adpcm_buffer_fill.py` verifies **27 native
+opcode windows, ten direct E8 call edges, three
 conditional branch targets**, and the exact original DLL
 SHA-256 and PE metadata, read-only without executing the DLL.
 The separate `tests/test_adpcm_buffer_fill.py` provides
-**13 synthetic regression tests**, covering all zero-flag
+**16 synthetic regression tests**, covering all zero-flag
 gates, alternate branches, missing lock release and
 changed active-flag writer.
 
