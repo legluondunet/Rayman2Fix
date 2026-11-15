@@ -51,6 +51,9 @@ def analyze(content: str) -> dict:
                     "ms": integer(f, "t_ms"),
                     "menu": integer(f, "menu"),
                     "ref_class": integer(f, "ref_class"),
+                    "pending_state": integer(f, "pending_switch_state"),
+                    "pending_matches_outer": integer(f, "pending_target_matches_outer"),
+                    "pending_differs_current": integer(f, "pending_target_differs_current"),
                     "outer": key(f, "outer"),
                     "alternate": key(f, "alt"),
                     "inner": key(f, "inner"),
@@ -83,6 +86,7 @@ def analyze(content: str) -> dict:
                 "depth_before": integer(f,"depth_before"),
                 "depth_after": integer(f,"depth_after"),
                 "voice": None, "verdict": None, "resume": None,
+                "owner_diag": None,
                 "paired_lifetime": False, "overlap": overlapping_open,
                 "phase6": False, "sxd_lifetime": None,
             }
@@ -90,6 +94,26 @@ def analyze(content: str) -> dict:
             active=entry
             pending_resume=None
             last_lifetime=None
+            continue
+
+        if line.startswith("RUNTIME-ESC-OWNER-DIAG:"):
+            # Original diagnostic is one-time for the first rejection
+            # and one-time for the first accepted owner. Never carry
+            # its fields forward across later ESC openings.
+            if active is None or active["owner_diag"] is not None:
+                anomalies.append(f"line {lineno}: unmatched/duplicate owner diagnosis")
+                continue
+            active["owner_diag"]={
+                "event": f.get("event"),
+                "native_ref_class": integer(f,"native_player_ref_class"),
+                "native_ref_match": integer(f,"native_player_ref_match"),
+                "pending_state": integer(f,"pending_switch_state"),
+                "pending_matches_outer": integer(f,"pending_target_matches_outer"),
+                "pending_differs_current": integer(f,"pending_target_differs_current"),
+                "outer": key(f,"outer"),
+                "inner": key(f,"inner"),
+                "driver_owned": integer(f,"theme_owned_driver"),
+            }
             continue
 
         if line.startswith("RUNTIME-ESC-ADPCM-VOICE:"):
@@ -203,6 +227,37 @@ def analyze(content: str) -> dict:
         )
         entry["verified_post_dispatch_voice"]=valid_voice
         entry["alternate_ref_was_previously_active"]=prior_theme_reference
+        # Last watcher is a change-triggered observation, not an atomic
+        # view of the game at the ESC opening. Label it separately.
+        last_watch=next((
+            item for item in reversed(watcher)
+            if item["ms"]<=entry["open_ms"]),None)
+        entry["last_watcher_pending_target_match_at_ms"]=(
+            last_watch["ms"] if last_watch is not None and
+            last_watch["ref_class"]==3 and
+            last_watch["pending_state"]==1 and
+            last_watch["pending_matches_outer"]==1 and
+            last_watch["pending_differs_current"]==1 and
+            last_watch["outer"]==entry["outer"]
+            else None
+        )
+        owner=entry["owner_diag"]
+        entry["direct_pending_target_confirmed"]=bool(
+            owner is not None and owner["event"]=="rejected" and
+            entry["ref_class"]==3 and entry["ref_match"]==0 and
+            entry["verdict"]=="live-theme-ref-not-verified" and
+            valid_voice and voice["paused"]==1 and voice["other_gate"]==0 and
+            owner["native_ref_class"]==3 and owner["native_ref_match"]==0 and
+            owner["pending_state"]==1 and
+            owner["pending_matches_outer"]==1 and
+            owner["pending_differs_current"]==1 and
+            owner["outer"]==entry["outer"] and
+            owner["inner"]==entry["inner"] and
+            owner["driver_owned"]==1
+        )
+        entry["audio_intervention_authorized"]=False
+        # This investigation deliberately does not derive a native
+        # Resume permission from any combination of diagnostics.
         entry["rejected_paused_eligible"]=bool(
             entry["verdict"]=="live-theme-ref-not-verified" and
             entry["ref_class"]==3 and entry["ref_match"]==0 and
@@ -227,6 +282,10 @@ def analyze(content: str) -> dict:
         "compensated_unpaused_count": sum(x["compensated_unpaused_eligible"] for x in result),
         "phase6_open_count": sum(x["phase6"] for x in result),
         "prior_theme_ref_count": sum(x["alternate_ref_was_previously_active"] for x in result),
+        "direct_pending_target_confirmation_count": sum(
+            x["direct_pending_target_confirmed"] for x in result),
+        "prior_watcher_pending_match_count": sum(
+            x["last_watcher_pending_target_match_at_ms"] is not None for x in result),
         "observations": result,
         "anomalies": anomalies,
         "limits": [
@@ -234,6 +293,9 @@ def analyze(content: str) -> dict:
             "No source-verified Resume means no confirmed close.",
             "A post-dispatch voice state never authorizes pre-driver Pause suppression.",
             "Theme/SXD progression and zero Play/Stop counts do not prove physical-driver continuity.",
+            "The pending-target match is read after the original Pause, not atomically.",
+            "A watcher sample may be stale, even if the Theme descriptor has not visibly changed.",
+            "Pending-target equality is never permission to call Resume or skip native Pause.",
             "No audible outcome can be inferred from a runtime log alone.",
         ],
     }
@@ -260,6 +322,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Verified Theme + compensated unpaused ADPCM voice: "
               f"{summary['compensated_unpaused_count']}")
         print(f"Phase-6 safety quarantines: {summary['phase6_open_count']}")
+        print(f"Direct owner diagnosis confirms pending 9:5 target: "
+              f"{summary['direct_pending_target_confirmation_count']} opening(s)")
+        print(f"Most recent change-triggered watcher matches pending target: "
+              f"{summary['prior_watcher_pending_match_count']} opening(s) "
+              "(not necessarily fresh at ESC)")
         for x in summary["observations"]:
             v=x["voice"] or {}
             print(f"  t={x['open_ms']}ms ref_class={x['ref_class']} "
