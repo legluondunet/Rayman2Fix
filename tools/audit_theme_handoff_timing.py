@@ -89,6 +89,18 @@ def scan(lines: list[str]) -> dict:
         previous = next((w for w in reversed(watch[:wi])
                          if watched_current(w[2])), None)
         prev_matches = bool(previous and native_key(previous[2], 'outer_') == former)
+        # Look at the last *change-triggered* original inner SXD part
+        # while the former Theme was current. A 4.8-second cadence is
+        # evidence of part progression, not a proved callback schedule.
+        previous_inner = native_key(previous[2], 'inner_') if previous else None
+        prior_part = next((
+            w for w in reversed(watch[:wi]) if previous is not None and
+            w[0] < previous[0] and watched_current(w[2]) and
+            native_key(w[2], 'outer_') == former and
+            native_key(w[2], 'inner_') is not None and
+            previous_inner is not None and
+            native_key(w[2], 'inner_')[0] == previous_inner[0] and
+            native_key(w[2], 'inner_')[1] != previous_inner[1]), None)
         commit = next((w for w in watch[wi+1:]
                        if w[0] > start and watched_current(w[2]) and
                        native_key(w[2], 'outer_') == current), None)
@@ -145,6 +157,21 @@ def scan(lines: list[str]) -> dict:
             'pending_first_verified_ms': start,
             'previous_current_last_sample_ms': previous[0] if previous else None,
             'previous_current_matches_alternative': prev_matches,
+            'previous_inner_part_bank_index': (
+                list(previous_inner) if previous_inner else None),
+            'prior_inner_part_bank_index': (
+                list(native_key(prior_part[2], 'inner_')) if prior_part else None),
+            'prior_part_change_sample_ms': prior_part[0] if prior_part else None,
+            'previous_inner_part_sample_ms': previous[0] if previous else None,
+            'prior_observed_part_interval_ms': (
+                previous[0]-prior_part[0] if previous and prior_part else None),
+            'pending_requested_after_last_part_sample_ms': (
+                start-previous[0] if previous and start>previous[0] else None),
+            'previous_part_to_commit_minus_esc_ms': (
+                commit[0]-previous[0]-paused
+                if evidence_complete and prior_part and previous and
+                   previous_inner is not None else None),
+            'part_boundary_callback_execution_proven': False,
             'former_theme_bank_index': list(former) if former else None,
             'pending_target_bank_index': list(current) if current else None,
             'new_current_first_verified_ms': commit[0] if commit else None,
