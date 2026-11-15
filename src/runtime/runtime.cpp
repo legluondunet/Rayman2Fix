@@ -3827,6 +3827,9 @@ void initialize_native_intro_skip() {
 // VA 0x50483C is loaded from "GLI_DRV_vAddBlackPolygon" by the
 // game's GetProcAddress table at VA 0x421BC2. The original callsites
 // at 0x420827, 0x420841, 0x420858, 0x420872 use cdecl (4 int args).
+// Confirmed Wine log: VA 0x420827 -> (0,0,1024,1) = TOP mask;
+// VA 0x420841 -> (0,763,1024,768) = BOTTOM mask.
+// Earlier prototype wrongly read arguments as (top,left,bottom,right).
 constexpr uintptr_t kBlackPolygonSlotRva = 0x10483C;
 constexpr uintptr_t kPlainSpriteSlotRva = 0x104530; // VA 0x504530
 constexpr uintptr_t kUvSpriteSlotRva = 0x104524;    // VA 0x504524
@@ -4045,7 +4048,7 @@ void probe_unrouted_lower_sprite(const r2fix::HudVertex* quad,
 }
 
 using BlackPolygonFn=void (__cdecl*)(int,int,int,int);
-void __cdecl cinematic_black_polygon(int top,int left,int bottom,int right) {
+void __cdecl cinematic_black_polygon(int x0,int y0,int x1,int y1) {
     const auto original=reinterpret_cast<BlackPolygonFn>(
         g_black_polygon_original.load(std::memory_order_acquire));
     if(!original)return;
@@ -4058,14 +4061,14 @@ void __cdecl cinematic_black_polygon(int top,int left,int bottom,int right) {
         g_approved_exe_size.load(std::memory_order_acquire),source_rva);
     const r2fix::CinematicBlackPolygon candidate=game_source ?
         r2fix::classify_cinematic_black_polygon(
-            source_rva,top,left,bottom,right,1024,768) :
+            source_rva,x0,y0,x1,y1,1024,768) :
         r2fix::CinematicBlackPolygon::Preserve;
     unsigned site=4;
     switch(source_rva) {
-    case 0x2082Du: site=0;break; // native left mask
-    case 0x20847u: site=1;break; // native right mask
-    case 0x2085Eu: site=2;break; // native upper mask
-    case 0x20878u: site=3;break; // native lower mask
+    case 0x2082Du: site=0;break; // native TOP mask
+    case 0x20847u: site=1;break; // native BOTTOM mask
+    case 0x2085Eu: site=2;break; // native LEFT mask
+    case 0x20878u: site=3;break; // native RIGHT mask
     default:break;
     }
     const bool skip=g_remove_cinematic_bars && g_hud_scale<0.9999f &&
@@ -4076,8 +4079,8 @@ void __cdecl cinematic_black_polygon(int top,int left,int bottom,int right) {
         if(n<3u) {
             char msg[290]{};
             std::snprintf(msg,sizeof(msg),
-                "RUNTIME-GLIDRV-BLACK-POLYGON: source_rva=0x%08X sample=%u rect_top_left_bottom_right=%d,%d,%d,%d candidate=%u suppressed=%u (native viewport mask; experimental)",
-                unsigned(source_rva),n+1,top,left,bottom,right,
+                "RUNTIME-GLIDRV-BLACK-POLYGON: source_rva=0x%08X sample=%u rect_x0_y0_x1_y1=%d,%d,%d,%d candidate=%u suppressed=%u (native viewport mask; experimental)",
+                unsigned(source_rva),n+1,x0,y0,x1,y1,
                 unsigned(candidate),unsigned(skip));
             log_line(msg);
         }
@@ -4092,7 +4095,7 @@ void __cdecl cinematic_black_polygon(int top,int left,int bottom,int right) {
                 "RUNTIME-GLIDRV-BLACK-POLYGON: first lower full-width mask suppressed (opt-in; video ownership not yet confirmed)");
         return;
     }
-    original(top,left,bottom,right);
+    original(x0,y0,x1,y1);
 }
 
 void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {

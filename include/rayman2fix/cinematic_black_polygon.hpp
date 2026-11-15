@@ -1,15 +1,16 @@
 #pragma once
-// Rayman 2 retail x86 GLI_DRV_vAddBlackPolygon boundary guard.
+// SHA-locked Rayman 2 retail x86 GLI_DRV_vAddBlackPolygon guard.
 //
-// The SHA-pinned original calls the GLI driver callback in this native
-// source order: (top, left, bottom, right), with four callsites in
-// GLI viewport update at VA 0x420827/841/858/872. Only the third and
-// fourth sites draw FULL-WIDTH top/bottom masks. The first two draw
-// left/right side masks and are never candidates for suppression.
+// Confirmed by comparing game's VA 0x420827,0x420841,0x420858,0x420872
+// assembly with user's 19:18 live driver logs:
+// arguments are (x0,y0,x1,y1), NOT (top,left,bottom,right).
+// Return RVA 0x2082D draws top full-width bars (0,0,1024,1..);
+// return RVA 0x20847 draws lower bars (0,763..,1024,768).
+// Return RVAs 0x2085E and 0x20878 are left/right side masks.
+// Never suppress those, regardless of apparent geometry.
 //
-// The viewport or contents behind the polygons are not modified.
-// A skipped polygon can therefore reveal unpainted or cleared pixels.
-// Treat as experimental; owner must confirm visually.
+// Suppressing a polygon cannot restore pixels which the scene did not
+// render. Keep opt-in and require visual validation.
 namespace r2fix {
 enum class CinematicBlackPolygon : unsigned {
     Preserve = 0, Upper = 1, Lower = 2
@@ -17,25 +18,21 @@ enum class CinematicBlackPolygon : unsigned {
 
 constexpr CinematicBlackPolygon classify_cinematic_black_polygon(
     unsigned return_rva,
-    int top, int left, int bottom, int right,
-    int viewport_width, int viewport_height) {
-    // The opt-in prototype is restricted to the project's pinned 1024×768
-    // internal GLI mode. Do not guess at dimensions or use geometry alone.
-    if (viewport_width != 1024 || viewport_height != 768 ||
-        left != 0 || right != viewport_width)
+    int x0,int y0,int x1,int y1,
+    int viewport_width,int viewport_height) {
+    // Exact supported internal Glide viewport and actual full-width
+    // horizontally thin region. This is not a generic geometry-only
+    // test: the native callsite must match as well.
+    if(viewport_width!=1024 || viewport_height!=768 ||
+       x0!=0 || x1!=viewport_width ||
+       y0<0 || y1>viewport_height || y0>=y1)
         return CinematicBlackPolygon::Preserve;
-    // Original caller VA 0x420858: push width, push top, push 0, push 0,
-    // returns at 0x42085E. A narrow full-width upper mask.
-    if (return_rva == 0x0002085Eu &&
-        top == 0 && bottom > 0 &&
-        bottom <= viewport_height / 3)
+    if(return_rva==0x0002082Du && y0==0 &&
+       y1<=viewport_height/3)
         return CinematicBlackPolygon::Upper;
-    // Original caller VA 0x420872: push width, push height, push 0,
-    // push bottom, returns at 0x420878. A narrow lower mask.
-    if (return_rva == 0x00020878u &&
-        bottom == viewport_height &&
-        top >= viewport_height * 2 / 3 &&
-        top < bottom)
+    if(return_rva==0x00020847u &&
+       y1==viewport_height &&
+       y0>=viewport_height*2/3)
         return CinematicBlackPolygon::Lower;
     return CinematicBlackPolygon::Preserve;
 }

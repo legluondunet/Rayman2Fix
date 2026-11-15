@@ -2,31 +2,40 @@
 #include <cstdlib>
 #define CHECK(expr) do { if (!(expr)) std::abort(); } while(false)
 int main() {
-    using r2fix::CinematicBlackPolygon;
+    using K=r2fix::CinematicBlackPolygon;
     const auto cls=r2fix::classify_cinematic_black_polygon;
-    using K=CinematicBlackPolygon;
-    // The four native CALL instructions return at 0x42082D, 847, 85E, 878.
-    CHECK(cls(0x2085E,0,0,34,1024,1024,768)==K::Upper);
-    CHECK(cls(0x20878,618,0,768,1024,1024,768)==K::Lower);
-    CHECK(cls(0x2085E,0,0,1,1024,1024,768)==K::Upper);
-    CHECK(cls(0x20878,767,0,768,1024,1024,768)==K::Lower);
-    // Left/right rectangles, even if they have a similar appearance,
-    // must never be suppressed. Preserve all unsupported producer sites.
-    CHECK(cls(0x2082D,0,0,768,128,1024,768)==K::Preserve);
-    CHECK(cls(0x20847,0,896,768,1024,1024,768)==K::Preserve);
-    CHECK(cls(0x2082D,0,0,34,1024,1024,768)==K::Preserve);
-    CHECK(cls(0x20847,618,0,768,1024,1024,768)==K::Preserve);
-    CHECK(cls(0x2A1BE,0,0,34,1024,1024,768)==K::Preserve);
-    // Never suppress full-screen masks, central curtains, unusual
-    // output sizes, negative or inverted bounds.
-    CHECK(cls(0x2085E,0,0,768,1024,1024,768)==K::Preserve);
-    CHECK(cls(0x20878,0,0,768,1024,1024,768)==K::Preserve);
-    CHECK(cls(0x2085E,0,0,300,1024,1024,768)==K::Preserve);
-    CHECK(cls(0x20878,400,0,768,1024,1024,768)==K::Preserve);
-    CHECK(cls(0x2085E,0,128,34,896,1024,768)==K::Preserve);
-    CHECK(cls(0x20878,618,0,768,900,1024,768)==K::Preserve);
-    CHECK(cls(0x2085E,0,0,34,1024,800,600)==K::Preserve);
-    CHECK(cls(0x2085E,0,0,-1,1024,1024,768)==K::Preserve);
-    CHECK(cls(0x20878,769,0,768,1024,1024,768)==K::Preserve);
+    // Exact arguments observed on the owner's 2026-11-15 19:18 run.
+    CHECK(cls(0x2082D,0,0,1024,1,1024,768)==K::Upper);
+    CHECK(cls(0x2082D,0,0,1024,3,1024,768)==K::Upper);
+    CHECK(cls(0x20847,0,763,1024,768,1024,768)==K::Lower);
+    CHECK(cls(0x20847,0,758,1024,768,1024,768)==K::Lower);
+    // Hypothetical taller bars on the exact same native sites.
+    CHECK(cls(0x2082D,0,0,1024,150,1024,768)==K::Upper);
+    CHECK(cls(0x20847,0,618,1024,768,1024,768)==K::Lower);
+    CHECK(cls(0x2082D,0,0,1024,256,1024,768)==K::Upper);
+    CHECK(cls(0x20847,0,512,1024,768,1024,768)==K::Lower);
+    // Strictly preserve the native left and right polygon calls.
+    CHECK(cls(0x2085E,0,0,34,768,1024,768)==K::Preserve);
+    CHECK(cls(0x20878,990,0,1024,768,1024,768)==K::Preserve);
+    // Wrong native source, even when its bounds mimic a top/bottom bar.
+    CHECK(cls(0x2085E,0,0,1024,34,1024,768)==K::Preserve);
+    CHECK(cls(0x20878,0,618,1024,768,1024,768)==K::Preserve);
+    CHECK(cls(0x2A1BE,0,0,1024,34,1024,768)==K::Preserve);
+    // Full-screen fade, central UI masks, large unknown masks,
+    // negative coordinates, swapped or zero-area ranges.
+    CHECK(cls(0x2082D,0,0,1024,768,1024,768)==K::Preserve);
+    CHECK(cls(0x20847,0,0,1024,768,1024,768)==K::Preserve);
+    CHECK(cls(0x2082D,0,0,1024,300,1024,768)==K::Preserve);
+    CHECK(cls(0x20847,0,400,1024,768,1024,768)==K::Preserve);
+    CHECK(cls(0x2082D,0,20,1024,30,1024,768)==K::Preserve);
+    CHECK(cls(0x20847,0,700,1024,750,1024,768)==K::Preserve);
+    CHECK(cls(0x2082D,5,0,1024,34,1024,768)==K::Preserve);
+    CHECK(cls(0x20847,0,618,900,768,1024,768)==K::Preserve);
+    CHECK(cls(0x2082D,0,0,1024,34,800,600)==K::Preserve);
+    CHECK(cls(0x20847,0,0,1024,34,1024,768)==K::Preserve);
+    CHECK(cls(0x2082D,0,0,1024,0,1024,768)==K::Preserve);
+    CHECK(cls(0x20847,0,768,1024,768,1024,768)==K::Preserve);
+    CHECK(cls(0x2082D,0,-1,1024,34,1024,768)==K::Preserve);
+    CHECK(cls(0x20847,0,730,1024,769,1024,768)==K::Preserve);
     return 0;
 }

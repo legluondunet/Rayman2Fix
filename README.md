@@ -564,8 +564,12 @@ In addition to the older GLI source-rectangle filter, the opt-in
 prototype intercepts the original retail game's **native
 `GLI_DRV_vAddBlackPolygon`** callback (VA 0x50483C), but only suppresses
 full-width, thin horizontal masks from the exact top/bottom native
-call-sites (return RVAs `0x2085E` and `0x20878`) on the approved
-1024×768 viewport. Side masks, full-screen fades, unknown game
+call-sites (return RVAs `0x2082D` and `0x20847`) on the approved
+1024×768 viewport. The game's actual callback parameter order is
+`(x0,y0,x1,y1)` and was cross-checked against the 19:18 Wine log:
+top `(0,0,1024,1)`, bottom `(0,763,1024,768)`.
+The earlier prototype had misclassified these as side masks, so
+it had suppressed nothing. Side masks, full-screen fades, unknown game
 revisions, 4:3 output and native 2D/HUD/dialogue callbacks are preserved.
 The wrapper does **not** invent content behind a suppressed mask: black
 pixels may remain if the camera or image itself does not draw there.
