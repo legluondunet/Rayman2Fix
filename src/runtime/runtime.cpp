@@ -207,6 +207,7 @@ std::atomic<unsigned> g_black_polygon_source_samples[4]{};
 // colored clear pixels in place of rendering real scene content.
 std::atomic<bool> g_cinematic_viewport_fill_installed{false};
 std::atomic<unsigned> g_cinematic_viewport_fill_samples{0};
+std::atomic<unsigned> g_cinematic_viewport_input_samples[2]{};
 std::atomic<unsigned> g_cinematic_viewport_fill_calls{0};
 
 
@@ -3774,6 +3775,26 @@ void __cdecl cinematic_viewport_calc(void* dimensions,void* viewport) {
     std::memcpy(&x1,view+0x54,sizeof(x1));
     const auto fill=r2fix::calculate_cinematic_viewport_fill(
         w,h,x0,x1,y0,y1);
+    // Even rejected input can explain why a movie still has bars.
+    // Log at most 4 candidate insets in each time phase; never scan
+    // scene state, texture names or raw pointers.
+    if(g_log && w==1024 && h==768 &&
+       (y0>0 || y1<1000) &&
+       y0>=-100 && y1<=1100) {
+        const DWORD started=g_native_2d_probe_start_ms.load(
+            std::memory_order_acquire);
+        const unsigned phase=started &&
+            (GetTickCount()-started)>=25000 ? 1u:0u;
+        const unsigned sample=g_cinematic_viewport_input_samples[phase]
+            .fetch_add(1,std::memory_order_relaxed);
+        if(sample<4u) {
+            char line[250]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-CINEMATIC-VIEWPORT-INPUT: phase=%u sample=%u x=%d..%d y=%d..%d permille fill_candidate=%u (source, read-only decision)",
+                phase,sample+1u,x0,x1,y0,y1,unsigned(fill.change));
+            log_line(line);
+        }
+    }
     if(!fill.change) {
         original(dimensions,viewport);
         return;
