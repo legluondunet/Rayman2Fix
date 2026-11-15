@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <initializer_list>
+#include <cstring>
 #include <limits>
 
 int main() {
@@ -35,6 +36,19 @@ int main() {
         if(near(squeeze,0.75f)) {
             assert(!near(vertical,(1.0f/480.0f)*squeeze));
         }
+        float actor_horizontal=0.0f,actor_restore_y=0.0f;
+        assert(r2fix::superimposed_actor_extent_coefficients(
+            squeeze,actor_horizontal,actor_restore_y));
+        assert(near(actor_horizontal,(1.0f/640.0f)*squeeze));
+        assert(near(actor_restore_y,1.0f/squeeze));
+        const float scene_width=1024.0f;
+        const float actor_uniform_value=scene_width*actor_horizontal;
+        assert(near(actor_uniform_value*actor_restore_y,
+                    scene_width/640.0f));
+        if(near(squeeze,0.75f)) {
+            assert(near(actor_uniform_value,1.2f));
+            assert(near(actor_uniform_value*actor_restore_y,1.6f));
+        }
         float extent=0.0f;
         assert(r2fix::superimposed_uniform_extent(
             768.0f,squeeze,extent));
@@ -55,6 +69,33 @@ int main() {
                 (1024.0f*(1.0f-squeeze)/2.0f)+x*1024.0f*squeeze));
         }
     }
+    // Both original retail x86 sites use exactly 6 bytes and may have
+    // different base registers. Validate the generated gateway bytes
+    // and x87 FMUL operand; guard against a future wrong-register patch.
+    constexpr std::uint32_t factor=0x1234ABCDu;
+    constexpr std::uint32_t gateway_va=0x30001000u;
+    r2fix::SuperimposedActorStoreGateway ed{},es{};
+    assert(r2fix::make_superimposed_actor_store_gateway(
+        true,factor,gateway_va,0x471236u,ed));
+    assert(r2fix::make_superimposed_actor_store_gateway(
+        false,factor,gateway_va,0x4718DCu,es));
+    for(const auto* code:{&ed,&es}) {
+        assert(code->bytes.size()==17u);
+        assert(code->bytes[0]==0xD9u && code->bytes[2]==0x34u);
+        assert(code->bytes[3]==0xD8u && code->bytes[4]==0x0Du);
+        assert(code->bytes[9]==0xD9u && code->bytes[11]==0x54u);
+        assert(code->bytes[12]==0xE9u);
+        std::uint32_t operand=0,relative=0;
+        std::memcpy(&operand,code->bytes.data()+5,4);
+        std::memcpy(&relative,code->bytes.data()+13,4);
+        assert(operand==factor);
+        assert(gateway_va+17u+relative==
+            (code==&ed ? 0x471236u : 0x4718DCu));
+    }
+    assert(ed.bytes[1]==0x57u && ed.bytes[10]==0x5Fu);
+    assert(es.bytes[1]==0x56u && es.bytes[10]==0x5Eu);
+    assert(!r2fix::make_superimposed_actor_store_gateway(
+        true,0u,gateway_va,0x471236u,ed));
     float pos=0.0f,extent=0.0f;
     assert(!r2fix::center_normalized_superimposed_x(
         std::numeric_limits<float>::quiet_NaN(),0.75f,pos));
@@ -77,6 +118,16 @@ int main() {
     assert(r2fix::superimposed_text_extent_coefficients(
         1.0f,hor,ver));
     assert(near(hor,1.0f/640.0f) && near(ver,1.0f/480.0f));
+    float actor_x=0.0f,actor_vertical=0.0f;
+    assert(!r2fix::superimposed_actor_extent_coefficients(
+        std::numeric_limits<float>::quiet_NaN(),actor_x,actor_vertical));
+    assert(!r2fix::superimposed_actor_extent_coefficients(
+        0.0f,actor_x,actor_vertical));
+    assert(!r2fix::superimposed_actor_extent_coefficients(
+        1.1f,actor_x,actor_vertical));
+    assert(r2fix::superimposed_actor_extent_coefficients(
+        1.0f,actor_x,actor_vertical));
+    assert(near(actor_x,1.0f/640.0f) && near(actor_vertical,1.0f));
     assert(!r2fix::superimposed_uniform_extent(0.0f,0.75f,extent));
     assert(!r2fix::superimposed_uniform_extent(32768.0f,0.75f,extent));
     assert(!r2fix::superimposed_uniform_extent(768.0f,0.2f,extent));
