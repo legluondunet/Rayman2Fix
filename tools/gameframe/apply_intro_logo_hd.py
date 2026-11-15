@@ -51,6 +51,16 @@ fn log_once(key:u64, msg:&str) {
     }
 }
 
+/// Bounded read-only diagnostics on the first GameFrame texture upload
+/// and the first 32x32 / format-12 tile. Distinguishes a wrong bundle,
+/// unrecognized source, mismatched mip count and missing local atlas.
+pub fn observe_source(w:usize,h:usize,format:u32,mips:usize) {
+    log_once(0x1000,&format!("renderer hook ACTIVE; first decoded texture={}x{} format={} mip_count={}; atlas path checked only on source match",w,h,format,mips));
+    if w==32 && h==32 && format==12 {
+        log_once(0x1001,&format!("observed source texture 32x32 format=12 mip_count={}",mips));
+    }
+}
+
 fn load_atlas() -> Option<Vec<u8>> {
     let cwd=std::env::current_dir().ok()?;
     let mut paths=vec![cwd.join("Rayman2Fix_logo_hd.rgba")];
@@ -116,12 +126,26 @@ fn tile_pixels(master:&[u8],col:usize,row:usize)->Option<Vec<u8>> {
 /// continues to report logical 32x32 to the shader for unchanged UVs.
 /// If any precondition fails, return None for byte-identical behavior.
 pub fn replacement(w:usize,h:usize,format:u32,rgba:&[u8],single_mip:bool)->Option<Vec<u8>> {
-    if !single_mip || w!=32 || h!=32 || format!=12 || rgba.len()!=4096{return None;}
+    if w!=32 || h!=32 || format!=12 || rgba.len()!=4096 {return None;}
+    if !single_mip {
+        log_once(0x1002,"32x32 format-12 original rejected: texture has more than one mip level");
+        return None;
+    }
     let hash=fnv64(rgba);
-    let idx=TITLE_HASHES.iter().position(|&v|v==hash)?;
-    let master=atlas()?;
-    let (col,row)=atlas_cell(idx)?;
-    let result=tile_pixels(master,col,row)?;
+    let Some(idx)=TITLE_HASHES.iter().position(|&v|v==hash) else {
+        log_once(0x1003,&format!("first 32x32 format-12 source is not in the original 18: hash={hash:016x}; continuing to search"));
+        return None;
+    };
+    log_once(0x1004,&format!("recognized original logo tile={} hash={hash:016x}; checking local HD atlas",idx+17));
+    let Some(master)=atlas() else {
+        log_once(0x1005,"recognized source logo tile but HD atlas is not readable/valid; preserving original pixels");
+        return None;
+    };
+    let Some((col,row))=atlas_cell(idx) else {return None};
+    let Some(result)=tile_pixels(master,col,row) else {
+        log_once(0x1006,"HD atlas tile extraction failed; preserving original pixels");
+        return None;
+    };
     log_once(hash,&format!("tile={} hash={hash:016x} slot=({}, {}) original=32x32 gpu=128x128 alpha=original draw blending",idx+17,col,row));
     Some(result)
 }
@@ -185,6 +209,7 @@ def install(root:pathlib.Path)->None:
         "                    },",
         "                    Ok(img) => unsafe {\n"
         "                        if k==0 {\n"
+        "                            crate::intro_logo_hd::observe_source(lw,lh,i.format,t.ranges.len());\n"
         "                            if let Some(pixels)=crate::intro_logo_hd::replacement(lw,lh,i.format,&img.pixels,t.ranges.len()==1) {\n"
         "                                (gl.TexImage2D)(TEXTURE_2D,0,RGBA8 as i32,128,128,0,RGBA,UNSIGNED_BYTE,pixels.as_ptr().cast());\n"
         "                            } else {\n"

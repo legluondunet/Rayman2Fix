@@ -21,6 +21,7 @@ class PinnedIntroLogoHDTests(unittest.TestCase):
             contents=(base/"render/textures.rs").read_text()
             self.assertIn("crate::intro_logo_hd::replacement",contents)
             self.assertIn("t.ranges.len()==1",contents)
+            self.assertIn("crate::intro_logo_hd::observe_source",contents)
             self.assertIn("if let Some(pixels)",contents)
             self.assertIn("else",contents)
             self.assertIn("img.pixels.as_ptr().cast()",contents)
@@ -28,6 +29,9 @@ class PinnedIntroLogoHDTests(unittest.TestCase):
             self.assertIn("let n=17-index;",MODULE)
             self.assertIn("TILE-1-y",MODULE)
             self.assertIn("R2LOGOHD",MODULE)
+            self.assertIn("renderer hook ACTIVE",MODULE)
+            self.assertIn("recognized source logo tile but HD atlas",MODULE)
+            self.assertIn("first 32x32 format-12 source is not",MODULE)
             with self.assertRaises(SystemExit):
                 install(pathlib.Path(tmp))
     def test_unpinned_upstream_rejected_atomically(self):
