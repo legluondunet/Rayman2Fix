@@ -15,6 +15,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from audit_apmmxbvr import PE32, PEFormatError, OWNER_ORIGINAL_SHA256
+from audit_adpcm_lock_routes import WAVMW_OWNER_SHA256
 
 ANCHORS = {
     'buffer_fill_entry': (0x18D0, 'a1 c4 4e 02 10 83 ec 20 85 c0 53 55 56 57 75'),
@@ -68,6 +69,55 @@ BRANCH_OPCODES = {
     'progress_d8_nonzero_skips_inactive': 0x75,
     'progress_field20_nonzero_skips_inactive': (0x0F, 0x85),
 }
+
+
+WAVMW_BUFFER_SITES = {
+    'wavmw_create_buffer_export': (0xC3F0, '8b 44 24 04 56 57 8b 7c 24 10'),
+    'wavmw_buffer_class_gate': (0xC3FA, '83 38 01 75 2b'),
+    'wavmw_backend_choice': (0xC410, '75 0c'),
+    'wavmw_backend_type2_call': (0xC412, 'e8 e9 06 00 00'),
+    'wavmw_backend_other_call': (0xC41E, 'e8 5d 0d 00 00'),
+    'wavmw_buffer_result_storage': (0xC45C, '8b 0f 89 08 89 70 04'),
+    'wavmw_buffer_error_return': (0xC468, '5f 83 c8 ff 5e c2 10 00'),
+}
+WAVMW_BUFFER_EDGES = {
+    'backend_type2_call': (0xC412, 0xCB00),
+    'backend_other_call': (0xC41E, 0xD180),
+}
+
+
+def audit_wavmw_registration(data: bytes) -> dict:
+    """Static route for the APMMX export-provider name, not runtime execution."""
+    if hashlib.sha256(data).hexdigest() != WAVMW_OWNER_SHA256:
+        raise PEFormatError('original WAVMW SHA-256 mismatch')
+    pe = PE32(data)
+    if (pe.machine != 0x14C or pe.timestamp != 0x38076FB4
+            or pe.image_base != 0x10000000 or pe.image_size != 0x87000):
+        raise PEFormatError('original WAVMW PE metadata mismatch')
+    if pe.exports().get('_SND_fn_lCreateNewBufferExSxd@16') != 0xC3F0:
+        raise PEFormatError('original WAVMW CreateNewBufferEx export mismatch')
+    for name,(rva,hex_bytes) in WAVMW_BUFFER_SITES.items():
+        expected=bytes.fromhex(hex_bytes)
+        if pe.read_rva(rva,len(expected)) != expected:
+            raise PEFormatError(f'original WAVMW buffer callback opcode mismatch: {name}')
+    for name,(rva,target) in WAVMW_BUFFER_EDGES.items():
+        code=pe.read_rva(rva,5)
+        actual=rva+5+int.from_bytes(code[1:5],'little',signed=True)
+        if code[0]!=0xE8 or actual!=target:
+            raise PEFormatError(f'original WAVMW backend call edge mismatch: {name}')
+    return {
+        'original_wavmw_sha256': WAVMW_OWNER_SHA256,
+        'wavmw_buffer_create_export_rva': '0xC3F0',
+        'wavmw_buffer_class_gate_rva': '0xC3FA',
+        'wavmw_backend_for_type2_rva': '0xCB00',
+        'wavmw_backend_for_other_types_rva': '0xD180',
+        'opcode_windows_verified': len(WAVMW_BUFFER_SITES),
+        'direct_call_edges_verified': len(WAVMW_BUFFER_EDGES),
+        'original_callback_provider_link_verified': True,
+        'runtime_provider_selected_or_invoked_proven': False,
+        'callback_executed_during_esc_proven': False,
+        'permission_to_change_audio': False,
+    }
 
 
 def audit(data: bytes) -> dict:
@@ -148,9 +198,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('original_apmmx_dll', type=Path)
     parser.add_argument('--json', action='store_true')
+    parser.add_argument('--wavmwbvr', type=Path, default=None,
+                        help='optional exact original WAVMW for complete cross-DLL buffer creation route')
     args = parser.parse_args(argv)
     try:
         result = audit(args.original_apmmx_dll.read_bytes())
+        if args.wavmwbvr is not None:
+            result['wavmw_creation_route'] = audit_wavmw_registration(args.wavmwbvr.read_bytes())
     except (OSError, PEFormatError, OverflowError) as exc:
         print(f'APMMX mixer completion audit refused: {exc}', file=sys.stderr)
         return 2
