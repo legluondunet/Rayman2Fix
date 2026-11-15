@@ -121,7 +121,8 @@ class SyntheticEpochModel:
         self.handles.clear()
 
     def matches_conceptual_epoch(self, handle: int, observed: int) -> bool:
-        return self.handles.get(handle) == observed
+        return (type(observed) is int and observed > 0
+                and handle in self.handles and self.handles[handle] == observed)
 
 
 def main(argv: list[str] | None = None) -> int:
