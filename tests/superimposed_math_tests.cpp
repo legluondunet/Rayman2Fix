@@ -23,6 +23,18 @@ int main() {
         assert(near(pos*1024.0f,
                     (1024.0f-1024.0f*squeeze)/2.0f+
                     230.0f/1000.0f*1024.0f*squeeze));
+        float horizontal=0.0f,vertical=0.0f;
+        assert(r2fix::superimposed_text_extent_coefficients(
+            squeeze,horizontal,vertical));
+        assert(near(horizontal,(1.0f/640.0f)*squeeze));
+        assert(near(vertical,1.0f/480.0f));
+        // The vertical scale must not change between 4:3, 16:9 and
+        // 21:9. This guards against the screenshot-confirmed 0.75x
+        // cinematic title flattening on a 1920x1080 monitor.
+        assert(near(768.0f*vertical,768.0f/480.0f));
+        if(near(squeeze,0.75f)) {
+            assert(!near(vertical,(1.0f/480.0f)*squeeze));
+        }
         float extent=0.0f;
         assert(r2fix::superimposed_uniform_extent(
             768.0f,squeeze,extent));
@@ -53,6 +65,18 @@ int main() {
         200,std::numeric_limits<float>::quiet_NaN(),pos));
     assert(!r2fix::remap_superimposed_screen_x(200,0.0f,pos));
     assert(!r2fix::remap_superimposed_screen_x(200,1.1f,pos));
+    float hor=0.0f,ver=0.0f;
+    assert(!r2fix::superimposed_text_extent_coefficients(
+        std::numeric_limits<float>::quiet_NaN(),hor,ver));
+    assert(!r2fix::superimposed_text_extent_coefficients(
+        0.0f,hor,ver));
+    assert(!r2fix::superimposed_text_extent_coefficients(
+        1.1f,hor,ver));
+    assert(!r2fix::superimposed_text_extent_coefficients(
+        0.2f,hor,ver));
+    assert(r2fix::superimposed_text_extent_coefficients(
+        1.0f,hor,ver));
+    assert(near(hor,1.0f/640.0f) && near(ver,1.0f/480.0f));
     assert(!r2fix::superimposed_uniform_extent(0.0f,0.75f,extent));
     assert(!r2fix::superimposed_uniform_extent(32768.0f,0.75f,extent));
     assert(!r2fix::superimposed_uniform_extent(768.0f,0.2f,extent));

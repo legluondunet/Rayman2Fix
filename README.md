@@ -409,6 +409,22 @@ and early texture/palette uploads. These diagnostics let us distinguish a
 No pixels are changed and there is no user-visible configuration setting.
 This is investigative pending in-game comparison of the loading artwork.
 
+## Cinematic titles: preserve 4:3 text proportions in widescreen
+
+The approved retail game builds native `TextSuperImposed` titles
+through the same screen-world UI path as its other 4:3 overlays.
+The binary independently multiplies the native viewport width by
+`1/640` and its height by `1/480` (CD RVAs `0x75BEF` and
+`0x75BF7`). The widescreen runtime must apply its horizontal
+centering factor to the width term **only**: applying it to the height
+term made the opening credits and dialogue titles about 25% too short
+on a 16:9 monitor. The fix restores the native height term while
+retaining the existing 4:3 horizontal centering and world Hor+ FOV.
+The correction requires no new INI setting and applies to all native
+`TextSuperImposed` routes, not specific cutscene scripts.
+It has regression tests; in-game visual verification is required
+before merge.
+
 ## Original loading artwork: RGB565 colors and centered 4:3
 
 The loading picture is a CPU-written 1024x768 RGB565 frame while Glide

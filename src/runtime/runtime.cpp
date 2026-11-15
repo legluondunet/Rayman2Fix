@@ -105,6 +105,9 @@ const void* g_approved_overlay_viewport=nullptr;
 // The original PE stores coefficients at VA 0x49CC58 / 0x49CCA4
 // (1/640) and 0x49CCA8 (1/480). Redirect only FOUR verified
 // fmul operands to DLL-owned values; never overwrite shared constants.
+// TextSuperImposed's x extent uses WIDTH/640, and the z extent uses
+// HEIGHT/480 (native 0x475BC6..0x475BF7): squeeze WIDTH only.
+// Squeezing HEIGHT also made the cinematic text 25% too short in 16:9.
 float g_superimposed_actor_extent_coefficient=1.0f/640.0f;
 float g_superimposed_text_x_coefficient=1.0f/640.0f;
 float g_superimposed_text_z_coefficient=1.0f/480.0f;
@@ -3413,10 +3416,11 @@ void install_approved_overlay_source_patch() {
         }
     }
     g_superimposed_actor_extent_coefficient=(1.0f/640.0f)*g_hud_scale;
-    g_superimposed_text_x_coefficient=(1.0f/640.0f)*g_hud_scale;
-    g_superimposed_text_z_coefficient=(1.0f/480.0f)*g_hud_scale;
-    if(!std::isfinite(g_superimposed_text_z_coefficient) ||
-       g_superimposed_text_z_coefficient<=0.0f)return;
+    // The screen-X correction remains 4:3-centered; restore the
+    // native vertical text size, independently of the monitor aspect.
+    if(!r2fix::superimposed_text_extent_coefficients(
+        g_hud_scale,g_superimposed_text_x_coefficient,
+        g_superimposed_text_z_coefficient))return;
 
     constexpr std::size_t kEntryBytes=
         sizeof(kNativeScreenToVertexExpected);
@@ -3474,9 +3478,16 @@ void install_approved_overlay_source_patch() {
     g_overlay_source_patch_enabled.store(true,std::memory_order_release);
     char line[242]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-OVERLAY-SOURCE: CD native source conversion and four actor/text extents centered 4:3 at scale=%.6f; screen-world viewport left native (experimental, no per-level hacks)",
+        "RUNTIME-OVERLAY-SOURCE: CD native source conversion; actor horizontal extents centered 4:3 at scale=%.6f; TextSuperImposed X extent centered, vertical size preserved (no per-level hacks)",
         double(g_hud_scale));
     log_line(line);
+    char text_line[230]{};
+    std::snprintf(text_line,sizeof(text_line),
+        "RUNTIME-CINEMATIC-TEXT: native TextSuperImposed coefficients width=%.8f height=%.8f horiz_scale=%.4f vert_scale=1.0000 (approved 640x480 reference)",
+        double(g_superimposed_text_x_coefficient),
+        double(g_superimposed_text_z_coefficient),
+        double(g_hud_scale));
+    log_line(text_line);
 }
 // The public GOG Ray2Fix source suggests three superimposed-actor
 // code locations. They are NOT approved offsets for this CD executable.
