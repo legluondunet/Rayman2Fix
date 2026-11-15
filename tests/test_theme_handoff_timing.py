@@ -41,10 +41,11 @@ def resume(t, *, forwarded=2):
     )
 
 
-def lifetime(t, paired=1, overlap=0):
+def lifetime(t, paired=1, overlap=0, *, opened_at=None):
+    elapsed=t-opened_at if opened_at is not None else 9999
     return (
         f"RUNTIME-ESC-PREDRIVER-LIFETIME: t_ms={t} "
-        f"paired={paired} overlap={overlap} elapsed_ms=9999 "
+        f"paired={paired} overlap={overlap} elapsed_ms={elapsed} "
         f"play_between=0 stop_between=0"
     )
 
@@ -52,7 +53,7 @@ def lifetime(t, paired=1, overlap=0):
 def complete(start, end, intervals):
     lines=[watcher(start-100,12,0,1),watcher(start,5,1,3)]
     for a,b in intervals:
-        lines.extend([opening(a),resume(b),lifetime(b)])
+        lines.extend([opening(a),resume(b),lifetime(b,opened_at=a)])
     lines.append(watcher(end,5,0,1))
     return "\n".join(lines)
 
@@ -82,6 +83,42 @@ class ThemeHandoffTimingTests(unittest.TestCase):
         # must NOT be treated as if this missing Resume had occurred.
         self.assertFalse(out["qualified"])
         self.assertIsNone(out["outside_esc_ms"])
+
+    def test_realistic_original_esc_callback_splits_are_counted(self):
+        # Two ORIGINAL music transition Pause/Resume callbacks + 6/7
+        # ordinary effects. These 8/9 callbacks are expected in the
+        # owner's Wine logs and must not veto source-paired timing.
+        text="\n".join([
+            watcher(34849,12,0,1),
+            watcher(35749,5,1,3),
+            ("RUNTIME-ESC-PREDRIVER-GATE: t_ms=36718 callbacks=8 "
+             "transition_pauses=2 other_slots=6 different_handles=0 "
+             "slots=2,0,0,0 depth_before=1 depth_after=2 owner_driver=1 "
+             "native_ref_class=3 native_ref_match=0"),
+            ("RUNTIME-ESC-PREDRIVER-RESUME: t_ms=43051 callbacks=9 "
+             "transition_resumes=2 other_slots=7 different_handles=0 "
+             "slots=1,3,1,1 native_forwarded=2 native_suppressed=0 "
+             "depth_before=2 depth_after=1"),
+            lifetime(43051,opened_at=36718),
+            watcher(63549,5,0,1),
+        ])
+        result=M.evaluate(text)
+        self.assertTrue(result["qualified"],result.get("errors"))
+        self.assertEqual(result["script_esc_window_ms"],6333)
+        self.assertEqual(result["outside_esc_ms"],27800-6333)
+
+    def test_mismatched_number_of_effect_calls_fails_closed(self):
+        s=complete(10000,18000,[(12000,16000)])
+        s=s.replace("callbacks=2 transition_resumes=2 other_slots=0",
+                    "callbacks=11 transition_resumes=2 other_slots=0")
+        out=M.evaluate(s)
+        self.assertFalse(out["qualified"])
+        self.assertTrue(any("invalid source Resume" in x for x in out["errors"]))
+
+    def test_script_lifetime_elapsed_must_match_observed_wall_times(self):
+        s=complete(10000,18000,[(12000,16000)])
+        s=s.replace("elapsed_ms=4000","elapsed_ms=3999")
+        self.assertFalse(M.evaluate(s)["qualified"])
 
     def test_missing_close_fails_closed(self):
         text=complete(10000,20000,[(11000,13000)])
