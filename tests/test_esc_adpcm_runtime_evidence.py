@@ -148,6 +148,92 @@ class EscAdpcmPostDispatchEvidenceTests(unittest.TestCase):
         self.assertEqual(result["rejected_paused_count"],0)
         self.assertEqual(len(result["anomalies"]),1)
 
+    def test_nov15_pending_target_is_direct_once_not_three_times(self):
+        # Synthetic reconstruction of relationship counts, NOT copied
+        # owner log. The real tool must not reuse a one-shot owner
+        # diagnosis for later source-qualified ESC openings.
+        prior=WATCH_PRIOR.replace("t_ms=15000","t_ms=9106")
+        pending=(
+            WATCH_HANDOFF.replace("t_ms=40000","t_ms=33917") +
+            " pending_switch_state=1 pending_target_matches_outer=1 "
+            "pending_target_differs_current=1"
+        )
+        matched=(
+            WATCH_MATCH.replace("t_ms=65000","t_ms=47017") +
+            " pending_switch_state=0 pending_target_matches_outer=-1 "
+            "pending_target_differs_current=-1"
+        )
+        owner_rejected=(
+            "RUNTIME-ESC-OWNER-DIAG: event=rejected "
+            "native_player_ref_class=3 native_player_ref_match=0 "
+            "pending_switch_state=1 pending_target_matches_outer=1 "
+            "pending_target_differs_current=1 theme_owned_driver=1 "
+            "outer_bank=9 outer_index=5 inner_bank=9 inner_index=6"
+        )
+        lines=[prior,pending]
+        for index,(open_t,close_t) in enumerate(
+            ((34367,35817),(37350,41733),(42734,46067))
+        ):
+            lines.extend([gate(open_t,3,6),voice(open_t,1),verdict(False)])
+            if index==0:
+                lines.append(owner_rejected)
+            lines.extend(resumed(close_t,False))
+        lines.append(matched)
+        lines.extend([
+            gate(47600,1,7),voice(47600,0),verdict(True),
+            "RUNTIME-ESC-OWNER-DIAG: event=accepted "
+            "native_player_ref_class=1 native_player_ref_match=1 "
+            "pending_switch_state=0 pending_target_matches_outer=-1 "
+            "pending_target_differs_current=-1 theme_owned_driver=1 "
+            "outer_bank=9 outer_index=5 inner_bank=9 inner_index=7",
+            "RUNTIME-ESC-MUSIC: event=driver-command-rejected "
+            "phase=6 detail=theme-or-sxd-stream-changed-native-passthrough",
+        ])
+        result=M.analyze("\n".join(lines))
+        self.assertEqual(result["open_count"],4)
+        self.assertEqual(result["confirmed_complete_count"],3)
+        self.assertEqual(result["unconfirmed_close_count"],1)
+        self.assertEqual(result["rejected_paused_count"],3)
+        self.assertEqual(result["compensated_unpaused_count"],1)
+        self.assertEqual(result["phase6_open_count"],1)
+        self.assertEqual(result["direct_pending_target_confirmation_count"],1)
+        self.assertEqual(result["prior_watcher_pending_match_count"],3)
+        self.assertEqual(result["anomalies"],[])
+        self.assertTrue(result["observations"][0]["direct_pending_target_confirmed"])
+        self.assertFalse(result["observations"][1]["direct_pending_target_confirmed"])
+        self.assertFalse(result["observations"][2]["direct_pending_target_confirmed"])
+        self.assertTrue(all(not item["audio_intervention_authorized"]
+                            for item in result["observations"]))
+
+    def test_pending_mismatch_or_duplicate_owner_report_never_proves_target(self):
+        owner=(
+            "RUNTIME-ESC-OWNER-DIAG: event=rejected "
+            "native_player_ref_class=3 native_player_ref_match=0 "
+            "pending_switch_state=1 pending_target_matches_outer=1 "
+            "pending_target_differs_current=1 theme_owned_driver=1 "
+            "outer_bank=9 outer_index=5 inner_bank=9 inner_index=6"
+        )
+        base=[gate(100,3,6),voice(100,1),verdict(False)]
+        valid=M.analyze("\n".join(base+[owner]))
+        self.assertEqual(valid["direct_pending_target_confirmation_count"],1)
+        for replacement in (
+            owner.replace("pending_target_matches_outer=1",
+                          "pending_target_matches_outer=0"),
+            owner.replace("pending_target_differs_current=1",
+                          "pending_target_differs_current=0"),
+            owner.replace("pending_switch_state=1","pending_switch_state=0"),
+            owner.replace("native_player_ref_class=3",
+                          "native_player_ref_class=1"),
+            owner.replace("inner_index=6","inner_index=7"),
+            owner.replace("theme_owned_driver=1","theme_owned_driver=0"),
+        ):
+            result=M.analyze("\n".join(base+[replacement]))
+            self.assertEqual(result["direct_pending_target_confirmation_count"],0)
+        duplicate=M.analyze("\n".join(base+[owner,owner]))
+        self.assertEqual(duplicate["direct_pending_target_confirmation_count"],0)
+        self.assertTrue(duplicate["observations"][0]["owner_diag_invalid"])
+        self.assertEqual(len(duplicate["anomalies"]),1)
+
     def test_duplicate_openings_are_not_silently_closed(self):
         lines=[gate(100,3,6),voice(100,1),verdict(False),
                gate(200,3,6),voice(200,1),verdict(False)]
