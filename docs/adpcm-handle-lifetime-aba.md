@@ -2009,3 +2009,114 @@ opted-in prototype can narrow this distinction,
 but even that result is not an immutable ADPCM
 stream identity or permission to bypass
 the class-3 safeguard. PR #10 stays DRAFT.
+
+## 24. CD Theme predecessor-to-pending-to-current resource provenance (15 November, original 1999 CD source + 15:34 owner log)
+
+This section addresses the *directly observed cause* of early
+ESC refusal: original Theme `ref_class=3`,
+`ref_match=0`, `pending_switch_state=1`,
+`pending_target_matches_outer=1` at the first
+ESC. **This is not a license to suppress the
+original sound Pause before the handoff completes.**
+
+### Original CD state machine is independently verified
+
+The existing (non-duplicated) exact-SHA audits
+`tools/audit_original_cd_theme_switch.py` and
+`tools/audit_original_cd_theme_callback.py`
+already prove from the original owner CD
+`Rayman2(3).exe` (SHA-256
+`7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`):
+
+- Original `0x4595F6`: set controller `+0x0C=1`
+  (pending flag); `0x4595FC`: store the new
+  descriptor at controller `+0x44`.
+- Original `0x459476`: clear the pending flag;
+  `0x45948E`: promote the pending pointer into
+  controller `+0x14` (global `0x4B95CC`).
+- Original callback `0x4596E0`, registered via
+  `0x459AE5/0x459AEC`, conditionally calls
+  the updater `0x459460`; the original
+  `0x45997B` compares the incoming Theme
+  pointer against that global current pointer.
+
+No original function has been invoked for this analysis.
+The state transition is staged, not atomic from the
+perspective of the separate render-thread observer.
+Callback registration alone cannot tell us
+when a pending Theme is promoted.
+
+### The 15:34 owner log now links both ends of the handoff
+
+Four relevant original, native-bank-verified
+`RUNTIME-ESC-THEME-WATCH` records:
+
+| t_ms | Seq | Original Theme snapshot |
+| ---: | ---: | --- |
+| 34849 | 14 | current ref class 1, matched, active outer **9:12**, pending 0 |
+| 35700 | 15 | transitional/ambiguous snapshot: two outer candidates, no qualified owner |
+| 35749 | 16 | class 3 pending; outer target **9:5**, alternative current descriptor **9:12**, same loaded bank, target matches outer and differs from current |
+| 63549 | 17 | class 1 matched again, active outer **9:5**, pending 0 |
+
+This is stronger than the previously recognized
+`native_ref_class=3`: the *last known
+synchronized Theme resource* `9:12` and the
+*pending alternative* `9:12` have matching
+original loaded-bank/index provenance, while
+the *pending target* `9:5` matches the
+next known synchronized Theme `9:5`.
+
+The sampled pending state at `35749` and
+the first later matching state at `63549`
+are **27,800 ms apart**. This is the span
+between **two source-qualified snapshots**,
+**not** proof that a single pointer or physical
+voice remained unchanged continuously for 27.8 s.
+The transient ambiguous record at `35700`
+must not be quietly treated as a qualified
+current reference.
+
+**Limits:** a loaded-bank/index pair does not
+prove identical descriptor pointer, record
+allocation generation, or ADPCM physical voice.
+Neither the original audio callback's scheduling
+nor its execution during the first ESC is
+observed. The three paired early ESC menus
+have valid global mixer progress measurements,
+but they do not establish that the *old*
+Theme music voice was actually playing during
+the pending stage. Any bypass based only on
+resource provenance remains **NO-GO**.
+
+### Reproducible offline correlation
+
+New read-only `tools/audit_theme_handoff_history.py`
+reconciles the last known source-qualified
+current Theme, a source-qualified pending Theme
+and the first later source-qualified current
+Theme. It only compares original loaded
+bank/resource indices and reports intermediary
+ambiguous snapshots and missing endpoints
+without inferring pointer identity or lifetime
+continuity. Ten synthetic regression tests
+under `tests/test_theme_handoff_history.py`
+verify both matches, unknown alternatives,
+mismatched new resources, missing current
+snapshots and non-monotonic sequence rejection.
+
+```sh
+python3 tools/audit_theme_handoff_history.py \
+  'Rayman2Fix(20261115-153430).log' --json
+python3 -m unittest discover -s tests -p 'test_theme_handoff_history.py'
+```
+
+**Next technical target:** distinguish the actual
+current music driver's record *during* the pending
+handoff from the target music driver's record
+*after* promotion, or provide a generation-safe
+game-level Pause policy that does not require
+assuming continuity. Do not make first-ESC Pause
+suppression conditional only on matching
+bank/index, a valid old descriptor, pending
+target, or advancing global buffer positions.
+PR #10 stays draft.
