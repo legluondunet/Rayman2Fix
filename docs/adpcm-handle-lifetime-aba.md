@@ -742,3 +742,82 @@ internal ADPCM retirement` with no public Stop is established
 across the original binary implementations. Actual ordering and
 occurrence in the owner runtime remain unobserved, so no new
 native Pause suppression or synthetic Resume is permitted.
+
+## 14. Query-delegate provenance before and after Theme sync (15 November)
+
+The owner-original `WAVMWbvr.dll` contains **five separately
+resolved** type-4 APMMX driver callbacks relevant to this experiment,
+not only the earlier Stop/Pause/Resume trio:
+
+| Original WAVMW pointer RVA | Operation | Original WAVMW fallback RVA |
+| --- | --- | --- |
+| `0x26A98` | StopTransition | `0x3C50` |
+| `0x26A9C` | PauseTransition | `0x3C80` |
+| `0x26AA0` | ResumeTransition | `0x3CB0` |
+| `0x26A00` | **TestIsPlaying** | `0x3440` |
+| `0x26A14` | **GetPos** | `0x3530` |
+
+Exact SHA-256-identified original disassembly confirms both new
+fallback functions and their indirection tables. **GetPos and
+TestIsPlaying are *queries with potential side effects***, so the
+runtime **never calls them** for monitoring.
+
+The existing, singly bounded function
+`log_adpcm_delegate_origins_readonly()` now reads all five pointer
+slots using the same verified original WAVMW PE timestamp, image
+size, Pause entry opcode and read-only address-to-module classifier.
+It does not load modules, invoke delegates, install hooks, publish raw
+addresses, or modify driver memory.
+
+Instead of emitting the pointers only once in an entire session,
+the observation happens at most **twice**, once for a
+source-confirmed, original pending Theme reference
+(`native_ref_class=3`) and once for a synchronized original
+Theme reference (`native_ref_class=1`). It executes in the
+existing render-thread `proto_menu_tick`, *after* the original
+native audio script and existing compensation dispatch. A new line
+marks each stage:
+
+```text
+RUNTIME-AUDIO-ADPCM-DELEGATE-CONTEXT: ref_class=3 stage=pending ...
+RUNTIME-AUDIO-ADPCM-DELEGATE: op=test-is-playing status=resolved module=... callback_rva=...
+RUNTIME-AUDIO-ADPCM-DELEGATE: op=get-pos status=resolved module=... callback_rva=...
+RUNTIME-AUDIO-ADPCM-DELEGATE-CONTEXT: ref_class=1 stage=synchronized ...
+```
+
+The original log
+`Rayman2Fix(20261115-084027).log` **predates** this
+five-pointer, dual-stage diagnostic. It contains only **three
+resolved legacy callbacks**, four opening samples, three
+paired `Play/Stop=0` menu lifetimes, and **zero** valid
+post-resume active-flag samples. It cannot prove that either
+query executed, that a hidden retirement happened, or that
+the physical music voice was unchanged between observations.
+
+A new **offline, read-only log classifier**,
+`tools/audit_esc_adpcm_evidence.py`, keeps these limits explicit.
+It accepts legacy and new logs, groups the five callbacks by
+source-confirmed stage, refuses to compare incomplete/duplicated/
+unrecognized stage reports, and classifies the bounded
+`RUNTIME-ESC-ADPCM-VOICE` and
+`RUNTIME-ESC-ADPCM-RESUME` snapshots without treating
+matching record slots as an immutable voice generation. The
+twelve synthetic tests in
+`tests/test_esc_adpcm_evidence.py` cover old three-callback logs,
+missing pointers, fallback changes, bad stage classes, duplicates,
+unpaired closes, activity markers and unknown values.
+
+```sh
+python3 tools/audit_esc_adpcm_evidence.py \
+  'Rayman2Fix(20261115-084027).log' --json
+python3 -m unittest discover -s tests -p 'test_esc_adpcm_evidence.py'
+```
+
+**Interpretation:** a query callback that is bound to the original
+APMMX indicates an available route, **not** execution of that route.
+A change in pointer identity across phases can invalidate an
+assumed fixed delegate. An *unchanged* pointer, and even
+`active=1` sampled at both endpoints, still cannot rule out
+internal inactivation, reclamation or ABA reuse. All unresolved
+observations remain **NO-GO** for a synthetic early-ESC Resume
+or native Pause suppression. No release behavior was changed.
