@@ -68,7 +68,9 @@ class LockRoutesTests(unittest.TestCase):
             result = A.audit(fixture)
         self.assertEqual(result['opcode_anchors_verified'], 21)
         self.assertEqual(result['relative_call_edges_verified'], 15)
-        self.assertEqual(result['local_lockless_ranges_verified'], 4)
+        self.assertEqual(result['local_lockless_ranges_verified'], 7)
+        self.assertTrue(result['position_query_has_no_direct_original_driver_lock_calls'])
+        self.assertFalse(result['external_or_indirect_serialization_proven_absent'])
         self.assertEqual(len(result['known_locked_routes']), 4)
         self.assertFalse(result['all_retirement_synchronized_proven'])
         self.assertTrue(result['exported_stop_count_cannot_prove_no_retirement'])
@@ -112,6 +114,28 @@ class LockRoutesTests(unittest.TestCase):
               patch.object(A, 'PE32', Bad)):
             with self.assertRaisesRegex(A.PEFormatError, 'unexpected direct lock'):
                 A.audit(fixture)
+
+    def test_getpos_reader_direct_lock_call_would_invalidate_original_claim(self):
+        fixture = b'synthetic GetPos lock call inserted'
+        class Bad(FakeOwnerPE):
+            def __init__(self, raw):
+                super().__init__(raw)
+                site=0x2380
+                self.text[site-0x1000]=0xE8
+                struct.pack_into('<i',self.text,site-0x1000+1,
+                                 0x1020-(site+5))
+        with (patch.object(A, 'OWNER_ORIGINAL_SHA256', hashlib.sha256(fixture).hexdigest()),
+              patch.object(A, 'PE32', Bad)):
+            with self.assertRaisesRegex(A.PEFormatError,
+                                        'unexpected direct lock'):
+                A.audit(fixture)
+
+    def test_getpos_local_lockless_ranges_do_not_prove_no_external_lock(self):
+        self.assertIn((0x51A0,0x51B0),A.NO_LOCAL_LOCK)
+        self.assertIn((0x2A00,0x2A55),A.NO_LOCAL_LOCK)
+        self.assertIn((0x2320,0x247E),A.NO_LOCAL_LOCK)
+        self.assertNotIn((0x2780,0x283D),A.NO_LOCAL_LOCK)
+        self.assertNotIn((0x3340,0x3371),A.NO_LOCAL_LOCK)
 
     def test_extra_known_lock_entry_in_play_route_blocks_claim(self):
         fixture = b'extra lock call in synthetic play function'
