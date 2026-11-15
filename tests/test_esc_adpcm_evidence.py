@@ -300,6 +300,71 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(obs['close_gate_passed_but_sample_unknown'],0)
         self.assertEqual(obs['adpcm_close_samples'],0)
 
+    def test_owner_shaped_three_live_buffer_pairs_and_two_stream_switch_refusals(self):
+        # Synthetic/abstracted reconstruction of the 15:34 behaviour.
+        # No proprietary game bytes, actual owner log, or native calls.
+        # Three ref_class=3 source-paired menus, each with active=1
+        # and paused=1 after native Pause, have nonzero global output
+        # progress and valid post-native Resume snapshots.
+        # Two later ref_class=1 sessions change SXD while menu is open:
+        # observer correctly refuses to sample those new streams.
+        log=[]
+        for start, end, old_pos, new_pos in (
+            (1000, 7333, 100000, 239920),
+            (10000, 18217, 300000, 481500),
+            (22000, 31333, 500000, 706140),
+        ):
+            log.extend([
+                f'RUNTIME-ESC-PREDRIVER-GATE: t_ms={start} '
+                'callbacks=8 transition_pauses=2 native_ref_class=3 native_ref_match=0',
+                f'RUNTIME-ESC-ADPCM-VOICE: t_ms={start} '
+                f'sampled=1 voice_index=0 paused=1 active=1 '
+                f'mode0_output={old_pos} mode1_output={old_pos}',
+                f'RUNTIME-ESC-PREDRIVER-LIFETIME: t_ms={end} paired=1 overlap=0 '
+                'play_between=0 stop_between=0',
+                f'RUNTIME-ESC-ADPCM-RESUME: t_ms={end} paired=1 gate=1 sampled=1 '
+                f'voice_index=0 paused=0 active=1 '
+                f'mode0_output={new_pos} mode1_output={new_pos}',
+            ])
+        for start,end in ((34000,40633),(42000,45100)):
+            log.extend([
+                f'RUNTIME-ESC-PREDRIVER-GATE: t_ms={start} '
+                'callbacks=10 transition_pauses=2 native_ref_class=1 native_ref_match=1',
+                f'RUNTIME-ESC-ADPCM-VOICE: t_ms={start} sampled=1 '
+                'voice_index=0 paused=0 active=1 '
+                'mode0_output=900000 mode1_output=900000',
+                f'RUNTIME-ESC-PREDRIVER-LIFETIME: t_ms={end} paired=1 overlap=0 '
+                'play_between=0 stop_between=0',
+                f'RUNTIME-ESC-ADPCM-RESUME: t_ms={end} paired=1 '
+                'gate=0 sampled=0 active=-1 mode0_output=0 mode1_output=0',
+            ])
+        # Last opening intentionally has no paired native Resume.
+        log.extend([
+            'RUNTIME-ESC-PREDRIVER-GATE: t_ms=50000 callbacks=8 '
+            'transition_pauses=2 native_ref_class=1 native_ref_match=1',
+            'RUNTIME-ESC-ADPCM-VOICE: t_ms=50000 sampled=1 '
+            'voice_index=0 paused=0 active=1 '
+            'mode0_output=1100000 mode1_output=1100000',
+        ])
+        report=A.classify(log)
+        self.assertEqual(report['observations']['esc_gate_count'],6)
+        self.assertEqual(report['observations']['adpcm_open_samples'],6)
+        self.assertEqual(report['observations']['paired_menu_lifetimes'],5)
+        self.assertEqual(report['observations']['export_quiet_lifetimes'],5)
+        self.assertEqual(report['observations']['adpcm_close_samples'],3)
+        self.assertEqual(report['observations']['close_gates_open'],3)
+        self.assertEqual(report['observations']['close_gates_blocked'],2)
+        self.assertEqual(report['observations']['close_gate_passed_but_sample_unknown'],0)
+        output=report['native_output_positions']
+        self.assertEqual(output['paired_counter_snapshots'],3)
+        self.assertEqual(output['mode0_increased_pairs'],3)
+        self.assertEqual(output['mode1_increased_pairs'],3)
+        self.assertEqual(output['counter_decreased_or_wrapped_pairs'],0)
+        self.assertFalse(output['proves_music_voice_progressed'])
+        self.assertFalse(output['proves_original_mixer_callback_was_invoked'])
+        self.assertFalse(report['can_prove_internal_retirement_absent'])
+        self.assertFalse(report['can_prove_continuous_physical_voice_generation'])
+
     def test_only_legacy_three_callbacks_never_claims_comparison(self):
         older = [f'RUNTIME-AUDIO-ADPCM-DELEGATE: op={op} status=resolved '
                  'module=APMMXbvr.dll callback_rva=0x000054D0'
