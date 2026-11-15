@@ -2,8 +2,9 @@
 """Read-only call-site audit for the owner's hash-pinned 1999 APMMXbvr.dll.
 
 Reports raw E8+rel32 candidate call sites targeting the original
-record-retirement and record-initialization helpers. This is NOT a
-complete x86 call graph: indirect calls and non-E8 control flow
+record-retirement, allocation, GetPos and TestIsPlaying helper chains.
+The targets are also independently disassembled against the exact
+owner DLL. This is NOT a complete x86 call graph: indirect calls and non-E8 control flow
 are unobservable, and an E8 byte inside instruction data is only a
 candidate until independently disassembled.
 """
@@ -18,8 +19,22 @@ from pathlib import Path
 from audit_apmmxbvr import PE32, PEFormatError, OWNER_ORIGINAL_SHA256
 
 EXPECTED = {
+    # Original primary voice allocator; both play entry routes.
+    0x13A0: (0x27BE, 0x3223),
+    # Original retirement: exported Stop and internal cleanup routes.
     0x15D0: (0x172C, 0x1C8D, 0x1F68, 0x2950),
+    # Shared record initializer: primary and *auxiliary* records.
     0x1FC0: (0x14F9, 0x21F3, 0x22A3),
+    # Internal inactive record cleanup, reached directly by TestIsPlaying.
+    0x1F50: (0x290E,),
+    # Internal position/progression reader, reached directly by GetPos.
+    0x2320: (0x2A20,),
+    # Original handle validation helper (many different original paths).
+    0x2480: (0x15EB, 0x170E, 0x1C3F, 0x1EDD, 0x1F1D,
+             0x1F8D, 0x218E, 0x2222, 0x22DE, 0x2355),
+    # Public APMMX TestIsPlaying and GetPos entry stubs.
+    0x2900: (0x5155,),
+    0x2A00: (0x51A5,),
 }
 
 
@@ -64,6 +79,14 @@ def audit(data: bytes) -> dict:
         "raw_text_bytes": len(raw),
         "direct_rel32_candidates": verified,
         "raw_direct_call_candidates_verified": True,
+        "direct_target_count": len(EXPECTED),
+        "direct_callsite_count": sum(len(sites) for sites in verified.values()),
+        "query_internal_helpers_have_one_direct_candidate_each": (
+            verified["0x1F50"] == ["0x290E"] and
+            verified["0x2320"] == ["0x2A20"]
+        ),
+        "unique_original_query_runtime_invocation_proven": False,
+        "indirect_or_dynamic_call_paths_exhausted": False,
         "native_generation_proven": False,
         "permission_to_modify_audio": False,
         "limit": ("Only raw E8+rel32 candidates within original .text. "
