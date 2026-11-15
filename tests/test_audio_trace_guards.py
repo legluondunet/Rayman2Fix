@@ -13,6 +13,30 @@ class AudioTraceGuardTests(unittest.TestCase):
         cls.config=(ROOT/"src/launcher/game_config.cpp").read_text(encoding="utf-8")
         cls.esc_music_header=(ROOT/"include/rayman2fix/esc_music_wine_prototype.hpp").read_text(encoding="utf-8")
 
+    def test_menu_attempt_generation_is_not_original_adpcm_record_generation(self):
+        # The owner-hash-verified APMMX DLL has two handle aliases:
+        # a first-free slot after Stop, and in-place inactive record
+        # reinitialization WITHOUT any original Stop call. Therefore
+        # the current coordinator's generation is an ESC session token,
+        # never proof of a physical music stream epoch.
+        self.assertIn("Only an ESC script-attempt/session token",self.runtime)
+        self.assertIn("NOT the original APMMX ADPCM",self.runtime)
+        self.assertIn("record's creation/reinitialization generation",self.runtime)
+        self.assertIn("without native Stop",self.runtime)
+        self.assertIn("NOT an original ADPCM record epoch",self.esc_music_header)
+        self.assertIn("IN PLACE without Stop",self.esc_music_header)
+        self.assertIn("not a physical voice",self.esc_music_header)
+        self.assertEqual(self.runtime.count("g_proto_generation.fetch_add("),1)
+        original_pause=self.runtime.split("void __cdecl proto_script_pause() {",1)[1].split(
+            "void __cdecl proto_script_resume() {",1)[0]
+        self.assertIn("g_proto_generation.fetch_add(1",original_pause)
+        self.assertNotIn("g_proto_generation.fetch_add(",self.runtime.split(
+            "void proto_record_stop(",1)[1])
+        # Never promote pending-target equivalence or the session
+        # counter to a generation credential in the synthetic bridge.
+        self.assertNotIn("native_pending_target_matches_outer",
+                         self.esc_music_header)
+
     def test_compilation_requires_explicit_audio_trace_build(self):
         self.assertRegex(self.cmake,r'option\(RAYMAN2FIX_AUDIO_TRACE\s+[^\n]+\s+OFF\)')
         self.assertIn("if(RAYMAN2FIX_AUDIO_TRACE)",self.cmake)
