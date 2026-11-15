@@ -500,3 +500,123 @@ after Stop/compaction. Even a stable ordinal in consecutive
 menu logs is not a music-generation token. The
 previous no-pre-driver-suppression policy continues until
 a reliable exact owner/retirement contract is established.
+
+## Owner's 15 November 2026 07:55 trace — first-ESC ADPCM voice gate confirmed
+
+Source: the owner-supplied `Rayman2Fix(20261115-075536).log`, **169 lines**.
+This is a real retail-CD-based Windows run with the existing
+read-only `RUNTIME-ESC-ADPCM-VOICE` post-dispatch observer.
+The observations below are *original game sound state*, not a
+modified audio output or a listening report.
+
+### Five source-verified ESC openings, exact paired evidence
+
+| Open (ms) | Native Theme-player ref | Active outer Theme | Inner SXD | Original Pause callbacks | Post-dispatch APMMX voice | Compensation |
+| --- | --- | --- | --- | --- | --- | --- |
+| 41,079 | class 3, alternate `9:12` | `9:5` | `9:6` | 2, same object, type 4 | `sampled=1 index=0 paused=1 other_gate=0` | **rejected**, live Theme ref mismatch |
+| 52,046 | class 3, alternate `9:12` | `9:5` | `9:6` | 2, same object, type 4 | `sampled=1 index=0 paused=1 other_gate=0` | **rejected** |
+| 57,679 | class 3, alternate `9:12` | `9:5` | `9:6` | 2, same object, type 4 | `sampled=1 index=0 paused=1 other_gate=0` | **rejected** |
+| 65,929 | class 1, pointer matches active Theme | `9:5` | `9:7` | 2, same object, type 4 | `sampled=1 index=0 paused=0 other_gate=0` | **accepted**, 2 synthetic native resumes |
+| 70,813 | class 1, pointer matches active Theme | `9:5` | `9:8` | 2, same object, type 4 | `sampled=1 index=0 paused=0 other_gate=0` | **accepted**, 2 synthetic native resumes |
+
+All five have original script pause depth `1→2`.
+The first four matching script Resume wrappers have depth
+`2→1`, with respectively **2, 2, 2** original native
+Resume callbacks forwarded and **2** suppressed after
+matching compensation. All four lifetime reports are
+`paired=1 overlap=0`. The fifth opening has **no
+source-verified script Resume** before the session ends
+and must not be counted as a completed pair.
+
+All five APMMX samples passed the original DLL version,
+delegation, record pool, backlink, and repeated-count
+checks; they show the **actual record's `+0x1C` mixer
+gate at the post-dispatch observation point**. This is
+much stronger than the old logical Theme/SXD-only
+observation: it ties the script Pause's exact opaque
+transition argument to a live ADPCM record whose
+`paused` flag is 1 when the current compensation
+rejects and 0 when the current compensation accepts.
+Still, *correlation and mechanism are not a safe
+authorization to bypass or add native calls*.
+
+### Why class 3 is especially interesting, but not a new stream ID
+
+The original Theme watcher shows `9:12` as the active
+and **matching** outer Theme between ~15.551 and
+39.496 seconds, with changing inner sound resources in
+bank 239. At ~40.346 seconds a Theme handoff occurs
+(`outer_candidates=2`), then at ~40.396 seconds the
+new unique active outer Theme resolves to `9:5` and
+inner SXD `9:6`, **while the native current Theme
+player still references the readable old `9:12`
+descriptor** (`ref_class=3`, different descriptor,
+same original bank 9). Only around 65.846 seconds,
+as inner SXD progresses from `9:6` to `9:7`,
+does native player reference become class 1 and
+match the active outer Theme.
+
+Thus `9:12` is **observed as a previously active
+Theme reference**, not an arbitrary identifier or
+an invalid memory pointer. This may represent retained
+Theme-player state, a delayed native handoff or another
+intentional overlapping music transition. The trace does
+**not** establish which interpretation is correct and
+does not prove that the formerly referenced sound was
+audible during the subsequent ESC menus.
+
+Critically, `voice_index=0` is only a temporary
+`0xE4`-stride ADPCM pool ordinal. The same index
+across menus is **not a stable identity or generation
+token**; Stop compacts the pool. No raw pointer is
+retained by the observer.
+
+### Fifth opening's unclosed transition is NOT a clean pair
+
+At 70.813 seconds the second accepted menu
+compensates the two source-native Pauses and
+the ADPCM voice sample is already `paused=0`.
+At 75.446 seconds, while `menu=1`, nested SXD
+changes `9:8→9:9` and the conservative safety
+machine enters `phase=6`. Then the active Theme
+becomes unavailable at 76.834 seconds, and a new
+Theme `278:0` appears by 77.087 seconds.
+**No matching script Resume wrapper is recorded for
+that menu.** The missing close can be a scene
+transition or an unobserved game path; do not infer
+that the user closed ESC normally, that the sound
+crashed, or that a permanently paused voice remains.
+The zero Play/Stop counters of earlier paired menus
+also cannot rule out internal SXD progression.
+
+### Strongest supported conclusion and research gate
+
+For this exact original DLL pair, three early
+source-qualified ESC Pauses result in a live
+ADPCM record with `paused=1 other_gate=0` after
+native forwarding; two later class-1-owner sessions
+leave a verified record with `paused=0 other_gate=0`
+after the current paired compensation. This directly
+supports the identified ADPCM mixer gate as the
+mechanism of the early audio mute.
+
+**Still not proven:** that the temporary pool record
+is an exclusive, stable *music-generation owner* across
+all callbacks; whether source-specific original native
+Resumes may be safely withheld when the old Theme
+descriptor persists; and safe handling of Stop,
+focus, nested script pauses, or scene change. It would
+be unsafe to relax `native_theme_player_ref_matches_outer==1`
+purely because a post-dispatch `paused=1` observation
+exists. PR #10 remains a research draft, and original
+game DLLs are unchanged.
+
+**Next focused research:** determine whether the
+*previously active* Theme `9:12` and *currently active*
+Theme `9:5` share a physical ADPCM stream/record
+during the handoff, and whether that handoff is
+controlled by the native player pointer, a separate
+generation mechanism, or a materialized Stop/Start.
+Do so with byte-verified original code and bounded
+read-only evidence, **not** by assuming continuity
+from `voice_index=0`.
