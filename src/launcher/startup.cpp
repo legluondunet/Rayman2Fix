@@ -212,7 +212,6 @@ bool managed_fix_filename(const std::string& name) {
         name=="GLIDE2X.DLL" || name=="GLIDE2X.DLL.BAK" ||
         name=="GAMEFRAME-LICENSE-APACHE.TXT" ||
         name=="GAMEFRAME-LICENSE-APACHE.TXT.BAK" ||
-        name=="RAYMAN2FIX_LOGO_HD.RGBA" ||
         name==".RAYMAN2FIX-CD-FILES.TSV" ||
         name==".RAYMAN2FIX-EXE-PATCH.TSV") return true;
     for (const std::string prefix :
@@ -249,6 +248,10 @@ void migrate_legacy_layout(const fs::path& launcher_root, const fs::path& game) 
     if (fs::exists(game) && !fs::is_directory(game))
         throw std::runtime_error("rayman2/ is not a safe game directory");
     fs::create_directories(fix);
+    // New optional replacement images live here. No old atlas migration.
+    if(fs::is_symlink(fix/"textures"))
+        throw std::runtime_error("unsafe replacement textures symlink");
+    fs::create_directories(fix/"textures");
     std::vector<std::pair<fs::path,fs::path>> moves;
     for (const auto& entry:fs::directory_iterator(game)) {
         const auto name=upper_path_name(entry.path().filename().u8string());
@@ -258,16 +261,6 @@ void migrate_legacy_layout(const fs::path& launcher_root, const fs::path& game) 
            fs::exists(target) || fs::is_symlink(target))
             throw std::runtime_error("conflicting/unsafe Rayman2Fix migration file; no overwrite");
         moves.emplace_back(entry.path(),target);
-    }
-    // This optional, user-provided art used to live beside the launcher.
-    // Migrate only the precisely named file and never overwrite a newer copy.
-    const fs::path atlas=launcher_root/"Rayman2Fix_logo_hd.rgba";
-    if(fs::exists(atlas) || fs::is_symlink(atlas)) {
-        const fs::path dest=fix/atlas.filename();
-        if(fs::is_symlink(atlas) || !fs::is_regular_file(atlas) ||
-           fs::exists(dest) || fs::is_symlink(dest))
-            throw std::runtime_error("conflicting/unsafe local Rayman 2 HD atlas; original preserved");
-        moves.emplace_back(atlas,dest);
     }
     for(const auto& [source,target]:moves)
         fs::rename(source,target);

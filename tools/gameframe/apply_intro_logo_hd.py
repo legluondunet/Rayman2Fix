@@ -63,11 +63,8 @@ pub fn observe_source(w:usize,h:usize,format:u32,mips:usize) {
 
 fn load_atlas() -> Option<Vec<u8>> {
     let cwd=std::env::current_dir().ok()?;
-    let mut paths=vec![cwd.join("rayman2fix").join("Rayman2Fix_logo_hd.rgba"),cwd.join("Rayman2Fix_logo_hd.rgba")];
-    if let Some(p)=cwd.parent(){ paths.push(p.join("Rayman2Fix_logo_hd.rgba")); }
-    if let Ok(exe)=std::env::current_exe() {
-        if let Some(p)=exe.parent(){ paths.push(p.join("Rayman2Fix_logo_hd.rgba")); }
-    }
+    // Only the new canonical texture path is supported. No legacy fallback.
+    let paths=[cwd.join("rayman2fix").join("textures").join("logo.rgba")];
     for path in paths {
         let Ok(meta)=fs::metadata(&path) else {continue};
         if meta.len()!=BYTES as u64 {
@@ -84,7 +81,7 @@ fn load_atlas() -> Option<Vec<u8>> {
         log_once(3,&format!("external user-supplied atlas loaded {}x{} from {}",WIDTH,HEIGHT,path.display()));
         return Some(data);
     }
-    log_once(4,"optional user-supplied atlas not found; original title texture uploads preserved");
+    log_once(4,"optional rayman2fix/textures/logo.rgba not found; original title texture uploads preserved");
     None
 }
 

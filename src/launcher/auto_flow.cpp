@@ -158,7 +158,6 @@ void write_receipt(const fs::path& staged, const DiscInfo& info) {
 // rayman2.exe for Windows application-directory DLL resolution.
 bool bootstrap_fix_file(const std::string& name) {
     return name=="RAYMAN2FIX.INI" || name=="RAYMAN2FIX.DLL" ||
-           name=="RAYMAN2FIX_LOGO_HD.RGBA" ||
            name==".RAYMAN2FIX-CD-FILES.TSV" ||
            name==".RAYMAN2FIX-EXE-PATCH.TSV" ||
            runtime_backup_name(name) || gameframe_bundle_file(name);
@@ -174,9 +173,16 @@ void check_bootstrap_workspace(const fs::path& game_dir) {
                 throw std::runtime_error("unsafe rayman2fix/ bootstrap directory");
             for(const auto& fix:fs::directory_iterator(item.path())) {
                 const auto part=upper(fix.path().filename().u8string());
-                if(fix.is_symlink() || !fix.is_regular_file() ||
-                   !bootstrap_fix_file(part))
+                if(part=="TEXTURES") {
+                    if(fix.is_symlink() || !fix.is_directory())
+                        throw std::runtime_error("unsafe replacement textures directory");
+                    for(const auto& texture:fs::directory_iterator(fix.path()))
+                        if(texture.is_symlink() || !texture.is_regular_file())
+                            throw std::runtime_error("unsafe replacement texture");
+                } else if(fix.is_symlink() || !fix.is_regular_file() ||
+                          !bootstrap_fix_file(part)) {
                     throw std::runtime_error("unrecognized files inside rayman2fix/; preserving user files");
+                }
             }
         } else if(name=="WINMM.DLL") {
             if(item.is_symlink() || !item.is_regular_file())
@@ -403,12 +409,31 @@ void copy_bootstrap_files(const fs::path& original, const fs::path& staged) {
             throw std::runtime_error("unsafe Rayman2Fix bootstrap directory");
         for(const auto& entry:fs::directory_iterator(source)) {
             const auto name=upper(entry.path().filename().u8string());
-            if(!bootstrap_fix_file(name) || entry.is_symlink() ||
-               !entry.is_regular_file())
-                throw std::runtime_error("unsafe bootstrap fix file; refusing install");
-            fs::copy_file(entry.path(),dest/entry.path().filename());
+            if(name=="TEXTURES") {
+                if(entry.is_symlink() || !entry.is_directory())
+                    throw std::runtime_error("unsafe replacement textures directory");
+                const fs::path textures=dest/"textures";
+                if(fs::exists(textures) || fs::is_symlink(textures))
+                    throw std::runtime_error("replacement textures directory collision");
+                fs::create_directory(textures);
+                for(const auto& texture:fs::directory_iterator(entry.path())) {
+                    if(texture.is_symlink() || !texture.is_regular_file())
+                        throw std::runtime_error("unsafe replacement texture");
+                    const auto target=textures/texture.path().filename();
+                    if(fs::exists(target) || fs::is_symlink(target))
+                        throw std::runtime_error("replacement texture collision");
+                    fs::copy_file(texture.path(),target);
+                }
+            } else {
+                if(!bootstrap_fix_file(name) || entry.is_symlink() ||
+                   !entry.is_regular_file())
+                    throw std::runtime_error("unsafe bootstrap fix file; refusing install");
+                fs::copy_file(entry.path(),dest/entry.path().filename());
+            }
         }
     }
+    // Keep the replacement textures folder present even without an atlas.
+    fs::create_directories(dest/"textures");
     // This exception is deliberate: Windows must locate winmm.dll from
     // the directory containing rayman2.exe (not from PATH/fix subdir).
     const fs::path winmm=original/"winmm.dll";
