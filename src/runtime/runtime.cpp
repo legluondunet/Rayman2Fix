@@ -173,6 +173,10 @@ std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
 r2fix::IntroSkipGuard g_intro_guard;
 bool g_intro_level_logged = false;
+// Diagnostic-only timestamp of render sources. These do not authorize
+// audio compensation, skip inputs, or changes in foreground policy.
+std::atomic<DWORD> g_last_camera_tick{0};
+std::atomic<DWORD> g_last_native_2d_tick{0};
 bool g_learn_logged = false;
 bool g_learn_intro_seen = false;
 bool g_learn_handover = false;
@@ -1998,6 +2002,20 @@ void __cdecl proto_script_pause() {
         proto_log("script-pause-observed",pending ?
             "paired-theme-candidate-ready" :
             "provisional-owner-rejected-native-audio-unchanged");
+        if(g_log) {
+            const DWORD now=GetTickCount();
+            const DWORD camera=g_last_camera_tick.load(std::memory_order_relaxed);
+            const DWORD native2d=g_last_native_2d_tick.load(std::memory_order_relaxed);
+            char line[270]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-ESC-POLL-CADENCE: source=script-pause "
+                "camera_age_ms=%ld native2d_age_ms=%ld "
+                "win32_foreground=%u (post-native-pause, diagnostic only)",
+                camera ? long(DWORD(now-camera)) : -1L,
+                native2d ? long(DWORD(now-native2d)) : -1L,
+                unsigned(game_window_is_foreground()));
+            log_line(line);
+        }
     }
 }
 void __cdecl proto_script_resume() {
@@ -2091,6 +2109,20 @@ void __cdecl proto_script_resume() {
         }
     }
     proto_deferred_safety();
+    if(enabled && g_log && trace) {
+        const DWORD now=GetTickCount();
+        const DWORD camera=g_last_camera_tick.load(std::memory_order_relaxed);
+        const DWORD native2d=g_last_native_2d_tick.load(std::memory_order_relaxed);
+        char line[300]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-ESC-POLL-CADENCE: source=script-resume "
+            "camera_age_ms=%ld native2d_age_ms=%ld "
+            "win32_foreground=%u (post-native-resume, diagnostic only)",
+            camera ? long(DWORD(now-camera)) : -1L,
+            native2d ? long(DWORD(now-native2d)) : -1L,
+            unsigned(game_window_is_foreground()));
+        log_line(line);
+    }
 }
 // Called ONLY on the render thread, after native menu audio decisions.
 // Unlike proto_menu_tick(), this also flushes when the FSM is already idle.
@@ -4250,13 +4282,15 @@ void poll_second_intro_skip() {
     if (!native_change || !g_current_level) return;
     // These counters measure the sampling cadence of the EXISTING camera
     // callback; they do not add a key hook, change the input guard or skip.
-    static DWORD entered_at=0,requested_at=0;
-    static unsigned input_polls=0,down_polls=0;
+    static DWORD entered_at=0,requested_at=0,last_input_diag=0;
+    static unsigned input_polls=0,down_polls=0,down_edges=0;
+    static bool last_down=false;
     const bool in_intro = r2fix::is_second_intro(g_current_level);
     if (in_intro && !g_intro_level_logged) {
         entered_at=GetTickCount();
-        requested_at=0;
-        input_polls=down_polls=0;
+        requested_at=last_input_diag=0;
+        input_polls=down_polls=down_edges=0;
+        last_down=false;
         log_line("RUNTIME-INTRO: jail_20 detected; Space/Enter/Esc can skip to learn_10");
         g_intro_level_logged = true;
     } else if (!in_intro && g_intro_level_logged) {
@@ -4270,7 +4304,9 @@ void poll_second_intro_skip() {
             log_line(line);
         }
         g_intro_level_logged = false;
-        entered_at=requested_at=0;
+        entered_at=requested_at=last_input_diag=0;
+        input_polls=down_polls=down_edges=0;
+        last_down=false;
     }
     // Never read keyboard state unless the game owns the foreground.
     // Being unfocused or holding a key while entering the scene is not a
@@ -4283,8 +4319,32 @@ void poll_second_intro_skip() {
     if(in_intro) {
         ++input_polls;
         if(down)++down_polls;
+        if(down && !last_down)++down_edges;
     }
-    if (!g_intro_guard.update(g_current_level, down) || !foreground) return;
+    // Preserve exactly one original state-machine update per camera tick.
+    const bool requested=g_intro_guard.update(g_current_level, down);
+    if(in_intro && g_log) {
+        const DWORD now=GetTickCount();
+        const bool edge=down && !last_down;
+        if(!last_input_diag || DWORD(now-last_input_diag)>=5000u ||
+           (edge && down_edges<=12u) || requested) {
+            last_input_diag=now;
+            char input[290]{};
+            std::snprintf(input,sizeof(input),
+                "RUNTIME-INTRO-INPUT: elapsed_ms=%lu input_polls=%u "
+                "down_polls=%u key_down_edges=%u foreground=%u key_down=%u "
+                "released_latch=%u request_latch=%u (camera-thread sampled; "
+                "no key hook, no skip behavior changes)",
+                static_cast<unsigned long>(DWORD(now-entered_at)),
+                input_polls,down_polls,down_edges,
+                unsigned(foreground),unsigned(down),
+                unsigned(g_intro_guard.released),
+                unsigned(g_intro_guard.requested));
+            log_line(input);
+        }
+        last_down=down;
+    }
+    if (!requested || !foreground) return;
 
     // The game itself queues the level change for its next engine tick.
     // Do not force a renderer switch, destroy a video window or write
@@ -4302,6 +4362,7 @@ void poll_second_intro_skip() {
 }
 
 void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
+    g_last_camera_tick.store(GetTickCount(),std::memory_order_relaxed);
     // The engine has a separate screen-world 3D camera for overlay
     // actors, including dialogue glyph geometry. Preserve its NATIVE
     // 4:3 projection. Hor+ is exclusively for other 3D world cameras.
@@ -4592,6 +4653,7 @@ void probe_native_glyph_after_frame(float xmin,float ymin,
 
 void __cdecl native_2d_percent_sprite(void* viewport,
            float xmin,float ymin,float xmax,float ymax,void* material) {
+    g_last_native_2d_tick.store(GetTickCount(),std::memory_order_relaxed);
     // This exact native entry is reached by:
     // - JFFTXT_vDrawString's per-character quads (VA 0x4664D4),
     // - the screen-image pass (VA 0x460653), and
