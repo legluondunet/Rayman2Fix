@@ -5,6 +5,7 @@
 #include "rayman2fix/runtime_inject.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <string>
 
 namespace r2fix {
@@ -53,7 +54,8 @@ void ensure_rayman2_dpi_manifest(const std::filesystem::path& game_dir);
 ChildProcessResult run_child_process(
     const std::filesystem::path& executable,
     const std::filesystem::path& working_directory,
-    const ChildDisplayOptions& display = {});
+    const ChildDisplayOptions& display = {},
+    const std::function<void(const PresentationResult&)>& on_presentation = {});
 
 // After a successful automatic installation/verification, try launching the
 // supported game edition. Return 2 if blocked, 1 for OS/game error.
