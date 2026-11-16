@@ -18,6 +18,9 @@ struct PresentationResult {
     bool game_icon_available = false;
     bool game_icon_applied = false;
     unsigned game_icon_updates = 0;
+    unsigned game_icon_groups = 0;
+    bool game_icon_readback = false;
+    std::string game_window_class;
     std::string game_icon_source;
     std::string game_icon_error;
     std::string last_error;
@@ -28,7 +31,7 @@ struct PresentationResult {
 class WindowPresentation {
 public:
     // The two HICON handles are extracted from the owner's installed
-    // rayman2.exe (or its original .bak). They remain alive until the game
+    // rayman2.exe only. They remain alive until the game
     // process exits; the installer never embeds or redistributes an icon.
     WindowPresentation(unsigned long child_pid, DisplayMetrics display,
                        const std::wstring& game_executable);
