@@ -22,6 +22,7 @@ struct PresentationResult {
     bool game_icon_readback = false;
     std::string game_window_class;
     std::string game_icon_source;
+    std::string game_icon_method;
     std::string game_icon_error;
     std::string last_error;
 };
