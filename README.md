@@ -708,8 +708,12 @@ It recognizes only 1024×768 internal full-width viewports with moderate
 top/bottom insets expressed as thousandths, temporarily passes 0..1000
 to the original viewport calculator, and restores the source parameters
 after the original recalculates its cached screen limits. Unknown
-viewports, side panels, 4:3 output and full-screen fades are preserved.
-Bounded `RUNTIME-CINEMATIC-VIEWPORT` log entries record both the
+viewports, side panels and full-screen fades are preserved. The vertical
+cinematic viewport fill is available in both Auto and centered 4:3 output
+modes; GameFrame's 4:3 sidebars are not removed or stretched. A
+`RUNTIME-CINEMATIC-VIEWPORT` log entry confirms that the native viewport
+was actually expanded, whereas `RemoveCinematicBars=1` alone only confirms
+the option was read. Bounded diagnostic entries record both the
 original requested inset and derived full-screen bounds.
 
 **This is still a test prototype, not a visual fix confirmed on game
