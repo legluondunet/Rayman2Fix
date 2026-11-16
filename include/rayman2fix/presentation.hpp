@@ -16,6 +16,7 @@ struct PresentationResult {
     // Best effort: native Windows/Wine taskbar and Alt+Tab icon. A missing
     // icon never prevents launch or modifies the authenticated game EXE.
     bool game_icon_available = false;
+    bool game_icon_delegated = false;
     bool game_icon_applied = false;
     unsigned game_icon_updates = 0;
     unsigned game_icon_groups = 0;
@@ -35,7 +36,8 @@ public:
     // rayman2.exe only. They remain alive until the game
     // process exits; the installer never embeds or redistributes an icon.
     WindowPresentation(unsigned long child_pid, DisplayMetrics display,
-                       const std::wstring& game_executable);
+                       const std::wstring& game_executable,
+                       bool game_icon_delegated = false);
     ~WindowPresentation();
     WindowPresentation(const WindowPresentation&) = delete;
     WindowPresentation& operator=(const WindowPresentation&) = delete;
@@ -49,6 +51,7 @@ private:
     std::wstring game_executable_;
     PresentationResult result_;
     bool game_icons_loaded_ = false;
+    bool game_icon_delegated_ = false;
     void* big_icon_ = nullptr;
     void* small_icon_ = nullptr;
     void* last_icon_window_ = nullptr;
