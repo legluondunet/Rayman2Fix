@@ -203,7 +203,7 @@ int main() {
               "bootstrap initialization must create INI when absent");
         check(fs::is_directory(root / "rayman2" / "rayman2fix" / "textures"),
               "bootstrap creates a textures folder for replacement images");
-        check(contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("Force4x3=0") != std::string::npos &&
+        check(contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("AspectRatio=Auto") != std::string::npos &&
               contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos &&
               contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("RemoveDialogueBackgrounds=0") != std::string::npos &&
               contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("RemoveCinematicBars=0") != std::string::npos,
@@ -232,15 +232,15 @@ int main() {
         }
         write(user_ini,
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n");
-        write(user_ini, "[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+        write(user_ini, "[Graphics]\nResolution=1920x1080\nAspectRatio=4:3\n"
                         "[Features]\nSkipCinematics=1\n");
-        check(r2fix::configured_force_4_3(user_ini) &&
+        check(r2fix::configured_aspect_ratio_is_4_3(user_ini) &&
               r2fix::configured_skip_cinematics(user_ini),
               "4:3 and cinematic skip opt-in recognized");
         check(!r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
               !r2fix::configured_remove_cinematic_bars(user_ini),
               "both visual filters disabled when absent");
-        write(user_ini,"[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+        write(user_ini,"[Graphics]\nResolution=1920x1080\nAspectRatio=4:3\n"
                        "[Features]\nSkipCinematics=1\nRemoveDialogueBackgrounds=1\n"
                        "RemoveCinematicBars=0\n");
         check(r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
@@ -250,23 +250,23 @@ int main() {
         check(!r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
               r2fix::configured_remove_cinematic_bars(user_ini),
               "cinematic-only opt-in does not enable dialogue filter");
-        write(user_ini,"[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+        write(user_ini,"[Graphics]\nResolution=1920x1080\nAspectRatio=4:3\n"
                        "[Features]\nSkipCinematics=1\nRemoveDialogueBackgrounds=1\n"
                        "RemoveCinematicBars=1\n");
         check(r2fix::configured_render_resolution(user_ini) ==
               std::make_pair(1440u,1080u),"1920x1080: 4:3 content area 1440x1080");
-        write(user_ini, "[Graphics]\nResolution=1280x800\nForce4x3=1\n");
+        write(user_ini, "[Graphics]\nResolution=1280x800\nAspectRatio=4:3\n");
         check(r2fix::configured_render_resolution(user_ini) ==
               std::make_pair(1064u,798u),"1280x800 exact 4:3");
-        write(user_ini, "[Graphics]\nResolution=1920x1080\nForce4x3=0\n");
+        write(user_ini, "[Graphics]\nResolution=1920x1080\nAspectRatio=Auto\n");
         check(r2fix::configured_render_resolution(user_ini) ==
               std::make_pair(1920u,1080u),"default wide unchanged");
         for(const auto* bad:{"2","yes",""}) {
-            write(user_ini,std::string("[Graphics]\nForce4x3=")+bad+"\n");
+            write(user_ini,std::string("[Graphics]\nAspectRatio=")+bad+"\n");
             bool refused=false;
-            try{(void)r2fix::configured_force_4_3(user_ini);}
+            try{(void)r2fix::configured_aspect_ratio_is_4_3(user_ini);}
             catch(const std::exception&){refused=true;}
-            check(refused,"invalid 4:3 flag rejected");
+            check(refused,"invalid AspectRatio rejected");
             write(user_ini,std::string("[Features]\nSkipCinematics=")+bad+"\n");
             refused=false;
             try{(void)r2fix::configured_skip_cinematics(user_ini);}
@@ -293,7 +293,7 @@ int main() {
               migrated.find("Log=0\r\n")!=std::string::npos &&
               migrated.find("Setting=keep\r\n")!=std::string::npos &&
               migrated.find("; comment\r\n")!=std::string::npos &&
-              migrated.find("Force4x3=0\r\n")!=std::string::npos &&
+              migrated.find("AspectRatio=Auto\r\n")!=std::string::npos &&
               migrated.find("[Features]\r\n")!=std::string::npos &&
               migrated.find("SkipCinematics=0\r\n")!=std::string::npos &&
               migrated.find("RemoveDialogueBackgrounds=0\r\n")!=std::string::npos &&
@@ -301,6 +301,36 @@ int main() {
               "existing INI migration retains BOM, CRLF, custom values");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
         check(contents(user_ini)==migrated,"migration is idempotent");
+        // Existing boolean settings migrate without losing the chosen geometry.
+        write(user_ini,"[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+                       "[Personal]\nSetting=keep\n");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        const auto old_enabled=contents(user_ini);
+        check(old_enabled.find("AspectRatio=4:3")!=std::string::npos &&
+              old_enabled.find("Force4x3=")==std::string::npos &&
+              old_enabled.find("Setting=keep")!=std::string::npos &&
+              r2fix::configured_render_resolution(user_ini)==
+                  std::make_pair(1440u,1080u),
+              "Force4x3=1 migrates to 4:3 with identical geometry");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        check(contents(user_ini)==old_enabled,"aspect migration is idempotent");
+        write(user_ini,"[Graphics]\nForce4x3=0\n");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        check(r2fix::configured_aspect_ratio(user_ini)=="Auto" &&
+              contents(user_ini).find("Force4x3=")==std::string::npos,
+              "Force4x3=0 migrates to Auto");
+        write(user_ini,"[Graphics]\nForce4x3=1\nAspectRatio=auto\n");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        check(r2fix::configured_aspect_ratio(user_ini)=="Auto" &&
+              contents(user_ini).find("Force4x3=")==std::string::npos,
+              "explicit AspectRatio wins over the obsolete flag");
+        write(user_ini,"[Graphics]\nForce4x3=2\n");
+        bool invalid_legacy_aspect=false;
+        try{r2fix::ensure_rayman2fix_ini_options(user_ini);}
+        catch(const std::exception&){invalid_legacy_aspect=true;}
+        check(invalid_legacy_aspect &&
+              contents(user_ini).find("Force4x3=2")!=std::string::npos,
+              "invalid old flag fails without altering INI");
         write(user_ini,"[Features]\nRemoveBlackFrames=1\n"
                        "RemoveCinematicBars=0\n; user setting retained\n");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
