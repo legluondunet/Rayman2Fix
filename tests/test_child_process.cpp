@@ -33,6 +33,15 @@ int main() {
     GetEnvironmentVariableW(L"GLIDE_SIZE", buffer, 128);
     wchar_t frame_limit[64]{};
     GetEnvironmentVariableW(L"RAYMAN2FIX_FPS_LIMIT", frame_limit, 64);
+    std::wstring child_path(32768, L'\0');
+    const DWORD path_len=GetEnvironmentVariableW(
+        L"PATH",child_path.data(),static_cast<DWORD>(child_path.size()));
+    if(!path_len || path_len>=child_path.size())return 24;
+    child_path.resize(path_len);
+    std::wofstream path_report(root/"child-dll-search-path.txt");
+    path_report << child_path;
+    path_report.close();
+    if(!path_report)return 25;
     RECT rect{};
     GetWindowRect(hwnd, &rect);
     std::wofstream info(root / "child-window.txt");
