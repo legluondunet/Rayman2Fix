@@ -1,3 +1,70 @@
+## Optional real-HD Rayman 2 opening logo (experimental; issue #16)
+
+The 18 pieces of the retail CD's "Rayman 2 — The Great Escape" title
+are stored as vertically inverted 32×32 Glide format-12 textures. The
+owner's texture captures reconstruct the *entire* upright 192×96 logo
+without gaps in a verified 6×3 arrangement:
+
+```
+34 31 28 25 22 19
+33 30 27 24 21 18
+32 29 26 23 20 17
+```
+
+The previous 4× bicubic interpolator (#18) was tested and made nearly
+no visible improvement; **this implementation instead uses an optional
+genuinely higher-resolution image supplied locally by the user**.
+It is not merged with or dependent upon the bicubic prototype.
+
+No third-party or Ubisoft picture is committed, embedded, or distributed
+by Rayman2Fix. The user can get a cleaner 1582×676 transparent-logo
+reference at
+https://raymanpc.com/wiki/script-en/index.php?title=File:Rayman_2_Logo.png .
+Copyright and terms for that artwork remain with their respective
+owners: the user chooses and acquires the image separately. The included
+open-source helper converts a transparent PNG to a fixed 768×384 raw
+RGBA atlas that the GameFrame DLL recognizes. The HD atlas remains a
+local optional file, not a game-resource rewrite.
+
+On Linux/Manjaro (requires python-pillow), from the Rayman2Fix launcher
+directory:
+
+```bash
+curl -fL -o prepare_intro_logo_hd.py \
+  https://raw.githubusercontent.com/legluondunet/Rayman2Fix/fix/intro-logo-hd-external-asset/tools/prepare_intro_logo_hd.py
+python prepare_intro_logo_hd.py --download
+```
+
+RayWiki sometimes returns HTTP 403 to automated requests. Open the
+[1582×676 original PNG](https://raymanpc.com/wiki/script-en/images/b/bb/Rayman_2_Logo.png)
+in a normal browser. Save it as `Rayman_2_Logo.png` beside the launcher,
+or in `~/Downloads/` or `~/Téléchargements/`. Re-run
+`python prepare_intro_logo_hd.py --download`: the updated helper
+detects the local file before attempting another network download.
+Alternatively use `python prepare_intro_logo_hd.py --png /path/to/logo.png`.
+Never silently fall back to a different, lower-quality logo; only
+the user-provided original or a successfully downloaded original is used.
+The renderer and bootstrap remain unchanged; no Windows rebuild is needed.
+The helper writes `Rayman2Fix_logo_hd.rgba` next to the launcher.
+
+The pinned GameFrame renderer loads that exact-size/header atlas on
+first use, and changes **only** eighteen original 32×32 format-12
+textures whose decoded RGBA FNV-1a64 fingerprints match the approved
+CD source. Their original draw calls still control the placement,
+geometry, alpha blends, timing, fades, and cinematic transitions. UV
+scale remains the original 32×32 logical size; just the GPU texture
+is 128×128. The formerly over-strict single-mipmap condition has been removed. All available source mip levels are validated first and replaced as a consistent 4x GPU pyramid (128, 64, 32, etc.), generated from the same 128×128 atlas tile with alpha-weighted area downsampling. The logical Glide dimensions/UVs and game's original mip count are unchanged. Other textures, unsupported games/editions, failed fingerprints, missing or malformed atlases pass through unchanged.
+Deleting `Rayman2Fix_logo_hd.rgba` restores the original logo with no
+INI change. The diagnostic `RUNTIME-GLIDE: INTRO-LOGO-HD` in
+`Rayman2Fix.log` reports loading and matching at most 18 sources.
+
+The plugin is disabled unless the user supplies the separate atlas.
+**This is an experimental draft pending a short Wine/Windows visual
+test**, including seams, title placement and fade transitions. The
+conversion deliberately maps the reference artwork to the exact
+historic atlas bounds; it is not promised to be pixel-identical to
+the retail title's low-res palette.
+
 ## Music in the Escape pause menu — research build
 
 Requested future setting: `[Features] MusicInPauseMenu=0` (disabled by
