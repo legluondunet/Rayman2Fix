@@ -30,6 +30,7 @@ static void usage() {
         << "  Rayman2Fix.exe --verbose             verbose console diagnostics\n\n"
         << "--verbose may be combined with a command, in either order.\n"
         << "Automatic install searches for exactly one .iso/.cue beside the launcher.\n"
+        << "Optional: approved decrypted Rayman2.exe beside launcher replaces the protected EXE.\n"
         << "Installation directory: <launcher>/rayman2/ (fixes in rayman2/rayman2fix/)\n"
         << "Unchecked launch does not verify executable presence, hashes, CD files,\n"
         << "or modify/repair the installation; OS errors are returned as-is.\n"

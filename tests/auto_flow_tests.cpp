@@ -346,6 +346,17 @@ int main() {
             check(static_cast<bool>(out), "write sample ISO");
         }
 
+        // A file named Rayman2.exe beside the launcher must be SHA256
+        // allowlisted; arbitrary local EXEs may never replace CD content.
+        write(root / "Rayman2.exe", "NOT_THE_APPROVED_DECRYPTED_EXECUTABLE");
+        bool rejected_local_exe = false;
+        try { (void)r2fix::run_automatic(app); }
+        catch(const std::exception&) { rejected_local_exe = true; }
+        check(rejected_local_exe &&
+              !fs::exists(root / "rayman2" / "rayman2.exe") &&
+              !fs::exists(root / "rayman2.installing"),
+              "invalid local executable rejected before publishing original CD files");
+        fs::remove(root / "Rayman2.exe");
         check(r2fix::run_automatic(app) == 2,
               "CD assets install but nonfunctional game runtime must not launch");
         const auto game = root / "rayman2";

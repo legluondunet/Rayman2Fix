@@ -905,16 +905,25 @@ The underlying game executables are **never distributed or committed**.
 - The cross-platform C++ decoder supports the compressed `Z` operation
   with strict bounds, and validates the exact SHA-256 and sizes of the
   **approved original and target** before replacing either executable.
-- To test an owner-provided delta without uploading game-derived patch
-  material to GitHub, place `Rayman2Fix-executable.r2patch` beside
-  `Rayman2Fix.exe`. An installed matching retail executable is then
-  upgraded on the next no-argument launch. On a different edition, the
-  source is preserved unchanged.
+- **Preferred local workflow (no Python / no private delta needed):**
+  place the user's own **decrypted `Rayman2.exe`** beside
+  `Rayman2Fix.exe` (on Windows, `rayman2.exe` is equivalent).
+  Both the protected installed executable and the local decrypted
+  candidate must match the approved size and SHA-256 values above.
+  On the next normal startup or `--install-only`, the installer copies
+  the decrypted EXE to `rayman2/rayman2.exe`, backs up the original as
+  `rayman2/rayman2.exe.bak`, and writes the patch receipt under
+  `rayman2/rayman2fix/`. The supplied file next to the launcher remains
+  untouched. An unsupported candidate aborts safely with a diagnostic.
+- Alternatively, place a generated `Rayman2Fix-executable.r2patch`
+  beside `Rayman2Fix.exe`. On a different edition, the source stays
+  unchanged.
 - The final one-EXE packaging remains available: local Windows builds
   may pass `-DRAYMAN2FIX_EXE_PATCH=<absolute delta path>` to embed the
   approved binary delta as RCDATA resource `#1102`. The standard public
-  GitHub CI archive **does not yet contain the private delta**, and thus
-  does not auto-patch unless the owner provides the sidecar.
+  GitHub CI archive **does not contain the private delta or copyrighted
+  decrypted game EXE**. It can nevertheless use the user-supplied local
+  `Rayman2.exe` without any compiler or Python dependency.
 - On an exactly recognized original SHA-256, the installer writes and
   verifies the new executable to a temporary file, **renames the untouched
   original to `rayman2.exe.bak`**, publishes the new `rayman2.exe`, and
@@ -924,8 +933,8 @@ The underlying game executables are **never distributed or committed**.
   backup is *never* silently overwritten; a failed replacement rolls back.
 
 **The EXE patch is already generated and verified**, but is not
-present in the public CI build. When the owner adds the matching local
-delta (or builds with it embedded), Rayman2Fix creates
+present in the public CI build. When the owner supplies the approved
+decrypted EXE or adds the matching local delta, Rayman2Fix creates
 `rayman2.exe.bak` only after reconstructing and SHA-256-checking
 the unprotected executable. Once the approved EXE and pinned GameFrame
 are verified, the launcher **now attempts to start Rayman 2**. Actual
