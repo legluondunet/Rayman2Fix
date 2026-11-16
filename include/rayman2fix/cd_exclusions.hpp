@@ -6,12 +6,11 @@
 
 namespace r2fix {
 
-// Explicit root-only exclusions requested for the original RAYMAN2 CD.
-// Exact root-only protection-era auxiliaries. The original CD inspection
-// confirmed "directx/dplayx.dll" (DirectPlay), NOT the misspelled root-level
-// "dplayerx.dll" or "dxplayerx.dll". Those are not exclusion rules.
-// Do not filter nested namesakes or extensions. Applies only to RAYMAN2.
-inline constexpr std::array<const char*, 8> kExcludedCdRootFiles = {{
+// Exact root-only CD auxiliary exclusions requested by the owner for the
+// original RAYMAN2 volume. loader.ini and dplayerx.dll are not required by
+// the Rayman2Fix installation; directx/dplayx.dll is a different file in an
+// excluded installer directory. Do not filter nested namesakes or extensions.
+inline constexpr std::array<const char*, 10> kExcludedCdRootFiles = {{
     "00000001.tmp",
     "0000040c.016",
     "0000040c.256",
@@ -20,6 +19,8 @@ inline constexpr std::array<const char*, 8> kExcludedCdRootFiles = {{
     "clcd32.dll",
     "clokspl.exe",
     "drvmgt.dll",
+    "loader.ini",
+    "dplayerx.dll",
 }};
 
 inline bool excluded_cd_root_auxiliary(const std::filesystem::path& relative) {
