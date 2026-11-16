@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <cstdint>
 #include <utility>
+#include <string>
 
 namespace r2fix {
 class Startup;
@@ -21,7 +22,8 @@ std::pair<std::uint32_t, std::uint32_t> configured_output_resolution(
     const std::filesystem::path& rayman2fix_ini);
 
 // 4:3 output is centered inside the physical canvas by GameFrame.
-bool configured_force_4_3(const std::filesystem::path& rayman2fix_ini);
+std::string configured_aspect_ratio(const std::filesystem::path& rayman2fix_ini);
+bool configured_aspect_ratio_is_4_3(const std::filesystem::path& rayman2fix_ini);
 std::pair<std::uint32_t, std::uint32_t> configured_render_resolution(
     const std::filesystem::path& rayman2fix_ini);
 
@@ -29,7 +31,7 @@ std::pair<std::uint32_t, std::uint32_t> configured_render_resolution(
 bool configured_skip_cinematics(const std::filesystem::path& rayman2fix_ini);
 
 // Independently opt in to native GLI dialogue backdrops or experimental
-// game-drawn cinematic letterbox strips (not GameFrame Force4x3 sidebars).
+// game-drawn cinematic letterbox strips (not GameFrame 4:3 sidebars).
 bool configured_remove_dialogue_backgrounds(const std::filesystem::path& rayman2fix_ini);
 bool configured_remove_cinematic_bars(const std::filesystem::path& rayman2fix_ini);
 
