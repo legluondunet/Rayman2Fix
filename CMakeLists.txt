@@ -80,7 +80,9 @@ if(WIN32)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
     message(FATAL_ERROR "Rayman2Fix runtime must be compiled for 32-bit Windows")
   endif()
-  add_library(Rayman2FixRuntime SHARED src/runtime/runtime.cpp)
+  add_library(Rayman2FixRuntime SHARED
+    src/runtime/runtime.cpp
+    src/runtime/game_window_icon.cpp)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME Rayman2Fix)
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
@@ -303,7 +305,11 @@ if(BUILD_TESTING)
     # Harmless child executable for a Win32 CreateProcessW smoke test. This
     # checks spaces in paths and explicit game working directory, without
     # launching any commercial executable.
-    add_executable(test_child_process tests/test_child_process.cpp)
+    add_executable(test_child_process
+      tests/test_child_process.cpp
+      src/runtime/game_window_icon.cpp)
+    target_include_directories(test_child_process PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(test_child_process PRIVATE user32)
     add_dependencies(game_launch_tests test_child_process Rayman2FixRuntime)
   endif()
