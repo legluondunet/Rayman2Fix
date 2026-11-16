@@ -99,7 +99,16 @@ int main(int argc, char** argv) {
             check(n<orig_path_bytes,"parent PATH capture valid");
             orig_path.resize(n);
         }
-        const auto fullscreen = r2fix::run_child_process(child, root, options);
+        unsigned live_presentation_reports=0;
+        const auto fullscreen = r2fix::run_child_process(
+            child, root, options,
+            [&](const r2fix::PresentationResult& observed) {
+                check(observed.window_found,
+                      "live presentation callback only sees selected HWND");
+                ++live_presentation_reports;
+            });
+        check(live_presentation_reports>0,
+              "presentation diagnostic arrives while child process is running");
         const DWORD after_path_bytes=GetEnvironmentVariableW(L"PATH",nullptr,0);
         std::wstring after_path(after_path_bytes,L'\0');
         if(after_path_bytes){
@@ -226,8 +235,9 @@ int main(int argc, char** argv) {
                       SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0) != 0,
                       "window's large and small icons visibly assigned by WM_SETICON");
                 presentation.update();
-                check(presentation.result().game_icon_updates == 1,
-                      "icon handles assigned only once to each renderer window");
+                check(presentation.result().game_icon_updates == 1 &&
+                      presentation.result().game_icon_readback,
+                      "icon handles assigned once and Win32 WM_GETICON retained both");
                 // Destroy before presentation's HICON destructor: the
                 // launcher normally waits for game process termination.
                 DestroyWindow(hwnd);
