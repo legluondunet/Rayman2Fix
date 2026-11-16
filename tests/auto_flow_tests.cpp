@@ -43,11 +43,11 @@ static std::size_t record(std::uint8_t* p, std::uint32_t extent,
     return length;
 }
 static std::vector<std::uint8_t> test_disc() {
-    std::vector<std::uint8_t> iso(37 * 2048, 0);
+    std::vector<std::uint8_t> iso(38 * 2048, 0);
     auto* pvd = iso.data() + 16 * 2048;
     pvd[0] = 1; pvd[1] = 'C'; pvd[2] = 'D'; pvd[3] = '0';
     pvd[4] = '0'; pvd[5] = '1'; pvd[6] = 1;
-    put32(pvd + 80, 37);
+    put32(pvd + 80, 38);
     const char* name = "RAYMAN2";
     std::copy(name, name + 7, pvd + 40);
     record(pvd + 156, 20, 2048, true, std::string(1, '\0'));
@@ -68,6 +68,7 @@ static std::vector<std::uint8_t> test_disc() {
     p += record(root + p, 34, 4, false, "CLOKSPL.EXE;1");
     p += record(root + p, 35, 4, false, "DPLAYERX.DLL;1");
     p += record(root + p, 36, 4, false, "DRVMGT.DLL;1");
+    p += record(root + p, 37, 4, false, "LOADER.INI;1");
     const std::string original_ubi =
         "[Rayman2]\r\nLanguage=French\r\nGLI_Dll=DirectX6\r\n"
         "GLI_Mode=1 - 640 x 480 x 16\r\n[Other]\r\nKeep=present\r\n";
@@ -97,6 +98,7 @@ static std::vector<std::uint8_t> test_disc() {
     std::copy_n("CLOK", 4, iso.data() + 34 * 2048);
     std::copy_n("DPLY", 4, iso.data() + 35 * 2048);
     std::copy_n("DRVM", 4, iso.data() + 36 * 2048);
+    std::copy_n("RAYM", 4, iso.data() + 37 * 2048);
     std::copy(original_ubi.begin(), original_ubi.end(), iso.begin() + 32 * 2048);
     return iso;
 }
@@ -399,24 +401,23 @@ int main() {
               "managed ubi.ini must not be recorded as an immutable CD asset");
         check(fs::exists(game / "rayman2fix" / ".rayman2fix-cd-files.tsv"),
               "local installation receipt created");
-        // All eight root-only exclusions are absent from a fresh installation
-        // and its SHA256 receipt. Similar but unrelated filenames survive.
+        // All ten root-only exclusions are absent from a fresh installation
+        // and its SHA256 receipt. Unrelated similarly named files survive.
         for (const auto* filename : {"00000001.tmp", "0000040c.016",
                                      "0000040c.256", "secdrv.sys",
                                      "rayman2.icd", "clcd32.dll",
-                                     "clokspl.exe", "drvmgt.dll"}) {
+                                     "clokspl.exe", "drvmgt.dll",
+                                     "loader.ini", "dplayerx.dll"}) {
             check(!fs::exists(game / filename), "obsolete protection file not extracted");
             check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(filename) ==
                       std::string::npos,
                   "obsolete protection file omitted from receipt");
         }
-        for (const auto* name : {"dxplayerx.dll", "dplayerx.dll"}) {
-            check(fs::exists(game / name),
-                  "unrelated lookalike root names must survive installation");
-            check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(name) !=
-                      std::string::npos,
-                  "unrelated lookalike root names stay in SHA256 receipt");
-        }
+        check(fs::exists(game / "dxplayerx.dll"),
+              "unrelated DXPLAYERX root file must survive installation");
+        check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(
+                  "\tdxplayerx.dll") != std::string::npos,
+              "unrelated DXPLAYERX remains in the SHA256 receipt");
         check(!fs::exists(root / "rayman2.installing"),
               "staging directory removed after publishing");
         check(r2fix::verify_installation(app) == 0,
@@ -424,7 +425,7 @@ int main() {
 
         // Simulate an already-installed copy made by an older Rayman2Fix
         // build: the receipt used to list now-excluded root files.
-        const std::array<std::pair<const char*, const char*>, 8> legacy = {{
+        const std::array<std::pair<const char*, const char*>, 10> legacy = {{
             {"00000001.tmp", "TEMP"},
             {"0000040c.016", "ICON"},
             {"0000040c.256", "LOGO"},
@@ -432,7 +433,9 @@ int main() {
             {"rayman2.icd", "ICD!"},
             {"clcd32.dll", "CL32"},
             {"clokspl.exe", "CLOK"},
-            {"drvmgt.dll", "DRVM"}
+            {"drvmgt.dll", "DRVM"},
+            {"loader.ini", "RAYM"},
+            {"dplayerx.dll", "DPLY"}
         }};
         {
             std::ofstream receipt(game / "rayman2fix" / ".rayman2fix-cd-files.tsv",
@@ -446,6 +449,7 @@ int main() {
         }
         // Also accept an obsolete file which the user had removed manually.
         fs::remove(game / "00000001.tmp");
+        fs::remove(game / "loader.ini"); // already absent in one legacy install
         fs::remove(root / "Rayman2.iso");
         check(r2fix::run_automatic(app) == 2,
               "old install is migrated without disc and runtime stays gated");
@@ -458,9 +462,8 @@ int main() {
         }
         check(r2fix::verify_installation(app) == 0,
               "post-migration hash verification remains valid");
-        check(fs::exists(game / "dxplayerx.dll") &&
-              fs::exists(game / "dplayerx.dll"),
-              "lookalike root files remain untouched during migration");
+        check(fs::exists(game / "dxplayerx.dll"),
+              "unrelated DXPLAYERX root file remains untouched during migration");
         check(contents(game / "data" / "game.dat") == "DATA\n",
               "migration preserves unrelated game assets");
         check(contents(game / "rayman2fix" / "Rayman2Fix.ini") ==
