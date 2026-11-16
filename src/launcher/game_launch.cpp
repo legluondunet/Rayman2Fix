@@ -56,6 +56,8 @@ std::string presentation_status(const PresentationResult& p) {
          " window_class=" + p.game_window_class) +
         (p.game_icon_source.empty() ? "" :
          " icon_source=" + p.game_icon_source) +
+        (p.game_icon_method.empty() ? "" :
+         " icon_method=" + p.game_icon_method) +
         (p.game_icon_error.empty() ? "" :
          " icon_error=" + p.game_icon_error) +
         " child_window_dpi=" + std::to_string(p.observed_dpi) +
