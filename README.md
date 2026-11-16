@@ -1,3 +1,28 @@
+## New nested layout and safe migration
+
+The **retail game** is installed under `rayman2/`; the mod's
+configuration, runtime DLL, GameFrame `glide2x.dll`, license,
+backups are stored under `rayman2/rayman2fix/`; optional replacement images live in `rayman2/rayman2fix/textures/`.
+The game retains `rayman2/` as its working directory. The launcher
+prepends the nested mod directory to the **child-only** Windows PATH
+for Glide DLL lookup and injects the runtime by its absolute path.
+
+`winmm.dll` stays beside `rayman2.exe` so Windows locates the
+game-facing audio bridge. Windows also requires the generated
+`rayman2.exe.manifest` beside the EXE for per-monitor DPI behavior.
+All three diagnostic logs (installer, runtime and optional CD inspection)
+remain beside the outer `Rayman2Fix.exe`.
+
+On verified startup a legacy `Rayman2Fix/` installation is migrated
+to `rayman2/` by renaming its directory and moving only known mod
+files into the nested `rayman2fix/`. No game media is re-extracted,
+and existing INI values, backed-up executables, receipts and saves
+remain unchanged. The old `Rayman2Fix_logo_hd.rgba` file is deliberately
+not migrated or renamed; recreate the optional resource directly at
+`rayman2/rayman2fix/textures/logo.rgba` with the converter. If **both** old and new directories
+exist, migration refuses to overwrite either. The unchecked launch
+mode does not migrate or repair files.
+
 ## Optional real-HD Rayman 2 opening logo (experimental; issue #16)
 
 The 18 pieces of the retail CD's "Rayman 2 — The Great Escape" title
@@ -31,7 +56,7 @@ directory:
 
 ```bash
 curl -fL -o prepare_intro_logo_hd.py \
-  https://raw.githubusercontent.com/legluondunet/Rayman2Fix/fix/intro-logo-hd-external-asset/tools/prepare_intro_logo_hd.py
+  https://raw.githubusercontent.com/legluondunet/Rayman2Fix/feat/nested-game-and-fix-layout/tools/prepare_intro_logo_hd.py
 python prepare_intro_logo_hd.py --download
 ```
 
@@ -44,8 +69,8 @@ detects the local file before attempting another network download.
 Alternatively use `python prepare_intro_logo_hd.py --png /path/to/logo.png`.
 Never silently fall back to a different, lower-quality logo; only
 the user-provided original or a successfully downloaded original is used.
-The renderer and bootstrap remain unchanged; no Windows rebuild is needed.
-The helper writes `Rayman2Fix_logo_hd.rgba` next to the launcher.
+The browser-download fallback only needs Python and Pillow.
+The helper creates `rayman2/rayman2fix/textures/logo.rgba` when run from the launcher directory.
 
 The pinned GameFrame renderer loads that exact-size/header atlas on
 first use, and changes **only** eighteen original 32×32 format-12
@@ -54,7 +79,7 @@ CD source. Their original draw calls still control the placement,
 geometry, alpha blends, timing, fades, and cinematic transitions. UV
 scale remains the original 32×32 logical size; just the GPU texture
 is 128×128. The formerly over-strict single-mipmap condition has been removed. All available source mip levels are validated first and replaced as a consistent 4x GPU pyramid (128, 64, 32, etc.), generated from the same 128×128 atlas tile with alpha-weighted area downsampling. The logical Glide dimensions/UVs and game's original mip count are unchanged. Other textures, unsupported games/editions, failed fingerprints, missing or malformed atlases pass through unchanged.
-Deleting `Rayman2Fix_logo_hd.rgba` restores the original logo with no
+Deleting `rayman2/rayman2fix/textures/logo.rgba` restores the original logo with no
 INI change. The diagnostic `RUNTIME-GLIDE: INTRO-LOGO-HD` in
 `Rayman2Fix.log` reports loading and matching at most 18 sources.
 
@@ -531,7 +556,7 @@ Wine and Windows before the PR is merged.
 Run **`Rayman2Fix.exe` without arguments**. The obsolete `--init` command
 has been removed.
 
-- When `Rayman2Fix/rayman2.exe` already exists, the launcher checks the
+- When `rayman2/rayman2.exe` already exists, the launcher checks the
   local CD installation receipt (original filenames, sizes and SHA-256) and audio assets
   without needing the source CD again. Missing or changed files are reported,
   not silently overwritten.
@@ -543,11 +568,11 @@ has been removed.
   the known installer-only material and dummy entries, preserving long Joliet
   names in lowercase and writable. It creates `dll/snd_cpa.ini` from
   `dll/snd_cpa_mmx.ini`, writes a local **SHA-256** CD file receipt,
-  then publishes directly into `Rayman2Fix/` transactionally. Existing
+  then publishes into `rayman2/` with fixes in `rayman2/rayman2fix/` transactionally. Existing
   unrelated files are preserved; an incomplete/unrecognized installation is
   never silently overwritten.
 - The launcher embeds and deploys its own x86 `Rayman2Fix.dll`, creating
-  the `Rayman2Fix/` directory and minimal INI automatically. If the
+  the `rayman2/rayman2fix/` directory and minimal INI automatically. If the
   runtime DLL changes, its **immediately previous version** is kept as
   `Rayman2Fix.dll.bak`; the older backup is replaced, never accumulated
   as numbered history.
@@ -581,24 +606,26 @@ On first execution it generates (and subsequently preserves):
 
 ```text
 Rayman2Fix.exe
-Rayman2Fix_installer.log        (installer/launcher when Log=1)
-Rayman2Fix.log                  (DLL, GameFrame and game, after launch)
-Rayman2Fix/
-    Rayman2Fix.dll             (unpacked from the EXE; inert placeholder)
-    Rayman2Fix.dll.bak         (only if updated; one latest backup)
-    Rayman2Fix.ini             (only user-editable configuration)
-    ubi.ini                     (generated game-facing Glide config)
-    rayman2.exe.manifest         (generated DPI compatibility manifest)
-    rayman2.exe                (from original CD)
-    dll/
-        snd_cpa_mmx.ini         (from original CD)
-        snd_cpa.ini             (initialized from MMX ini)
-        ...
-    data/ ...                  (original CD assets)
-    .rayman2fix-cd-files.tsv   (local size + SHA-256 receipt)
-    glide2x.dll                (GameFrame x86: deployed from launcher)
-    GameFrame-LICENSE-APACHE.txt (Apache 2.0 license: deployed from launcher)
-    SDL3.dll                   (future phase: not bundled or required)
+Rayman2Fix_installer.log       (installer messages, when Log=1)
+Rayman2Fix.log                 (runtime/GameFrame diagnostics, beside launcher)
+rayman2/
+    rayman2.exe                (game executable from the CD)
+    rayman2.exe.bak            (protected original, if patched)
+    rayman2.exe.manifest       (required game-facing DPI manifest)
+    winmm.dll                  (game-facing audio bridge, if present)
+    ubi.ini                    (managed game configuration)
+    data/                      (retail game resources)
+    dll/                       (retail audio configuration)
+    rayman2fix/
+        .rayman2fix-cd-files.tsv  (local CD asset receipt)
+        .rayman2fix-exe-patch.tsv (executable-patch receipt)
+        Rayman2Fix.ini         (user mod configuration)
+        Rayman2Fix.dll         (x86 injected mod runtime)
+        Rayman2Fix.dll.bak     (single runtime backup)
+        glide2x.dll            (pinned GameFrame renderer)
+        GameFrame-LICENSE-APACHE.txt
+        textures/
+            logo.rgba         (optional externally provided HD logo atlas)
 ```
 
 The correct Glide 2 filename is **`glide2x.dll`**, not `glide2.dll`.
@@ -820,7 +847,7 @@ Rayman2Fix.exe --verbose             print detailed diagnostics to console
 `--verbose` is an optional modifier, e.g. `Rayman2Fix.exe --install-only --verbose`;
 it may appear before or after the primary command. If no command is given,
 the launcher detects an existing installation or exactly one neighboring
-`.iso`/`.cue` image, safely stages files under `Rayman2Fix/`, verifies
+`.iso`/`.cue` image, safely stages files under `rayman2/`, verifies
 them, and attempts to launch the approved game. `--install-only` uses
 the **same installation and verification logic** but finishes without
 starting the game. `--inspect` is the one supported *read-only* disc
@@ -841,7 +868,7 @@ not a trusted retail-edition allowlist.
 `--launch-no-verify` is for intentional troubleshooting: it does **not**
 verify executable presence, hashes, backup, CD assets or GameFrame and it
 does not extract, patch, repair or provision game DLLs. It attempts to start
-`Rayman2Fix/rayman2.exe` using the existing display settings (desktop
+`rayman2/rayman2.exe` using the existing display settings (desktop
 defaults if the INI is absent); Win32 reports the error if the file is
 missing. It can therefore attempt an unsupported executable and **does not**
 imply that the installation was authenticated.
@@ -850,7 +877,7 @@ GameFrame integration means the correct open-source graphics DLL is installed
 and SHA-256-verified; it does **not** prove that Rayman 2 can render with it.
 The launcher now performs an initial game-startup experiment with strict
 original/unprotected EXE SHA-256 and size checks. It starts `rayman2.exe`
-through Win32 `CreateProcessW` with `Rayman2Fix/` as the working directory,
+through Win32 `CreateProcessW` with `rayman2/` as the working directory,
 waits for the process to exit, and logs the full exit code and duration in
 `Rayman2Fix_installer.log`; the injected DLL and GameFrame diagnostics
 go to the separate `Rayman2Fix.log`. In the default verified path, unknown editions are never executed; the explicitly requested `--launch-no-verify` mode bypasses these safeguards for troubleshooting.
@@ -878,16 +905,25 @@ The underlying game executables are **never distributed or committed**.
 - The cross-platform C++ decoder supports the compressed `Z` operation
   with strict bounds, and validates the exact SHA-256 and sizes of the
   **approved original and target** before replacing either executable.
-- To test an owner-provided delta without uploading game-derived patch
-  material to GitHub, place `Rayman2Fix-executable.r2patch` beside
-  `Rayman2Fix.exe`. An installed matching retail executable is then
-  upgraded on the next no-argument launch. On a different edition, the
-  source is preserved unchanged.
+- **Preferred local workflow (no Python / no private delta needed):**
+  place the user's own **decrypted `Rayman2.exe`** beside
+  `Rayman2Fix.exe` (on Windows, `rayman2.exe` is equivalent).
+  Both the protected installed executable and the local decrypted
+  candidate must match the approved size and SHA-256 values above.
+  On the next normal startup or `--install-only`, the installer copies
+  the decrypted EXE to `rayman2/rayman2.exe`, backs up the original as
+  `rayman2/rayman2.exe.bak`, and writes the patch receipt under
+  `rayman2/rayman2fix/`. The supplied file next to the launcher remains
+  untouched. An unsupported candidate aborts safely with a diagnostic.
+- Alternatively, place a generated `Rayman2Fix-executable.r2patch`
+  beside `Rayman2Fix.exe`. On a different edition, the source stays
+  unchanged.
 - The final one-EXE packaging remains available: local Windows builds
   may pass `-DRAYMAN2FIX_EXE_PATCH=<absolute delta path>` to embed the
   approved binary delta as RCDATA resource `#1102`. The standard public
-  GitHub CI archive **does not yet contain the private delta**, and thus
-  does not auto-patch unless the owner provides the sidecar.
+  GitHub CI archive **does not contain the private delta or copyrighted
+  decrypted game EXE**. It can nevertheless use the user-supplied local
+  `Rayman2.exe` without any compiler or Python dependency.
 - On an exactly recognized original SHA-256, the installer writes and
   verifies the new executable to a temporary file, **renames the untouched
   original to `rayman2.exe.bak`**, publishes the new `rayman2.exe`, and
@@ -897,8 +933,8 @@ The underlying game executables are **never distributed or committed**.
   backup is *never* silently overwritten; a failed replacement rolls back.
 
 **The EXE patch is already generated and verified**, but is not
-present in the public CI build. When the owner adds the matching local
-delta (or builds with it embedded), Rayman2Fix creates
+present in the public CI build. When the owner supplies the approved
+decrypted EXE or adds the matching local delta, Rayman2Fix creates
 `rayman2.exe.bak` only after reconstructing and SHA-256-checking
 the unprotected executable. Once the approved EXE and pinned GameFrame
 are verified, the launcher **now attempts to start Rayman 2**. Actual

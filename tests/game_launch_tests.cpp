@@ -62,6 +62,15 @@ int main(int argc, char** argv) {
         check(fs::exists(root / "child-working-directory.txt"),
               "child inherited explicit game working directory");
 
+        {
+            std::wifstream probe(root/"child-dll-search-path.txt");
+            check(static_cast<bool>(probe),"child PATH probe missing");
+            std::wstring actual;
+            std::getline(probe,actual);
+            const auto expected=fs::absolute(root/"rayman2fix").wstring();
+            check(actual==expected || actual.rfind(expected+L";",0)==0,
+                  "game child must search nested rayman2fix before inherited PATH");
+        }
         r2fix::configure_launcher_dpi_awareness();
         r2fix::ChildDisplayOptions options;
         options.borderless = true;
@@ -73,13 +82,30 @@ int main(int argc, char** argv) {
         const auto local_runtime = fs::absolute(fs::path(argv[0])).parent_path() /
                                    "Rayman2Fix.dll";
         check(fs::exists(local_runtime), "native Hor+ runtime built beside tests");
-        fs::copy_file(local_runtime, root / "Rayman2Fix.dll");
+        fs::create_directories(root / "rayman2fix");
+        fs::copy_file(local_runtime, root / "rayman2fix" / "Rayman2Fix.dll");
         options.enable_fov = true;
         options.fps_limit = 75;
         options.log_enabled = false;
         check(SetEnvironmentVariableW(L"RAYMAN2FIX_FPS_LIMIT", L"99") != 0,
               "set existing parent FPS setting for restoration check");
+        const DWORD orig_path_bytes=GetEnvironmentVariableW(L"PATH",nullptr,0);
+        std::wstring orig_path(orig_path_bytes,L'\0');
+        if(orig_path_bytes){
+            const DWORD n=GetEnvironmentVariableW(L"PATH",orig_path.data(),orig_path_bytes);
+            check(n<orig_path_bytes,"parent PATH capture valid");
+            orig_path.resize(n);
+        }
         const auto fullscreen = r2fix::run_child_process(child, root, options);
+        const DWORD after_path_bytes=GetEnvironmentVariableW(L"PATH",nullptr,0);
+        std::wstring after_path(after_path_bytes,L'\0');
+        if(after_path_bytes){
+            const DWORD n=GetEnvironmentVariableW(L"PATH",after_path.data(),after_path_bytes);
+            check(n<after_path_bytes,"parent PATH restored value valid");
+            after_path.resize(n);
+        }
+        check(orig_path==after_path,
+              "launcher must restore PATH after game starts");
         wchar_t parent_fps[16]{};
         GetEnvironmentVariableW(L"RAYMAN2FIX_FPS_LIMIT", parent_fps, 16);
         check(std::wstring(parent_fps) == L"99",

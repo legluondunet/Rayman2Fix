@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -115,7 +116,12 @@ std::vector<fs::path> find_disc_candidates(const fs::path& root) {
 // hashed for later integrity checks; this is NOT a trusted retail-edition
 // manifest because the hash baseline is generated from the same unverified CD.
 void write_receipt(const fs::path& staged, const DiscInfo& info) {
-    const auto receipt = staged / kReceipt;
+    const auto private_dir=staged/"rayman2fix";
+    if(fs::is_symlink(private_dir) ||
+       (fs::exists(private_dir) && !fs::is_directory(private_dir)))
+        throw std::runtime_error("unsafe installer receipt directory");
+    fs::create_directories(private_dir);
+    const auto receipt = private_dir / kReceipt;
     if (fs::exists(receipt))
         throw std::runtime_error("disc includes reserved Rayman2Fix receipt filename");
     std::ofstream out(receipt, std::ios::binary | std::ios::trunc);
@@ -129,6 +135,10 @@ void write_receipt(const fs::path& staged, const DiscInfo& info) {
         if (file.skipped_by_cd_recipe || file.invalid_extent ||
             file.relative_path.generic_u8string() == "ubi.ini") continue;
         const auto name = file.relative_path.generic_u8string();
+        // Fix assets are managed only by the installer and never imported
+        // from a CD image into the private runtime directory.
+        if (name=="rayman2fix" || name.rfind("rayman2fix/",0)==0)
+            throw std::runtime_error("CD conflicts with reserved rayman2fix/ directory");
         if (name.find('\t') != std::string::npos ||
             name.find('\n') != std::string::npos ||
             !safe_relative(file.relative_path))
@@ -144,27 +154,49 @@ void write_receipt(const fs::path& staged, const DiscInfo& info) {
         throw std::runtime_error("CD installation receipt is incomplete");
 }
 
-// Do not silently replace files that belong to an existing user installation.
-// The old artifact includes a Rayman2Fix/ directory with an inert runtime,
-// so it is recognized as a bootstrap workspace rather than an installed game.
+// Existing bootstrap files are under rayman2/rayman2fix. The only
+// permitted game-facing DLL here is winmm.dll, which must stay beside
+// rayman2.exe for Windows application-directory DLL resolution.
+bool bootstrap_fix_file(const std::string& name) {
+    return name=="RAYMAN2FIX.INI" || name=="RAYMAN2FIX.DLL" ||
+           name==".RAYMAN2FIX-CD-FILES.TSV" ||
+           name==".RAYMAN2FIX-EXE-PATCH.TSV" ||
+           runtime_backup_name(name) || gameframe_bundle_file(name);
+}
 void check_bootstrap_workspace(const fs::path& game_dir) {
     if (!fs::exists(game_dir)) return;
     if (!fs::is_directory(game_dir) || fs::is_symlink(game_dir))
-        throw std::runtime_error("Rayman2Fix path is not a safe directory");
-    for (const auto& item : fs::directory_iterator(game_dir)) {
-        if (item.is_symlink() || !item.is_regular_file())
-            throw std::runtime_error("unrecognized content in existing Rayman2Fix directory; "
-                                     "preserving user data (no overwrite)");
-        const auto name = upper(item.path().filename().u8string());
-        if (name != "RAYMAN2FIX.INI" && name != "RAYMAN2FIX.DLL" &&
-            !runtime_backup_name(name) && !gameframe_bundle_file(name))
-            throw std::runtime_error("existing Rayman2Fix directory contains user files; "
-                                     "automatic install refused to avoid overwriting them");
+        throw std::runtime_error("rayman2/ is not a safe directory");
+    for (const auto& item:fs::directory_iterator(game_dir)) {
+        const auto name=upper(item.path().filename().u8string());
+        if(name=="RAYMAN2FIX") {
+            if(item.is_symlink() || !item.is_directory())
+                throw std::runtime_error("unsafe rayman2fix/ bootstrap directory");
+            for(const auto& fix:fs::directory_iterator(item.path())) {
+                const auto part=upper(fix.path().filename().u8string());
+                if(part=="TEXTURES") {
+                    if(fix.is_symlink() || !fix.is_directory())
+                        throw std::runtime_error("unsafe replacement textures directory");
+                    for(const auto& texture:fs::directory_iterator(fix.path()))
+                        if(texture.is_symlink() || !texture.is_regular_file())
+                            throw std::runtime_error("unsafe replacement texture");
+                } else if(fix.is_symlink() || !fix.is_regular_file() ||
+                          !bootstrap_fix_file(part)) {
+                    throw std::runtime_error("unrecognized files inside rayman2fix/; preserving user files");
+                }
+            }
+        } else if(name=="WINMM.DLL") {
+            if(item.is_symlink() || !item.is_regular_file())
+                throw std::runtime_error("unsafe game-facing winmm.dll");
+        } else {
+            throw std::runtime_error(
+                "existing rayman2/ contains user game files without verified receipt; refusing overwrite");
+        }
     }
 }
 
 bool verify_local_receipt(const fs::path& root, Startup& startup) {
-    const auto receipt = root / kReceipt;
+    const auto receipt = root / "rayman2fix" / kReceipt;
     std::ifstream in(receipt, std::ios::binary);
     if (!in) {
         startup.log("VERIFY: missing local CD receipt");
@@ -271,7 +303,7 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
 // Only an otherwise verified RAYMAN2 installation is eligible; the receipt
 // is replaced with rollback before any original files are removed.
 void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {
-    const fs::path receipt = root / kReceipt;
+    const fs::path receipt = root / "rayman2fix" / kReceipt;
     std::ifstream input(receipt, std::ios::binary);
     if (!input) throw std::runtime_error("CD receipt missing during cleanup");
     std::string line;
@@ -365,16 +397,52 @@ void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {
 }
 
 void copy_bootstrap_files(const fs::path& original, const fs::path& staged) {
-    for (const auto& entry : fs::directory_iterator(original)) {
-        const auto name = upper(entry.path().filename().u8string());
-        if (name != "RAYMAN2FIX.INI" && name != "RAYMAN2FIX.DLL" &&
-            !runtime_backup_name(name) && !gameframe_bundle_file(name))
-            continue;
-        const auto dest = staged / entry.path().filename();
-        if (fs::exists(dest))
-            throw std::runtime_error("CD content collides with runtime file: " +
-                                     dest.filename().u8string());
-        fs::copy_file(entry.path(), dest);
+    const auto source=original/"rayman2fix";
+    const auto dest=staged/"rayman2fix";
+    // SHA256 receipts are written into this subfolder before copying
+    // the launcher-owned DLL, INI, and bundled wrapper.
+    if(fs::is_symlink(dest) ||
+       (fs::exists(dest) && !fs::is_directory(dest)))
+        throw std::runtime_error("unsafe private staging directory");
+    fs::create_directories(dest);
+    if(fs::exists(source)) {
+        if(!fs::is_directory(source) || fs::is_symlink(source))
+            throw std::runtime_error("unsafe Rayman2Fix bootstrap directory");
+        for(const auto& entry:fs::directory_iterator(source)) {
+            const auto name=upper(entry.path().filename().u8string());
+            if(name=="TEXTURES") {
+                if(entry.is_symlink() || !entry.is_directory())
+                    throw std::runtime_error("unsafe replacement textures directory");
+                const fs::path textures=dest/"textures";
+                if(fs::exists(textures) || fs::is_symlink(textures))
+                    throw std::runtime_error("replacement textures directory collision");
+                fs::create_directory(textures);
+                for(const auto& texture:fs::directory_iterator(entry.path())) {
+                    if(texture.is_symlink() || !texture.is_regular_file())
+                        throw std::runtime_error("unsafe replacement texture");
+                    const auto target=textures/texture.path().filename();
+                    if(fs::exists(target) || fs::is_symlink(target))
+                        throw std::runtime_error("replacement texture collision");
+                    fs::copy_file(texture.path(),target);
+                }
+            } else {
+                if(!bootstrap_fix_file(name) || entry.is_symlink() ||
+                   !entry.is_regular_file())
+                    throw std::runtime_error("unsafe bootstrap fix file; refusing install");
+                fs::copy_file(entry.path(),dest/entry.path().filename());
+            }
+        }
+    }
+    // Keep the replacement textures folder present even without an atlas.
+    fs::create_directories(dest/"textures");
+    // This exception is deliberate: Windows must locate winmm.dll from
+    // the directory containing rayman2.exe (not from PATH/fix subdir).
+    const fs::path winmm=original/"winmm.dll";
+    if(fs::exists(winmm) || fs::is_symlink(winmm)) {
+        if(!fs::is_regular_file(winmm) || fs::is_symlink(winmm) ||
+           fs::exists(staged/"winmm.dll"))
+            throw std::runtime_error("unsafe/conflicting winmm.dll");
+        fs::copy_file(winmm,staged/"winmm.dll");
     }
 }
 
@@ -415,18 +483,61 @@ void publish_installation(const fs::path& game_dir, const fs::path& staging) {
     }
 }
 
-// Patch bytes are intentionally not bundled until we obtain the ORIGINAL
-// retail executable and generate an edition-specific minimal delta.
-// On a supported build, commit the new EXE with its original preserved under
-// rayman2.exe.bak, never overwrite a previous backup.
+// The public bootstrap does not contain a proprietary game executable
+// or the owner's private delta. Detect an exact SHA256-approved decrypted
+// rayman2.exe beside Rayman2Fix.exe, for both fresh and existing installs.
+std::optional<fs::path> find_local_unprotected_exe(const fs::path& launcher_root) {
+    std::optional<fs::path> found;
+    for (const auto& entry : fs::directory_iterator(launcher_root)) {
+        if (upper(entry.path().filename().u8string()) != "RAYMAN2.EXE")
+            continue;
+        if (entry.is_symlink() || !entry.is_regular_file())
+            throw std::runtime_error("unsafe local rayman2.exe beside installer");
+        if (found)
+            throw std::runtime_error("ambiguous local rayman2.exe filenames beside installer");
+        found = entry.path();
+    }
+    return found;
+}
+
+// The original is preserved as rayman2.exe.bak and the receipt stays in
+// rayman2/rayman2fix/. Unknown CD editions are never modified.
 void patch_executable_if_supported(const fs::path& game_root, Startup& startup) {
     if (is_exe_replaced(game_root)) {
         startup.log("EXE-PATCH: installed patch marker present; original preserved as rayman2.exe.bak");
         return;
     }
+    const auto supplied = find_local_unprotected_exe(startup.root());
+    if (supplied) {
+        const ExePatchHeader approved{
+            kApprovedProtectedExeSize, kApprovedUnprotectedExeSize,
+            kApprovedProtectedExeSha256, kApprovedUnprotectedExeSha256
+        };
+        // No fallback to another file or unverified EXE if the user
+        // explicitly supplied a rayman2.exe with the wrong hash.
+        if (!exists_file(*supplied) ||
+            fs::file_size(*supplied) != approved.patched_size ||
+            sha256_file(*supplied) != approved.patched_sha256)
+            throw std::runtime_error(
+                "local rayman2.exe does not match approved decrypted SHA256; original preserved");
+        const auto original = game_root / "rayman2.exe";
+        if (!exists_file(original) ||
+            fs::file_size(original) != approved.original_size ||
+            sha256_file(original) != approved.original_sha256) {
+            startup.log("EXE-PATCH: local decrypted EXE valid, but protected source hash is unsupported; no change");
+            return;
+        }
+        const auto applied = install_exe_replacement_from_file(
+            game_root, *supplied, approved);
+        startup.log("EXE-PATCH: approved local decrypted rayman2.exe installed "
+                    "source_sha256=" + applied.original_sha256 +
+                    " target_sha256=" + applied.patched_sha256 +
+                    " original_backup=rayman2.exe.bak receipt=rayman2fix/.rayman2fix-exe-patch.tsv");
+        return;
+    }
     const auto patch = available_exe_patch(startup.root());
     if (patch.empty()) {
-        startup.log("EXE-PATCH: no embedded or local delta; original CD executable unchanged (no .bak yet)");
+        startup.log("EXE-PATCH: no approved local decrypted rayman2.exe, embedded patch or .r2patch sidecar; protected executable unchanged");
         return;
     }
     const auto header = inspect_exe_patch(patch);
@@ -467,7 +578,7 @@ int verify_installation(Startup& startup) {
     const fs::path root = startup.game_dir();
     if (!has_game_executable(root)) {
         startup.log("VERIFY: no installed rayman2.exe");
-        std::cerr << "No installed Rayman 2 executable under Rayman2Fix/.\n";
+        std::cerr << "No installed Rayman 2 executable under rayman2/.\n";
         return 2;
     }
     if (!verify_local_receipt(root, startup)) {
@@ -537,10 +648,9 @@ int run_automatic(Startup& startup, bool install_only) {
             return 2;
         }
 
-        // The user asked to install directly into Rayman2Fix/, not leave
-        // gameplay assets in DiscContent/. We stage as a sibling and then
-        // atomically publish without overwriting arbitrary user data.
-        const fs::path staging = startup.root() / "Rayman2Fix.installing";
+        // Stage the retail files as a sibling of rayman2/; bundle only the
+        // managed mod files in its rayman2fix/ subfolder before publishing.
+        const fs::path staging = startup.root() / "rayman2.installing";
         fs::path nested_staging = staging;
         nested_staging += ".staging";
         if (fs::exists(staging) || fs::exists(nested_staging))
@@ -570,7 +680,7 @@ int run_automatic(Startup& startup, bool install_only) {
             fs::remove_all(staging, ignored);
             throw;
         }
-        startup.log("AUTO-INSTALL: CD files staged and committed to Rayman2Fix/ "
+        startup.log("AUTO-INSTALL: CD files staged and committed to rayman2/ "
                     "with snd_cpa.ini and local SHA256 receipt");
         console.step(8, 8, "Verifying installed files and executable hashes...");
         if (verify_installation(startup) != 0) return 2;
@@ -583,7 +693,7 @@ int run_automatic(Startup& startup, bool install_only) {
                       "applied (original kept as rayman2.exe.bak)" :
                       "not applied (no supported embedded/local delta)") << '\n'
                   << "  GameFrame: "
-                  << (gameframe_glide_ready(root) ? "verified" : "not verified")
+                  << (gameframe_glide_ready(root / "rayman2fix") ? "verified" : "not verified")
                   << (install_only
                       ? "\n  Game startup: skipped (--install-only)\n"
                       : "\n  Game startup: attempting supported EXE (first real-world test)\n");

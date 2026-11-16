@@ -2,9 +2,15 @@
 import pathlib
 import tempfile
 import unittest
-from tools.prepare_intro_logo_hd import SOURCE_URL,find_local_logo
+from tools.prepare_intro_logo_hd import SOURCE_URL,find_local_logo,main
 
 class DownloadFallbackTests(unittest.TestCase):
+    def test_default_logo_destination(self):
+        import inspect
+        source=inspect.getsource(main)
+        self.assertIn('rayman2/rayman2fix/textures/logo.rgba',source)
+        self.assertNotIn('Rayman2Fix_logo_hd.rgba',source)
+
     def test_original_url_is_explicit(self):
         self.assertEqual(SOURCE_URL,"https://raymanpc.com/wiki/script-en/images/b/bb/Rayman_2_Logo.png")
 

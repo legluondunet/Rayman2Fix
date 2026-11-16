@@ -52,9 +52,10 @@ def convert(image, output:pathlib.Path) -> None:
     atlas.alpha_composite(foreground,(MARGIN_X,MARGIN_Y))
     data=MAGIC+struct.pack("<II",WIDTH,HEIGHT)+atlas.tobytes()
     assert len(data)==16+WIDTH*HEIGHT*4
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(data)
     print(f"Created {output} ({WIDTH}x{HEIGHT}, {len(data)} bytes, SHA256 {hashlib.sha256(data).hexdigest()})")
-    print("Place this atlas beside Rayman2Fix.exe; remove it to restore the original game logo.")
+    print("Use rayman2/rayman2fix/textures/logo.rgba; remove it to restore the original game logo.")
     print("The logo is a user-provided optional local resource and is NOT included in the launcher.")
 
 def main() -> None:
@@ -62,7 +63,7 @@ def main() -> None:
     source=p.add_mutually_exclusive_group(required=True)
     source.add_argument("--png",type=pathlib.Path,help="A high-resolution transparent logo PNG supplied by the user")
     source.add_argument("--download",action="store_true",help="Download the RayWiki logo for personal testing")
-    p.add_argument("--output",type=pathlib.Path,default=pathlib.Path("Rayman2Fix_logo_hd.rgba"))
+    p.add_argument("--output",type=pathlib.Path,default=pathlib.Path("rayman2/rayman2fix/textures/logo.rgba"))
     args=p.parse_args()
     try:
         from PIL import Image
