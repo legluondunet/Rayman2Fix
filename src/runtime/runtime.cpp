@@ -2546,6 +2546,10 @@ void proto_theme_transition_watch_tick() {
 }
 void proto_menu_tick() {
     if(!g_proto_callsites_installed.load(std::memory_order_acquire))return;
+    // Only the original render-thread camera callback invokes this poll.
+    // Log one post-decision sample per pending window so 4:3 Wine tests can
+    // distinguish an early native Theme handoff from a missed menu tick.
+    static DWORD first_logged_pending_at=0;
     // The full bank/actor scan is bounded but nontrivial; keep the 75ms
     // safety cadence outside pending transitions. During an ESC opening,
     // a cheap menu-byte check removes up to 75ms of avoidable audible
@@ -2578,8 +2582,23 @@ void proto_menu_tick() {
     if(phase==proto::Phase::idle)return;
     if(phase==proto::Phase::pending_menu &&
        DWORD(GetTickCount()-started)>1500u) {
-        const std::lock_guard<std::mutex> lock(g_proto_mutex);
-        if(g_proto.phase()==proto::Phase::pending_menu)g_proto.reset();
+        BYTE expired_menu=0;
+        const bool expired_known=proto_game_read(0xB9BC8,expired_menu);
+        {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            if(g_proto.phase()==proto::Phase::pending_menu)g_proto.reset();
+        }
+        // Timeout is already a native-audio passthrough; never extend the
+        // deadline or issue an extra Pause/Resume based on this observation.
+        if(g_log) {
+            char line[245]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-ESC-MENU-POLL: stage=pending-timeout elapsed_ms=%lu "
+                "menu_known=%u menu=%u (render-thread; no audio changes)",
+                static_cast<unsigned long>(DWORD(GetTickCount()-started)),
+                unsigned(expired_known),unsigned(expired_menu));
+            log_line(line);
+        }
         return;
     }
     BYTE menu=0;
@@ -2612,6 +2631,21 @@ void proto_menu_tick() {
     proto_dispatch(action);
     proto_deferred_safety();
     const DWORD dispatch_ms=DWORD(GetTickCount()-dispatch_start);
+    // Never emit this diagnostic before the possible physical compensation:
+    // file I/O at this point can otherwise cause audible Wine pauses.
+    if(g_log && phase==proto::Phase::pending_menu && started &&
+       first_logged_pending_at!=started) {
+        first_logged_pending_at=started;
+        char line[270]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-ESC-MENU-POLL: stage=first-render-sample "
+            "elapsed_ms=%lu menu_known=%u menu=%u actor_ok=%u "
+            "current_theme=%u (post-dispatch; no audio changes)",
+            static_cast<unsigned long>(DWORD(GetTickCount()-started)),
+            unsigned(known),unsigned(menu),unsigned(actor_ok),
+            unsigned(current));
+        log_line(line);
+    }
     // Consume diagnostics only AFTER the critical audio compensation path.
     // Callback telemetry was gathered before original driver forwarding,
     // but no native audio callback has ever been delayed by its file I/O.
@@ -4214,12 +4248,29 @@ void poll_second_intro_skip() {
     if(!g_skip_cinematics)return;
     const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
     if (!native_change || !g_current_level) return;
+    // These counters measure the sampling cadence of the EXISTING camera
+    // callback; they do not add a key hook, change the input guard or skip.
+    static DWORD entered_at=0,requested_at=0;
+    static unsigned input_polls=0,down_polls=0;
     const bool in_intro = r2fix::is_second_intro(g_current_level);
     if (in_intro && !g_intro_level_logged) {
+        entered_at=GetTickCount();
+        requested_at=0;
+        input_polls=down_polls=0;
         log_line("RUNTIME-INTRO: jail_20 detected; Space/Enter/Esc can skip to learn_10");
         g_intro_level_logged = true;
     } else if (!in_intro && g_intro_level_logged) {
+        if(g_log && requested_at) {
+            char line[180]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-INTRO: jail_20 exit observed %lu ms after request "
+                "(render-thread detection; no scene rewrite)",
+                static_cast<unsigned long>(
+                    DWORD(GetTickCount()-requested_at)));
+            log_line(line);
+        }
         g_intro_level_logged = false;
+        entered_at=requested_at=0;
     }
     // Never read keyboard state unless the game owns the foreground.
     // Being unfocused or holding a key while entering the scene is not a
@@ -4229,12 +4280,24 @@ void poll_second_intro_skip() {
         ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0 ||
          (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0 ||
          (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
+    if(in_intro) {
+        ++input_polls;
+        if(down)++down_polls;
+    }
     if (!g_intro_guard.update(g_current_level, down) || !foreground) return;
 
     // The game itself queues the level change for its next engine tick.
     // Do not force a renderer switch, destroy a video window or write
     // save data. This is the same native API used by script transitions.
-    log_line("RUNTIME-INTRO: skip requested for jail_20 -> learn_10 (native level change, no save)");
+    requested_at=GetTickCount();
+    char line[250]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-INTRO: skip requested for jail_20 -> learn_10 "
+        "elapsed_ms=%lu input_polls=%u key_down_polls=%u "
+        "(native level change, no save)",
+        static_cast<unsigned long>(DWORD(requested_at-entered_at)),
+        input_polls,down_polls);
+    log_line(line);
     native_change(kAfterIntroLevel, 0);
 }
 
