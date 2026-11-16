@@ -122,15 +122,54 @@ fn tile_pixels(master:&[u8],col:usize,row:usize)->Option<Vec<u8>> {
     Some(out)
 }
 
-/// On a match, the returned RGBA pixels are 128x128 but the caller
-/// continues to report logical 32x32 to the shader for unchanged UVs.
-/// If any precondition fails, return None for byte-identical behavior.
-pub fn replacement(w:usize,h:usize,format:u32,rgba:&[u8],single_mip:bool)->Option<Vec<u8>> {
-    if w!=32 || h!=32 || format!=12 || rgba.len()!=4096 {return None;}
-    if !single_mip {
-        log_once(0x1002,"32x32 format-12 original rejected: texture has more than one mip level");
+/// The 128x128 atlas tile must supply EVERY GPU mip level, without
+/// changing the 32x32 logical Glide source or UV coordinates.
+/// Validate the entire chain before the first GL upload.
+pub fn compatible_mip(w:usize,h:usize)->bool {
+    w>0 && h>0 && w<=32 && h<=32 &&
+    w.is_power_of_two() && h.is_power_of_two() &&
+    TILE%(w*4)==0 && TILE%(h*4)==0
+}
+
+/// Premultiplied-alpha area downsampling prevents a dark edge halo
+/// and yields a complete 4x mip chain: 128, 64, 32, 16, 8, 4.
+pub fn mip_from_hd(base:&[u8],w_source:usize,h_source:usize)->Option<Vec<u8>> {
+    if base.len()!=TILE*TILE*4 || !compatible_mip(w_source,h_source) {
         return None;
     }
+    let (w,h)=(w_source*4,h_source*4);
+    let (sx,sy)=(TILE/w,TILE/h);
+    if sx==1 && sy==1 {return Some(base.to_vec());}
+    let mut output=vec![0u8;w*h*4];
+    let n=(sx*sy) as u64;
+    for y in 0..h {
+        for x in 0..w {
+            let mut alpha=0u64;
+            let mut premul=[0u64;3];
+            for by in y*sy..(y+1)*sy {
+                for bx in x*sx..(x+1)*sx {
+                    let i=(by*TILE+bx)*4;
+                    let a=base[i+3] as u64;
+                    alpha+=a;
+                    for c in 0..3 {premul[c]+=base[i+c] as u64*a;}
+                }
+            }
+            let i=(y*w+x)*4;
+            output[i+3]=((alpha+n/2)/n).min(255) as u8;
+            if alpha!=0 {
+                for c in 0..3 {
+                    output[i+c]=((premul[c]+alpha/2)/alpha).min(255) as u8;
+                }
+            }
+        }
+    }
+    Some(output)
+}
+
+/// The original 32x32 source mip is fingerprinted; subsequent mip
+/// levels are derived from the atlas instead of the low-res game.
+pub fn replacement(w:usize,h:usize,format:u32,rgba:&[u8])->Option<Vec<u8>> {
+    if w!=32 || h!=32 || format!=12 || rgba.len()!=4096 {return None;}
     let hash=fnv64(rgba);
     let Some(idx)=TITLE_HASHES.iter().position(|&v|v==hash) else {
         log_once(0x1003,&format!("first 32x32 format-12 source is not in the original 18: hash={hash:016x}; continuing to search"));
@@ -146,7 +185,7 @@ pub fn replacement(w:usize,h:usize,format:u32,rgba:&[u8],single_mip:bool)->Optio
         log_once(0x1006,"HD atlas tile extraction failed; preserving original pixels");
         return None;
     };
-    log_once(hash,&format!("tile={} hash={hash:016x} slot=({}, {}) original=32x32 gpu=128x128 alpha=original draw blending",idx+17,col,row));
+    log_once(hash,&format!("tile={} hash={hash:016x} slot=({}, {}) original=32x32 gpu=128x128 complete_mip_chain=1",idx+17,col,row));
     Some(result)
 }
 
@@ -179,13 +218,36 @@ mod tests {
         assert!(tile_pixels(&master[..100],0,0).is_none());
     }
     #[test]
+    fn original_32_to_1_mips_generate_a_complete_hd_pyramid() {
+        let source=vec![240u8,170u8,30u8,255u8].repeat(TILE*TILE);
+        for size in [32,16,8,4,2,1] {
+            assert!(compatible_mip(size,size));
+            let pixels=mip_from_hd(&source,size,size).unwrap();
+            assert_eq!(pixels.len(),size*size*16*4);
+            assert!(pixels.chunks_exact(4).all(|p|p==[240,170,30,255]));
+        }
+        for invalid in [0,3,33,64] {
+            assert!(!compatible_mip(invalid,invalid));
+            assert!(mip_from_hd(&source,invalid,invalid).is_none());
+        }
+        assert!(mip_from_hd(&source[..500],16,16).is_none());
+    }
+    #[test]
+    fn alpha_downsample_preserves_color_at_transparent_edges() {
+        let mut source=vec![0u8;TILE*TILE*4];
+        source[..4].copy_from_slice(&[255,180,30,255]);
+        let half=mip_from_hd(&source,16,16).unwrap();
+        assert_eq!(&half[..4],&[255,180,30,64]);
+        assert_eq!(&half[4..8],&[0,0,0,0]);
+    }
+    #[test]
     fn unknown_game_textures_are_never_replaced() {
         let b=vec![128u8;4096];
-        assert!(replacement(32,32,12,&b,true).is_none());
-        assert!(replacement(32,32,11,&b,true).is_none());
-        assert!(replacement(32,32,12,&b,false).is_none());
-        assert!(replacement(32,31,12,&b,true).is_none());
+        assert!(replacement(32,32,12,&b).is_none());
+        assert!(replacement(32,32,11,&b).is_none());
+        assert!(replacement(32,31,12,&b).is_none());
     }
+
 }
 ''';
 
@@ -204,21 +266,34 @@ def install(root:pathlib.Path)->None:
     a=once(a,"#[cfg(windows)]\nmod loading_image_fix;",
         "#[cfg(windows)]\nmod loading_image_fix;\n#[cfg(windows)]\nmod intro_logo_hd;")
     b=once(b,
+        "            for (k, (lod, &(a, b))) in levels.zip(&t.ranges).enumerate() {",
+        """            // Check every mip before the first replacement upload.
+            let hd_chain_ok=w==32 && h==32 && i.format==12 && levels.clone().all(|lod| {
+                size(lod,i.aspect).map_or(false,|(mw,mh)|crate::intro_logo_hd::compatible_mip(mw,mh))
+            });
+            let mut hd_tile:Option<Vec<u8>>=None;
+            for (k, (lod, &(a, b))) in levels.zip(&t.ranges).enumerate() {""")
+    b=once(b,
         "                    Ok(img) => unsafe {\n"
         "                        (gl.TexImage2D)(TEXTURE_2D, k as i32, RGBA8 as i32, lw as i32, lh as i32, 0, RGBA, UNSIGNED_BYTE, img.pixels.as_ptr().cast());\n"
         "                    },",
-        "                    Ok(img) => unsafe {\n"
-        "                        if k==0 {\n"
-        "                            crate::intro_logo_hd::observe_source(lw,lh,i.format,t.ranges.len());\n"
-        "                            if let Some(pixels)=crate::intro_logo_hd::replacement(lw,lh,i.format,&img.pixels,t.ranges.len()==1) {\n"
-        "                                (gl.TexImage2D)(TEXTURE_2D,0,RGBA8 as i32,128,128,0,RGBA,UNSIGNED_BYTE,pixels.as_ptr().cast());\n"
-        "                            } else {\n"
-        "                                (gl.TexImage2D)(TEXTURE_2D,k as i32,RGBA8 as i32,lw as i32,lh as i32,0,RGBA,UNSIGNED_BYTE,img.pixels.as_ptr().cast());\n"
-        "                            }\n"
-        "                        } else {\n"
-        "                            (gl.TexImage2D)(TEXTURE_2D,k as i32,RGBA8 as i32,lw as i32,lh as i32,0,RGBA,UNSIGNED_BYTE,img.pixels.as_ptr().cast());\n"
-        "                        }\n"
-        "                    },")
+        """                    Ok(img) => unsafe {
+                        if k==0 {
+                            crate::intro_logo_hd::observe_source(lw,lh,i.format,t.ranges.len());
+                            if hd_chain_ok {
+                                hd_tile=crate::intro_logo_hd::replacement(lw,lh,i.format,&img.pixels);
+                            }
+                        }
+                        if let Some(ref base)=hd_tile {
+                            if let Some(pixels)=crate::intro_logo_hd::mip_from_hd(base,lw,lh) {
+                                (gl.TexImage2D)(TEXTURE_2D,k as i32,RGBA8 as i32,(lw*4) as i32,(lh*4) as i32,0,RGBA,UNSIGNED_BYTE,pixels.as_ptr().cast());
+                            } else {
+                                (gl.TexImage2D)(TEXTURE_2D,k as i32,RGBA8 as i32,lw as i32,lh as i32,0,RGBA,UNSIGNED_BYTE,img.pixels.as_ptr().cast());
+                            }
+                        } else {
+                            (gl.TexImage2D)(TEXTURE_2D,k as i32,RGBA8 as i32,lw as i32,lh as i32,0,RGBA,UNSIGNED_BYTE,img.pixels.as_ptr().cast());
+                        }
+                    },""")
     # Only write after the entire pinned layout is validated.
     lib.write_text(a,encoding="utf-8")
     tex.write_text(b,encoding="utf-8")

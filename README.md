@@ -53,8 +53,7 @@ textures whose decoded RGBA FNV-1a64 fingerprints match the approved
 CD source. Their original draw calls still control the placement,
 geometry, alpha blends, timing, fades, and cinematic transitions. UV
 scale remains the original 32×32 logical size; just the GPU texture
-is 128×128. Other textures, unsupported games/editions, failed
-fingerprints, missing or malformed atlases pass through unchanged.
+is 128×128. The formerly over-strict single-mipmap condition has been removed. All available source mip levels are validated first and replaced as a consistent 4x GPU pyramid (128, 64, 32, etc.), generated from the same 128×128 atlas tile with alpha-weighted area downsampling. The logical Glide dimensions/UVs and game's original mip count are unchanged. Other textures, unsupported games/editions, failed fingerprints, missing or malformed atlases pass through unchanged.
 Deleting `Rayman2Fix_logo_hd.rgba` restores the original logo with no
 INI change. The diagnostic `RUNTIME-GLIDE: INTRO-LOGO-HD` in
 `Rayman2Fix.log` reports loading and matching at most 18 sources.
