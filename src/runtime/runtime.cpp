@@ -20,6 +20,7 @@
 #include "rayman2fix/scene_script_probe.hpp"
 #include "rayman2fix/intro_gate_timeline.hpp"
 #include "rayman2fix/intro_integer_reader.hpp"
+#include "rayman2fix/game_window_icon.hpp"
 #include <mutex>
 #if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
 #include "rayman2fix/esc_music_wine_prototype.hpp"
@@ -6409,6 +6410,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
             install_cinematic_viewport_hook();
         initialize_native_intro_skip();
         start_hud_monitor();
+        // Apply game EXE icon in its own process, independently of ESC audio.
+        r2fix::start_game_window_icon_worker(&log_line);
     }
     return camera_status;
 }

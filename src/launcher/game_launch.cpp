@@ -42,6 +42,29 @@ bool matches(const fs::path& path, std::uint64_t bytes, const char* hash) {
     return fs::is_regular_file(path) && !fs::is_symlink(path) &&
            fs::file_size(path) == bytes && sha256_file(path) == hash;
 }
+std::string presentation_status(const PresentationResult& p) {
+    return "window_found=" + std::string(p.window_found ? "1" : "0") +
+        " borderless_applied=" +
+        (p.borderless_applied ? "1" : "0") +
+        " changes=" + std::to_string(p.changes) +
+        " icon_available=" + (p.game_icon_available ? "1" : "0") +
+        " icon_delegated=" + (p.game_icon_delegated ? "1" : "0") +
+        " icon_applied=" + (p.game_icon_applied ? "1" : "0") +
+        " icon_readback=" + (p.game_icon_readback ? "1" : "0") +
+        " icon_groups=" + std::to_string(p.game_icon_groups) +
+        " icon_updates=" + std::to_string(p.game_icon_updates) +
+        (p.game_window_class.empty() ? "" :
+         " window_class=" + p.game_window_class) +
+        (p.game_icon_source.empty() ? "" :
+         " icon_source=" + p.game_icon_source) +
+        (p.game_icon_method.empty() ? "" :
+         " icon_method=" + p.game_icon_method) +
+        (p.game_icon_error.empty() ? "" :
+         " icon_error=" + p.game_icon_error) +
+        " child_window_dpi=" + std::to_string(p.observed_dpi) +
+        (p.last_error.empty() ? "" :
+         " last_error=" + p.last_error);
+}
 std::string exit_hex(unsigned long exit_code) {
     std::ostringstream stream;
     stream << "0x" << std::uppercase << std::hex << std::setw(8)
@@ -183,7 +206,8 @@ void ensure_rayman2_dpi_manifest(const fs::path& game_dir) {
 
 ChildProcessResult run_child_process(
     const fs::path& executable, const fs::path& working_directory,
-    const ChildDisplayOptions& display) {
+    const ChildDisplayOptions& display,
+    const std::function<void(const PresentationResult&)>& on_presentation) {
 #ifdef _WIN32
     if (!display.skip_executable_precheck &&
         (!fs::is_regular_file(executable) || fs::is_symlink(executable) ||
@@ -268,10 +292,25 @@ ChildProcessResult run_child_process(
     }
 
     if (display.borderless) {
-        WindowPresentation presentation(raw.dwProcessId, display.monitor);
+        WindowPresentation presentation(raw.dwProcessId, display.monitor,
+                                        application,result.fov_hook.active);
         DWORD wait = WAIT_TIMEOUT;
+        std::string last_report;
         while ((wait = WaitForSingleObject(process.handle, 120)) == WAIT_TIMEOUT) {
             presentation.update();
+            // Flush a bounded status update while the game is still
+            // running. Previously PRESENTATION was logged only after exit
+            // and owner uploads from a running game contained no evidence.
+            if(on_presentation) {
+                const auto observed=presentation.result();
+                if(observed.window_found) {
+                    const auto report=presentation_status(observed);
+                    if(report!=last_report) {
+                        on_presentation(observed);
+                        last_report=report;
+                    }
+                }
+            }
         }
         result.presentation = presentation.result();
         if (wait != WAIT_OBJECT_0) {
@@ -295,6 +334,7 @@ ChildProcessResult run_child_process(
     (void)executable;
     (void)working_directory;
     (void)display;
+    (void)on_presentation;
     return {false, 0, 1};
 #endif
 }
@@ -390,7 +430,11 @@ int launch_verified_game(Startup& startup, bool verify) {
     // game launch resets Rayman2Fix.log, keeping installer messages separate.
     startup.prepare_runtime_log();
     const ChildProcessResult result =
-        run_child_process(root / "rayman2.exe", root, display);
+        run_child_process(root / "rayman2.exe", root, display,
+            [&startup](const PresentationResult& observed) {
+                startup.log("PRESENTATION-LIVE: " +
+                            presentation_status(observed));
+            });
     const auto seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - started).count();
     if (!result.started) {
@@ -407,15 +451,7 @@ int launch_verified_game(Startup& startup, bool verify) {
                   << result.error_code << '\n';
         return 1;
     }
-    startup.log("PRESENTATION: window_found=" +
-                std::string(result.presentation.window_found ? "1" : "0") +
-                " borderless_applied=" +
-                (result.presentation.borderless_applied ? "1" : "0") +
-                " changes=" + std::to_string(result.presentation.changes) +
-                " child_window_dpi=" +
-                std::to_string(result.presentation.observed_dpi) +
-                (result.presentation.last_error.empty() ? "" :
-                  " last_error=" + result.presentation.last_error));
+    startup.log("PRESENTATION: " + presentation_status(result.presentation));
     startup.log("LAUNCH-EXIT: child_exit_code=" + exit_hex(result.exit_code) +
                 " elapsed_ms=" + std::to_string(
                     static_cast<unsigned long long>(seconds * 1000.0)));
