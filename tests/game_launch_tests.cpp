@@ -322,6 +322,41 @@ int main(int argc, char** argv) {
                 throw std::runtime_error(
                     "cross-process WM_SETICON did not round-trip");
             }
+
+            // Now exercise the NEW fix: the resource-owning game process
+            // sets its OWN window icon, instead of receiving a foreign
+            // HICON in a WM_SETICON sent from the launcher.
+            check(SetEnvironmentVariableW(
+                L"RAYMAN2FIX_TEST_SELF_ICON",L"1")!=0,
+                "synthetic child icon opt-in set");
+            PROCESS_INFORMATION self_child{};
+            STARTUPINFOW self_start{};
+            self_start.cb=sizeof(self_start);
+            const auto self_path=resource_exe.wstring();
+            std::wstring self_cmd=L"\"" + self_path + L"\"";
+            const BOOL self_created=CreateProcessW(
+                self_path.c_str(),self_cmd.data(),nullptr,nullptr,FALSE,0,
+                nullptr,workdir.c_str(),&self_start,&self_child);
+            SetEnvironmentVariableW(L"RAYMAN2FIX_TEST_SELF_ICON",nullptr);
+            check(self_created!=0,
+                "synthetic executable with icon starts normally");
+            const DWORD self_wait=WaitForSingleObject(
+                self_child.hProcess,6000);
+            DWORD self_exit=0;
+            const BOOL self_exit_known=GetExitCodeProcess(
+                self_child.hProcess,&self_exit);
+            CloseHandle(self_child.hThread);
+            CloseHandle(self_child.hProcess);
+            check(self_wait==WAIT_OBJECT_0 && self_exit_known &&
+                  self_exit==17,
+                "self-owned icon child terminates without graphics crash");
+            std::ifstream self_report(root/"child-owned-window-icon.txt");
+            int win_big=0,win_small=0,class_big=0,class_small=0;
+            self_report>>win_big>>win_small>>class_big>>class_small;
+            check(static_cast<bool>(self_report) &&
+                  win_big && win_small && class_big && class_small,
+                  "same-process icon install yields WM_GETICON and "
+                  "window class icons from its own PE resources");
         }
 
         const auto nonexistent = root / "does-not-exist.exe";
