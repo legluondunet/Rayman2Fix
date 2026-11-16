@@ -20,6 +20,7 @@
 #include "rayman2fix/scene_script_probe.hpp"
 #include "rayman2fix/intro_gate_timeline.hpp"
 #include "rayman2fix/intro_integer_reader.hpp"
+#include "rayman2fix/game_window_icon.hpp"
 #include <mutex>
 #if RAYMAN2FIX_ESC_MUSIC_PROTO
 #include "rayman2fix/esc_music_wine_prototype.hpp"
@@ -4887,6 +4888,10 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
             install_cinematic_viewport_hook();
         initialize_native_intro_skip();
         start_hud_monitor();
+        // Install only on the verified game process, after initialization.
+        // The launcher cannot reliably transfer HICON handles cross-process
+        // to Wine's X11 window. Keep this off the camera/render hot path.
+        r2fix::start_game_window_icon_worker(&log_line);
     }
     return camera_status;
 }
