@@ -251,7 +251,7 @@ int main(int argc, char** argv) {
             PROCESS_INFORMATION icon_child{};
             const auto executable=child.wstring();
             const auto workdir=root.wstring();
-            std::wstring command=L"\\\""+executable+L"\\\"";
+            std::wstring command=L"\""+executable+L"\"";
             check(CreateProcessW(executable.c_str(),command.data(),
                 nullptr,nullptr,FALSE,0,nullptr,workdir.c_str(),
                 &icon_start,&icon_child)!=0,
