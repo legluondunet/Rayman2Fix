@@ -1,3 +1,13 @@
+> **PR #10 — opt-in ESC pause music (not yet approved for release).**
+> This branch retains the validated nested installation layout from `main`.
+> In `rayman2/rayman2fix/Rayman2Fix.ini`, set
+> `[Features] MusicInPauseMenu=1` to test the guarded native
+> Theme/SXD continuation during the ESC menu (`0` by default).
+> First-menu continuation remains unverified and earlier retry attempts
+> caused audio regressions; the strict fail-closed policy stays in force.
+> Requires an explicitly tested PR preview build; ordinary `main`
+> installers do not implement this INI option.
+
 ## New nested layout and safe migration
 
 The **retail game** is installed under `rayman2/`; the mod's
