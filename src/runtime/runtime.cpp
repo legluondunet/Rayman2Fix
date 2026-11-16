@@ -21,7 +21,7 @@
 #include "rayman2fix/intro_gate_timeline.hpp"
 #include "rayman2fix/intro_integer_reader.hpp"
 #include <mutex>
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
 #include "rayman2fix/esc_music_wine_prototype.hpp"
 #endif
 #include <atomic>
@@ -48,6 +48,19 @@
 #endif
 #ifndef RAYMAN2FIX_AUDIO_TRACE
 #define RAYMAN2FIX_AUDIO_TRACE 0
+#endif
+#ifndef RAYMAN2FIX_ESC_MUSIC_FEATURE
+#define RAYMAN2FIX_ESC_MUSIC_FEATURE 0
+#endif
+#if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
+#define RAYMAN2FIX_ESC_MUSIC_ACTIVE 1
+#else
+#define RAYMAN2FIX_ESC_MUSIC_ACTIVE 0
+#endif
+#if RAYMAN2FIX_AUDIO_TRACE || RAYMAN2FIX_ESC_MUSIC_ACTIVE
+#define RAYMAN2FIX_AUDIO_HOOKS 1
+#else
+#define RAYMAN2FIX_AUDIO_HOOKS 0
 #endif
 #if RAYMAN2FIX_AUDIO_TRACE != 0 && RAYMAN2FIX_AUDIO_TRACE != 1
 #error RAYMAN2FIX_AUDIO_TRACE must be 0 or 1
@@ -355,6 +368,7 @@ struct RuntimeOptions {
     DWORD skip_cinematics;
     DWORD remove_dialogue_backgrounds;
     DWORD remove_cinematic_bars;
+    DWORD music_in_pause_menu;
 };
 
 bool valid_angle(float v) {
@@ -383,6 +397,70 @@ void log_line(const char* message) {
     WriteFile(file, "\r\n", 2, &written, nullptr);
     CloseHandle(file);
 }
+// Read-only audit of the ORIGINAL CPA sound configuration, not a fix
+// configuration and never a driver selection override. The key is spelled
+// "Unconditionnal" by the 1999 engine. This runs once on explicit runtime
+// initialization, not from a native audio callback, with no config changes.
+#if RAYMAN2FIX_AUDIO_HOOKS
+void log_cpa_sound_configuration() {
+    if(!g_log)return;
+    wchar_t path[MAX_PATH]{};
+    const DWORD length=GetModuleFileNameW(nullptr,path,MAX_PATH);
+    if(!length || length>=MAX_PATH)return;
+    wchar_t* end=wcsrchr(path,L'\\');
+    if(!end)return;
+    const wchar_t filename[]=L"dll\\snd_cpa.ini";
+    if(static_cast<std::size_t>(end+1-path)+
+       (sizeof(filename)/sizeof(filename[0]))>MAX_PATH)return;
+    wcscpy_s(end+1,MAX_PATH-static_cast<std::size_t>(end+1-path),filename);
+    const DWORD attributes=GetFileAttributesW(path);
+    if(attributes==INVALID_FILE_ATTRIBUTES ||
+       (attributes&FILE_ATTRIBUTE_DIRECTORY)!=0u ||
+       (attributes&FILE_ATTRIBUTE_REPARSE_POINT)!=0u) {
+        // Unavailable is deliberately broader than missing: permissions,
+        // junctions and links are not automatically trusted or followed.
+        log_line("RUNTIME-AUDIO-CONFIG: status=unavailable (no audio settings changed)");
+        return;
+    }
+    // Strict ASCII field normalization: no path, quoted line, or injected
+    // line break from a user-editable legacy INI ever enters the log.
+    const auto field=[&](const wchar_t* section,const wchar_t* key,
+                         char (&out)[48]) {
+        wchar_t wide[96]{};
+        const DWORD n=GetPrivateProfileStringW(
+            section,key,L"unset",wide,
+            static_cast<DWORD>(sizeof(wide)/sizeof(wide[0])),path);
+        unsigned k=0;
+        for(DWORD i=0;i<n && k+1<sizeof(out);++i) {
+            const wchar_t c=wide[i];
+            if((c>=L'A' && c<=L'Z') ||
+               (c>=L'a' && c<=L'z') ||
+               (c>=L'0' && c<=L'9') ||
+               c==L'_' || c==L'-' || c==L'.')
+                out[k++]=static_cast<char>(c);
+            else
+                out[k++]='?';
+        }
+        out[k]='\0';
+    };
+    char unconditional[48]{},default_sxd[48]{},file0[48]{},file1[48]{},
+         default_adpcm[48]{};
+    field(L"DLL_Sxd",L"Unconditionnal",unconditional);
+    field(L"DLL_Sxd",L"Default",default_sxd);
+    field(L"DLL_Sxd",L"File0",file0);
+    field(L"DLL_Sxd",L"File1",file1);
+    field(L"DLL_Adpcm",L"Default",default_adpcm);
+    char line[400]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-AUDIO-CONFIG: status=present "
+        "sxd_unconditional=%s sxd_default=%s sxd_file0=%s sxd_file1=%s "
+        "adpcm_default=%s "
+        "(configuration candidates only; original DLL unchanged)",
+        unconditional,default_sxd,file0,file1,default_adpcm);
+    log_line(line);
+}
+#endif
+
 bool game_window_is_foreground() {
     HWND foreground = GetForegroundWindow();
     DWORD pid = 0;
@@ -390,11 +468,11 @@ bool game_window_is_foreground() {
            pid == GetCurrentProcessId();
 }
 
-// Research-only audio pause/resume trace for the owner's exact 1999 CD build.
-// No sound call is suppressed, delayed or modified. The native sound DLL is
-// loaded dynamically after the game starts, so sample its *existing* resolved
-// function slots on the regular camera callback. Never hook these in release.
-#if RAYMAN2FIX_AUDIO_TRACE
+// Dedicated native SXD hook infrastructure for the approved 1999 CD build.
+// Production hooks only the four required Theme/SXD pause/resume/stop
+// functions; the legacy research tracer is separately gated at build time.
+// Driver pointers are captured after native audio initialization.
+#if RAYMAN2FIX_AUDIO_HOOKS
 using AudioPauseFn=void (__stdcall*)(DWORD);
 constexpr unsigned kAudioSlotCount=14;
 struct AudioSlot {
@@ -501,6 +579,210 @@ void log_audio_driver_module(unsigned slot,const void* current) {
         "RUNTIME-AUDIO-DRIVER: channel=%s module=%s callback_rva=0x%08X (module basename only; original forwarded; read-only)",
         kAudioSlots[slot].name,basename,rva);
     log_line(msg);
+}
+
+// Original owner's hash-pinned WAVMWbvr.dll contains dynamically resolved
+// type-4 ADPCM Stop/Pause/Resume transition thunks, plus separate
+// TestIsPlaying and GetPos query thunks in the same PE data region.
+// Read them at most ONCE for each original Theme-ref class (3 pending,
+// 1 synchronized), after a source-confirmed ESC menu, on
+// the normal render thread AFTER the existing audio compensation. Never
+// call these delegates, read them in a native callback or log raw pointers.
+// A basename/timestamp/entry-opcode guard prevents applying original-DLL
+// offsets to unrelated versions. This is a *version fingerprint*, not
+// a full SHA-256 proof of the image bytes.
+void log_adpcm_delegate_origins_readonly() {
+    if(!g_log)return;
+    const auto original=g_audio_original[2u].load(std::memory_order_acquire);
+    if(!original) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=no-original-pause (read-only)");
+        return;
+    }
+    HMODULE h=nullptr;
+    if(!GetModuleHandleExW(
+         GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+         GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+         reinterpret_cast<LPCWSTR>(original),&h) || !h) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=unknown-origin (read-only)");
+        return;
+    }
+    wchar_t path[MAX_PATH]{};
+    const DWORD len=GetModuleFileNameW(h,path,MAX_PATH);
+    if(!len || len>=MAX_PATH) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=unknown-module (read-only)");
+        return;
+    }
+    const wchar_t* name=path;
+    for(DWORD i=0;i<len;++i)
+        if(path[i]==L'\\' || path[i]==L'/')name=path+i+1;
+    const BYTE* base=reinterpret_cast<const BYTE*>(h);
+    const auto origin=reinterpret_cast<std::uintptr_t>(original);
+    if(CompareStringOrdinal(name,-1,L"WAVMWbvr.dll",-1,TRUE)!=CSTR_EQUAL ||
+       origin!=reinterpret_cast<std::uintptr_t>(base)+0xC7E0u) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=other-pause-owner (read-only)");
+        return;
+    }
+    const HANDLE proc=GetCurrentProcess();
+    const auto read=[&](const void* address,void* out,SIZE_T size) {
+        SIZE_T copied=0;
+        return ReadProcessMemory(proc,address,out,size,&copied)!=0 &&
+            copied==size;
+    };
+    IMAGE_DOS_HEADER dos{};
+    if(!read(base,&dos,sizeof(dos)) ||
+       dos.e_magic!=IMAGE_DOS_SIGNATURE ||
+       dos.e_lfanew<=0 || dos.e_lfanew>=0x1000) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=invalid-dos (read-only)");
+        return;
+    }
+    IMAGE_NT_HEADERS32 nt{};
+    if(!read(base+dos.e_lfanew,&nt,sizeof(nt)) ||
+       nt.Signature!=IMAGE_NT_SIGNATURE ||
+       nt.FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       nt.FileHeader.TimeDateStamp!=0x38076FB4u ||
+       nt.OptionalHeader.Magic!=IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
+       nt.OptionalHeader.SizeOfImage!=0x87000u) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=unverified-image (read-only)");
+        return;
+    }
+    constexpr BYTE expected_pause[7]{0x8B,0x4C,0x24,0x04,0x8B,0x01,0x48};
+    BYTE actual_pause[sizeof(expected_pause)]{};
+    if(!read(base+0xC7E0u,actual_pause,sizeof(actual_pause)) ||
+       std::memcmp(actual_pause,expected_pause,sizeof(actual_pause))!=0) {
+        log_line("RUNTIME-AUDIO-ADPCM-DELEGATE: status=entry-mismatch (read-only)");
+        return;
+    }
+    // This exact disk DLL dispatches the original ADPCM type-4 thunks:
+    // StopTransition -> [module+0x26A98], Pause -> +0x26A9C,
+    // Resume -> +0x26AA0, TestIsPlaying -> +0x26A00,
+    // GetPos -> +0x26A14, SetParam -> +0x269FC,
+    // SetParamTransition -> +0x26A88. The latter four operations may
+    // have hidden native lifetime effects when ACTUALLY CALLED by
+    // the game, so we only READ their dynamically bound pointers.
+    // Pointer resolution is not proof of any live query invocation.
+    // SetParamSxd and SetParamTransitionSxd can also reach original
+    // APMMX 0x1C30, which may retire an inactive record internally.
+    // Original WAVMW resolver: +0x269FC / fallback 0x3410 and
+    // +0x26A88 / fallback 0x3B60. This observer ONLY reads pointers.
+    constexpr unsigned slot_rvas[7]{
+        0x26A98u,0x26A9Cu,0x26AA0u,0x26A00u,0x26A14u,
+        0x269FCu,0x26A88u
+    };
+    constexpr unsigned fallback_rvas[7]{
+        0x3C50u,0x3C80u,0x3CB0u,0x3440u,0x3530u,
+        0x3410u,0x3B60u
+    };
+    const char* labels[7]{
+        "stop","pause","resume","test-is-playing","get-pos",
+        "set-param","set-param-transition"
+    };
+    // Exact original APMMX export RVAs and first 16 opcode bytes, checked
+    // offline against the owner's original 1999 DLL. No Windows export
+    // resolution or driver invocation is permitted by this readout.
+    constexpr unsigned owner_rvas[7]{
+        0x54C0u,0x54D0u,0x54E0u,0x5150u,0x51A0u,
+        0x5120u,0x5430u
+    };
+    constexpr BYTE owner_entry[7][16]{
+        {0x8B,0x44,0x24,0x04,0x50,0xE8,0x76,0xDE,0xFF,0xFF,0x83,0xC4,0x04,0xC2,0x04,0x00},
+        {0x8B,0x44,0x24,0x04,0x50,0xE8,0xA6,0xDE,0xFF,0xFF,0x83,0xC4,0x04,0xC2,0x04,0x00},
+        {0x8B,0x44,0x24,0x04,0x50,0xE8,0xD6,0xDE,0xFF,0xFF,0x83,0xC4,0x04,0xC2,0x04,0x00},
+        {0x8B,0x44,0x24,0x04,0x50,0xE8,0xA6,0xD7,0xFF,0xFF,0x83,0xC4,0x04,0xC2,0x04,0x00},
+        {0x8B,0x44,0x24,0x04,0x50,0xE8,0x56,0xD8,0xFF,0xFF,0x83,0xC4,0x04,0xC2,0x04,0x00},
+        {0x8B,0x4C,0x24,0x08,0x83,0xEC,0x08,0x8D,0x44,0x24,0x00,0x50,0x51,0xE8,0x8E,0xE9},
+        {0x8B,0x4C,0x24,0x08,0x83,0xEC,0x08,0x8D,0x44,0x24,0x00,0x50,0x51,0xE8,0x7E,0xE6}
+    };
+    for(unsigned i=0;i<7u;++i) {
+        DWORD target=0;
+        if(!read(base+slot_rvas[i],&target,sizeof(target)) ||
+           !target || target==0xFFFFFFFFu) {
+            char msg[170]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-AUDIO-ADPCM-DELEGATE: op=%s status=unresolved "
+                "(read-only; no call)",labels[i]);
+            log_line(msg);
+            continue;
+        }
+        const auto address=std::uintptr_t(target);
+        if(address==std::uintptr_t(base)+fallback_rvas[i]) {
+            char msg[170]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-AUDIO-ADPCM-DELEGATE: op=%s status=fallback "
+                "(original DLL no-op; no call)",labels[i]);
+            log_line(msg);
+            continue;
+        }
+        HMODULE target_module=nullptr;
+        if(!GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(address),&target_module) ||
+           !target_module ||
+           !executable_page(reinterpret_cast<const void*>(address))) {
+            char msg[180]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-AUDIO-ADPCM-DELEGATE: op=%s status=unknown "
+                "(read-only; no call)",labels[i]);
+            log_line(msg);
+            continue;
+        }
+        wchar_t target_path[MAX_PATH]{};
+        const DWORD n=GetModuleFileNameW(
+            target_module,target_path,MAX_PATH);
+        const wchar_t* target_name=target_path;
+        if(!n || n>=MAX_PATH) {
+            char msg[180]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-AUDIO-ADPCM-DELEGATE: op=%s status=unknown-name "
+                "(read-only; no call)",labels[i]);
+            log_line(msg);
+            continue;
+        }
+        for(DWORD j=0;j<n;++j)
+            if(target_path[j]==L'\\' || target_path[j]==L'/')
+                target_name=target_path+j+1;
+        char safe_basename[64]{};
+        unsigned k=0;
+        for(const wchar_t* p=target_name;*p && k+1<sizeof(safe_basename);++p)
+            safe_basename[k++]=(*p>=33 && *p<=126)
+                ? static_cast<char>(*p) : '?';
+        const auto* owner_base=reinterpret_cast<const BYTE*>(target_module);
+        const auto target_rva=address-
+            reinterpret_cast<std::uintptr_t>(target_module);
+        // A DLL basename alone could identify an unexpected replacement.
+        // Treat the owner's PE timestamp, image size, exact expected RVA
+        // and original entry opcode as a BOUNDED fingerprint, not a
+        // cryptographic verification of every loaded code/data byte.
+        bool owner_fingerprint=false;
+        if(CompareStringOrdinal(target_name,-1,L"APMMXbvr.dll",-1,TRUE)==CSTR_EQUAL &&
+           target_rva==owner_rvas[i]) {
+            IMAGE_DOS_HEADER original_dos{};
+            IMAGE_NT_HEADERS32 original_nt{};
+            BYTE actual_entry[16]{};
+            if(read(owner_base,&original_dos,sizeof(original_dos)) &&
+               original_dos.e_magic==IMAGE_DOS_SIGNATURE &&
+               original_dos.e_lfanew>0 && original_dos.e_lfanew<0x1000 &&
+               read(owner_base+original_dos.e_lfanew,
+                    &original_nt,sizeof(original_nt)) &&
+               original_nt.Signature==IMAGE_NT_SIGNATURE &&
+               original_nt.FileHeader.Machine==IMAGE_FILE_MACHINE_I386 &&
+               original_nt.FileHeader.TimeDateStamp==0x38076F98u &&
+               original_nt.OptionalHeader.Magic==IMAGE_NT_OPTIONAL_HDR32_MAGIC &&
+               original_nt.OptionalHeader.SizeOfImage==0xEE000u &&
+               read(owner_base+owner_rvas[i],actual_entry,sizeof(actual_entry)) &&
+               std::memcmp(actual_entry,owner_entry[i],sizeof(actual_entry))==0)
+                owner_fingerprint=true;
+        }
+        char msg[300]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-AUDIO-ADPCM-DELEGATE: op=%s status=resolved "
+            "module=%s callback_rva=0x%08X "
+            "original_entry_fingerprint=%u "
+            "(PE/opcode only, NOT full SHA; pointer is not invocation; no call)",
+            labels[i],safe_basename,static_cast<unsigned>(target_rva),
+            unsigned(owner_fingerprint));
+        log_line(msg);
+    }
 }
 
 // Owner's exact CD executable, source RVA=0x4580B0: the *global*
@@ -704,10 +986,36 @@ struct AudioThemeOwnerContext {
     // POINTER, not to the origin-bank/index of the serialized resource.
     // -1=unknown, 0=other descriptor, 1=matching current Theme pointer.
     int native_theme_player_ref_matches_outer=-1;
+    // Optional diagnostic classification for the first ESC: -1 not sampled,
+    // 0 native controller ref null, 1 equals current Theme descriptor,
+    // 2 another active Theme record, 3 other readable Theme descriptor,
+    // 4 readable non-Theme data, 5 unreadable/unmapped reference.
+    // These values never authorize audio and contain no raw pointers.
+    int native_theme_player_ref_class=-1;
+    // Original approved-CD code establishes a two-stage Theme switch:
+    // 0x4595F6 sets [controller+0x0C]=1 and +0x44=pending descriptor;
+    // 0x459476 clears the flag, then +0x14 receives the pending pointer.
+    // -1 means unreadable/unknown/not applicable; pending target is
+    // considered only if flag=1 AND the unique active outer Theme is
+    // already verified as an actual original type-11 descriptor.
+    // Diagnostic only: NEVER authorize Pause/Resume from these fields.
+    int native_theme_pending_state=-1;
+    int native_pending_target_matches_outer=-1;
+    int native_pending_target_differs_current=-1;
+    // Classify the *alternative* native Theme descriptor by its original
+    // loaded bank, never by the untrusted Id halves. Research-only,
+    // sampled on the first rejected/accepted ESC after physical callbacks.
+    // -1 means not verified / not applicable, not proof of a match.
+    int alternative_ref_bank=-1;
+    int alternative_ref_index=-1;
+    int alternative_ref_same_bank=-1;
+    unsigned alternative_ref_complete=0;
+    unsigned alternative_ref_candidates=0;
     AudioNativeBankOrigin outer_bank_provenance{};
     AudioNativeBankOrigin inner_bank_provenance{};
 };
-AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
+AudioThemeOwnerContext inspect_audio_theme_owner(
+    DWORD argument,bool classify_native_ref=false) {
     AudioThemeOwnerContext out{};
     auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
     if(!module)return out;
@@ -776,6 +1084,75 @@ AudioThemeOwnerContext inspect_audio_theme_owner(DWORD argument) {
             out.native_theme_player_ref_matches_outer=
                 int(current_theme_key==
                     static_cast<DWORD>(outer_descriptor_address));
+            if(classify_native_ref) {
+                DWORD switch_flag=0,pending_target=0;
+                if(safe_read(module+kControllerRva+0x0Cu,
+                             &switch_flag,sizeof(switch_flag)) &&
+                   safe_read(module+kControllerRva+0x44u,
+                             &pending_target,sizeof(pending_target)) &&
+                   switch_flag<=1u) {
+                    out.native_theme_pending_state=int(switch_flag);
+                    if(switch_flag==1u && pending_target>=0x10000u) {
+                        out.native_pending_target_matches_outer=int(
+                            std::uintptr_t(pending_target)==
+                            outer_descriptor_address);
+                        out.native_pending_target_differs_current=int(
+                            pending_target!=current_theme_key);
+                    }
+                }
+                if(current_theme_key==0u)
+                    out.native_theme_player_ref_class=0;
+                else if(current_theme_key==outer_descriptor_address)
+                    out.native_theme_player_ref_class=1;
+                else {
+                    // Check if the native current player refers to a
+                    // *different active* Theme descriptor in this snapshot.
+                    // No call to the native player, no pointer written.
+                    int other_active_theme=0;
+                    for(const auto& entry:table) {
+                        if(entry.words[1]!=current_theme_key ||
+                           entry.words[5]==0u)continue;
+                        DWORD header[2]{};
+                        if(safe_read(reinterpret_cast<const void*>(
+                                         std::uintptr_t(current_theme_key)),
+                                     header,sizeof(header)) &&
+                           header[1]==11u) {
+                            other_active_theme=1;
+                            break;
+                        }
+                    }
+                    if(other_active_theme)
+                        out.native_theme_player_ref_class=2;
+                    else {
+                        DWORD header[2]{};
+                        if(!safe_read(reinterpret_cast<const void*>(
+                                          std::uintptr_t(current_theme_key)),
+                                      header,sizeof(header)))
+                            out.native_theme_player_ref_class=5;
+                        else if(header[1]==11u) {
+                            out.native_theme_player_ref_class=3;
+                            // Read-only provenance; one bounded walk of the
+                            // originally loaded BNM list, never a bypass.
+                            const auto alternative=inspect_audio_native_bank_origin(
+                                std::uintptr_t(current_theme_key));
+                            out.alternative_ref_bank=alternative.bank_id;
+                            out.alternative_ref_index=alternative.resource_index;
+                            out.alternative_ref_complete=alternative.list_complete;
+                            out.alternative_ref_candidates=alternative.candidates;
+                            if(alternative.list_complete==1u &&
+                               alternative.candidates==1u &&
+                               alternative.bank_id>=0 &&
+                               out.outer_bank_provenance.list_complete==1u &&
+                               out.outer_bank_provenance.candidates==1u &&
+                               out.outer_bank_provenance.bank_id>=0)
+                                out.alternative_ref_same_bank=int(
+                                    alternative.bank_id==
+                                    out.outer_bank_provenance.bank_id);
+                        } else
+                            out.native_theme_player_ref_class=4;
+                    }
+                }
+            }
         }
     }
     if(active==0u)return out;
@@ -1081,19 +1458,134 @@ DWORD __stdcall audio_play_transition_ex(DWORD a,DWORD b,DWORD c,DWORD d,DWORD e
     return result;
 }
 
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
-// An explicitly opted-in research build ONLY. The game keeps ownership of
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+// Verified, opt-in original Theme/SXD music continuation policy. The game keeps ownership of
 // the pause depth and both sound-record marks. Rebalancing the observed
 // paired Theme/SXD driver callbacks is deliberately experimental, not a
 // confirmed contract for every APM backend.
 namespace proto=r2fix::esc_proto;
 std::atomic<bool> g_proto_enabled{false};
 std::atomic<bool> g_proto_callsites_installed{false};
+// Only an ESC script-attempt/session token, incremented when we begin
+// a source-confirmed menu Pause wrapper. NOT the original APMMX ADPCM
+// record's creation/reinitialization generation. The owner-verified
+// 1999 ADPCM allocator can reuse a handle+record without native Stop.
+// Do not treat this token as permission for an early synthetic Resume.
 std::atomic<unsigned> g_proto_generation{0};
+// Purely diagnostic: every observed native SXD Stop callback advances this
+// monotonic counter. Unlike the coordinator's generation, it also covers
+// Stops outside ESC. It neither classifies music nor gates driver forwarding.
+std::atomic<unsigned> g_proto_native_stop_calls{0};
 std::atomic<DWORD> g_proto_pending_at{0};
 std::mutex g_proto_mutex;
 proto::Coordinator g_proto;
 thread_local proto::Origin g_proto_origin=proto::Origin::unknown;
+// Source-specific feasibility trace for a possible pre-driver ESC bridge.
+// Observational only: gather the ORDER and HANDLE cardinality of the
+// original driver's callback sequence *before* forwarding every call.
+// Do not add bank scanning, logging or memory writes inside the native
+// driver callback. A separate pure-C++ policy models possible deferral.
+struct ProtoPreDriverProbe {
+    bool active=false;
+    unsigned callback_count=0;
+    unsigned pause_count=0;
+    unsigned unrelated_slots=0;
+    unsigned other_handle_count=0;
+    DWORD first_handle=0;
+    unsigned first_slots[4]{99u,99u,99u,99u};
+};
+thread_local ProtoPreDriverProbe g_proto_predriver_probe{};
+std::atomic<unsigned> g_proto_predriver_probe_budget{0};
+struct ProtoPreDriverReport {
+    bool ready=false;
+    ProtoPreDriverProbe probe{};
+    DWORD t_ms=0;
+    int depth_before=-1;
+    int depth_after=-1;
+    // Post-wrapper-only read of the original WAVMWbvr transition object's
+    // first DWORD. -1=unreadable/not-applicable, 0=other, 1/2/4=tags
+    // established by static analysis of owner's hash-pinned DLL.
+    // It is NOT a physical voice ID and never authorizes audio calls.
+    int transition_type_post_pause=-1;
+    // Source-scoped snapshots, captured outside the native driver callbacks.
+    // Play/Stop counts include OTHER sounds: any delta disproves a totally
+    // quiet interval, but zero alone does not prove the SXD stream is stable.
+    unsigned native_stop_before=0;
+    unsigned native_stop_after=0;
+    unsigned native_play_before=0;
+    unsigned native_play_after=0;
+};
+// Store only a tiny snapshot after the original wrapper. The main menu
+// tick emits disk diagnostics AFTER trying native audio compensation.
+// Guarded by g_proto_mutex, never held inside a native driver hook.
+ProtoPreDriverReport g_proto_predriver_report{};
+// One script-sourced ESC opening is expected before its paired Resume.
+// If another Pause occurs before that Resume, report ambiguous lifetime
+// rather than a misleading zero event count. Never used by audio forwarding.
+struct ProtoEscLifetimeStart {
+    bool valid=false;
+    bool overlap=false;
+    DWORD start_tick=0;
+    DWORD thread_id=0;
+    unsigned generation=0;
+    unsigned play_before=0;
+    unsigned stop_before=0;
+    // Source-paired, sampled *resource provenance*, NOT a driver epoch or
+    // music identity. Filled using snapshots the menu tick and existing
+    // Theme watcher already gathered; never queried in an audio callback.
+    bool sxd_baseline_valid=false;
+    int sxd_first_bank=-1;
+    int sxd_first_index=-1;
+    int sxd_last_bank=-1;
+    int sxd_last_index=-1;
+    unsigned sxd_samples=0;
+    unsigned sxd_changes=0;
+    unsigned sxd_unknown=0;
+};
+ProtoEscLifetimeStart g_proto_esc_lifetime_start{}; // g_proto_mutex
+
+// Read-only companion to the Pause probe. Inspect the ORIGINAL script-resume
+// callback order and actual native forwarding decisions; never decide them
+// using this probe. A separate report survives the transition back to idle.
+struct ProtoPreDriverResumeProbe {
+    bool active=false;
+    unsigned callback_count=0;
+    unsigned resume_count=0;
+    unsigned unrelated_slots=0;
+    unsigned other_handle_count=0;
+    unsigned forwarded_count=0;
+    unsigned suppressed_count=0;
+    DWORD first_handle=0;
+    unsigned first_slots[4]{99u,99u,99u,99u};
+};
+thread_local ProtoPreDriverResumeProbe g_proto_predriver_resume_probe{};
+std::atomic<unsigned> g_proto_predriver_resume_budget{0};
+struct ProtoPreDriverResumeReport {
+    bool ready=false;
+    ProtoPreDriverResumeProbe probe{};
+    DWORD t_ms=0;
+    int depth_before=-1;
+    int depth_after=-1;
+    unsigned phase_before=0;
+    unsigned phase_after=0;
+    bool lifetime_paired=false;
+    bool lifetime_overlap=false;
+    DWORD lifetime_elapsed_ms=0;
+    unsigned play_between=0;
+    unsigned stop_between=0;
+    unsigned play_during_resume=0;
+    unsigned stop_during_resume=0;
+    bool sxd_baseline_valid=false;
+    int sxd_first_bank=-1;
+    int sxd_first_index=-1;
+    int sxd_last_bank=-1;
+    int sxd_last_index=-1;
+    unsigned sxd_samples=0;
+    unsigned sxd_changes=0;
+    unsigned sxd_unknown=0;
+};
+ProtoPreDriverResumeReport g_proto_predriver_resume_report{};
+
 class ProtoScope {
 public:
     explicit ProtoScope(proto::Origin origin) noexcept : old_(g_proto_origin) {
@@ -1112,7 +1604,11 @@ void proto_log(const char* action,const char* reason="none") {
         phase=unsigned(g_proto.phase());
     }
     std::snprintf(msg,sizeof(msg),
+#if RAYMAN2FIX_ESC_MUSIC_PROTO
         "RUNTIME-ESC-PROTOTYPE: event=%s phase=%u detail=%s (experimental; original soundtrack only)",
+#else
+        "RUNTIME-ESC-MUSIC: event=%s phase=%u detail=%s (native Theme/SXD)",
+#endif
         action,phase,reason);
     log_line(msg);
 }
@@ -1123,6 +1619,47 @@ bool proto_game_read(std::uintptr_t rva,BYTE& out) {
     SIZE_T read=0;
     return ReadProcessMemory(GetCurrentProcess(),module+rva,&out,1,&read)!=0 &&
            read==1 && out<=1;
+}
+// Bounded, read-only native Theme callback eligibility *flags*.
+// Original approved CD 0x4596E0 first checks [0x4B9618], player+0x00
+// and player+0x04 before it can call 0x459460 to promote pending +0x44.
+// No native callback is invoked, no instrumented driver writes occur.
+// These two successive reads are not an atomic engine-state snapshot.
+struct ProtoThemeCallbackGuardSnapshot {
+    int sampled=0;
+    int controller_active=-1;
+    int controller4_nonzero=-1;
+    int pending=-1;
+    int global_nonzero=-1;
+    int eligible_from_flags=-1;
+};
+ProtoThemeCallbackGuardSnapshot proto_sample_theme_callback_guards() {
+    ProtoThemeCallbackGuardSnapshot out{};
+    if(!g_proto_enabled.load(std::memory_order_acquire) ||
+       !g_proto_callsites_installed.load(std::memory_order_acquire))
+        return out;
+    const auto* base=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!base)return out;
+    const auto read=[&](std::uintptr_t rva,void* dst,SIZE_T size) {
+        SIZE_T n=0;
+        return ReadProcessMemory(GetCurrentProcess(),base+rva,dst,size,&n)!=0 &&
+               n==size;
+    };
+    DWORD a[4]{},b[4]{};
+    DWORD global_a=0,global_b=0;
+    if(!read(0xB95B8u,a,sizeof(a)) ||
+       !read(0xB9618u,&global_a,sizeof(global_a)) ||
+       !read(0xB95B8u,b,sizeof(b)) ||
+       !read(0xB9618u,&global_b,sizeof(global_b)) ||
+       std::memcmp(a,b,sizeof(a))!=0 || global_a!=global_b)return out;
+    out.sampled=1;
+    out.controller_active=a[0]==0u ? 0 : (a[0]==1u ? 1 : 2);
+    out.controller4_nonzero=a[1]==0u ? 0 : 1;
+    out.pending=a[3]==0u ? 0 : (a[3]==1u ? 1 : 2);
+    out.global_nonzero=global_a==0u ? 0 : 1;
+    out.eligible_from_flags=int(
+        a[0]==1u && a[1]==0u && global_a==0u && a[3]==1u);
+    return out;
 }
 bool proto_read_depth(DWORD& out) {
     const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
@@ -1165,7 +1702,8 @@ proto::Identity proto_identity(DWORD handle,std::uint64_t generation,
 // a reused handle. These stdcall functions return void: no success proof.
 void proto_dispatch(proto::Dispatch action) {
     if(!action || !g_proto_enabled.load(std::memory_order_acquire))return;
-    if(action.count!=2 || !action.handle || !action.generation) {
+    if(action.count!=2 || !action.handle || !action.generation ||
+       !action.native_theme_key || !action.native_inner_key) {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
         g_proto.quarantine();
         return;
@@ -1186,9 +1724,18 @@ void proto_dispatch(proto::Dispatch action) {
                  g_proto.safety_current(action.generation));
             if(!authorized || g_proto.current_handle()!=action.handle)return;
         }
-        if(!proto_identity(action.handle,action.generation).valid()) {
-            const std::lock_guard<std::mutex> lock(g_proto_mutex);
-            g_proto.quarantine();
+        const auto live=proto_identity(action.handle,action.generation);
+        // The native player can advance from SXD 9:7 to 9:8 while ESC
+        // remains open, even when the driver handle is unchanged. The
+        // original implementation only tested live.valid(), which could
+        // issue a *synthetic safety Pause* to the new music generation.
+        if(!live.same_dispatch(action)) {
+            {
+                const std::lock_guard<std::mutex> lock(g_proto_mutex);
+                g_proto.quarantine();
+            }
+            proto_log("driver-command-rejected",
+                "theme-or-sxd-stream-changed-native-passthrough");
             return;
         }
         fn(action.handle);
@@ -1215,8 +1762,150 @@ void proto_call_original(std::uintptr_t rva) {
     if(!base)return;
     reinterpret_cast<NativeAudioWrapper>(base+rva)();
 }
+// The exact uploaded WAVMWbvr.dll (SHA256 cd0a0ad0...) dispatches
+// PauseTransitionSxd from the first DWORD of its *object pointer*.
+// Sample the tag ONLY after the unchanged original script wrapper has
+// returned. Never read game/driver memory inside its audio callbacks,
+// and never use this value to authorize/suppress native Pause/Resume.
+// This diagnostic is bounded by the existing first-16 ESC-source budget.
+int proto_read_transition_type_post_wrapper(DWORD object_ref) {
+    if(object_ref<0x10000u || object_ref==0xffffffffu)return -1;
+    DWORD type=0;
+    SIZE_T read=0;
+    const bool ok=ReadProcessMemory(
+        GetCurrentProcess(),
+        reinterpret_cast<const void*>(std::uintptr_t(object_ref)),
+        &type,sizeof(type),&read)!=0 && read==sizeof(type);
+    if(!ok)return -1;
+    return (type==1u || type==2u || type==4u) ? int(type) : 0;
+}
+// Actual owner-supplied WAVMWbvr.dll dispatches type 4 by reading
+// [transition+4] and passing that ADPCM handle to APMMXbvr.dll. The
+// owner-supplied APMMXbvr.dll checks [handle] against its 0xE4-stride
+// live record pool and writes [record+0x1C]=1 for Pause. This is a
+// bounded *post-compensation* snapshot only, NOT a stream identity
+// credential. Never retain raw pointers, guess a different DLL
+// version, or let this observation gate audio calls.
+struct ProtoAdpcmVoiceSnapshot {
+    int sampled=0;
+    int voice_index=-1;
+    int pause=-1;
+    int active=-1;
+    int other_gate=-1;
+    // Native APMMX mode-0/mode-1 global buffer-output positions.
+    // Neither is a per-voice stream epoch or a music-only counter.
+    DWORD mode0_output=0;
+    DWORD mode1_output=0;
+};
+ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {
+    ProtoAdpcmVoiceSnapshot out{};
+    if(ref<0x10000u || ref==0xffffffffu)return out;
+    const auto* wav=reinterpret_cast<const BYTE*>(
+        GetModuleHandleW(L"WAVMWbvr.dll"));
+    const auto* apm=reinterpret_cast<const BYTE*>(
+        GetModuleHandleW(L"APMMXbvr.dll"));
+    if(!wav || !apm)return out;
+    const auto original=g_audio_original[2u].load(std::memory_order_acquire);
+    if(reinterpret_cast<std::uintptr_t>(original)!=
+       reinterpret_cast<std::uintptr_t>(wav)+0xC7E0u)return out;
+    const auto read=[&](const void* ptr,void* dest,SIZE_T length) {
+        SIZE_T got=0;
+        return ReadProcessMemory(GetCurrentProcess(),ptr,dest,length,&got)!=0 &&
+            got==length;
+    };
+    const auto verified_pe=[&](const BYTE* module,DWORD time,DWORD size) {
+        IMAGE_DOS_HEADER dos{};
+        if(!read(module,&dos,sizeof(dos)) ||
+           dos.e_magic!=IMAGE_DOS_SIGNATURE ||
+           dos.e_lfanew<=0 || dos.e_lfanew>=0x1000)return false;
+        IMAGE_NT_HEADERS32 nt{};
+        return read(module+dos.e_lfanew,&nt,sizeof(nt)) &&
+            nt.Signature==IMAGE_NT_SIGNATURE &&
+            nt.FileHeader.Machine==IMAGE_FILE_MACHINE_I386 &&
+            nt.FileHeader.TimeDateStamp==time &&
+            nt.OptionalHeader.Magic==IMAGE_NT_OPTIONAL_HDR32_MAGIC &&
+            nt.OptionalHeader.SizeOfImage==size;
+    };
+    if(!verified_pe(wav,0x38076FB4u,0x87000u) ||
+       !verified_pe(apm,0x38076F98u,0xEE000u))return out;
+    constexpr BYTE wav_prefix[]{0x8B,0x4C,0x24,0x04,0x8B,0x01,0x48};
+    constexpr BYTE apm_prefix[]{
+        0x8B,0x44,0x24,0x04,0x50,0xE8,0xA6,0xDE,0xFF,0xFF,
+        0x83,0xC4,0x04,0xC2,0x04,0x00
+    };
+    BYTE wav_actual[sizeof(wav_prefix)]{};
+    BYTE apm_actual[sizeof(apm_prefix)]{};
+    if(!read(wav+0xC7E0u,wav_actual,sizeof(wav_actual)) ||
+       std::memcmp(wav_actual,wav_prefix,sizeof(wav_prefix))!=0 ||
+       !read(apm+0x54D0u,apm_actual,sizeof(apm_actual)) ||
+       std::memcmp(apm_actual,apm_prefix,sizeof(apm_prefix))!=0)return out;
+    // Verify that the actual WAVMW type-4 pause pointer is bound to
+    // this particular APMMX module, not a substitute loaded by the game.
+    DWORD delegate=0;
+    if(!read(wav+0x26A9Cu,&delegate,sizeof(delegate)) ||
+       std::uintptr_t(delegate)!=
+           reinterpret_cast<std::uintptr_t>(apm)+0x54D0u)return out;
+    DWORD transition[2]{};
+    if(!read(reinterpret_cast<const void*>(std::uintptr_t(ref)),
+             transition,sizeof(transition)) ||
+       transition[0]!=4u || transition[1]<0x10000u ||
+       transition[1]==0xffffffffu)return out;
+    const DWORD handle=transition[1]; // never retained outside this call
+    DWORD record=0;
+    DWORD count=0;
+    if(!read(reinterpret_cast<const void*>(std::uintptr_t(handle)),
+             &record,sizeof(record)) ||
+       !read(apm+0x24EC4u,&count,sizeof(count)) ||
+       !count || count>30u)return out;
+    constexpr std::uintptr_t pool_rva=0xE67D8u;
+    constexpr std::uintptr_t record_stride=0xE4u;
+    const std::uintptr_t pool=
+        reinterpret_cast<std::uintptr_t>(apm)+pool_rva;
+    if(std::uintptr_t(record)<pool ||
+       std::uintptr_t(record)>=pool+std::uintptr_t(count)*record_stride ||
+       (std::uintptr_t(record)-pool)%record_stride!=0u)return out;
+    const auto record_address=std::uintptr_t(record);
+    DWORD recorded_handle=0,pause=0,active=0,other=0;
+    DWORD record_after=0,count_after=0,pause_after=0,active_after=0;
+    DWORD mode0_output=0,mode1_output=0;
+    if(!read(apm+0xE82A0u,&mode0_output,sizeof(mode0_output)) ||
+       !read(apm+0x24ED0u,&mode1_output,sizeof(mode1_output)) ||
+       !read(reinterpret_cast<const void*>(record_address+0xD4u),
+             &recorded_handle,sizeof(recorded_handle)) ||
+       recorded_handle!=handle ||
+       !read(reinterpret_cast<const void*>(record_address+0x1Cu),
+             &pause,sizeof(pause)) ||
+       !read(reinterpret_cast<const void*>(record_address+0x28u),
+             &active,sizeof(active)) ||
+       !read(reinterpret_cast<const void*>(record_address+0xDCu),
+             &other,sizeof(other)) ||
+       !read(reinterpret_cast<const void*>(std::uintptr_t(handle)),
+             &record_after,sizeof(record_after)) ||
+       !read(apm+0x24EC4u,&count_after,sizeof(count_after)) ||
+       !read(reinterpret_cast<const void*>(record_address+0x1Cu),
+             &pause_after,sizeof(pause_after)) ||
+       !read(reinterpret_cast<const void*>(record_address+0x28u),
+             &active_after,sizeof(active_after)) ||
+       record_after!=record || count_after!=count ||
+       pause_after!=pause || active_after!=active)return out;
+    // A coherent *sample* cannot rule out ABA (inactive -> reused
+    // -> identical handle and slot between the two reads).
+    out.sampled=1;
+    out.voice_index=int((record_address-pool)/record_stride);
+    out.pause=pause==0u ? 0 : (pause==1u ? 1 : 2);
+    out.active=active==0u ? 0 : (active==1u ? 1 : 2);
+    out.other_gate=other==0u ? 0 : 1;
+    out.mode0_output=mode0_output;
+    out.mode1_output=mode1_output;
+    return out;
+}
 void __cdecl proto_script_pause() {
     bool adopted=false;
+    DWORD depth_before=0,depth_after=0;
+    bool depth_before_ok=false,depth_after_ok=false;
+    unsigned native_stop_before=0,native_stop_after=0;
+    unsigned native_play_before=0,native_play_after=0;
+    int transition_type_post_pause=-1;
     if(g_proto_enabled.load(std::memory_order_acquire)) {
         BYTE menu=0;
         DWORD depth=0;
@@ -1237,12 +1926,64 @@ void __cdecl proto_script_pause() {
             }
         }
     }
+    const unsigned predriver_sample=g_proto_predriver_probe_budget.fetch_add(
+        adopted && g_log ? 1u : 0u,std::memory_order_relaxed);
+    const bool predriver_trace=adopted && g_log && predriver_sample<16u;
+    if(predriver_trace) {
+        depth_before_ok=proto_read_depth(depth_before);
+        native_stop_before=g_proto_native_stop_calls.load(std::memory_order_acquire);
+        native_play_before=g_transition_play_calls.load(std::memory_order_acquire);
+        g_proto_predriver_probe=ProtoPreDriverProbe{};
+        g_proto_predriver_probe.active=true;
+    }
     {
         ProtoScope scope(proto::Origin::script_pause);
         proto_call_original(0x536D0); // unchanged verified native wrapper
     }
+    if(predriver_trace) {
+        g_proto_predriver_probe.active=false;
+        // No added work inside audio callbacks or before native pause.
+        // Both source-specific original calls must have used one object.
+        if(g_proto_predriver_probe.pause_count==2u &&
+           g_proto_predriver_probe.other_handle_count==0u)
+            transition_type_post_pause=proto_read_transition_type_post_wrapper(
+                g_proto_predriver_probe.first_handle);
+        depth_after_ok=proto_read_depth(depth_after);
+        native_stop_after=g_proto_native_stop_calls.load(std::memory_order_acquire);
+        native_play_after=g_transition_play_calls.load(std::memory_order_acquire);
+    }
     {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        if(predriver_trace) {
+            g_proto_predriver_report.ready=true;
+            g_proto_predriver_report.probe=g_proto_predriver_probe;
+            g_proto_predriver_report.t_ms=DWORD(GetTickCount()-
+                g_audio_origin.load(std::memory_order_acquire));
+            g_proto_predriver_report.depth_before=
+                depth_before_ok ? int(depth_before) : -1;
+            g_proto_predriver_report.depth_after=
+                depth_after_ok ? int(depth_after) : -1;
+            g_proto_predriver_report.native_stop_before=native_stop_before;
+            g_proto_predriver_report.native_stop_after=native_stop_after;
+            g_proto_predriver_report.native_play_before=native_play_before;
+            g_proto_predriver_report.native_play_after=native_play_after;
+            g_proto_predriver_report.transition_type_post_pause=
+                transition_type_post_pause;
+        }
+        if(adopted && predriver_trace) {
+            const bool overlap=g_proto_esc_lifetime_start.valid;
+            g_proto_esc_lifetime_start={
+                true,overlap,GetTickCount(),GetCurrentThreadId(),
+                g_proto_generation.load(std::memory_order_relaxed),
+                native_play_before,native_stop_before
+            };
+        } else if(g_proto_esc_lifetime_start.valid && !adopted) {
+            // An unexpected script-origin Pause breaks unique pairing.
+            g_proto_esc_lifetime_start.overlap=true;
+        } else if(adopted && !predriver_trace) {
+            // Out-of-budget opening: do not pair it with an older sample.
+            g_proto_esc_lifetime_start={};
+        }
         if(adopted)g_proto.end_script_pause();
         else if(g_proto.phase()==proto::Phase::audible_menu)
             g_proto.quarantine(); // independent nested script pause
@@ -1260,15 +2001,218 @@ void __cdecl proto_script_pause() {
     }
 }
 void __cdecl proto_script_resume() {
+    // The game retains its ORIGINAL resume wrapper and native driver calls.
+    // Passive counters must never delay or authorize an audio operation.
+    const bool enabled=g_proto_enabled.load(std::memory_order_acquire);
+    const bool eligible=enabled && g_log &&
+        g_proto_callsites_installed.load(std::memory_order_acquire);
+    const unsigned sample=g_proto_predriver_resume_budget.fetch_add(
+        eligible ? 1u : 0u,std::memory_order_relaxed);
+    const bool trace=eligible && sample<16u;
+    DWORD depth_before=0,depth_after=0;
+    bool depth_before_ok=false,depth_after_ok=false;
+    unsigned phase_before=0;
+    unsigned play_pre=0,stop_pre=0,play_post=0,stop_post=0;
+    ProtoEscLifetimeStart lifetime{};
+    if(trace) {
+        depth_before_ok=proto_read_depth(depth_before);
+        play_pre=g_transition_play_calls.load(std::memory_order_acquire);
+        stop_pre=g_proto_native_stop_calls.load(std::memory_order_acquire);
+        {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            phase_before=unsigned(g_proto.phase());
+            lifetime=g_proto_esc_lifetime_start;
+            g_proto_esc_lifetime_start={}; // never reuse the opener
+        }
+        g_proto_predriver_resume_probe=ProtoPreDriverResumeProbe{};
+        g_proto_predriver_resume_probe.active=true;
+    }
     {
         ProtoScope scope(proto::Origin::script_resume);
-        proto_call_original(0x53700);
+        proto_call_original(0x53700); // original, unmodified native script wrapper
     }
-    if(g_proto_enabled.load(std::memory_order_acquire)) {
+    if(trace) {
+        g_proto_predriver_resume_probe.active=false;
+        depth_after_ok=proto_read_depth(depth_after);
+        play_post=g_transition_play_calls.load(std::memory_order_acquire);
+        stop_post=g_proto_native_stop_calls.load(std::memory_order_acquire);
+    } else if(enabled && g_log) {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        g_proto_esc_lifetime_start={}; // exhausted budget: no stale pairing
+    }
+    if(enabled) {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
         g_proto.end_script_resume();
+        if(trace) {
+            g_proto_predriver_resume_report.ready=true;
+            g_proto_predriver_resume_report.probe=g_proto_predriver_resume_probe;
+            g_proto_predriver_resume_report.t_ms=DWORD(GetTickCount()-
+                g_audio_origin.load(std::memory_order_acquire));
+            g_proto_predriver_resume_report.depth_before=
+                depth_before_ok ? int(depth_before) : -1;
+            g_proto_predriver_resume_report.depth_after=
+                depth_after_ok ? int(depth_after) : -1;
+            g_proto_predriver_resume_report.phase_before=phase_before;
+            g_proto_predriver_resume_report.phase_after=unsigned(g_proto.phase());
+            const bool paired=lifetime.valid && !lifetime.overlap &&
+                lifetime.thread_id==GetCurrentThreadId() &&
+                lifetime.generation==
+                    g_proto_generation.load(std::memory_order_relaxed);
+            g_proto_predriver_resume_report.lifetime_paired=paired;
+            g_proto_predriver_resume_report.lifetime_overlap=lifetime.overlap;
+            if(paired) {
+                g_proto_predriver_resume_report.lifetime_elapsed_ms=
+                    DWORD(GetTickCount()-lifetime.start_tick);
+                g_proto_predriver_resume_report.play_between=
+                    play_pre-lifetime.play_before;
+                g_proto_predriver_resume_report.stop_between=
+                    stop_pre-lifetime.stop_before;
+                g_proto_predriver_resume_report.play_during_resume=
+                    play_post-play_pre;
+                g_proto_predriver_resume_report.stop_during_resume=
+                    stop_post-stop_pre;
+                g_proto_predriver_resume_report.sxd_baseline_valid=
+                    lifetime.sxd_baseline_valid;
+                g_proto_predriver_resume_report.sxd_first_bank=
+                    lifetime.sxd_first_bank;
+                g_proto_predriver_resume_report.sxd_first_index=
+                    lifetime.sxd_first_index;
+                g_proto_predriver_resume_report.sxd_last_bank=
+                    lifetime.sxd_last_bank;
+                g_proto_predriver_resume_report.sxd_last_index=
+                    lifetime.sxd_last_index;
+                g_proto_predriver_resume_report.sxd_samples=
+                    lifetime.sxd_samples;
+                g_proto_predriver_resume_report.sxd_changes=
+                    lifetime.sxd_changes;
+                g_proto_predriver_resume_report.sxd_unknown=
+                    lifetime.sxd_unknown;
+            }
+        }
     }
     proto_deferred_safety();
+}
+// Called ONLY on the render thread, after native menu audio decisions.
+// Unlike proto_menu_tick(), this also flushes when the FSM is already idle.
+void proto_flush_predriver_resume_report() {
+    if(!g_log)return;
+    ProtoPreDriverResumeReport report{};
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        if(!g_proto_predriver_resume_report.ready)return;
+        report=g_proto_predriver_resume_report;
+        g_proto_predriver_resume_report.ready=false;
+    }
+    const auto& probe=report.probe;
+    char line[540]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-ESC-PREDRIVER-RESUME: t_ms=%lu callbacks=%u "
+        "transition_resumes=%u other_slots=%u different_handles=%u "
+        "slots=%u,%u,%u,%u native_forwarded=%u native_suppressed=%u "
+        "depth_before=%d depth_after=%d phase_before=%u phase_after=%u "
+        "(script-origin read-only resume order; existing audio policy unchanged)",
+        static_cast<unsigned long>(report.t_ms),
+        probe.callback_count,probe.resume_count,probe.unrelated_slots,
+        probe.other_handle_count,
+        probe.first_slots[0],probe.first_slots[1],
+        probe.first_slots[2],probe.first_slots[3],
+        probe.forwarded_count,probe.suppressed_count,
+        report.depth_before,report.depth_after,
+        report.phase_before,report.phase_after);
+    log_line(line);
+    // This interval covers the full native menu lifetime, unlike the
+    // first-tick WINDOW trace. No zero counts may be interpreted when
+    // paired=0 (nested Pause, changed generation, or different thread).
+    char lifetime_line[370]{};
+    std::snprintf(lifetime_line,sizeof(lifetime_line),
+        "RUNTIME-ESC-PREDRIVER-LIFETIME: t_ms=%lu paired=%u overlap=%u "
+        "elapsed_ms=%lu play_between=%u stop_between=%u "
+        "play_during_resume=%u stop_during_resume=%u "
+        "(global observed calls only; unmatched deltas invalid; no audio changes)",
+        static_cast<unsigned long>(report.t_ms),
+        unsigned(report.lifetime_paired),unsigned(report.lifetime_overlap),
+        static_cast<unsigned long>(report.lifetime_elapsed_ms),
+        report.play_between,report.stop_between,
+        report.play_during_resume,report.stop_during_resume);
+    log_line(lifetime_line);
+    char resource_line[430]{};
+    std::snprintf(resource_line,sizeof(resource_line),
+        "RUNTIME-ESC-SXD-LIFETIME: t_ms=%lu paired=%u sampled=%u "
+        "first=%d:%d last=%d:%d samples=%u changes=%u unknown=%u "
+        "play_between=%u stop_between=%u "
+        "(sampled inner-resource provenance, NOT driver lifetime; no audio changes)",
+        static_cast<unsigned long>(report.t_ms),
+        unsigned(report.lifetime_paired),
+        unsigned(report.lifetime_paired && report.sxd_baseline_valid),
+        report.sxd_first_bank,report.sxd_first_index,
+        report.sxd_last_bank,report.sxd_last_index,
+        report.sxd_samples,report.sxd_changes,report.sxd_unknown,
+        report.play_between,report.stop_between);
+    log_line(resource_line);
+    // Original source-paired Resume completed on the game thread.
+    // The controller gate snapshot is diagnostic-only and cannot
+    // authorize physical driver operations or interpret a callback tick.
+    const ProtoThemeCallbackGuardSnapshot close_cb_guards=
+        report.lifetime_paired && !report.lifetime_overlap ?
+        proto_sample_theme_callback_guards() :
+        ProtoThemeCallbackGuardSnapshot{};
+    char close_cb_line[320]{};
+    std::snprintf(close_cb_line,sizeof(close_cb_line),
+        "RUNTIME-ESC-THEME-CALLBACK-GUARDS: stage=close t_ms=%lu "
+        "sampled=%d active=%d ctrl4_nonzero=%d pending=%d "
+        "global_nonzero=%d eligible_from_flags=%d "
+        "(post-original Resume; read-only; not execution proof)",
+        static_cast<unsigned long>(report.t_ms),
+        close_cb_guards.sampled,close_cb_guards.controller_active,
+        close_cb_guards.controller4_nonzero,close_cb_guards.pending,
+        close_cb_guards.global_nonzero,close_cb_guards.eligible_from_flags);
+    log_line(close_cb_line);
+    // This is an additional *observation*, NEVER an extra native
+    // TestIsPlaying call (that query can retire the original ADPCM
+    // record). Use the transition object just seen by the unmodified
+    // native resume callback, after its wrapper and outside all audio
+    // callbacks, on the render thread only. The pointer is never
+    // persisted; a new allocation may still alias the same pool slot.
+    // The ORIGINAL script-resume wrapper restarts ordinary sound
+    // effects as well as exactly two calls to the same music transition.
+    // The old unrelated_slots==0 filter rejected *every* real owner
+    // close (5-20 ordinary resumes) despite a valid same-handle pair.
+    // Ignore unrelated SOUND slots for observation only. Still refuse
+    // changed/unknown SXD streams, Play/Stop deltas, mismatched handles,
+    // incomplete callbacks and overlapping/non-paired script intervals.
+    // This gate never authorizes a native Pause/Resume/Stop command.
+    const bool source_pair=report.lifetime_paired &&
+        !report.lifetime_overlap && report.sxd_baseline_valid &&
+        report.sxd_changes==0u && report.sxd_unknown==0u &&
+        probe.resume_count==2u && probe.other_handle_count==0u &&
+        probe.callback_count==probe.resume_count+probe.unrelated_slots &&
+        probe.forwarded_count+probe.suppressed_count==2u &&
+        probe.first_handle>=0x10000u &&
+        probe.first_handle!=0xffffffffu &&
+        report.play_between==0u && report.stop_between==0u &&
+        report.play_during_resume==0u && report.stop_during_resume==0u;
+    const int transition_type=source_pair ?
+        proto_read_transition_type_post_wrapper(probe.first_handle) : -1;
+    const ProtoAdpcmVoiceSnapshot adpcm_voice=
+        source_pair && transition_type==4 ?
+        proto_sample_adpcm_voice_after_dispatch(probe.first_handle) :
+        ProtoAdpcmVoiceSnapshot{};
+    char voice_line[480]{};
+    std::snprintf(voice_line,sizeof(voice_line),
+        "RUNTIME-ESC-ADPCM-RESUME: t_ms=%lu paired=%u gate=%u "
+        "sampled=%d voice_index=%d paused=%d active=%d "
+        "other_gate=%d transition_type=%d "
+        "mode0_output=%lu mode1_output=%lu snapshot=post-native-resume "
+        "(render-thread read-only, no native TestIsPlaying; "
+        "no raw pointers; ABA not excluded; no audio authorization)",
+        static_cast<unsigned long>(report.t_ms),
+        unsigned(report.lifetime_paired),unsigned(source_pair),
+        adpcm_voice.sampled,
+        adpcm_voice.voice_index,adpcm_voice.pause,adpcm_voice.active,
+        adpcm_voice.other_gate,transition_type,
+        static_cast<unsigned long>(adpcm_voice.mode0_output),
+        static_cast<unsigned long>(adpcm_voice.mode1_output));
+    log_line(voice_line);
 }
 // Focus is a Win32/Wine activation event, not necessarily visible to
 // GetForegroundWindow() on the game's render thread. The renderer can be
@@ -1337,6 +2281,10 @@ bool proto_allow_resume(DWORD handle) {
     return g_proto.native_resume(handle,g_proto_origin);
 }
 void proto_record_stop(DWORD handle) {
+    // Observe the native Stop before it reaches the original driver. This
+    // counter is never read by the audio coordinator and never suppresses
+    // or changes a Stop call.
+    g_proto_native_stop_calls.fetch_add(1u,std::memory_order_relaxed);
     const std::lock_guard<std::mutex> lock(g_proto_mutex);
     g_proto.native_stop(handle);
 }
@@ -1419,13 +2367,202 @@ void proto_install_callsites() {
     proto_log("source-hooks-installed","script-and-win32-focus-separated");
 }
 bool proto_esc_menu_actor_open();
+// One-time, bounded diagnostic for a rejected first music-owner verdict.
+// No raw driver pointers are emitted; this never changes authorization.
+void proto_log_owner_rejection(DWORD handle,DWORD elapsed_ms,
+                               const char* event="rejected") {
+    if(!g_log)return;
+    const DWORD before=GetTickCount();
+    const auto owner=inspect_audio_theme_owner(handle,true);
+    char line[850]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-ESC-OWNER-DIAG: event=%s pending_ms=%lu owner_scan_ms=%lu "
+        "outer_candidates=%u inner_active=%u inner_transition=%u "
+        "inner_driver_matches=%u theme_owned_driver=%u "
+        "native_player_ref_match=%d native_player_ref_class=%d "
+        "pending_switch_state=%d pending_target_matches_outer=%d "
+        "pending_target_differs_current=%d "
+        "alt_ref_bank=%d alt_ref_index=%d alt_ref_same_bank=%d "
+        "alt_ref_complete=%u alt_ref_candidates=%u "
+        "outer_bank_complete=%u "
+        "outer_bank_candidates=%u outer_bank=%d outer_index=%d "
+        "inner_bank_complete=%u inner_bank_candidates=%u "
+        "inner_bank=%d inner_index=%d (bounded read-only; no raw pointers)",
+        event,static_cast<unsigned long>(elapsed_ms),
+        static_cast<unsigned long>(GetTickCount()-before),
+        owner.outer_candidates,owner.inner_active,owner.inner_transition,
+        owner.inner_driver_matches,owner.theme_owned_driver,
+        owner.native_theme_player_ref_matches_outer,
+        owner.native_theme_player_ref_class,
+        owner.native_theme_pending_state,
+        owner.native_pending_target_matches_outer,
+        owner.native_pending_target_differs_current,
+        owner.alternative_ref_bank,
+        owner.alternative_ref_index,
+        owner.alternative_ref_same_bank,
+        owner.alternative_ref_complete,
+        owner.alternative_ref_candidates,
+        owner.outer_bank_provenance.list_complete,
+        owner.outer_bank_provenance.candidates,
+        owner.outer_bank_provenance.bank_id,
+        owner.outer_bank_provenance.resource_index,
+        owner.inner_bank_provenance.list_complete,
+        owner.inner_bank_provenance.candidates,
+        owner.inner_bank_provenance.bank_id,
+        owner.inner_bank_provenance.resource_index);
+    log_line(line);
+}
+// Observe early Theme controller and SXD ownership changes on the game's
+// render thread. Every 40ms, sample cheap original controller fields and
+// the 64 small native sound records. Track both Theme and SXD DESCRIPTOR
+// references: the nested record pointer can remain constant while its
+// active resource changes. Ignore menu-only toggles to preserve the
+// 24-event budget for actual music transitions in the first 120 seconds.
+// Full bank provenance runs *only* on a music-state change.
+// No audio driver call, patch or mutable game state.
+// Only annotate an already sampled source-specific ESC lifetime. The
+// owner provenance was read by other existing diagnostics, outside driver
+// callbacks and after the current compensation decisions. No call here
+// may authorize or veto a Pause, Resume, or Stop.
+void proto_note_sampled_sxd(const AudioThemeOwnerContext& owner,
+                           bool menu_visible) {
+    if(!menu_visible || !g_log)return;
+    const bool known=owner.inner_active==1u &&
+        owner.inner_transition==1u &&
+        owner.inner_bank_provenance.list_complete==1u &&
+        owner.inner_bank_provenance.candidates==1u &&
+        owner.inner_bank_provenance.bank_id>=0 &&
+        owner.inner_bank_provenance.resource_index>=0;
+    const std::lock_guard<std::mutex> lock(g_proto_mutex);
+    auto& sample=g_proto_esc_lifetime_start;
+    if(!sample.valid || sample.overlap)return;
+    if(!known) {
+        ++sample.sxd_unknown;
+        return;
+    }
+    const int bank=owner.inner_bank_provenance.bank_id;
+    const int index=owner.inner_bank_provenance.resource_index;
+    if(!sample.sxd_baseline_valid) {
+        sample.sxd_baseline_valid=true;
+        sample.sxd_first_bank=bank;
+        sample.sxd_first_index=index;
+    } else if(sample.sxd_last_bank!=bank || sample.sxd_last_index!=index) {
+        ++sample.sxd_changes;
+    }
+    sample.sxd_last_bank=bank;
+    sample.sxd_last_index=index;
+    ++sample.sxd_samples;
+}
+void proto_theme_transition_watch_tick() {
+    if(!g_proto_callsites_installed.load(std::memory_order_acquire) ||
+       !g_proto_enabled.load(std::memory_order_acquire) || !g_log)return;
+    static proto::ThemeRefWatchPolicy watch;
+    static DWORD last_sample=0;
+    const DWORD now=GetTickCount();
+    const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
+    if(!origin || DWORD(now-origin)>proto::ThemeRefWatchPolicy::kWindowMs)
+        return;
+    if(last_sample && DWORD(now-last_sample)<40u)return;
+    last_sample=now;
+    const auto* module=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!module)return;
+    const auto read_native=[&](std::uintptr_t rva,void* data,SIZE_T size) {
+        SIZE_T bytes=0;
+        return ReadProcessMemory(GetCurrentProcess(),module+rva,
+                                 data,size,&bytes)!=0 && bytes==size;
+    };
+    DWORD controller_words[6]{}; // +0x00 active, +0x0C state, +0x14 Theme ref
+    DWORD nested=0;
+    BYTE menu=0;
+    // One small read of the original 64 x 32 byte sound-record table.
+    // A Theme or SXD descriptor may change *within* the same record:
+    // controller pointer and nested record pointer alone missed this
+    // transition in the owner's 14:30 Wine endurance trace.
+    struct NativeSoundRecord { DWORD words[8]; };
+    NativeSoundRecord records[64]{};
+    if(!read_native(0xB95B8,controller_words,sizeof(controller_words)) ||
+       !read_native(0xB95E8,&nested,sizeof(nested)) ||
+       !read_native(0xB8C98,records,sizeof(records)) ||
+       !proto_game_read(0xB9BC8,menu))return;
+    const DWORD singleton=static_cast<DWORD>(
+        reinterpret_cast<std::uintptr_t>(module)+0xB95B8);
+    DWORD outer_descriptor=0;
+    unsigned outer_matches=0;
+    for(const auto& record:records) {
+        if(record.words[0]!=singleton || record.words[5]==0u)continue;
+        ++outer_matches;
+        if(outer_matches==1u)outer_descriptor=record.words[1];
+    }
+    if(outer_matches!=1u)outer_descriptor=0;
+    DWORD inner_descriptor=0;
+    const auto ref=decode_audio_nested_record_ref(nested,module);
+    if(ref.table_index>=0) {
+        const auto& record=records[ref.table_index];
+        if(record.words[5]!=0u)inner_descriptor=record.words[1];
+    }
+    const proto::ThemeRefWatchInput snapshot{
+        controller_words[0],controller_words[3],controller_words[5],
+        nested,outer_descriptor,inner_descriptor,menu
+    };
+    if(!watch.observe(snapshot,DWORD(now-origin)))return;
+
+    // The native descriptor is only classified in this diagnostic branch.
+    // Passing 0 deliberately prevents an unproven driver-owner assertion.
+    const auto owner=inspect_audio_theme_owner(0,true);
+    // This is a change-triggered sample, not continuous surveillance.
+    // A missing transition cannot be taken as proof that the stream stood still.
+    proto_note_sampled_sxd(owner,menu!=0u);
+    char line[760]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-ESC-THEME-WATCH: seq=%u t_ms=%lu menu=%u active=%lu "
+        "controller_field0c=%lu ref_class=%d ref_match=%d "
+        "pending_switch_state=%d pending_target_matches_outer=%d "
+        "pending_target_differs_current=%d "
+        "outer_candidates=%u outer_bank=%d outer_index=%d "
+        "inner_active=%u inner_transition=%u inner_bank=%d inner_index=%d "
+        "alt_bank=%d alt_index=%d alt_same_bank=%d "
+        "outer_complete=%u inner_complete=%u alt_complete=%u "
+        "(read-only bounded controller-change sample; no raw pointers)",
+        watch.events(),static_cast<unsigned long>(now-origin),
+        unsigned(menu),static_cast<unsigned long>(controller_words[0]),
+        static_cast<unsigned long>(controller_words[3]),
+        owner.native_theme_player_ref_class,
+        owner.native_theme_player_ref_matches_outer,
+        owner.native_theme_pending_state,
+        owner.native_pending_target_matches_outer,
+        owner.native_pending_target_differs_current,
+        owner.outer_candidates,
+        owner.outer_bank_provenance.bank_id,
+        owner.outer_bank_provenance.resource_index,
+        owner.inner_active,owner.inner_transition,
+        owner.inner_bank_provenance.bank_id,
+        owner.inner_bank_provenance.resource_index,
+        owner.alternative_ref_bank,owner.alternative_ref_index,
+        owner.alternative_ref_same_bank,
+        owner.outer_bank_provenance.list_complete,
+        owner.inner_bank_provenance.list_complete,
+        owner.alternative_ref_complete);
+    log_line(line);
+}
 void proto_menu_tick() {
     if(!g_proto_callsites_installed.load(std::memory_order_acquire))return;
-    // The approved game's loaded-bank traversal is bounded but nontrivial;
-    // do not rescan every 16ms on the render thread.
+    // The full bank/actor scan is bounded but nontrivial; keep the 75ms
+    // safety cadence outside pending transitions. During an ESC opening,
+    // a cheap menu-byte check removes up to 75ms of avoidable audible
+    // silence before the two native ResumeTransitionSxd calls.
     static DWORD last_probe=0;
     const DWORD now=GetTickCount();
-    if(last_probe && DWORD(now-last_probe)<75u)return;
+    if(last_probe && DWORD(now-last_probe)<75u) {
+        bool pending=false;
+        {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            pending=g_proto.phase()==proto::Phase::pending_menu;
+        }
+        if(!pending)return;
+        BYTE menu_quick=0;
+        if(proto_game_read(0xB9BC8,menu_quick) && menu_quick==0u)
+            return; // no expensive bank scan while awaiting native UI
+    }
     last_probe=now;
     proto::Phase phase=proto::Phase::idle;
     DWORD started=0;
@@ -1451,19 +2588,165 @@ void proto_menu_tick() {
     // independent observation of the live actor YAM_GenMenuMap_I1
     // whose appearance at ESC was confirmed in the owner's Nov 14 log.
     // Only inspect it once on the pending->menu-open transition.
+    const DWORD verify_start=GetTickCount();
     const bool actor_ok=!(phase==proto::Phase::pending_menu &&
                           known && menu!=0) ||
                          proto_esc_menu_actor_open();
-    const bool current=actor_ok &&
-        proto_identity(handle,generation).valid();
+    const proto::Identity live=actor_ok ?
+        proto_identity(handle,generation) : proto::Identity{};
+    const DWORD verify_ms=DWORD(GetTickCount()-verify_start);
     proto::Dispatch action{};
+    bool current=false;
     {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        // Do not confuse "valid live music" with "the SAME music" that
+        // owns our two previously observed PauseTransitionSxd calls.
+        current=actor_ok && g_proto.owner_same(live);
         action=g_proto.menu_tick(known && actor_ok,menu!=0,
                                  game_window_is_foreground(),current);
     }
-    // One bounded verdict per actual pending -> menu-open observation.
-    // This diagnostic is never used to authorize a native call.
+    // NEVER synchronously write the menu verdict BEFORE the native audio
+    // compensation: CreateFile/WriteFile/CloseHandle on Wine can make the
+    // brief original pause audible. The verdict is diagnostic only.
+    const DWORD dispatch_start=GetTickCount();
+    proto_dispatch(action);
+    proto_deferred_safety();
+    const DWORD dispatch_ms=DWORD(GetTickCount()-dispatch_start);
+    // Consume diagnostics only AFTER the critical audio compensation path.
+    // Callback telemetry was gathered before original driver forwarding,
+    // but no native audio callback has ever been delayed by its file I/O.
+    ProtoPreDriverReport report{};
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        if(g_proto_predriver_report.ready) {
+            report=g_proto_predriver_report;
+            g_proto_predriver_report.ready=false;
+        }
+    }
+    if(report.ready && g_log) {
+        const auto& probe=report.probe;
+        // Run the nontrivial read-only check AFTER current native audio
+        // compensation, never in the original wrapper's critical path.
+        // Early rejected menus have not been compensated; accepted
+        // menus may already be resumed at this observation point.
+        const auto adpcm_voice=
+            report.transition_type_post_pause==4 &&
+            probe.pause_count==2u && probe.other_handle_count==0u ?
+            proto_sample_adpcm_voice_after_dispatch(probe.first_handle) :
+            ProtoAdpcmVoiceSnapshot{};
+        const auto owner=inspect_audio_theme_owner(probe.first_handle,true);
+        // Use the source-verified opening snapshot as the baseline;
+        // watch-only sampling could otherwise miss the first menu interval.
+        proto_note_sampled_sxd(owner,known && menu!=0 && actor_ok);
+        char line[590]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-ESC-PREDRIVER-GATE: t_ms=%lu callbacks=%u "
+            "transition_pauses=%u other_slots=%u different_handles=%u "
+            "slots=%u,%u,%u,%u depth_before=%d depth_after=%d "
+            "owner_driver=%u outer_candidates=%u native_ref_class=%d "
+            "native_ref_match=%d outer_bank=%d outer_index=%d "
+            "inner_bank=%d inner_index=%d "
+            "transition_type_post_pause=%d "
+            "(script-origin read-only pre-driver order; all native calls forwarded)",
+            static_cast<unsigned long>(report.t_ms),
+            probe.callback_count,probe.pause_count,probe.unrelated_slots,
+            probe.other_handle_count,
+            probe.first_slots[0],probe.first_slots[1],
+            probe.first_slots[2],probe.first_slots[3],
+            report.depth_before,report.depth_after,
+            owner.theme_owned_driver,owner.outer_candidates,
+            owner.native_theme_player_ref_class,
+            owner.native_theme_player_ref_matches_outer,
+            owner.outer_bank_provenance.bank_id,
+            owner.outer_bank_provenance.resource_index,
+            owner.inner_bank_provenance.bank_id,
+            owner.inner_bank_provenance.resource_index,
+            report.transition_type_post_pause);
+        log_line(line);
+        // Only compare the ORIGINAL controller gate values after
+        // the native Pause and all existing synthetic safety decisions.
+        // Eligible flags are never permission to issue a music command.
+        const ProtoThemeCallbackGuardSnapshot cb_guards=
+            owner.theme_owned_driver==1u &&
+            report.transition_type_post_pause==4 ?
+            proto_sample_theme_callback_guards() :
+            ProtoThemeCallbackGuardSnapshot{};
+        char cb_guard_line[320]{};
+        std::snprintf(cb_guard_line,sizeof(cb_guard_line),
+            "RUNTIME-ESC-THEME-CALLBACK-GUARDS: stage=open t_ms=%lu "
+            "sampled=%d active=%d ctrl4_nonzero=%d pending=%d "
+            "global_nonzero=%d eligible_from_flags=%d "
+            "(original CD callback guards; read-only; not execution proof)",
+            static_cast<unsigned long>(report.t_ms),
+            cb_guards.sampled,cb_guards.controller_active,
+            cb_guards.controller4_nonzero,cb_guards.pending,
+            cb_guards.global_nonzero,cb_guards.eligible_from_flags);
+        log_line(cb_guard_line);
+        // The snapshot is from AFTER existing native audio dispatch.
+        // Early rejected menus may retain Pause=1, while compensated
+        // menus may show Pause=0; this is diagnostic only.
+        char adpcm_line[470]{};
+        std::snprintf(adpcm_line,sizeof(adpcm_line),
+            "RUNTIME-ESC-ADPCM-VOICE: t_ms=%lu sampled=%d voice_index=%d "
+            "paused=%d active=%d other_gate=%d transition_type=%d "
+            "mode0_output=%lu mode1_output=%lu snapshot=post-dispatch "
+            "(original 1999 WAVMW/APMMX only; post-compensation read-only; "
+            "no raw pointers; no audio authorization; ABA not excluded)",
+            static_cast<unsigned long>(report.t_ms),
+            adpcm_voice.sampled,adpcm_voice.voice_index,
+            adpcm_voice.pause,adpcm_voice.active,adpcm_voice.other_gate,
+            report.transition_type_post_pause,
+            static_cast<unsigned long>(adpcm_voice.mode0_output),
+            static_cast<unsigned long>(adpcm_voice.mode1_output));
+        log_line(adpcm_line);
+        // Read-only source-window audit. Snapshot the global native Play
+        // and Stop call counts before/after the script wrapper and at the
+        // subsequent menu tick, AFTER all existing audio decisions.
+        // These are not per-song counters and MUST NOT authorize bypass.
+        const unsigned stop_tick=g_proto_native_stop_calls.load(
+            std::memory_order_acquire);
+        const unsigned play_tick=g_transition_play_calls.load(
+            std::memory_order_acquire);
+        char window[340]{};
+        std::snprintf(window,sizeof(window),
+            "RUNTIME-ESC-PREDRIVER-WINDOW: t_ms=%lu "
+            "stop_during_wrapper=%u stop_after_wrapper=%u "
+            "play_during_wrapper=%u play_after_wrapper=%u "
+            "menu_known=%u esc_actor_confirmed=%u "
+            "(read-only global events, not a music-owner proof; audio unchanged)",
+            static_cast<unsigned long>(report.t_ms),
+            report.native_stop_after-report.native_stop_before,
+            stop_tick-report.native_stop_after,
+            report.native_play_after-report.native_play_before,
+            play_tick-report.native_play_after,
+            unsigned(known),
+            unsigned(known && menu!=0 && actor_ok));
+        log_line(window);
+        // Compare native delegate provenance at most twice: once with
+        // the original pending Theme ref (class 3) and once with the
+        // synchronized original ref (class 1). In both cases the source
+        // is verified and ALL native menu audio dispatch has completed.
+        // These are pointer snapshots, not proof that any query ran.
+        static bool adpcm_targets_logged_pending=false;
+        static bool adpcm_targets_logged_synced=false; // render thread only
+        const int cls=owner.native_theme_player_ref_class;
+        const bool can_trace_delegate=
+            report.transition_type_post_pause==4 &&
+            ((cls==3 && !adpcm_targets_logged_pending) ||
+             (cls==1 && !adpcm_targets_logged_synced));
+        if(can_trace_delegate) {
+            if(cls==3)adpcm_targets_logged_pending=true;
+            else adpcm_targets_logged_synced=true;
+            char context[250]{};
+            std::snprintf(context,sizeof(context),
+                "RUNTIME-AUDIO-ADPCM-DELEGATE-CONTEXT: ref_class=%d "
+                "stage=%s (source-confirmed post-dispatch, "
+                "resolution is NOT invocation)",
+                cls,cls==3 ? "pending" : "synchronized");
+            log_line(context);
+            log_adpcm_delegate_origins_readonly();
+        }
+    }
     if(phase==proto::Phase::pending_menu && known && menu!=0) {
         proto_log("menu-verdict",
             !actor_ok ? "escape-menu-actor-not-verified" :
@@ -1471,15 +2754,71 @@ void proto_menu_tick() {
             action.command==proto::Command::resume ?
                 "paired-native-resume-requested" :
                 "candidate-rejected-native-audio-unchanged");
+        if(g_log) {
+            char timing[190]{};
+            std::snprintf(timing,sizeof(timing),
+                "RUNTIME-ESC-PERF: t_ms=%lu pending_ms=%lu verify_ms=%lu "
+                "dispatch_ms=%lu compensated=%u (timings captured before verdict log)",
+                static_cast<unsigned long>(now-
+                    g_audio_origin.load(std::memory_order_acquire)),
+                static_cast<unsigned long>(now-started),
+                static_cast<unsigned long>(verify_ms),
+                static_cast<unsigned long>(dispatch_ms),
+                unsigned(action.command==proto::Command::resume));
+            log_line(timing);
+        }
+        // The rejection code above covers several different native
+        // ownership gates. Inspect ONE rejected owner after all audio
+        // dispatch decisions, to establish the first-ESC root cause.
+        static bool first_owner_rejection_logged=false;
+        static bool first_owner_accepted_logged=false;
+        if(g_log && actor_ok && !current &&
+           !first_owner_rejection_logged) {
+            first_owner_rejection_logged=true;
+            proto_log_owner_rejection(handle,DWORD(now-started));
+        } else if(g_log && actor_ok && current &&
+                  !first_owner_accepted_logged) {
+            first_owner_accepted_logged=true;
+            proto_log_owner_rejection(handle,DWORD(now-started),"accepted");
+        }
     }
-    proto_dispatch(action);
-    proto_deferred_safety();
 }
-#endif // RAYMAN2FIX_ESC_MUSIC_PROTO
+#endif // RAYMAN2FIX_ESC_MUSIC_ACTIVE
 
 void audio_trace_forward(unsigned slot,DWORD arg) {
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+    // Record the true order BEFORE any native driver operation, on the
+    // game-script source thread only. Nothing is suppressed or deferred.
+    auto& probe=g_proto_predriver_probe;
+    if(probe.active && g_proto_origin==proto::Origin::script_pause) {
+        if(probe.callback_count<4u)
+            probe.first_slots[probe.callback_count]=slot;
+        ++probe.callback_count;
+        if(slot==2u) {
+            if(!probe.pause_count)probe.first_handle=arg;
+            else if(probe.first_handle!=arg)++probe.other_handle_count;
+            ++probe.pause_count;
+        } else {
+            ++probe.unrelated_slots;
+        }
+    }
+    auto& resume_probe=g_proto_predriver_resume_probe;
+    if(resume_probe.active && g_proto_origin==proto::Origin::script_resume) {
+        if(resume_probe.callback_count<4u)
+            resume_probe.first_slots[resume_probe.callback_count]=slot;
+        ++resume_probe.callback_count;
+        if(slot==3u) {
+            if(!resume_probe.resume_count)resume_probe.first_handle=arg;
+            else if(resume_probe.first_handle!=arg)++resume_probe.other_handle_count;
+            ++resume_probe.resume_count;
+        } else {
+            ++resume_probe.unrelated_slots;
+        }
+    }
+#endif
     const auto original=reinterpret_cast<AudioPauseFn>(
         g_audio_original[slot].load(std::memory_order_acquire));
+#if RAYMAN2FIX_AUDIO_TRACE
     // Count and bound diagnostics BEFORE the native driver call. Crucially,
     // do not scan 64 sound records for every sound event after budget
     // exhaustion: this research tracer must stay cheap during gameplay.
@@ -1528,7 +2867,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
             preview ? &scanned_words : nullptr,
             preview ? &wrapper_returns : nullptr,
             preview ? &confirmed_pairs : nullptr);
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
         // The experimental source detours insert a DLL frame, so
         // return-address-based origin parsing can report "unknown".
         // Restore the proven source from the scoped, per-thread wrapper
@@ -1549,7 +2888,8 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         }
 #endif
     }
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#endif // research-only per-call sound diagnostics
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
     bool forwarded=true;
     if(g_proto_enabled.load(std::memory_order_acquire) &&
        g_proto_callsites_installed.load(std::memory_order_acquire)) {
@@ -1560,6 +2900,11 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
         if(slot==10u || slot==11u)proto_record_stop(arg);
     }
     if(original && forwarded)original(arg);
+    if(resume_probe.active && g_proto_origin==proto::Origin::script_resume &&
+       slot==3u) {
+        if(forwarded)++resume_probe.forwarded_count;
+        else ++resume_probe.suppressed_count;
+    }
     if(g_proto_enabled.load(std::memory_order_acquire) &&
        g_proto_callsites_installed.load(std::memory_order_acquire) &&
        slot==2u && g_proto_origin==proto::Origin::script_pause)
@@ -1568,6 +2913,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
 #else
     if(original) original(arg);
 #endif
+#if RAYMAN2FIX_AUDIO_TRACE
     if(!sampled)return;
     const DWORD origin=g_audio_origin.load(std::memory_order_acquire);
     char line[1024]{};
@@ -1622,6 +2968,7 @@ void audio_trace_forward(unsigned slot,DWORD arg) {
             code_rva_preview[0] ? code_rva_preview : "none");
         log_line(stack_line);
     }
+#endif // research-only driver trace
 }
 void __stdcall audio_pause_sxd(DWORD a){audio_trace_forward(0,a);}
 void __stdcall audio_resume_sxd(DWORD a){audio_trace_forward(1,a);}
@@ -1765,7 +3112,7 @@ AudioMenuActorSnapshot inspect_audio_menu_actor_readonly() {
     }
     return out;
 }
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
 bool proto_esc_menu_actor_open() {
     const auto snapshot=inspect_audio_menu_actor_readonly();
     return snapshot.type_found==1 &&
@@ -1775,11 +3122,24 @@ bool proto_esc_menu_actor_open() {
 #endif
 
 void poll_audio_pause_trace() {
-    if(!g_log || InterlockedCompareExchange(&g_audio_poll_guard,1,0)!=0)
+    // Normal runtime installs no audio hooks at all when the feature
+    // is disabled. Research tracing remains an explicit build-only mode.
+#if RAYMAN2FIX_AUDIO_TRACE
+    if(!g_log)return;
+#else
+    if(!g_proto_enabled.load(std::memory_order_acquire))return;
+#endif
+    if(InterlockedCompareExchange(&g_audio_poll_guard,1,0)!=0)
         return;
     const DWORD now=GetTickCount();
     const DWORD last=g_audio_last_poll.load(std::memory_order_relaxed);
-    if(last && DWORD(now-last)<500u) {
+    if(last && DWORD(now-last)<
+#if RAYMAN2FIX_AUDIO_TRACE
+       500u
+#else
+       125u
+#endif
+       ) {
         InterlockedExchange(&g_audio_poll_guard,0);
         return;
     }
@@ -1799,6 +3159,7 @@ void poll_audio_pause_trace() {
        pe->OptionalHeader.SizeOfImage<0xB8840) {
         InterlockedExchange(&g_audio_poll_guard,0);return;
     }
+#if RAYMAN2FIX_AUDIO_TRACE
     // Independently inspect the original game's MENU flag and ENGINE pause
     // flag. 0x4B9BC8 is ACP_Ray2 AI_g_bInGameMenu, set by VM opcode 0x1F8.
     // 0x500640 belongs to GAM engine timer pause/unpause, not the ESC menu.
@@ -1869,9 +3230,14 @@ void poll_audio_pause_trace() {
             log_line(msg);
         }
     }
+#endif // researcher-only UI and nested pause samples
     const auto begin=reinterpret_cast<std::uintptr_t>(module);
     const auto end=begin+pe->OptionalHeader.SizeOfImage;
     for(unsigned i=0;i<kAudioSlotCount;++i) {
+#if !RAYMAN2FIX_AUDIO_TRACE
+        // No MIDI/CD/volume hooks in the production game.
+        if(i!=2u && i!=3u && i!=10u && i!=11u)continue;
+#endif
         auto* ptr=reinterpret_cast<PVOID volatile*>(module+kAudioSlots[i].rva);
         if(!writable_audio_slot(const_cast<const void*>(
               reinterpret_cast<volatile void*>(ptr))))continue;
@@ -1886,16 +3252,28 @@ void poll_audio_pause_trace() {
         if(InterlockedCompareExchangePointer(ptr,hook,current)==current) {
             const unsigned n=g_audio_hooks_installed.fetch_add(
                 1u,std::memory_order_relaxed)+1u;
-            if(n<=kAudioSlotCount) {
+            if(n<=kAudioSlotCount && g_log) {
+#if RAYMAN2FIX_AUDIO_TRACE
                 char line[140]{};
                 std::snprintf(line,sizeof(line),
                     "RUNTIME-AUDIO-TRACE: installed=%s slot_rva=0x%06X (calls forwarded; research-only)",
                     kAudioSlots[i].name,unsigned(kAudioSlots[i].rva));
                 log_line(line);
                 log_audio_driver_module(i,current);
+#else
+                // The original thunk's owning module is stronger evidence
+                // than the Snd_Cpa.ini default: the CPA loader can choose a
+                // tested fallback. Reuse the research-only FROM_ADDRESS probe
+                // solely at installation, never in an audio callback. It
+                // reports basename+RVA, never a user's filesystem path,
+                // and changes no native call/ABI or driver configuration.
+                proto_log("driver-hook-installed",kAudioSlots[i].name);
+                log_audio_driver_module(i,current);
+#endif
             }
         }
     }
+#if RAYMAN2FIX_AUDIO_TRACE
     // Hook the five-argument transition playback API independently from
     // the one-argument pause/stop table: mixing their signatures would
     // corrupt the x86 stdcall stack.
@@ -1915,12 +3293,13 @@ void poll_audio_pause_trace() {
                          "(five args/result forwarded unchanged; research-only)");
         }
     }
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#endif // research-only PlayTransitionExSxd hook
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
     proto_install_callsites();
 #endif
     InterlockedExchange(&g_audio_poll_guard,0);
 }
-#endif // RAYMAN2FIX_AUDIO_TRACE
+#endif // RAYMAN2FIX_AUDIO_HOOKS
 
 
 
@@ -2950,10 +4329,13 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
     // Camera adjustment executes on the game's own render/main thread.
     // Use it only as a safe tick to request a *deferred* native transition.
     poll_second_intro_skip();
-#if RAYMAN2FIX_AUDIO_TRACE
+#if RAYMAN2FIX_AUDIO_HOOKS
     poll_audio_pause_trace();
-#if RAYMAN2FIX_ESC_MUSIC_PROTO
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
     proto_menu_tick();
+    // Never defer native ESC compensation behind diagnostic disk I/O.
+    proto_theme_transition_watch_tick();
+    proto_flush_predriver_resume_report(); // after audio decisions; never in hook
 #endif
 #endif
 #if RAYMAN2FIX_RESEARCH_PROBES
@@ -4812,6 +6194,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
+    if(settings->music_in_pause_menu>1u)return 5;
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
 #if RAYMAN2FIX_ESC_MUSIC_PROTO
     wchar_t proto_flag[8]{};
     const DWORD flag_size=GetEnvironmentVariableW(
@@ -4820,12 +6204,23 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_proto_enabled.store(explicit_opt_in && g_log,std::memory_order_release);
     if(g_proto_enabled.load(std::memory_order_acquire))
         log_line("RUNTIME-ESC-PROTOTYPE: enabled=1 experiment=paired-SXD "
-                 "ESC+UI-transition+Theme-player; NOT validated music identity; "
-                 "preserve original game files");
+                 "ESC+UI-transition+Theme-player; preserve original game files");
+#else
+    g_proto_enabled.store(settings->music_in_pause_menu==1u,
+                          std::memory_order_release);
+    if(g_proto_enabled.load(std::memory_order_acquire))
+        log_line("RUNTIME-ESC-MUSIC: enabled=1 source=Features.MusicInPauseMenu "
+                 "mode=native-Theme-SXD (original game music and native Stop)");
 #endif
+#endif
+#if RAYMAN2FIX_AUDIO_HOOKS
+    g_audio_origin.store(GetTickCount(),std::memory_order_release);
+    // Capture intended CPA config before the original sound driver is
+    // initialized. The actual native callback owners are logged later
+    // from the hooked original function pointers, not inferred here.
+    log_cpa_sound_configuration();
 #if RAYMAN2FIX_AUDIO_TRACE
     if (g_log) {
-        g_audio_origin.store(GetTickCount(),std::memory_order_release);
 #if RAYMAN2FIX_ESC_MUSIC_PROTO
         log_line(g_proto_enabled.load(std::memory_order_acquire) ?
             "RUNTIME-AUDIO-TRACE: enabled=1 schema=2 prototype=1 "
@@ -4837,6 +6232,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
 #endif
     }
 #endif
+#endif // RAYMAN2FIX_AUDIO_HOOKS
     if (g_log) log_line(kResearchProbes ?
         "RUNTIME-CONFIG: research_probes=1 (read-only experimental trace build)" :
         "RUNTIME-CONFIG: research_probes=0 (standard release instrumentation)");
