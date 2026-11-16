@@ -84,6 +84,7 @@ if(WIN32)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME Rayman2Fix)
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
+    RAYMAN2FIX_ESC_MUSIC_FEATURE=1
     RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}")
   if(RAYMAN2FIX_RESEARCH_PROBES)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
@@ -241,6 +242,13 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME esc-music-wine-prototype-policy
     COMMAND esc_music_wine_prototype_tests)
+  # Policy-only research; this does not intercept native audio.
+  add_executable(esc_pre_driver_pause_tests
+    tests/esc_pre_driver_pause_tests.cpp)
+  target_include_directories(esc_pre_driver_pause_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-pre-driver-pause-research-model
+    COMMAND esc_pre_driver_pause_tests)
 
   add_executable(fov_math_tests tests/fov_math_tests.cpp)
   target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
