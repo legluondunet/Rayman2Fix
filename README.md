@@ -2,7 +2,7 @@
 
 The **retail game** is installed under `rayman2/`; the mod's
 configuration, runtime DLL, GameFrame `glide2x.dll`, license,
-backups and optional HD atlas are stored under `rayman2/rayman2fix/`.
+backups are stored under `rayman2/rayman2fix/`; optional replacement images live in `rayman2/rayman2fix/textures/`.
 The game retains `rayman2/` as its working directory. The launcher
 prepends the nested mod directory to the **child-only** Windows PATH
 for Glide DLL lookup and injects the runtime by its absolute path.
@@ -17,8 +17,9 @@ On verified startup a legacy `Rayman2Fix/` installation is migrated
 to `rayman2/` by renaming its directory and moving only known mod
 files into the nested `rayman2fix/`. No game media is re-extracted,
 and existing INI values, backed-up executables, receipts and saves
-remain unchanged. A user-supplied atlas beside the launcher is moved
-into the nested fix directory. If **both** old and new directories
+remain unchanged. The old `Rayman2Fix_logo_hd.rgba` file is deliberately
+not migrated or renamed; recreate the optional resource directly at
+`rayman2/rayman2fix/textures/logo.rgba` with the converter. If **both** old and new directories
 exist, migration refuses to overwrite either. The unchecked launch
 mode does not migrate or repair files.
 
@@ -55,7 +56,7 @@ directory:
 
 ```bash
 curl -fL -o prepare_intro_logo_hd.py \
-  https://raw.githubusercontent.com/legluondunet/Rayman2Fix/fix/intro-logo-hd-external-asset/tools/prepare_intro_logo_hd.py
+  https://raw.githubusercontent.com/legluondunet/Rayman2Fix/feat/nested-game-and-fix-layout/tools/prepare_intro_logo_hd.py
 python prepare_intro_logo_hd.py --download
 ```
 
@@ -68,8 +69,8 @@ detects the local file before attempting another network download.
 Alternatively use `python prepare_intro_logo_hd.py --png /path/to/logo.png`.
 Never silently fall back to a different, lower-quality logo; only
 the user-provided original or a successfully downloaded original is used.
-The renderer and bootstrap remain unchanged; no Windows rebuild is needed.
-The helper writes `Rayman2Fix_logo_hd.rgba` next to the launcher.
+The browser-download fallback only needs Python and Pillow.
+The helper creates `rayman2/rayman2fix/textures/logo.rgba` when run from the launcher directory.
 
 The pinned GameFrame renderer loads that exact-size/header atlas on
 first use, and changes **only** eighteen original 32×32 format-12
@@ -78,7 +79,7 @@ CD source. Their original draw calls still control the placement,
 geometry, alpha blends, timing, fades, and cinematic transitions. UV
 scale remains the original 32×32 logical size; just the GPU texture
 is 128×128. The formerly over-strict single-mipmap condition has been removed. All available source mip levels are validated first and replaced as a consistent 4x GPU pyramid (128, 64, 32, etc.), generated from the same 128×128 atlas tile with alpha-weighted area downsampling. The logical Glide dimensions/UVs and game's original mip count are unchanged. Other textures, unsupported games/editions, failed fingerprints, missing or malformed atlases pass through unchanged.
-Deleting `Rayman2Fix_logo_hd.rgba` restores the original logo with no
+Deleting `rayman2/rayman2fix/textures/logo.rgba` restores the original logo with no
 INI change. The diagnostic `RUNTIME-GLIDE: INTRO-LOGO-HD` in
 `Rayman2Fix.log` reports loading and matching at most 18 sources.
 
@@ -623,7 +624,8 @@ rayman2/
         Rayman2Fix.dll.bak     (single runtime backup)
         glide2x.dll            (pinned GameFrame renderer)
         GameFrame-LICENSE-APACHE.txt
-        Rayman2Fix_logo_hd.rgba (optional externally provided HD logo atlas)
+        textures/
+            logo.rgba         (optional externally provided HD logo atlas)
 ```
 
 The correct Glide 2 filename is **`glide2x.dll`**, not `glide2.dll`.

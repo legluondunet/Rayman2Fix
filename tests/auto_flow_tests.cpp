@@ -127,7 +127,7 @@ int main() {
             write(old/"Rayman2Fix.dll","OLD-FIX-DLL");
             write(old/"glide2x.dll","OLD-GLIDE");
             write(old/"winmm.dll","WINMM-GAME");
-            write(legacy_root/"Rayman2Fix_logo_hd.rgba","LOCAL-HD-ART");
+            write(legacy_root/"Rayman2Fix_logo_hd.rgba","OLD-ART-LEFT-IN-PLACE");
             {
                 r2fix::Startup migrating(legacy_root/"Rayman2Fix.exe");
                 migrating.initialize();
@@ -146,8 +146,12 @@ int main() {
                 check(contents(game/"rayman2fix"/"glide2x.dll")=="OLD-GLIDE",
                       "legacy Glide DLL relocated unchanged");
 #endif
-                check(contents(game/"rayman2fix"/"Rayman2Fix_logo_hd.rgba")=="LOCAL-HD-ART",
-                      "user HD atlas migrated into fix folder");
+                check(contents(legacy_root/"Rayman2Fix_logo_hd.rgba")=="OLD-ART-LEFT-IN-PLACE",
+                      "obsolete atlas is not automatically migrated");
+                check(fs::is_directory(game/"rayman2fix"/"textures"),
+                      "migration creates replacement textures folder");
+                check(!fs::exists(game/"rayman2fix"/"textures"/"logo.rgba"),
+                      "old atlas is never implicitly renamed or converted");
             }
             fs::remove_all(legacy_root);
         }
@@ -197,6 +201,8 @@ int main() {
               "next game launch clears only the dedicated runtime log");
         check(fs::exists(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini"),
               "bootstrap initialization must create INI when absent");
+        check(fs::is_directory(root / "rayman2" / "rayman2fix" / "textures"),
+              "bootstrap creates a textures folder for replacement images");
         check(contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("Force4x3=0") != std::string::npos &&
               contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos &&
               contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("RemoveDialogueBackgrounds=0") != std::string::npos &&
@@ -323,6 +329,10 @@ int main() {
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n");
         // winmm is game-facing: preserve it beside rayman2.exe.
         write(root / "rayman2" / "winmm.dll", "WINMM");
+        write(root / "rayman2" / "rayman2fix" / "textures" / "logo.rgba",
+              "NEW-HD-LOGO");
+        write(root / "rayman2" / "rayman2fix" / "textures" / "custom.rgba",
+              "USER-IMAGE");
         check(r2fix::run_automatic(app) == 2,
               "no game or image must report missing media, not success");
         check(!fs::exists(root / "rayman2" / "rayman2.exe"),
@@ -348,6 +358,10 @@ int main() {
               "winmm must not be installed under rayman2fix");
         check(fs::is_directory(game / "rayman2fix"),
               "mod directory created under rayman2");
+        check(contents(game / "rayman2fix" / "textures" / "logo.rgba") ==
+              "NEW-HD-LOGO", "HD logo retained during CD extraction");
+        check(contents(game / "rayman2fix" / "textures" / "custom.rgba") ==
+              "USER-IMAGE", "other replacement images retained");
         check(contents(game / "dll" / "snd_cpa_mmx.ini") == "AUDIO\n",
               "MMX sound settings copied from disc");
         check(contents(game / "dll" / "snd_cpa.ini") == "AUDIO\n",
