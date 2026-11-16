@@ -1,5 +1,6 @@
 #include "rayman2fix/game_launch.hpp"
 #include "rayman2fix/display.hpp"
+#include "rayman2fix/presentation.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -158,6 +159,49 @@ int main(int argc, char** argv) {
               height == static_cast<int>(options.monitor.height),
               "test child window covers physical primary monitor exactly");
         window.close(); // Release Windows sharing lock before temp tree cleanup.
+
+        // Exercise the icon setter with a harmless in-process Win32
+        // window and a real Windows system DLL containing icon resources.
+        // Production only supplies the user's rayman2.exe path. No game
+        // image or copyrighted artwork is needed by the automated test.
+        {
+            wchar_t system_dir[MAX_PATH]{};
+            check(GetSystemDirectoryW(system_dir, MAX_PATH) != 0,
+                  "system directory available for synthetic icon fixture");
+            const fs::path source = fs::path(system_dir) / "shell32.dll";
+            check(fs::is_regular_file(source),
+                  "system shell32 icon resource file exists");
+            WNDCLASSW klass{};
+            klass.lpfnWndProc = DefWindowProcW;
+            klass.hInstance = GetModuleHandleW(nullptr);
+            klass.lpszClassName = L"Rayman2FixIconWindowTest";
+            check(RegisterClassW(&klass) != 0,
+                  "synthetic icon test window class registered");
+            HWND hwnd = CreateWindowExW(0, klass.lpszClassName,
+                L"Rayman2Fix icon fixture", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                30, 30, 640, 480, nullptr, nullptr, klass.hInstance, nullptr);
+            check(hwnd != nullptr, "synthetic icon test window created");
+            {
+                r2fix::WindowPresentation presentation(
+                    GetCurrentProcessId(), r2fix::primary_display_metrics(),
+                    source.wstring());
+                presentation.update();
+                const auto observed = presentation.result();
+                check(observed.window_found && observed.game_icon_available &&
+                      observed.game_icon_applied && observed.game_icon_updates == 1,
+                      "executable resource icons applied to actual HWND");
+                check(SendMessageW(hwnd, WM_GETICON, ICON_BIG, 0) != 0 &&
+                      SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0) != 0,
+                      "window's large and small icons visibly assigned by WM_SETICON");
+                presentation.update();
+                check(presentation.result().game_icon_updates == 1,
+                      "icon handles assigned only once to each renderer window");
+                // Destroy before presentation's HICON destructor: the
+                // launcher normally waits for game process termination.
+                DestroyWindow(hwnd);
+            }
+            UnregisterClassW(klass.lpszClassName, klass.hInstance);
+        }
 
         const auto nonexistent = root / "does-not-exist.exe";
         const auto failure = r2fix::run_child_process(nonexistent, root);
