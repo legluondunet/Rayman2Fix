@@ -66,40 +66,39 @@ void WindowPresentation::load_game_icons() {
         return;
     }
 
-    // Extract the actual game icon, not the Rayman2Fix launcher's icon.
-    // The authenticated original EXE backup can retain an icon if the
-    // approved replacement executable lacks icon resources. Both are
-    // already user-installed files; no external .ico or PE patch is needed.
-    const std::wstring sources[] = {
-        game_executable_, game_executable_ + L".bak"
-    };
-    for (unsigned index = 0; index < 2; ++index) {
-        HICON big = nullptr, small = nullptr;
-        const UINT extracted =
-            ExtractIconExW(sources[index].c_str(), 0, &big, &small, 1);
-        if (extracted != 1 || (!big && !small)) {
-            if (big) DestroyIcon(big);
-            if (small && small != big) DestroyIcon(small);
-            continue;
-        }
-        // WM_SETICON has independent big and small slots. CopyIcon
-        // creates a caller-owned icon when an EXE supplies one size only.
-        if (!big) big = CopyIcon(small);
-        if (!small) small = CopyIcon(big);
-        if (!big || !small) {
-            if (big) DestroyIcon(big);
-            if (small && small != big) DestroyIcon(small);
-            continue;
-        }
-        big_icon_ = big;
-        small_icon_ = small;
-        result_.game_icon_available = true;
-        result_.game_icon_source =
-            index == 0 ? "rayman2.exe" : "rayman2.exe.bak";
+    // Read ONLY the current user's rayman2.exe resource, never a .bak:
+    // the original protected file is not guaranteed to remain installed.
+    const UINT groups=ExtractIconExW(game_executable_.c_str(),-1,
+                                      nullptr,nullptr,0);
+    result_.game_icon_groups=groups==UINT(-1) ? 0u : groups;
+    if(groups==0 || groups==UINT(-1)) {
+        result_.game_icon_error = "rayman2.exe has no extractable icon groups";
         return;
     }
-    result_.game_icon_error =
-        "no embedded icon in rayman2.exe or rayman2.exe.bak";
+
+    HICON big=nullptr,small=nullptr;
+    const UINT extracted=ExtractIconExW(game_executable_.c_str(),0,
+                                         &big,&small,1);
+    if(extracted!=1 || (!big && !small)) {
+        if(big)DestroyIcon(big);
+        if(small && small!=big)DestroyIcon(small);
+        result_.game_icon_error = "ExtractIconExW failed on rayman2.exe";
+        return;
+    }
+    // WM_SETICON has independent large/small slots. CopyIcon returns
+    // another caller-owned icon when only one embedded size exists.
+    if(!big)big=CopyIcon(small);
+    if(!small)small=CopyIcon(big);
+    if(!big || !small) {
+        if(big)DestroyIcon(big);
+        if(small && small!=big)DestroyIcon(small);
+        result_.game_icon_error = "unable to create both icon sizes from rayman2.exe";
+        return;
+    }
+    big_icon_=big;
+    small_icon_=small;
+    result_.game_icon_available=true;
+    result_.game_icon_source="rayman2.exe";
 }
 
 void WindowPresentation::apply_game_icons(void* raw_window) {
@@ -129,10 +128,26 @@ void WindowPresentation::apply_game_icons(void* raw_window) {
         result_.game_icon_applied = false;
         return;
     }
-    last_icon_window_ = hwnd;
-    result_.game_icon_applied = true;
-    result_.game_icon_error.clear();
+    // A successful SendMessageTimeout means the window procedure returned;
+    // it does NOT prove the game retained either icon. Cross-check with
+    // WM_GETICON before calling this applied. This still cannot prove XFCE
+    // sees Wine's X11 _NET_WM_ICON property.
+    DWORD_PTR actual_big=0,actual_small=0;
+    const BOOL get_big=SendMessageTimeoutW(
+        hwnd,WM_GETICON,ICON_BIG,0,
+        SMTO_ABORTIFHUNG | SMTO_BLOCK,100,&actual_big)!=0;
+    const BOOL get_small=SendMessageTimeoutW(
+        hwnd,WM_GETICON,ICON_SMALL,0,
+        SMTO_ABORTIFHUNG | SMTO_BLOCK,100,&actual_small)!=0;
+    result_.game_icon_readback=get_big && get_small &&
+        actual_big==reinterpret_cast<DWORD_PTR>(big_icon_) &&
+        actual_small==reinterpret_cast<DWORD_PTR>(small_icon_);
+    result_.game_icon_applied=true;
+    last_icon_window_=hwnd;
     ++result_.game_icon_updates;
+    if(result_.game_icon_readback)result_.game_icon_error.clear();
+    else result_.game_icon_error=
+        "WM_SETICON returned but WM_GETICON did not retain both icons";
 }
 
 void WindowPresentation::update() {
@@ -147,7 +162,9 @@ void WindowPresentation::update() {
     // Updating the icon is independent of borderless geometry; avoid
     // skipping it when style/position have already converged.
     load_game_icons();
-    apply_game_icons(hwnd);
+    char klass[100]{};
+    if(GetClassNameA(hwnd,klass,100))
+        result_.game_window_class=klass;
     RECT current{};
     if (!GetWindowRect(hwnd, &current)) return;
 
@@ -165,8 +182,14 @@ void WindowPresentation::update() {
         current.left != display_.left || current.top != display_.top ||
         current.right != display_.left + static_cast<int>(display_.width) ||
         current.bottom != display_.top + static_cast<int>(display_.height);
+    // Setting WM_SETICON before SWP_FRAMECHANGED could be lost if Wine
+    // recreates the X11 host surface. Assign only after the final style
+    // and window-position update, or on subsequent settled polls.
     if (!new_window && style == desired_style &&
-        exstyle == desired_exstyle && !needs_position) return;
+        exstyle == desired_exstyle && !needs_position) {
+        apply_game_icons(hwnd);
+        return;
+    }
 
     if (style != desired_style) SetWindowLongPtrW(hwnd, GWL_STYLE, desired_style);
     if (exstyle != desired_exstyle)
@@ -183,6 +206,7 @@ void WindowPresentation::update() {
     last_window_ = hwnd;
     ++result_.changes;
     result_.borderless_applied = true;
+    apply_game_icons(hwnd);
     const HMODULE user = GetModuleHandleW(L"user32.dll");
     using GetWindowDpi = UINT (WINAPI*)(HWND);
     const auto get_dpi = user ? reinterpret_cast<GetWindowDpi>(
