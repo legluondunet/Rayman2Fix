@@ -243,6 +243,9 @@ bool configured_remove_dialogue_backgrounds(const fs::path& ini) {
 bool configured_remove_cinematic_bars(const fs::path& ini) {
     return read_ini_flag(ini,"Features","RemoveCinematicBars");
 }
+bool configured_music_in_pause_menu(const fs::path& ini) {
+    return read_ini_flag(ini,"Features","MusicInPauseMenu");
+}
 std::pair<std::uint32_t,std::uint32_t> configured_render_resolution(
         const fs::path& ini) {
     const auto physical=configured_output_resolution(ini);
@@ -274,7 +277,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     const auto raw=lines_of(ini);
     std::string current;
     bool graphics=false,features=false,force=false,skip=false;
-    bool dialogue=false,cinematic=false,legacy=false;
+    bool dialogue=false,cinematic=false,legacy=false,music=false;
     for(const auto& text:raw) {
         std::string next;
         if(section(text,next)) {
@@ -292,6 +295,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(current=="FEATURES" && key=="SKIPCINEMATICS")skip=true;
         if(current=="FEATURES" && key=="REMOVEDIALOGUEBACKGROUNDS")dialogue=true;
         if(current=="FEATURES" && key=="REMOVECINEMATICBARS")cinematic=true;
+        if(current=="FEATURES" && key=="MUSICINPAUSEMENU")music=true;
         if(current=="FEATURES" && key=="REMOVEBLACKFRAMES")legacy=true;
     }
     // Existing opt-in users retain BOTH former behaviors. If only one new
@@ -299,10 +303,10 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     // Invalid legacy values are rejected before editing the user's INI.
     const bool inherited=legacy &&
         read_ini_flag(ini,"Features","RemoveBlackFrames");
-    if(force && skip && dialogue && cinematic && !legacy)return;
+    if(force && skip && dialogue && cinematic && music && !legacy)return;
     std::vector<std::string> output;
     std::string active;
-    bool added_force=false,added_skip=false,added_dialogue=false,added_cinematic=false;
+    bool added_force=false,added_skip=false,added_dialogue=false,added_cinematic=false,added_music=false;
     const auto inject=[&]() {
         if(active=="GRAPHICS" && !force && !added_force) {
             output.emplace_back("; 1 = centered 4:3 picture with black sidebars");
@@ -314,6 +318,12 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
             output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
             output.emplace_back("SkipCinematics=0");
             added_skip=true;
+        }
+        if(active=="FEATURES" && !music && !added_music) {
+            output.emplace_back("; 1 = continue the current level music in the ESC menu");
+            output.emplace_back("; Default 0 (opt in); original SFX and level changes remain native");
+            output.emplace_back("MusicInPauseMenu=0");
+            added_music=true;
         }
         if(active=="FEATURES" && !dialogue && !added_dialogue) {
             output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
@@ -362,6 +372,9 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
         output.emplace_back("; Does not affect GameFrame Force4x3 sidebars");
         output.emplace_back("RemoveCinematicBars=0");
+        output.emplace_back("; 1 = continue the current level music in the ESC menu");
+        output.emplace_back("; Default 0 (opt in); preserves native SFX and level changes");
+        output.emplace_back("MusicInPauseMenu=0");
     }
     // Retain original BOM, comments, unrelated keys and EOL type.
     std::ifstream old(ini,std::ios::binary);

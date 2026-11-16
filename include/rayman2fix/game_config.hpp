@@ -32,6 +32,8 @@ bool configured_skip_cinematics(const std::filesystem::path& rayman2fix_ini);
 // game-drawn cinematic letterbox strips (not GameFrame Force4x3 sidebars).
 bool configured_remove_dialogue_backgrounds(const std::filesystem::path& rayman2fix_ini);
 bool configured_remove_cinematic_bars(const std::filesystem::path& rayman2fix_ini);
+// Opt-in; keep original engine audio controls unless enabled.
+bool configured_music_in_pause_menu(const std::filesystem::path& rayman2fix_ini);
 
 // Add missing new options to existing INIs without discarding user settings.
 void ensure_rayman2fix_ini_options(const std::filesystem::path& rayman2fix_ini);
