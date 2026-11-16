@@ -19,13 +19,23 @@ struct Dispatch {
     Command command=Command::none;
     std::uint32_t handle=0;
     unsigned count=0;
+    // ESC script-attempt token only, NOT an original ADPCM record epoch.
+    // Native handle slots can be recycled after Stop or reinitialized
+    // IN PLACE without Stop, without changing this token during the menu.
     std::uint64_t generation=0;
+    // Bind every synthetic driver command to the native stream captured
+    // on the two original script-pause callbacks. A driver handle can be
+    // reused while a Theme changes its inner SXD descriptor in-place.
+    std::uint32_t native_theme_key=0;
+    std::uint32_t native_inner_key=0;
     explicit operator bool() const noexcept { return command!=Command::none; }
 };
 struct Identity {
     std::uint32_t handle=0;
     std::uint32_t native_theme_key=0;
     std::uint32_t native_inner_key=0;
+    // Group a single source-verified ESC attempt, not a physical voice
+    // lifetime. Equality here does NOT establish ADPCM stream generation.
     std::uint64_t generation=0;
     bool valid() const noexcept {
         return handle!=0 && handle!=0xffffffffu && generation!=0 &&
@@ -37,6 +47,62 @@ struct Identity {
                native_inner_key==other.native_inner_key &&
                generation==other.generation;
     }
+    bool same_dispatch(const Dispatch& action) const noexcept {
+        return valid() && handle==action.handle &&
+               native_theme_key==action.native_theme_key &&
+               native_inner_key==action.native_inner_key &&
+               generation==action.generation;
+    }
+};
+
+// Lightweight, render-thread-only change detector for READ-ONLY
+// intro-to-level Theme controller research. It only decides whether an
+// already-sampled native controller snapshot deserves a diagnostic log.
+// It never authorizes, pauses, or resumes any audio.
+struct ThemeRefWatchInput {
+    std::uint32_t controller_active=0;
+    std::uint32_t controller_field0c=0;
+    std::uint32_t player_ref=0;
+    std::uint32_t nested_record_ref=0;
+    // The original 64-entry sound table can change *inside* one stable
+    // record slot. Monitor original native descriptor references so a
+    // transition from outer Theme 9:12 to 9:5 or inner SXD 9:6 to 9:7
+    // is not missed just because nested_record_ref stayed constant.
+    std::uint32_t outer_descriptor_ref=0;
+    std::uint32_t inner_descriptor_ref=0;
+    std::uint8_t menu_flag=0; // sampled for context; never consumes budget
+    bool same(const ThemeRefWatchInput& other) const noexcept {
+        return controller_active==other.controller_active &&
+               controller_field0c==other.controller_field0c &&
+               player_ref==other.player_ref &&
+               nested_record_ref==other.nested_record_ref &&
+               outer_descriptor_ref==other.outer_descriptor_ref &&
+               inner_descriptor_ref==other.inner_descriptor_ref;
+        // The first implementation treated every ESC menu open/close as
+        // a Theme change and exhausted all 24 events before later handoffs.
+    }
+};
+class ThemeRefWatchPolicy {
+public:
+    static constexpr std::uint32_t kWindowMs=120000u;
+    // The intro itself may consume 24 music-state changes before the first ESC.
+    // Reserve room to observe the subsequent Theme/SXD handoff, without
+    // changing any runtime audio behavior or extending the time window.
+    static constexpr unsigned kMaxEvents=48u;
+    bool observe(const ThemeRefWatchInput& sample,
+                 std::uint32_t session_age_ms) noexcept {
+        if(session_age_ms>kWindowMs || events_>=kMaxEvents)return false;
+        if(initialized_ && sample.same(previous_))return false;
+        previous_=sample;
+        initialized_=true;
+        ++events_;
+        return true;
+    }
+    unsigned events() const noexcept{return events_;}
+private:
+    bool initialized_=false;
+    unsigned events_=0;
+    ThemeRefWatchInput previous_{};
 };
 
 // This policy assumes the game's original paired Theme/SXD calls have
@@ -79,7 +145,16 @@ public:
     }
     Dispatch menu_tick(bool known, bool menu_open, bool foreground,
                        bool owner_same) noexcept {
-        if(phase_==Phase::idle || phase_==Phase::quarantined)return {};
+        if(phase_==Phase::idle)return {};
+        if(phase_==Phase::quarantined) {
+            // An unexpectedly terminated ESC compensation must not poison
+            // every subsequent menu for the same level. Once the *native*
+            // script-resume wrapper has returned and the game has exited
+            // its menu, retire this generation. Only the native game owns
+            // its music at this point; no synthetic driver calls are made.
+            if(known && !menu_open && native_script_exit_seen_)clear();
+            return {};
+        }
         if(!known || !owner_same) {
             quarantine();
             return {};
@@ -147,7 +222,11 @@ public:
     // compensation is in charge. All other native sounds pass through.
     bool native_resume(std::uint32_t handle, Origin source) noexcept {
         if(handle!=identity_.handle)return true;
-        if(phase_==Phase::quarantined)return !compensated_;
+        // Quarantine must NEVER swallow the game's native Resume forever.
+        // After an unknown event we stop all synthetic resumes, but leave
+        // the original driver in charge of restoring level audio. Blocking
+        // every subsequent Resume here could permanently mute gameplay.
+        if(phase_==Phase::quarantined)return true;
         if(phase_!=Phase::audible_menu && phase_!=Phase::muted_focus &&
            phase_!=Phase::closing_unfocused && phase_!=Phase::closing_recovered)
             return true;
@@ -160,18 +239,33 @@ public:
             return false;
         }
         if(source==Origin::focus_resume)return false;
-        // Unknown owners are never allowed to unmute the compensated
-        // stream when the game may be inactive or a pause is still held.
+        // Unknown provenance invalidates our compensation. The native
+        // game call must pass through, otherwise a lost Resume may leave
+        // the original level soundtrack permanently paused. Quarantine
+        // still forbids additional synthetic Resume batches.
         quarantine();
-        return false;
+        return true;
     }
     // The game may resume script audio *before* the visible menu flag
     // goes to zero. Count the actual suppressed native resume calls.
     void end_script_resume() noexcept {
         if(phase_==Phase::audible_menu || phase_==Phase::muted_focus) {
-            if(ignored_resumes_!=2) {quarantine();return;}
+            if(ignored_resumes_!=2) {
+                quarantine();
+                // The game has ALREADY exited through its own script
+                // Resume wrapper. Injecting a fresh safety Pause here
+                // could leave the level soundtrack muted indefinitely.
+                // In this exit-only case, defer to its native callbacks.
+                native_script_exit_seen_=true;
+                physical_paused_=true; // no new synthetic safety Pause
+                return;
+            }
             if(phase_==Phase::muted_focus)
                 phase_=Phase::closing_unfocused;
+        } else if(phase_==Phase::quarantined) {
+            // The original script resumes were forwarded in quarantine.
+            native_script_exit_seen_=true;
+            physical_paused_=true;
         }
     }
     // Any matching Stop wins over synthetic resume, including a Stop while
@@ -210,6 +304,11 @@ public:
         return phase_!=Phase::idle && phase_!=Phase::quarantined &&
                identity_.generation==token && token!=0;
     }
+    // Never consider an in-flight Theme→SXD handoff the same stream just
+    // because the driver handle still exists and the bank list is valid.
+    bool owner_same(const Identity& live) const noexcept {
+        return current(live.generation) && live.same(identity_);
+    }
     // A quarantined generation may receive ONE last safety *pause*
     // (never a resume), provided native Stop has not retired it.
     bool safety_current(std::uint64_t token) const noexcept {
@@ -224,7 +323,8 @@ public:
     void reset() noexcept {clear();}
 private:
     Dispatch make(Command c) const noexcept {
-        return {c,identity_.handle,observed_pauses_,identity_.generation};
+        return {c,identity_.handle,observed_pauses_,identity_.generation,
+                identity_.native_theme_key,identity_.native_inner_key};
     }
     void clear() noexcept {
         phase_=Phase::idle;
@@ -234,6 +334,7 @@ private:
         menu_open_=false;
         compensated_=false;
         physical_paused_=true;
+        native_script_exit_seen_=false;
     }
     Phase phase_=Phase::idle;
     Identity identity_{};
@@ -242,5 +343,6 @@ private:
     bool menu_open_=false;
     bool compensated_=false;
     bool physical_paused_=true;
+    bool native_script_exit_seen_=false;
 };
 } // namespace r2fix::esc_proto

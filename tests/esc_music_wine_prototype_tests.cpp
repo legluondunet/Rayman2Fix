@@ -15,6 +15,62 @@ Coordinator pending() {
     CHECK(x.phase()==Phase::pending_menu && x.native_pause_count()==2);
     return x;
 }
+void intro_theme_reference_watch_is_bounded_and_read_only() {
+    // Reproduction 2026-11-14 14:30: multiple early ESC presses while
+    // native current Theme ref=bank 9:12, outer Theme=9:5 and SXD=9:6.
+    // A native record's *descriptor* changes without its slot moving.
+    // Treat menu toggles as context only, otherwise 24 events are spent
+    // before the real 9:6 -> 9:7 transition.
+    ThemeRefWatchPolicy watch;
+    ThemeRefWatchInput before{
+        1,1,0x004a1000,0x004b1000,0x004c1000,0x004d1000,0
+    };
+    CHECK(watch.observe(before,0));
+    CHECK(!watch.observe(before,40));
+    auto first_menu=before;
+    first_menu.menu_flag=1;
+    CHECK(!watch.observe(first_menu,50)); // menu isn't a Theme change
+    first_menu.menu_flag=0;
+    CHECK(!watch.observe(first_menu,100));
+    CHECK(watch.events()==1);
+
+    // In-place outer Theme descriptor replacement, while the nested
+    // sound-table pointer and native player ref are unchanged.
+    auto changed=first_menu;
+    changed.outer_descriptor_ref=0x004c2000;
+    CHECK(watch.observe(changed,120));
+    CHECK(watch.events()==2);
+    auto inner=changed;
+    inner.inner_descriptor_ref=0x004d2000;
+    CHECK(watch.observe(inner,140)); // SXD 9:6 -> 9:7
+    auto state=inner;
+    state.controller_field0c=0;
+    CHECK(watch.observe(state,160)); // transition state -> settled
+    CHECK(watch.events()==4);
+    CHECK(!watch.observe(state,161));
+    state.menu_flag=1;
+    CHECK(!watch.observe(state,165));
+    CHECK(!watch.observe(state,ThemeRefWatchPolicy::kWindowMs+1));
+
+    ThemeRefWatchPolicy bounded;
+    ThemeRefWatchInput changing{};
+    // 24 early intro resource changes must not exhaust the diagnostics.
+    // The first ESC and audio transition may occur at 70-95s.
+    for(unsigned i=0;i<24u;++i) {
+        changing.inner_descriptor_ref=i+1;
+        CHECK(bounded.observe(changing,i*50u));
+    }
+    changing.inner_descriptor_ref=25u;
+    CHECK(bounded.observe(changing,95000u));
+    CHECK(bounded.events()==25u);
+    for(unsigned i=25u;i<ThemeRefWatchPolicy::kMaxEvents;++i) {
+        changing.inner_descriptor_ref=i+1;
+        CHECK(bounded.observe(changing,95000u+(i-24u)*40u));
+    }
+    CHECK(bounded.events()==ThemeRefWatchPolicy::kMaxEvents);
+    changing.inner_descriptor_ref=999;
+    CHECK(!bounded.observe(changing,ThemeRefWatchPolicy::kMaxEvents*40));
+}
 void strict_gates() {
     Coordinator x;
     CHECK(!x.begin_script_pause(false,true,true));
@@ -91,9 +147,156 @@ void uncertainty_restores_silence() {
     CHECK(x.safety_current(pause.generation));
     CHECK(!x.current(pause.generation)); // no artificial resumes after uncertainty
     CHECK(!x.take_safety_pause()); // only one safety pause batch
-    CHECK(!x.native_resume(123,Origin::focus_resume)); // cannot wake music
+    CHECK(x.native_resume(123,Origin::focus_resume));
+    // The original game owns its own audio resumption in quarantine:
+    // never suppress an unbounded sequence of native driver resumes.
     x.native_stop(123);
     CHECK(x.phase()==Phase::idle);
+}
+void synthetic_commands_are_bound_to_exact_original_theme_and_sxd() {
+    // Owner's 14:43 Wine log: after ESC compensation, the live inner
+    // track advanced 9:7 -> 9:8 in the *same* Theme and driver handle.
+    // A safety Pause from the previous generation must NOT reach it.
+    auto x=pending();
+    const auto resume=x.menu_tick(true,true,true,true);
+    CHECK(resume.command==Command::resume);
+    CHECK(kMusic.same_dispatch(resume));
+    const Identity inner_advanced{123,0x00090005,0x00090008,77};
+    const Identity other_theme{123,0x0009000c,0x00090007,77};
+    CHECK(!inner_advanced.same_dispatch(resume));
+    CHECK(!other_theme.same_dispatch(resume));
+    CHECK(!x.owner_same(inner_advanced));
+    CHECK(!x.owner_same(other_theme));
+    CHECK(x.owner_same(kMusic));
+
+    // The first moment the original Theme/SXD provenance changes, the
+    // coordinator must stop suppressing or dispatching sound commands.
+    CHECK(!x.menu_tick(true,true,true,x.owner_same(inner_advanced)));
+    CHECK(x.phase()==Phase::quarantined);
+    const auto safety=x.take_safety_pause();
+    CHECK(safety.command==Command::pause);
+    CHECK(kMusic.same_dispatch(safety));
+    CHECK(!inner_advanced.same_dispatch(safety));
+    CHECK(!other_theme.same_dispatch(safety));
+    CHECK(x.native_resume(123,Origin::script_resume));
+    CHECK(!x.focus_resume());
+    CHECK(!x.current(77));
+    x.end_script_resume();
+    CHECK(!x.menu_tick(true,false,true,true));
+    CHECK(x.phase()==Phase::idle);
+
+    // A newly started independent ESC never inherits the stale stream.
+    CHECK(x.begin_script_pause(true,true,true));
+    x.observe_native_pause(inner_advanced,true);
+    x.observe_native_pause(inner_advanced,true);
+    x.end_script_pause();
+    CHECK(x.owner_same(inner_advanced));
+    const auto next=x.menu_tick(true,true,true,true);
+    CHECK(inner_advanced.same_dispatch(next));
+    CHECK(!kMusic.same_dispatch(next));
+}
+void observed_nov14_in_menu_sxd_handoffs_never_reuse_old_driver_owner() {
+    // Owner's 2026-11-14 19:28 Windows trace, all with the SAME
+    // driver handle/Theme/generation, and with ZERO tracked native
+    // PlayTransitionEx + StopSxd events during their full ESC menus.
+    // A zero command count is not evidence that the inner SXD stayed
+    // identical: 9:8 -> 9:9, 9:10 -> 9:11, 239:5 -> 239:6,
+    // and 239:8 -> 239:1 were captured by the Theme watch.
+    struct Transition {std::uint32_t first, next;};
+    constexpr Transition changes[]{
+        {0x00090008u,0x00090009u},
+        {0x0009000au,0x0009000bu},
+        {0x00ef0005u,0x00ef0006u}, // bank 239 is 0xEF
+        {0x00ef0008u,0x00ef0001u},
+    };
+    for(const auto& pair:changes) {
+        const Identity before{123,0x00090005u,pair.first,77};
+        const Identity after{123,0x00090005u,pair.next,77};
+        CHECK(before.valid() && after.valid());
+        CHECK(!before.same(after));
+        CHECK(before.handle==after.handle);
+        CHECK(before.generation==after.generation);
+        CHECK(before.native_theme_key==after.native_theme_key);
+
+        Coordinator coordinator;
+        CHECK(coordinator.begin_script_pause(true,true,true));
+        coordinator.observe_native_pause(before,true);
+        coordinator.observe_native_pause(before,true);
+        coordinator.end_script_pause();
+        const auto original_resume=
+            coordinator.menu_tick(true,true,true,coordinator.owner_same(before));
+        CHECK(original_resume.command==Command::resume);
+        CHECK(original_resume.count==2);
+        CHECK(before.same_dispatch(original_resume));
+        CHECK(!after.same_dispatch(original_resume));
+
+        // The engine's nested descriptor advanced while the game showed
+        // the ESC actor. No Play/Stop callback is needed for this event.
+        CHECK(!coordinator.owner_same(after));
+        CHECK(!coordinator.menu_tick(true,true,true,coordinator.owner_same(after)));
+        CHECK(coordinator.phase()==Phase::quarantined);
+        CHECK(!coordinator.current(77));
+        // The pure coordinator may propose one LAST safety Pause for its
+        // old owner, but runtime must refuse to dispatch it to 'after'.
+        const auto old_safety=coordinator.take_safety_pause();
+        CHECK(old_safety.command==Command::pause);
+        CHECK(before.same_dispatch(old_safety));
+        CHECK(!after.same_dispatch(old_safety));
+        CHECK(!coordinator.take_safety_pause());
+        // Both original native Resume calls MUST pass through, never
+        // be swallowed by a stale compensation generation.
+        CHECK(coordinator.native_resume(123,Origin::script_resume));
+        CHECK(coordinator.native_resume(123,Origin::script_resume));
+        coordinator.end_script_resume();
+        CHECK(!coordinator.menu_tick(true,false,true,true));
+        CHECK(coordinator.phase()==Phase::idle);
+
+        // A subsequent ESC may independently adopt the new SXD resource.
+        CHECK(coordinator.begin_script_pause(true,true,true));
+        coordinator.observe_native_pause(after,true);
+        coordinator.observe_native_pause(after,true);
+        coordinator.end_script_pause();
+        const auto new_resume=coordinator.menu_tick(true,true,true,
+            coordinator.owner_same(after));
+        CHECK(new_resume.command==Command::resume);
+        CHECK(after.same_dispatch(new_resume));
+        CHECK(!before.same_dispatch(new_resume));
+    }
+}
+void quarantine_never_permanently_mutes_gameplay() {
+    // The owner observed eight consecutive ResumeTransitionSxd calls
+    // swallowed in phase=quarantined, after which level music never
+    // resumed. This must not recur, even when paired verification fails.
+    auto x=pending();
+    CHECK(x.menu_tick(true,true,true,true).command==Command::resume);
+    CHECK(!x.native_resume(123,Origin::script_resume));
+    x.end_script_resume(); // one of two expected resumes missing
+    CHECK(x.phase()==Phase::quarantined);
+    CHECK(!x.focus_resume()); // no synthetic resume on uncertainty
+    CHECK(!x.take_safety_pause()); // script exit must not introduce mute
+    for(unsigned i=0;i<8;++i)
+        CHECK(x.native_resume(123,Origin::script_resume));
+    CHECK(x.native_resume(123,Origin::focus_resume));
+    CHECK(!x.current(77)); // no resumed synthetic generation
+    CHECK(!x.menu_tick(true,false,true,true));
+    CHECK(x.phase()==Phase::idle); // re-armed for next ESC in same level
+    CHECK(x.begin_script_pause(true,true,true));
+    CHECK(x.phase()==Phase::pending_menu);
+    x.reset();
+    CHECK(x.native_resume(123,Origin::script_resume));
+
+    auto y=pending();
+    CHECK(y.menu_tick(true,true,true,true).command==Command::resume);
+    CHECK(y.native_resume(123,Origin::unknown)); // unknown owner passes
+    CHECK(y.phase()==Phase::quarantined);
+    CHECK(y.native_resume(123,Origin::script_resume));
+    CHECK(!y.focus_resume());
+    CHECK(!y.menu_tick(true,false,true,true));
+    CHECK(y.phase()==Phase::quarantined); // no confirmed script close
+    y.end_script_resume();
+    CHECK(!y.take_safety_pause());
+    CHECK(!y.menu_tick(true,false,true,true));
+    CHECK(y.phase()==Phase::idle);
 }
 void distinct_sfx() {
     auto x=pending();
@@ -105,7 +308,11 @@ void distinct_sfx() {
     CHECK(x.phase()==Phase::quarantined);
 }
 int main() {
+    intro_theme_reference_watch_is_bounded_and_read_only();
     strict_gates();menu_open_close();focus_during_esc();
-    stop_and_unknown();uncertainty_restores_silence();distinct_sfx();
+    stop_and_unknown();uncertainty_restores_silence();
+    quarantine_never_permanently_mutes_gameplay();distinct_sfx();
+    synthetic_commands_are_bound_to_exact_original_theme_and_sxd();
+    observed_nov14_in_menu_sxd_handoffs_never_reuse_old_driver_owner();
     std::cout<<"experimental ESC music FSM: strict gates, paired calls, focus, Stop OK\n";
 }
