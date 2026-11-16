@@ -693,7 +693,7 @@ int run_automatic(Startup& startup, bool install_only) {
                       "applied (original kept as rayman2.exe.bak)" :
                       "not applied (no supported embedded/local delta)") << '\n'
                   << "  GameFrame: "
-                  << (gameframe_glide_ready(root) ? "verified" : "not verified")
+                  << (gameframe_glide_ready(root / "rayman2fix") ? "verified" : "not verified")
                   << (install_only
                       ? "\n  Game startup: skipped (--install-only)\n"
                       : "\n  Game startup: attempting supported EXE (first real-world test)\n");
