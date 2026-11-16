@@ -53,7 +53,7 @@ ExtractedIcons direct_pe_icons(const std::wstring& path) {
         return result;
     }
     FirstGroup group;
-    EnumResourceNamesW(module,RT_GROUP_ICON,first_icon_group,
+    EnumResourceNamesW(module,MAKEINTRESOURCEW(14),first_icon_group,
                        reinterpret_cast<LONG_PTR>(&group));
     if(!group.found) {
         result.stage="no RT_GROUP_ICON resource names";
@@ -61,7 +61,7 @@ ExtractedIcons direct_pe_icons(const std::wstring& path) {
         return result;
     }
     const auto name=group.name();
-    const HRSRC resource=FindResourceW(module,name,RT_GROUP_ICON);
+    const HRSRC resource=FindResourceW(module,name,MAKEINTRESOURCEW(14));
     if(!resource) {
         result.stage="RT_GROUP_ICON FindResourceW error="+
                      std::to_string(GetLastError());
@@ -91,12 +91,12 @@ ExtractedIcons direct_pe_icons(const std::wstring& path) {
         GetSystemMetrics(SM_CYSMICON),LR_DEFAULTCOLOR));
     const auto create_by_id=[&](unsigned id,int width,int height)->HICON {
         if(!id)return nullptr;
-        const HRSRC entry=FindResourceW(module,MAKEINTRESOURCEW(id),RT_ICON);
+        const HRSRC entry=FindResourceW(module,MAKEINTRESOURCEW(id),MAKEINTRESOURCEW(3));
         if(!entry)return nullptr;
         const DWORD size=SizeofResource(module,entry);
         if(size<40u || size>2u*1024u*1024u)return nullptr;
         const HGLOBAL image=LoadResource(module,entry);
-        const auto* bits=image ? static_cast<PBYTE>(LockResource(image)) : nullptr;
+        auto* bits=image ? static_cast<PBYTE>(LockResource(image)) : nullptr;
         if(!bits)return nullptr;
         return CreateIconFromResourceEx(
             bits,size,TRUE,0x00030000,width,height,LR_DEFAULTCOLOR);
