@@ -4,6 +4,15 @@
 // Expose this as a pure policy so rendering and synthetic tests agree.
 // Original margins are restored after the approved native function returns.
 namespace r2fix {
+// Native vertical cinematic letterboxing is distinct from the compositor's
+// horizontal 4:3 sidebars. Keep this opt-in active even when hud_scale == 1
+// (the centered 4:3 output mode); the source-geometry guard below remains
+// responsible for rejecting side panels and unrelated UI.
+constexpr bool should_enable_cinematic_viewport_fill(
+    bool remove_cinematic_bars, float hud_scale) {
+    (void)hud_scale;  // Intentionally independent of the selected aspect.
+    return remove_cinematic_bars;
+}
 struct CinematicViewportFill {
     int top;
     int bottom;
