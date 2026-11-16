@@ -243,6 +243,46 @@ int main(int argc, char** argv) {
                 DestroyWindow(hwnd);
             }
             UnregisterClassW(klass.lpszClassName, klass.hInstance);
+
+            // Production targets a DIFFERENT process. Confirm its WM_SETICON
+            // and WM_GETICON round-trip, not just an in-process DefWindowProc.
+            STARTUPINFOW icon_start{};
+            icon_start.cb=sizeof(icon_start);
+            PROCESS_INFORMATION icon_child{};
+            const auto executable=child.wstring();
+            const auto workdir=root.wstring();
+            std::wstring command=L"\\\""+executable+L"\\\"";
+            check(CreateProcessW(executable.c_str(),command.data(),
+                nullptr,nullptr,FALSE,0,nullptr,workdir.c_str(),
+                &icon_start,&icon_child)!=0,
+                "cross-process icon fixture child launched");
+            r2fix::WindowPresentation remote(
+                icon_child.dwProcessId,r2fix::primary_display_metrics(),
+                source.wstring());
+            const DWORD started=GetTickCount();
+            r2fix::PresentationResult remote_result{};
+            do {
+                remote.update();
+                remote_result=remote.result();
+                if(remote_result.game_icon_applied)break;
+                Sleep(40);
+            } while(DWORD(GetTickCount()-started)<2000u);
+            WaitForSingleObject(icon_child.hProcess,4500);
+            CloseHandle(icon_child.hThread);
+            CloseHandle(icon_child.hProcess);
+            if(!(remote_result.game_icon_available &&
+                 remote_result.game_icon_applied &&
+                 remote_result.game_icon_readback)) {
+                std::cerr << "Cross-process icon diagnostics: found="
+                          << remote_result.window_found
+                          << " available=" << remote_result.game_icon_available
+                          << " applied=" << remote_result.game_icon_applied
+                          << " readback=" << remote_result.game_icon_readback
+                          << " class=" << remote_result.game_window_class
+                          << " error=" << remote_result.game_icon_error << "\\n";
+                throw std::runtime_error(
+                    "cross-process WM_SETICON did not round-trip");
+            }
         }
 
         const auto nonexistent = root / "does-not-exist.exe";
