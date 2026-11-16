@@ -244,6 +244,42 @@ int main(int argc, char** argv) {
             }
             UnregisterClassW(klass.lpszClassName, klass.hInstance);
 
+            // Verify the DIRECT PE-resource decoder, not just the shell32
+            // path for a standalone .ico. Construct a harmless EXE with
+            // RT_GROUP_ICON and RT_ICON directly in the test directory.
+            const fs::path resource_exe=root/"test-native-icon-resource.exe";
+            fs::copy_file(child,resource_exe);
+            std::array<BYTE,1128> image_bits{};
+            {
+                std::ifstream icon(source,std::ios::binary);
+                icon.seekg(22);
+                icon.read(reinterpret_cast<char*>(image_bits.data()),
+                          static_cast<std::streamsize>(image_bits.size()));
+                check(static_cast<bool>(icon),
+                      "synthetic icon BMP resource readable");
+            }
+            constexpr std::array<BYTE,20> icon_group={
+                0,0, 1,0, 1,0, 16,16,0,0, 1,0,32,0,
+                0x68,0x04,0,0, 42,0
+            };
+            const HANDLE edit=BeginUpdateResourceW(
+                resource_exe.c_str(),FALSE);
+            check(edit!=nullptr,"test PE resource updater opened");
+            const WORD language=MAKELANGID(LANG_NEUTRAL,SUBLANG_NEUTRAL);
+            check(UpdateResourceW(edit,RT_ICON,MAKEINTRESOURCEW(42),
+                        language,image_bits.data(),
+                        static_cast<DWORD>(image_bits.size()))!=0,
+                  "synthetic RT_ICON image inserted in test EXE");
+            check(UpdateResourceW(edit,RT_GROUP_ICON,MAKEINTRESOURCEW(7),
+                        language,const_cast<BYTE*>(icon_group.data()),
+                        static_cast<DWORD>(icon_group.size()))!=0,
+                  "synthetic RT_GROUP_ICON directory inserted in test EXE");
+            check(EndUpdateResourceW(edit,FALSE)!=0,
+                  "test EXE icon resources committed");
+            check(ExtractIconExW(resource_exe.c_str(),-1,
+                                 nullptr,nullptr,0)>=1,
+                  "test PE contains at least one native icon group");
+
             // Production targets a DIFFERENT process. Confirm its WM_SETICON
             // and WM_GETICON round-trip, not just an in-process DefWindowProc.
             STARTUPINFOW icon_start{};
@@ -258,7 +294,7 @@ int main(int argc, char** argv) {
                 "cross-process icon fixture child launched");
             r2fix::WindowPresentation remote(
                 icon_child.dwProcessId,r2fix::primary_display_metrics(),
-                source.wstring());
+                resource_exe.wstring());
             const DWORD started=GetTickCount();
             r2fix::PresentationResult remote_result{};
             do {
@@ -272,13 +308,15 @@ int main(int argc, char** argv) {
             CloseHandle(icon_child.hProcess);
             if(!(remote_result.game_icon_available &&
                  remote_result.game_icon_applied &&
-                 remote_result.game_icon_readback)) {
+                 remote_result.game_icon_readback &&
+                 remote_result.game_icon_method=="PE RT_GROUP_ICON")) {
                 std::cerr << "Cross-process icon diagnostics: found="
                           << remote_result.window_found
                           << " available=" << remote_result.game_icon_available
                           << " applied=" << remote_result.game_icon_applied
                           << " readback=" << remote_result.game_icon_readback
                           << " class=" << remote_result.game_window_class
+                          << " method=" << remote_result.game_icon_method
                           << " error=" << remote_result.game_icon_error << "\\n";
                 throw std::runtime_error(
                     "cross-process WM_SETICON did not round-trip");
