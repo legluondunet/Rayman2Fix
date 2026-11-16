@@ -39,7 +39,7 @@ if(NOT WIN32)
   set_target_properties(Rayman2Fix PROPERTIES OUTPUT_NAME rayman2fix_cli)
 endif()
 if(WIN32)
-  target_link_libraries(Rayman2Fix PRIVATE dxguid)
+  target_link_libraries(Rayman2Fix PRIVATE dxguid shell32)
 endif()
 find_package(Git QUIET)
 set(RAYMAN2FIX_BUILD_COMMIT "unknown")
@@ -193,6 +193,9 @@ if(BUILD_TESTING)
     src/launcher/startup.cpp)
   target_link_libraries(auto_flow_tests PRIVATE rayman2_disc rayman2_patch)
   if(WIN32)
+    target_link_libraries(auto_flow_tests PRIVATE shell32)
+  endif()
+  if(WIN32)
     # Startup tests need the same embedded DLL resource as the real launcher.
     target_sources(auto_flow_tests PRIVATE
       "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc")
@@ -219,6 +222,9 @@ if(BUILD_TESTING)
     src/launcher/patch_install.cpp
     src/launcher/startup.cpp)
   target_link_libraries(game_launch_tests PRIVATE rayman2_patch)
+  if(WIN32)
+    target_link_libraries(game_launch_tests PRIVATE shell32)
+  endif()
   add_test(NAME game-launch-preflight COMMAND game_launch_tests)
 
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
