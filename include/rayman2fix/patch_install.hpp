@@ -16,6 +16,14 @@ ExePatchHeader install_exe_replacement(
     const std::filesystem::path& game_root,
     const std::vector<unsigned char>& patch);
 
+// Install a user-provided decrypted executable through the SAME SHA256-locked
+// transactional receipt/backup path as the binary-delta installer.
+// The supplied file is copied, not moved or modified.
+ExePatchHeader install_exe_replacement_from_file(
+    const std::filesystem::path& game_root,
+    const std::filesystem::path& supplied_exe,
+    const ExePatchHeader& approved);
+
 // Verify the PATCH receipt and both executables against their own SHA-256.
 // If a patch receipt is absent, reject an unexplained rayman2.exe.bak.
 // If patched, expected_cd_hash/size must match the backup, not the new EXE.

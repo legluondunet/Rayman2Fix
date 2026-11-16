@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -482,18 +483,61 @@ void publish_installation(const fs::path& game_dir, const fs::path& staging) {
     }
 }
 
-// Patch bytes are intentionally not bundled until we obtain the ORIGINAL
-// retail executable and generate an edition-specific minimal delta.
-// On a supported build, commit the new EXE with its original preserved under
-// rayman2.exe.bak, never overwrite a previous backup.
+// The public bootstrap does not contain a proprietary game executable
+// or the owner's private delta. Detect an exact SHA256-approved decrypted
+// rayman2.exe beside Rayman2Fix.exe, for both fresh and existing installs.
+std::optional<fs::path> find_local_unprotected_exe(const fs::path& launcher_root) {
+    std::optional<fs::path> found;
+    for (const auto& entry : fs::directory_iterator(launcher_root)) {
+        if (upper(entry.path().filename().u8string()) != "RAYMAN2.EXE")
+            continue;
+        if (entry.is_symlink() || !entry.is_regular_file())
+            throw std::runtime_error("unsafe local rayman2.exe beside installer");
+        if (found)
+            throw std::runtime_error("ambiguous local rayman2.exe filenames beside installer");
+        found = entry.path();
+    }
+    return found;
+}
+
+// The original is preserved as rayman2.exe.bak and the receipt stays in
+// rayman2/rayman2fix/. Unknown CD editions are never modified.
 void patch_executable_if_supported(const fs::path& game_root, Startup& startup) {
     if (is_exe_replaced(game_root)) {
         startup.log("EXE-PATCH: installed patch marker present; original preserved as rayman2.exe.bak");
         return;
     }
+    const auto supplied = find_local_unprotected_exe(startup.root());
+    if (supplied) {
+        const ExePatchHeader approved{
+            kApprovedProtectedExeSize, kApprovedUnprotectedExeSize,
+            kApprovedProtectedExeSha256, kApprovedUnprotectedExeSha256
+        };
+        // No fallback to another file or unverified EXE if the user
+        // explicitly supplied a rayman2.exe with the wrong hash.
+        if (!exists_file(*supplied) ||
+            fs::file_size(*supplied) != approved.patched_size ||
+            sha256_file(*supplied) != approved.patched_sha256)
+            throw std::runtime_error(
+                "local rayman2.exe does not match approved decrypted SHA256; original preserved");
+        const auto original = game_root / "rayman2.exe";
+        if (!exists_file(original) ||
+            fs::file_size(original) != approved.original_size ||
+            sha256_file(original) != approved.original_sha256) {
+            startup.log("EXE-PATCH: local decrypted EXE valid, but protected source hash is unsupported; no change");
+            return;
+        }
+        const auto applied = install_exe_replacement_from_file(
+            game_root, *supplied, approved);
+        startup.log("EXE-PATCH: approved local decrypted rayman2.exe installed "
+                    "source_sha256=" + applied.original_sha256 +
+                    " target_sha256=" + applied.patched_sha256 +
+                    " original_backup=rayman2.exe.bak receipt=rayman2fix/.rayman2fix-exe-patch.tsv");
+        return;
+    }
     const auto patch = available_exe_patch(startup.root());
     if (patch.empty()) {
-        startup.log("EXE-PATCH: no embedded or local delta; original CD executable unchanged (no .bak yet)");
+        startup.log("EXE-PATCH: no approved local decrypted rayman2.exe, embedded patch or .r2patch sidecar; protected executable unchanged");
         return;
     }
     const auto header = inspect_exe_patch(patch);

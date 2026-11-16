@@ -79,6 +79,73 @@ bool match(const fs::path& file, std::uint64_t expected_size,
     return clean_file(file) && fs::file_size(file) == expected_size &&
            sha256_file(file) == expected_sha;
 }
+
+// Both the verified binary-delta route and a locally supplied decrypted EXE
+// share this transactional commit path. Never remove or replace a valid
+// original/backup until the new EXE and receipt have passed SHA256 checks.
+template<typename Stage>
+ExePatchHeader commit_verified_replacement(const fs::path& root,
+                                             const ExePatchHeader& info,
+                                             Stage stage) {
+    if (!is_digest(info.original_sha256) || !is_digest(info.patched_sha256) ||
+        !info.original_size || !info.patched_size ||
+        info.original_size > kMaxSize || info.patched_size > kMaxSize)
+        fail("unrecognized executable source or target metadata");
+
+    const fs::path original = root / "rayman2.exe";
+    const fs::path backup = root / "rayman2.exe.bak";
+    const fs::path patched = root / "rayman2.exe.patching";
+    const fs::path fix_dir = root / "rayman2fix";
+    if (fs::is_symlink(fix_dir) ||
+        (fs::exists(fix_dir) && !fs::is_directory(fix_dir)))
+        fail("unsafe metadata directory");
+    fs::create_directories(fix_dir);
+    const fs::path marker = fix_dir / kMarker;
+    const fs::path marker_new = fix_dir / ".rayman2fix-exe-patch.tsv.new";
+
+    if (!clean_file(original) || fs::exists(backup) || fs::is_symlink(backup) ||
+        fs::exists(patched) || fs::is_symlink(patched) ||
+        fs::exists(marker) || fs::is_symlink(marker) ||
+        fs::exists(marker_new) || fs::is_symlink(marker_new))
+        fail("existing/missing files prevent safe EXE replacement; preserving original");
+    if (!match(original, info.original_size, info.original_sha256))
+        fail("original CD executable has unsupported SHA256");
+
+    try {
+        stage(original, patched);
+        if (!match(patched, info.patched_size, info.patched_sha256))
+            fail("staged replacement does not match approved target SHA256");
+        save_marker(marker_new, info);
+    } catch (...) {
+        std::error_code ignored;
+        fs::remove(patched, ignored);
+        fs::remove(marker_new, ignored);
+        throw;
+    }
+    try {
+        fs::rename(original, backup);
+    } catch (...) {
+        std::error_code ignored;
+        fs::remove(patched, ignored);
+        fs::remove(marker_new, ignored);
+        throw;
+    }
+    bool installed = false;
+    try {
+        fs::rename(patched, original);
+        installed = true;
+        fs::rename(marker_new, marker);
+    } catch (...) {
+        std::error_code ignored;
+        if (installed) fs::remove(original, ignored);
+        // Never delete the verified backup until the restore succeeds.
+        fs::rename(backup, original, ignored);
+        fs::remove(patched, ignored);
+        fs::remove(marker_new, ignored);
+        throw;
+    }
+    return info;
+}
 } // namespace
 
 bool is_exe_replaced(const fs::path& root) {
@@ -121,48 +188,25 @@ bool verify_exe_replacement(const fs::path& root,
 ExePatchHeader install_exe_replacement(
     const fs::path& root, const std::vector<unsigned char>& patch) {
     const auto info = inspect_exe_patch(patch);
-    const fs::path original = root / "rayman2.exe";
-    const fs::path backup = root / "rayman2.exe.bak";
-    const fs::path patched = root / "rayman2.exe.patching";
-    const fs::path fix_dir=root/"rayman2fix";
-    if(fs::is_symlink(fix_dir) ||
-       (fs::exists(fix_dir) && !fs::is_directory(fix_dir)))
-        fail("unsafe metadata directory");
-    fs::create_directories(fix_dir);
-    const fs::path marker = fix_dir / kMarker;
-    const fs::path marker_new = fix_dir / ".rayman2fix-exe-patch.tsv.new";
-    if (!clean_file(original) || fs::exists(backup) || fs::is_symlink(backup) ||
-        fs::exists(patched) || fs::is_symlink(patched) ||
-        fs::exists(marker) || fs::is_symlink(marker) ||
-        fs::exists(marker_new) || fs::is_symlink(marker_new))
-        fail("existing/missing files prevent safe EXE replacement; preserving original");
-    if (!match(original, info.original_size, info.original_sha256))
-        fail("original CD executable has unsupported SHA256");
-    // Reconstruct and verify SHA256 *before* changing the original game file.
-    try {
-        const auto applied = apply_exe_patch(original, patched, patch);
-        save_marker(marker_new, applied);
-    } catch (...) {
-        std::error_code ignored;
-        fs::remove(patched, ignored);
-        fs::remove(marker_new, ignored);
-        throw;
-    }
-    fs::rename(original, backup);
-    bool renamed_patched = false;
-    try {
-        fs::rename(patched, original);
-        renamed_patched = true;
-        fs::rename(marker_new, marker);
-    } catch (...) {
-        std::error_code ignored;
-        if (renamed_patched) fs::remove(original, ignored);
-        // Never remove a good original backup unless the restore succeeded.
-        fs::rename(backup, original, ignored);
-        fs::remove(patched, ignored);
-        fs::remove(marker_new, ignored);
-        throw;
-    }
-    return info;
+    return commit_verified_replacement(root, info,
+        [&](const fs::path& original, const fs::path& staged) {
+            (void)apply_exe_patch(original, staged, patch);
+        });
+}
+
+ExePatchHeader install_exe_replacement_from_file(
+    const fs::path& root, const fs::path& supplied,
+    const ExePatchHeader& approved) {
+    // A separate, user-provided game executable is intentionally kept
+    // untouched. Hash and size must match BEFORE staging and again AFTER
+    // the copy to prevent replacing a game with an unknown binary.
+    if (!is_digest(approved.patched_sha256) ||
+        !approved.patched_size || approved.patched_size > kMaxSize ||
+        !match(supplied, approved.patched_size, approved.patched_sha256))
+        fail("local decrypted EXE has an unsupported size or SHA256");
+    return commit_verified_replacement(root, approved,
+        [&](const fs::path&, const fs::path& staged) {
+            fs::copy_file(supplied, staged, fs::copy_options::none);
+        });
 }
 } // namespace r2fix
