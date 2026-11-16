@@ -177,6 +177,11 @@ bool g_intro_level_logged = false;
 // audio compensation, skip inputs, or changes in foreground policy.
 std::atomic<DWORD> g_last_camera_tick{0};
 std::atomic<DWORD> g_last_native_2d_tick{0};
+// Source-callback telemetry only, transferred to the ordinary render-thread
+// report. No disk I/O, native audio queries or allocation in Resume wrapper.
+std::atomic<DWORD> g_esc_resume_camera_age{0xffffffffu};
+std::atomic<DWORD> g_esc_resume_native2d_age{0xffffffffu};
+std::atomic<bool> g_esc_resume_cadence_ready{false};
 bool g_learn_logged = false;
 bool g_learn_intro_seen = false;
 bool g_learn_handover = false;
@@ -2002,20 +2007,6 @@ void __cdecl proto_script_pause() {
         proto_log("script-pause-observed",pending ?
             "paired-theme-candidate-ready" :
             "provisional-owner-rejected-native-audio-unchanged");
-        if(g_log) {
-            const DWORD now=GetTickCount();
-            const DWORD camera=g_last_camera_tick.load(std::memory_order_relaxed);
-            const DWORD native2d=g_last_native_2d_tick.load(std::memory_order_relaxed);
-            char line[270]{};
-            std::snprintf(line,sizeof(line),
-                "RUNTIME-ESC-POLL-CADENCE: source=script-pause "
-                "camera_age_ms=%ld native2d_age_ms=%ld "
-                "win32_foreground=%u (post-native-pause, diagnostic only)",
-                camera ? long(DWORD(now-camera)) : -1L,
-                native2d ? long(DWORD(now-native2d)) : -1L,
-                unsigned(game_window_is_foreground()));
-            log_line(line);
-        }
     }
 }
 void __cdecl proto_script_resume() {
@@ -2113,15 +2104,13 @@ void __cdecl proto_script_resume() {
         const DWORD now=GetTickCount();
         const DWORD camera=g_last_camera_tick.load(std::memory_order_relaxed);
         const DWORD native2d=g_last_native_2d_tick.load(std::memory_order_relaxed);
-        char line[300]{};
-        std::snprintf(line,sizeof(line),
-            "RUNTIME-ESC-POLL-CADENCE: source=script-resume "
-            "camera_age_ms=%ld native2d_age_ms=%ld "
-            "win32_foreground=%u (post-native-resume, diagnostic only)",
-            camera ? long(DWORD(now-camera)) : -1L,
-            native2d ? long(DWORD(now-native2d)) : -1L,
-            unsigned(game_window_is_foreground()));
-        log_line(line);
+        g_esc_resume_camera_age.store(
+            camera ? DWORD(now-camera) : 0xffffffffu,
+            std::memory_order_relaxed);
+        g_esc_resume_native2d_age.store(
+            native2d ? DWORD(now-native2d) : 0xffffffffu,
+            std::memory_order_relaxed);
+        g_esc_resume_cadence_ready.store(true,std::memory_order_release);
     }
 }
 // Called ONLY on the render thread, after native menu audio decisions.
@@ -2136,6 +2125,18 @@ void proto_flush_predriver_resume_report() {
         g_proto_predriver_resume_report.ready=false;
     }
     const auto& probe=report.probe;
+    if(g_esc_resume_cadence_ready.exchange(false,std::memory_order_acq_rel)) {
+        const DWORD camera=g_esc_resume_camera_age.load(std::memory_order_relaxed);
+        const DWORD native2d=g_esc_resume_native2d_age.load(std::memory_order_relaxed);
+        char cadence[230]{};
+        std::snprintf(cadence,sizeof(cadence),
+            "RUNTIME-ESC-POLL-CADENCE: source=script-resume "
+            "camera_age_ms=%ld native2d_age_ms=%ld "
+            "(deferred to render thread; diagnostic only)",
+            camera==0xffffffffu ? -1L : long(camera),
+            native2d==0xffffffffu ? -1L : long(native2d));
+        log_line(cadence);
+    }
     char line[540]{};
     std::snprintf(line,sizeof(line),
         "RUNTIME-ESC-PREDRIVER-RESUME: t_ms=%lu callbacks=%u "
