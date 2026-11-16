@@ -168,8 +168,19 @@ BOOL CALLBACK find_game_window(HWND hwnd, LPARAM param) {
 
 WindowPresentation::WindowPresentation(unsigned long child_pid,
                                        DisplayMetrics display,
-                                       const std::wstring& game_executable)
-    : pid_(child_pid), display_(display), game_executable_(game_executable) {}
+                                       const std::wstring& game_executable,
+                                       bool game_icon_delegated)
+    : pid_(child_pid), display_(display), game_executable_(game_executable),
+      game_icon_delegated_(game_icon_delegated) {
+    result_.game_icon_delegated=game_icon_delegated;
+    if(game_icon_delegated) {
+        // The approved runtime now owns all HICONs and sets both slots
+        // in the game process. Do not retry invalid cross-process icons
+        // every second under Wine.
+        result_.game_icon_source="rayman2.exe";
+        result_.game_icon_method="in-game-runtime";
+    }
+}
 
 WindowPresentation::~WindowPresentation() {
     // The launcher waits until the child process exits before this runs.
@@ -182,6 +193,7 @@ WindowPresentation::~WindowPresentation() {
 void WindowPresentation::load_game_icons() {
     if (game_icons_loaded_) return;
     game_icons_loaded_ = true;
+    if(game_icon_delegated_)return;
     if (game_executable_.empty()) {
         result_.game_icon_error = "game executable path unavailable";
         return;
