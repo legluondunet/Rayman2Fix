@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include "rayman2fix/game_window_icon.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -15,11 +16,22 @@ int main() {
     out << "cwd-verified\n";
     out.close();
 #ifdef _WIN32
-    HWND hwnd = CreateWindowExW(0, L"STATIC", L"Rayman2 test window",
+    WNDCLASSW klass{};
+    klass.lpfnWndProc=DefWindowProcW;
+    klass.hInstance=GetModuleHandleW(nullptr);
+    klass.lpszClassName=L"Rayman2";
+    if(!RegisterClassW(&klass))return 26;
+    HWND hwnd = CreateWindowExW(0, klass.lpszClassName, L"Rayman2 test window",
                                 WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                                 55, 60, 640, 480, nullptr,
-                                nullptr, GetModuleHandleW(nullptr), nullptr);
+                                nullptr, klass.hInstance, nullptr);
     if (!hwnd) return 23;
+    wchar_t self_icon_flag[4]{};
+    const bool icon_test=GetEnvironmentVariableW(
+        L"RAYMAN2FIX_TEST_SELF_ICON",self_icon_flag,4)==1 &&
+        self_icon_flag[0]==L'1';
+    if(icon_test)
+        r2fix::start_game_window_icon_worker(nullptr);
     DWORD ticks = GetTickCount();
     MSG msg{};
     while (GetTickCount() - ticks < 3000) {
@@ -52,7 +64,24 @@ int main() {
          << (rect.bottom - rect.top) << L'\n'
          << frame_limit << L'\n';
     info.close();
+    if(icon_test) {
+        const HICON big=reinterpret_cast<HICON>(
+            SendMessageW(hwnd,WM_GETICON,ICON_BIG,0));
+        const HICON small=reinterpret_cast<HICON>(
+            SendMessageW(hwnd,WM_GETICON,ICON_SMALL,0));
+        const HICON class_big=reinterpret_cast<HICON>(
+            GetClassLongPtrW(hwnd,GCLP_HICON));
+        const HICON class_small=reinterpret_cast<HICON>(
+            GetClassLongPtrW(hwnd,GCLP_HICONSM));
+        std::ofstream self_report(root/"child-owned-window-icon.txt");
+        self_report << (big!=nullptr) << ' ' << (small!=nullptr)
+                    << ' ' << (class_big!=nullptr)
+                    << ' ' << (class_small!=nullptr) << '\n';
+        self_report.close();
+        if(!self_report)return 27;
+    }
     DestroyWindow(hwnd);
+    UnregisterClassW(klass.lpszClassName,klass.hInstance);
 #endif
     return 17;
 }
