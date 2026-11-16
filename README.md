@@ -100,12 +100,26 @@ conversion deliberately maps the reference artwork to the exact
 historic atlas bounds; it is not promised to be pixel-identical to
 the retail title's low-res palette.
 
-## Music in the Escape pause menu — research build
+## Music in the Escape pause menu — experimental PR #10
 
-Requested future setting: `[Features] MusicInPauseMenu=0` (disabled by
-default). **Not yet implemented in the user INI**, because a reliable
-audio-only pause policy has not been identified. No placebo option is
-shipped. The original music and the game's sound driver are unchanged.
+The PR #10 test build exposes `[Features] MusicInPauseMenu=1` (disabled
+by default). It attempts guarded continuation of the **already-verified**
+native Theme/SXD music during the ESC menu. It does not replace the
+game's audio driver, and all uncertain or changed resource states
+fall back to the original native audio behavior.
+
+**Important limitation:** during the first pauses after the
+`jail_20` → `learn_10` transition, the original controller may
+still reference Theme `9:12` while the active Theme is `9:5`.
+The compensation refuses this unverified pairing, so music can remain
+silent in the menu until the original controller synchronizes. The
+owner's latest successful `AspectRatio=Auto` test showed that
+synchronization around 57.6 seconds of play and subsequent audible
+menu music, but did **not** validate first-ESC continuation.
+`AspectRatio=4:3` does **not** disable the INI setting; its
+in-game behavior still requires validation. Do not weaken the native
+Theme ownership checks to force audio during initial or changing
+SXD parts. This feature remains experimental and unmerged.
 
 The separately labelled GitHub Actions artifact
 `Rayman2Fix-Windows-x86-audio-trace` has a **research-only** DLL with
