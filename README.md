@@ -662,6 +662,21 @@ RemoveCinematicBars=0
 Windows/Wine. You can alternatively select an explicit resolution such as
 `Resolution=1280x720` or `Resolution=1920x1080`.
 The format is validated and invalid values are refused, not silently ignored.
+For explicit resolutions, the parser accepts widths **640–8192** and
+heights **480–4320** independently, but these are input bounds rather
+than a promise that every aspect ratio renders correctly. Mathematical
+regression tests now cover 4:3 (640×480/1024×768), 16:10
+(1920×1200), 16:9 (1920×1080/2560×1440), and ultrawide
+(3440×1440/5120×1440). In `Auto`, the Hor+ FOV and centered
+native HUD math supports outputs **at least 4:3 and at most 5:1**
+where the camera angle itself also passes its safety guards; this
+does not independently verify cinematics, menus, or GPU presentation
+on real hardware. Narrower outputs such as 1280×1024 (5:4) are
+*not* guaranteed in Auto: the Hor+ helper rejects these ratios.
+For such displays, `AspectRatio=4:3` creates an exact 4:3 canvas
+inside the output, potentially adding horizontal as well as vertical
+black margins. `Resolution` never changes the Windows/Wine desktop
+display mode; `Desktop` is recommended for normal play.
 `FPSLimit=60` caps the **game's rendered frame rate** by pacing its
 `grBufferSwap` calls; set `FPSLimit=30`, `120`, or another rate
 between 15 and 240 if required. `FPSLimit=0` disables the cap.
