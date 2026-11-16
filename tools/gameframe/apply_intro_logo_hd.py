@@ -63,7 +63,7 @@ pub fn observe_source(w:usize,h:usize,format:u32,mips:usize) {
 
 fn load_atlas() -> Option<Vec<u8>> {
     let cwd=std::env::current_dir().ok()?;
-    let mut paths=vec![cwd.join("Rayman2Fix_logo_hd.rgba")];
+    let mut paths=vec![cwd.join("rayman2fix").join("Rayman2Fix_logo_hd.rgba"),cwd.join("Rayman2Fix_logo_hd.rgba")];
     if let Some(p)=cwd.parent(){ paths.push(p.join("Rayman2Fix_logo_hd.rgba")); }
     if let Ok(exe)=std::env::current_exe() {
         if let Some(p)=exe.parent(){ paths.push(p.join("Rayman2Fix_logo_hd.rgba")); }

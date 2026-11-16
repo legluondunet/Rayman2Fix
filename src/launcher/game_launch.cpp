@@ -118,8 +118,13 @@ GameLaunchPreflight check_game_launch(const fs::path& root) {
         std::string problem;
         if (!verify_exe_replacement(root, kOriginalHash, kOriginalBytes, problem))
             return {false, "EXE patch marker verification failed: " + problem};
-        if (!gameframe_glide_ready(root))
+        if (!gameframe_glide_ready(root / "rayman2fix"))
             return {false, "required GameFrame glide2x.dll is missing or unverified"};
+        // Application-directory DLLs take precedence over PATH. A stale
+        // root Glide wrapper would mask the verified nested one.
+        if (fs::exists(root / "glide2x.dll") ||
+            fs::is_symlink(root / "glide2x.dll"))
+            return {false, "unexpected root glide2x.dll shadows nested GameFrame; relocate it safely"};
         if (!fs::is_regular_file(root / "ubi.ini") ||
             fs::is_symlink(root / "ubi.ini"))
             return {false, "generated ubi.ini is missing or invalid"};
@@ -200,6 +205,23 @@ ChildProcessResult run_child_process(
     ScopedChildEnvironment fps_limit(L"RAYMAN2FIX_FPS_LIMIT");
     ScopedChildEnvironment glide_probe(L"RAYMAN2FIX_GLIDE_PROBE");
     ScopedChildEnvironment cinematic_probe(L"RAYMAN2FIX_CINEMATIC_PROBE");
+    ScopedChildEnvironment child_path(L"PATH");
+    // The game retains its original working directory, while the verified
+    // Glide wrapper lives with the rest of Rayman2Fix in a child folder.
+    // The Windows loader searches PATH for application-requested DLLs.
+    // The game-facing winmm.dll still resolves from the game directory.
+    const auto fixes=fs::absolute(working_directory/"rayman2fix").wstring();
+    const DWORD path_size=GetEnvironmentVariableW(L"PATH",nullptr,0);
+    if(path_size>32768) return {false,0,ERROR_INVALID_PARAMETER};
+    std::wstring inherited;
+    if(path_size) {
+        inherited.resize(path_size,L'\0');
+        const DWORD n=GetEnvironmentVariableW(L"PATH",inherited.data(),path_size);
+        if(n>=path_size)return {false,0,GetLastError()};
+        inherited.resize(n);
+    }
+    if(!child_path.set(fixes+(inherited.empty()?L"":L";"+inherited)))
+        return {false,0,child_path.error()};
     if (!glide_probe.set(display.log_enabled ? L"1" : L"0"))
         return {false, 0, glide_probe.error()};
     // The existing cinematic feature is also the opt-in for read-only
@@ -226,6 +248,7 @@ ChildProcessResult run_child_process(
                                         nullptr, nullptr, FALSE, 0, nullptr,
                                         cwd.c_str(), &startup, &raw);
     const DWORD spawn_error = created ? 0 : GetLastError();
+    child_path.restore();
     cinematic_probe.restore();
     glide_probe.restore();
     fps_limit.restore();
@@ -238,7 +261,7 @@ ChildProcessResult run_child_process(
     if (display.borderless && display.enable_fov) {
         result.fov_hook = initialize_game_fov(
             reinterpret_cast<std::uintptr_t>(process.handle),
-            raw.dwProcessId, working_directory / "Rayman2Fix.dll",
+            raw.dwProcessId, working_directory / "rayman2fix" / "Rayman2Fix.dll",
             display.output_width, display.output_height, display.log_enabled,
             display.skip_cinematics, display.remove_dialogue_backgrounds,
             display.remove_cinematic_bars);
@@ -357,7 +380,7 @@ int launch_verified_game(Startup& startup, bool verify) {
                 (display.fps_limit ? " cap at GameFrame.grBufferSwap"
                                    : " unlimited (GameFrame pacing disabled)"));
     std::cout << "Launching Rayman 2 (Glide2)...\n" << std::flush;
-    startup.log("LAUNCH-START: child=rayman2.exe working_directory=Rayman2Fix");
+    startup.log("LAUNCH-START: child=rayman2/rayman2.exe working_directory=rayman2 nested_glide_path=rayman2/rayman2fix");
     const auto started = std::chrono::steady_clock::now();
     // Launcher and DLL no longer share a file handle: only the approved
     // game launch resets Rayman2Fix.log, keeping installer messages separate.
