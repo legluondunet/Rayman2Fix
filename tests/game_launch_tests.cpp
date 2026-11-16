@@ -187,9 +187,18 @@ int main(int argc, char** argv) {
                     source.wstring());
                 presentation.update();
                 const auto observed = presentation.result();
-                check(observed.window_found && observed.game_icon_available &&
-                      observed.game_icon_applied && observed.game_icon_updates == 1,
-                      "executable resource icons applied to actual HWND");
+                if (!(observed.window_found && observed.game_icon_available &&
+                      observed.game_icon_applied && observed.game_icon_updates == 1)) {
+                    std::cerr << "Icon fixture diagnostics: found=" << observed.window_found
+                              << " available=" << observed.game_icon_available
+                              << " applied=" << observed.game_icon_applied
+                              << " updates=" << observed.game_icon_updates
+                              << " source=" << observed.game_icon_source
+                              << " icon_error=" << observed.game_icon_error
+                              << " last_error=" << observed.last_error << "\\n";
+                    throw std::runtime_error(
+                        "executable resource icons applied to actual HWND");
+                }
                 check(SendMessageW(hwnd, WM_GETICON, ICON_BIG, 0) != 0 &&
                       SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0) != 0,
                       "window's large and small icons visibly assigned by WM_SETICON");
