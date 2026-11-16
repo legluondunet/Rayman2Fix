@@ -289,8 +289,8 @@ void Startup::initialize(bool provision_files) {
                "Resolution=Desktop\n"
                "; FPSLimit=0 disables the cap; accepted range: 15..240\n"
                "FPSLimit=60\n"
-               "; 1 = centered 4:3 picture (black sidebars)\n"
-               "Force4x3=0\n"
+               "; Auto = monitor aspect ratio; 4:3 = centered classic picture\n"
+               "AspectRatio=Auto\n"
                "\n"
                "[Features]\n"
                "; 1 = allow Space/Enter/Esc to skip jail_20 only\n"
@@ -299,7 +299,7 @@ void Startup::initialize(bool provision_files) {
                "; 1 = hide native rectangles behind in-game dialogue\n"
                "RemoveDialogueBackgrounds=0\n"
                "; 1 = experimental game-drawn cinematic letterbox removal\n"
-               "; GameFrame Force4x3 sidebars remain unchanged\n"
+               "; GameFrame AspectRatio=4:3 sidebars remain unchanged\n"
                "RemoveCinematicBars=0\n";
         if (!ini) throw std::runtime_error("failed writing Rayman2Fix.ini");
     }
@@ -385,8 +385,8 @@ void Startup::initialize(bool provision_files) {
     log("CONFIG: Graphics.FPSLimit=" +
         (fps.empty() ? "60 (default)" : fps));
     const bool have_ini=fs::exists(ini_path_);
-    log(std::string("CONFIG: Graphics.Force4x3=") +
-        (have_ini && configured_force_4_3(ini_path_) ? "1" : "0"));
+    log(std::string("CONFIG: Graphics.AspectRatio=") +
+        (have_ini ? configured_aspect_ratio(ini_path_) : "Auto"));
     log(std::string("CONFIG: Features.SkipCinematics=") +
         (have_ini && configured_skip_cinematics(ini_path_) ? "1" : "0"));
     log(std::string("CONFIG: Features.RemoveDialogueBackgrounds=") +
