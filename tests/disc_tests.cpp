@@ -294,9 +294,10 @@ int main() {
         check(real_text == "HELLO\n", "real nested file contents preserved");
         real.close();
 
-        // Eight exact root exclusions, with two similarly named but NOT
-        // excluded roots: only directx/dplayx.dll exists in the inspected
-        // retail image. Preserve unrelated names and nested game assets.
+        // Ten exact root exclusions, including owner-approved loader.ini and
+        // dplayerx.dll. Keep unrelated dxplayerx.dll and nested namesakes.
+        // The inspected retail disc's actual DirectPlay library is distinct
+        // and lives in already-excluded directx/dplayx.dll.
         auto obsolete_cd = make_rayman2_with_dummy();
         obsolete_cd.resize(40 * 2048);
         put32(obsolete_cd.data() + 16 * 2048 + 80, 40);
@@ -314,6 +315,7 @@ int main() {
         root_pos += record(obsolete_root + root_pos, 36, 4, 0, "CLOKSPL.EXE;1");
         root_pos += record(obsolete_root + root_pos, 37, 4, 0, "DPLAYERX.DLL;1");
         root_pos += record(obsolete_root + root_pos, 38, 4, 0, "DRVMGT.DLL;1");
+        root_pos += record(obsolete_root + root_pos, 28, 4, 0, "LOADER.INI;1");
         auto* data_dir = obsolete_cd.data() + 21 * 2048;
         std::size_t data_pos = record(data_dir, 21, 2048, 2, std::string(1, '\0'));
         data_pos += record(data_dir + data_pos, 20, 2048, 2, std::string(1, '\1'));
@@ -321,28 +323,30 @@ int main() {
         data_pos += record(data_dir + data_pos, 29, 4, 0, "0000040C.016;1");
         data_pos += record(data_dir + data_pos, 33, 4, 0, "DXPLAYERX.DLL;1");
         data_pos += record(data_dir + data_pos, 34, 4, 0, "DRVMGT.DLL;1");
-        record(data_dir + data_pos, 39, 4, 0, "DPLAYERX.DLL;1");
-        for (int sector : {29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39})
+        data_pos += record(data_dir + data_pos, 39, 4, 0, "DPLAYERX.DLL;1");
+        record(data_dir + data_pos, 27, 4, 0, "LOADER.INI;1");
+        for (int sector : {27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39})
             std::copy_n("TEST", 4, obsolete_cd.data() + sector * 2048);
         write_file(root / "obsolete_cd.iso", obsolete_cd);
         const auto obsolete_image = r2fix::DiscImage::open(root / "obsolete_cd.iso");
-        check(obsolete_image.info().skipped_files == 9,
-              "eight exact root exclusions and known large dummy are omitted");
+        check(obsolete_image.info().skipped_files == 11,
+              "ten exact root exclusions and known large dummy are omitted");
         check(obsolete_image.info().extract_bytes == 30,
-              "unexcluded lookalikes and nested names remain selected");
+              "unexcluded DXPLAYERX and nested names remain selected");
         obsolete_image.extract(root / "obsolete-cd-extracted");
         for (const auto* file : {"00000001.tmp", "0000040c.016",
                                  "0000040c.256", "secdrv.sys",
                                  "rayman2.icd", "clcd32.dll",
-                                 "clokspl.exe", "drvmgt.dll"})
+                                 "clokspl.exe", "drvmgt.dll",
+                                 "dplayerx.dll", "loader.ini"})
             check(!fs::exists(root / "obsolete-cd-extracted" / file),
                   "exact root-only auxiliary must not be extracted");
-        check(fs::exists(root / "obsolete-cd-extracted" / "dxplayerx.dll") &&
-              fs::exists(root / "obsolete-cd-extracted" / "dplayerx.dll"),
-              "misspelled lookalike root names must not be excluded");
+        check(fs::exists(root / "obsolete-cd-extracted" / "dxplayerx.dll"),
+              "unrelated root DXPLAYERX must not be excluded");
         check(fs::exists(root / "obsolete-cd-extracted" / "data" / "0000040c.016") &&
               fs::exists(root / "obsolete-cd-extracted" / "data" / "dxplayerx.dll") &&
               fs::exists(root / "obsolete-cd-extracted" / "data" / "dplayerx.dll") &&
+              fs::exists(root / "obsolete-cd-extracted" / "data" / "loader.ini") &&
               fs::exists(root / "obsolete-cd-extracted" / "data" / "drvmgt.dll"),
               "nested same-name game files must be preserved");
 

@@ -5236,8 +5236,9 @@ DWORD install_camera_hook() {
 void __cdecl cinematic_viewport_calc(void* dimensions,void* viewport) {
     const auto original=g_original_cinematic_viewport_calc;
     if(!original)return;
-    if(!dimensions || !viewport || !g_remove_cinematic_bars ||
-       g_hud_scale>=0.9999f) {
+    if(!dimensions || !viewport ||
+       !r2fix::should_enable_cinematic_viewport_fill(
+           g_remove_cinematic_bars,g_hud_scale)) {
         original(dimensions,viewport);
         return;
     }
@@ -5300,7 +5301,8 @@ void __cdecl cinematic_viewport_calc(void* dimensions,void* viewport) {
 }
 
 void install_cinematic_viewport_hook() {
-    if(!g_remove_cinematic_bars || g_hud_scale>=0.9999f ||
+    if(!r2fix::should_enable_cinematic_viewport_fill(
+           g_remove_cinematic_bars,g_hud_scale) ||
        g_original_cinematic_viewport_calc)return;
     auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
     if(!base)return;

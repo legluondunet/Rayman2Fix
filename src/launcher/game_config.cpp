@@ -231,8 +231,14 @@ std::pair<std::uint32_t, std::uint32_t> configured_output_resolution(
     return resolution(read_resolution_setting(ini));
 }
 
-bool configured_force_4_3(const fs::path& ini) {
-    return read_ini_flag(ini,"Graphics","Force4x3");
+std::string configured_aspect_ratio(const fs::path& ini) {
+    const auto value=upper(trim(read_graphics_setting(ini,"AspectRatio","Auto")));
+    if(value=="AUTO")return "Auto";
+    if(value=="4:3")return "4:3";
+    throw std::runtime_error("invalid [Graphics] AspectRatio; use Auto or 4:3");
+}
+bool configured_aspect_ratio_is_4_3(const fs::path& ini) {
+    return configured_aspect_ratio(ini)=="4:3";
 }
 bool configured_skip_cinematics(const fs::path& ini) {
     return read_ini_flag(ini,"Features","SkipCinematics");
@@ -249,12 +255,12 @@ bool configured_music_in_pause_menu(const fs::path& ini) {
 std::pair<std::uint32_t,std::uint32_t> configured_render_resolution(
         const fs::path& ini) {
     const auto physical=configured_output_resolution(ini);
-    if(!configured_force_4_3(ini))return physical;
+    if(!configured_aspect_ratio_is_4_3(ini))return physical;
     // Preserve exact 4:3 in the largest integer-pixel area. GameFrame's
     // native present() clears black outside it, without EXE hacks.
     const auto units=std::min(physical.first/4u,physical.second/3u);
     if(units<160u)
-        throw std::runtime_error("unsupported [Graphics] Force4x3 canvas");
+        throw std::runtime_error("unsupported [Graphics] AspectRatio=4:3 canvas");
     return {units*4u,units*3u};
 }
 
@@ -276,7 +282,7 @@ std::uint32_t configured_fps_limit(const fs::path& ini) {
 void ensure_rayman2fix_ini_options(const fs::path& ini) {
     const auto raw=lines_of(ini);
     std::string current;
-    bool graphics=false,features=false,force=false,skip=false;
+    bool graphics=false,features=false,aspect=false,force=false,skip=false;
     bool dialogue=false,cinematic=false,legacy=false,music=false;
     for(const auto& text:raw) {
         std::string next;
@@ -292,6 +298,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(p==std::string::npos)continue;
         const auto key=upper(trim(t.substr(0,p)));
         if(current=="GRAPHICS" && key=="FORCE4X3")force=true;
+        if(current=="GRAPHICS" && key=="ASPECTRATIO")aspect=true;
         if(current=="FEATURES" && key=="SKIPCINEMATICS")skip=true;
         if(current=="FEATURES" && key=="REMOVEDIALOGUEBACKGROUNDS")dialogue=true;
         if(current=="FEATURES" && key=="REMOVECINEMATICBARS")cinematic=true;
@@ -303,27 +310,26 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     // Invalid legacy values are rejected before editing the user's INI.
     const bool inherited=legacy &&
         read_ini_flag(ini,"Features","RemoveBlackFrames");
-    if(force && skip && dialogue && cinematic && music && !legacy)return;
+    // Respect an explicitly configured AspectRatio if both keys are present.
+    // Reject invalid settings before changing the user's file.
+    if(aspect)(void)configured_aspect_ratio(ini);
+    const std::string migrated_aspect=(!aspect && force &&
+        read_ini_flag(ini,"Graphics","Force4x3")) ? "4:3" : "Auto";
+    if(aspect && !force && skip && dialogue && cinematic && music && !legacy)return;
     std::vector<std::string> output;
     std::string active;
-    bool added_force=false,added_skip=false,added_dialogue=false,added_cinematic=false,added_music=false;
+    bool added_aspect=false,added_skip=false,added_dialogue=false,added_cinematic=false,added_music=false;
     const auto inject=[&]() {
-        if(active=="GRAPHICS" && !force && !added_force) {
-            output.emplace_back("; 1 = centered 4:3 picture with black sidebars");
-            output.emplace_back("Force4x3=0");
-            added_force=true;
+        if(active=="GRAPHICS" && !aspect && !force && !added_aspect) {
+            output.emplace_back("; Auto = monitor aspect ratio; 4:3 = centered classic picture");
+            output.emplace_back("AspectRatio=Auto");
+            added_aspect=true;
         }
         if(active=="FEATURES" && !skip && !added_skip) {
             output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 only");
             output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
             output.emplace_back("SkipCinematics=0");
             added_skip=true;
-        }
-        if(active=="FEATURES" && !music && !added_music) {
-            output.emplace_back("; 1 = continue the current level music in the ESC menu");
-            output.emplace_back("; Default 0 (opt in); original SFX and level changes remain native");
-            output.emplace_back("MusicInPauseMenu=0");
-            added_music=true;
         }
         if(active=="FEATURES" && !dialogue && !added_dialogue) {
             output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
@@ -332,9 +338,15 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         }
         if(active=="FEATURES" && !cinematic && !added_cinematic) {
             output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
-            output.emplace_back("; Does not affect GameFrame Force4x3 sidebars");
+            output.emplace_back("; Does not affect GameFrame AspectRatio=4:3 sidebars");
             output.emplace_back(std::string("RemoveCinematicBars=")+(inherited?"1":"0"));
             added_cinematic=true;
+        }
+        if(active=="FEATURES" && !music && !added_music) {
+            output.emplace_back("; 1 = continue the current level music in the ESC menu");
+            output.emplace_back("; Default 0 (opt in); original SFX and level changes remain native");
+            output.emplace_back("MusicInPauseMenu=0");
+            added_music=true;
         }
     };
     for(const auto& text:raw) {
@@ -347,9 +359,27 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         // All unrelated lines, comments and custom sections are preserved.
         const auto t=trim(text);
         const auto eq=t.find('=');
-        if(active=="FEATURES" && eq!=std::string::npos &&
-           upper(trim(t.substr(0,eq)))=="REMOVEBLACKFRAMES")
+        const auto key=eq==std::string::npos ? std::string{} :
+                       upper(trim(t.substr(0,eq)));
+        if(active=="GRAPHICS") {
+            if(t=="; 1 = centered 4:3 picture with black sidebars" ||
+               t=="; 1 = centered 4:3 picture (black sidebars)")
+                continue; // remove obsolete generated comments
+            if(key=="FORCE4X3") {
+                if(!aspect && !added_aspect) {
+                    output.emplace_back("; Auto = monitor aspect ratio; 4:3 = centered classic picture");
+                    output.emplace_back("AspectRatio="+migrated_aspect);
+                    added_aspect=true;
+                }
+                continue; // retire old key; explicit AspectRatio always wins
+            }
+        }
+        if(active=="FEATURES" && key=="REMOVEBLACKFRAMES")
             continue;
+        if(t=="; GameFrame Force4x3 sidebars remain unchanged") {
+            output.emplace_back("; GameFrame AspectRatio=4:3 sidebars remain unchanged");
+            continue;
+        }
         output.push_back(text);
     }
     inject();
@@ -357,8 +387,8 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(!output.empty() && !output.back().empty())
             output.emplace_back();
         output.emplace_back("[Graphics]");
-        output.emplace_back("; 1 = centered 4:3 picture with black sidebars");
-        output.emplace_back("Force4x3=0");
+        output.emplace_back("; Auto = monitor aspect ratio; 4:3 = centered classic picture");
+        output.emplace_back("AspectRatio=Auto");
     }
     if(!features) {
         if(!output.empty() && !output.back().empty())
@@ -370,7 +400,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
         output.emplace_back("RemoveDialogueBackgrounds=0");
         output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
-        output.emplace_back("; Does not affect GameFrame Force4x3 sidebars");
+        output.emplace_back("; Does not affect GameFrame AspectRatio=4:3 sidebars");
         output.emplace_back("RemoveCinematicBars=0");
         output.emplace_back("; 1 = continue the current level music in the ESC menu");
         output.emplace_back("; Default 0 (opt in); preserves native SFX and level changes");

@@ -43,11 +43,11 @@ static std::size_t record(std::uint8_t* p, std::uint32_t extent,
     return length;
 }
 static std::vector<std::uint8_t> test_disc() {
-    std::vector<std::uint8_t> iso(37 * 2048, 0);
+    std::vector<std::uint8_t> iso(38 * 2048, 0);
     auto* pvd = iso.data() + 16 * 2048;
     pvd[0] = 1; pvd[1] = 'C'; pvd[2] = 'D'; pvd[3] = '0';
     pvd[4] = '0'; pvd[5] = '1'; pvd[6] = 1;
-    put32(pvd + 80, 37);
+    put32(pvd + 80, 38);
     const char* name = "RAYMAN2";
     std::copy(name, name + 7, pvd + 40);
     record(pvd + 156, 20, 2048, true, std::string(1, '\0'));
@@ -68,6 +68,7 @@ static std::vector<std::uint8_t> test_disc() {
     p += record(root + p, 34, 4, false, "CLOKSPL.EXE;1");
     p += record(root + p, 35, 4, false, "DPLAYERX.DLL;1");
     p += record(root + p, 36, 4, false, "DRVMGT.DLL;1");
+    p += record(root + p, 37, 4, false, "LOADER.INI;1");
     const std::string original_ubi =
         "[Rayman2]\r\nLanguage=French\r\nGLI_Dll=DirectX6\r\n"
         "GLI_Mode=1 - 640 x 480 x 16\r\n[Other]\r\nKeep=present\r\n";
@@ -97,6 +98,7 @@ static std::vector<std::uint8_t> test_disc() {
     std::copy_n("CLOK", 4, iso.data() + 34 * 2048);
     std::copy_n("DPLY", 4, iso.data() + 35 * 2048);
     std::copy_n("DRVM", 4, iso.data() + 36 * 2048);
+    std::copy_n("RAYM", 4, iso.data() + 37 * 2048);
     std::copy(original_ubi.begin(), original_ubi.end(), iso.begin() + 32 * 2048);
     return iso;
 }
@@ -203,11 +205,11 @@ int main() {
               "bootstrap initialization must create INI when absent");
         check(fs::is_directory(root / "rayman2" / "rayman2fix" / "textures"),
               "bootstrap creates a textures folder for replacement images");
-        check(contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("Force4x3=0") != std::string::npos &&
+        check(contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("AspectRatio=Auto") != std::string::npos &&
               contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos &&
               contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("RemoveDialogueBackgrounds=0") != std::string::npos &&
               contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("RemoveCinematicBars=0") != std::string::npos &&
-               contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("MusicInPauseMenu=0") != std::string::npos,
+              contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("MusicInPauseMenu=0") != std::string::npos,
               "bootstrap provides independent disabled visual options");
         write(root / "rayman2" / "rayman2fix" / "Rayman2Fix.dll", "BOOTSTRAP");
         write(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini",
@@ -233,9 +235,9 @@ int main() {
         }
         write(user_ini,
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n");
-        write(user_ini, "[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+        write(user_ini, "[Graphics]\nResolution=1920x1080\nAspectRatio=4:3\n"
                         "[Features]\nSkipCinematics=1\n");
-        check(r2fix::configured_force_4_3(user_ini) &&
+        check(r2fix::configured_aspect_ratio_is_4_3(user_ini) &&
               r2fix::configured_skip_cinematics(user_ini),
               "4:3 and cinematic skip opt-in recognized");
         check(!r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
@@ -251,7 +253,7 @@ int main() {
         write(user_ini,"[Features]\nMusicInPauseMenu=0\n");
         check(!r2fix::configured_music_in_pause_menu(user_ini),
               "explicit ESC music opt-out works");
-        write(user_ini,"[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+        write(user_ini,"[Graphics]\nResolution=1920x1080\nAspectRatio=4:3\n"
                        "[Features]\nSkipCinematics=1\nRemoveDialogueBackgrounds=1\n"
                        "RemoveCinematicBars=0\n");
         check(r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
@@ -261,23 +263,23 @@ int main() {
         check(!r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
               r2fix::configured_remove_cinematic_bars(user_ini),
               "cinematic-only opt-in does not enable dialogue filter");
-        write(user_ini,"[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+        write(user_ini,"[Graphics]\nResolution=1920x1080\nAspectRatio=4:3\n"
                        "[Features]\nSkipCinematics=1\nRemoveDialogueBackgrounds=1\n"
                        "RemoveCinematicBars=1\n");
         check(r2fix::configured_render_resolution(user_ini) ==
               std::make_pair(1440u,1080u),"1920x1080: 4:3 content area 1440x1080");
-        write(user_ini, "[Graphics]\nResolution=1280x800\nForce4x3=1\n");
+        write(user_ini, "[Graphics]\nResolution=1280x800\nAspectRatio=4:3\n");
         check(r2fix::configured_render_resolution(user_ini) ==
               std::make_pair(1064u,798u),"1280x800 exact 4:3");
-        write(user_ini, "[Graphics]\nResolution=1920x1080\nForce4x3=0\n");
+        write(user_ini, "[Graphics]\nResolution=1920x1080\nAspectRatio=Auto\n");
         check(r2fix::configured_render_resolution(user_ini) ==
               std::make_pair(1920u,1080u),"default wide unchanged");
         for(const auto* bad:{"2","yes",""}) {
-            write(user_ini,std::string("[Graphics]\nForce4x3=")+bad+"\n");
+            write(user_ini,std::string("[Graphics]\nAspectRatio=")+bad+"\n");
             bool refused=false;
-            try{(void)r2fix::configured_force_4_3(user_ini);}
+            try{(void)r2fix::configured_aspect_ratio_is_4_3(user_ini);}
             catch(const std::exception&){refused=true;}
-            check(refused,"invalid 4:3 flag rejected");
+            check(refused,"invalid AspectRatio rejected");
             write(user_ini,std::string("[Features]\nSkipCinematics=")+bad+"\n");
             refused=false;
             try{(void)r2fix::configured_skip_cinematics(user_ini);}
@@ -309,15 +311,45 @@ int main() {
               migrated.find("Log=0\r\n")!=std::string::npos &&
               migrated.find("Setting=keep\r\n")!=std::string::npos &&
               migrated.find("; comment\r\n")!=std::string::npos &&
-              migrated.find("Force4x3=0\r\n")!=std::string::npos &&
+              migrated.find("AspectRatio=Auto\r\n")!=std::string::npos &&
               migrated.find("[Features]\r\n")!=std::string::npos &&
               migrated.find("SkipCinematics=0\r\n")!=std::string::npos &&
               migrated.find("RemoveDialogueBackgrounds=0\r\n")!=std::string::npos &&
               migrated.find("RemoveCinematicBars=0\r\n")!=std::string::npos &&
-               migrated.find("MusicInPauseMenu=0\r\n")!=std::string::npos,
+              migrated.find("MusicInPauseMenu=0\r\n")!=std::string::npos,
               "existing INI migration retains BOM, CRLF, custom values");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
         check(contents(user_ini)==migrated,"migration is idempotent");
+        // Existing boolean settings migrate without losing the chosen geometry.
+        write(user_ini,"[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+                       "[Personal]\nSetting=keep\n");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        const auto old_enabled=contents(user_ini);
+        check(old_enabled.find("AspectRatio=4:3")!=std::string::npos &&
+              old_enabled.find("Force4x3=")==std::string::npos &&
+              old_enabled.find("Setting=keep")!=std::string::npos &&
+              r2fix::configured_render_resolution(user_ini)==
+                  std::make_pair(1440u,1080u),
+              "Force4x3=1 migrates to 4:3 with identical geometry");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        check(contents(user_ini)==old_enabled,"aspect migration is idempotent");
+        write(user_ini,"[Graphics]\nForce4x3=0\n");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        check(r2fix::configured_aspect_ratio(user_ini)=="Auto" &&
+              contents(user_ini).find("Force4x3=")==std::string::npos,
+              "Force4x3=0 migrates to Auto");
+        write(user_ini,"[Graphics]\nForce4x3=1\nAspectRatio=auto\n");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        check(r2fix::configured_aspect_ratio(user_ini)=="Auto" &&
+              contents(user_ini).find("Force4x3=")==std::string::npos,
+              "explicit AspectRatio wins over the obsolete flag");
+        write(user_ini,"[Graphics]\nForce4x3=2\n");
+        bool invalid_legacy_aspect=false;
+        try{r2fix::ensure_rayman2fix_ini_options(user_ini);}
+        catch(const std::exception&){invalid_legacy_aspect=true;}
+        check(invalid_legacy_aspect &&
+              contents(user_ini).find("Force4x3=2")!=std::string::npos,
+              "invalid old flag fails without altering INI");
         write(user_ini,"[Features]\nRemoveBlackFrames=1\n"
                        "RemoveCinematicBars=0\n; user setting retained\n");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
@@ -416,24 +448,23 @@ int main() {
               "managed ubi.ini must not be recorded as an immutable CD asset");
         check(fs::exists(game / "rayman2fix" / ".rayman2fix-cd-files.tsv"),
               "local installation receipt created");
-        // All eight root-only exclusions are absent from a fresh installation
-        // and its SHA256 receipt. Similar but unrelated filenames survive.
+        // All ten root-only exclusions are absent from a fresh installation
+        // and its SHA256 receipt. Unrelated similarly named files survive.
         for (const auto* filename : {"00000001.tmp", "0000040c.016",
                                      "0000040c.256", "secdrv.sys",
                                      "rayman2.icd", "clcd32.dll",
-                                     "clokspl.exe", "drvmgt.dll"}) {
+                                     "clokspl.exe", "drvmgt.dll",
+                                     "loader.ini", "dplayerx.dll"}) {
             check(!fs::exists(game / filename), "obsolete protection file not extracted");
             check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(filename) ==
                       std::string::npos,
                   "obsolete protection file omitted from receipt");
         }
-        for (const auto* name : {"dxplayerx.dll", "dplayerx.dll"}) {
-            check(fs::exists(game / name),
-                  "unrelated lookalike root names must survive installation");
-            check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(name) !=
-                      std::string::npos,
-                  "unrelated lookalike root names stay in SHA256 receipt");
-        }
+        check(fs::exists(game / "dxplayerx.dll"),
+              "unrelated DXPLAYERX root file must survive installation");
+        check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(
+                  "\tdxplayerx.dll") != std::string::npos,
+              "unrelated DXPLAYERX remains in the SHA256 receipt");
         check(!fs::exists(root / "rayman2.installing"),
               "staging directory removed after publishing");
         check(r2fix::verify_installation(app) == 0,
@@ -441,7 +472,7 @@ int main() {
 
         // Simulate an already-installed copy made by an older Rayman2Fix
         // build: the receipt used to list now-excluded root files.
-        const std::array<std::pair<const char*, const char*>, 8> legacy = {{
+        const std::array<std::pair<const char*, const char*>, 10> legacy = {{
             {"00000001.tmp", "TEMP"},
             {"0000040c.016", "ICON"},
             {"0000040c.256", "LOGO"},
@@ -449,7 +480,9 @@ int main() {
             {"rayman2.icd", "ICD!"},
             {"clcd32.dll", "CL32"},
             {"clokspl.exe", "CLOK"},
-            {"drvmgt.dll", "DRVM"}
+            {"drvmgt.dll", "DRVM"},
+            {"loader.ini", "RAYM"},
+            {"dplayerx.dll", "DPLY"}
         }};
         {
             std::ofstream receipt(game / "rayman2fix" / ".rayman2fix-cd-files.tsv",
@@ -463,6 +496,7 @@ int main() {
         }
         // Also accept an obsolete file which the user had removed manually.
         fs::remove(game / "00000001.tmp");
+        fs::remove(game / "loader.ini"); // already absent in one legacy install
         fs::remove(root / "Rayman2.iso");
         check(r2fix::run_automatic(app) == 2,
               "old install is migrated without disc and runtime stays gated");
@@ -475,9 +509,8 @@ int main() {
         }
         check(r2fix::verify_installation(app) == 0,
               "post-migration hash verification remains valid");
-        check(fs::exists(game / "dxplayerx.dll") &&
-              fs::exists(game / "dplayerx.dll"),
-              "lookalike root files remain untouched during migration");
+        check(fs::exists(game / "dxplayerx.dll"),
+              "unrelated DXPLAYERX root file remains untouched during migration");
         check(contents(game / "data" / "game.dat") == "DATA\n",
               "migration preserves unrelated game assets");
         check(contents(game / "rayman2fix" / "Rayman2Fix.ini") ==

@@ -323,6 +323,8 @@ int launch_verified_game(Startup& startup, bool verify) {
         : configured_output_resolution(startup.ini_path());
     const auto content = unchecked_without_ini ? configured
         : configured_render_resolution(startup.ini_path());
+    const bool classic_aspect=!unchecked_without_ini &&
+        configured_aspect_ratio_is_4_3(startup.ini_path());
     if (configured.first < 640 || configured.second < 480)
         throw std::runtime_error("invalid native output size");
     ChildDisplayOptions display{};
@@ -368,10 +370,10 @@ int launch_verified_game(Startup& startup, bool verify) {
                 " physical_canvas=" + std::to_string(configured.first) + "x" +
                 std::to_string(configured.second) +
                 " GameFrame.GLIDE_SIZE=explicit window=borderless-not-topmost" +
-                (configured_force_4_3(startup.ini_path()) ?
+                (classic_aspect ?
                     " aspect_mode=4:3-centered-black-bars" :
                     " aspect_mode=Auto"));
-    startup.log(configured_force_4_3(startup.ini_path()) ?
+    startup.log(classic_aspect ?
                 "WIDESCREEN: 4:3 mode selected; world Hor+ inactive, internal and output aspect 4:3" :
                 "WIDESCREEN: native output configured; game camera/Hor+ FOV patch not yet validated (do not confuse output scaling with Hor+)");
     startup.log(std::string("FEATURES: RemoveDialogueBackgrounds=") +

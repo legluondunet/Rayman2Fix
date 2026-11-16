@@ -3,6 +3,12 @@
 #define CHECK(expr) do { if(!(expr))std::abort(); } while(false)
 int main() {
     const auto calc=r2fix::calculate_cinematic_viewport_fill;
+    // Both actual HUD scales must enable the SAME vertical cinematic fix:
+    // 0.75 on a 16:9 desktop, 1.0 in centered 4:3 output.
+    CHECK(r2fix::should_enable_cinematic_viewport_fill(true,0.75f));
+    CHECK(r2fix::should_enable_cinematic_viewport_fill(true,1.0f));
+    CHECK(!r2fix::should_enable_cinematic_viewport_fill(false,0.75f));
+    CHECK(!r2fix::should_enable_cinematic_viewport_fill(false,1.0f));
     // Source coefficients inferred from the 1024x768 UV inset: 34..618.
     const auto video=calc(1024,768,0,1000,44,805);
     CHECK(video.change && video.top==0 && video.bottom==1000);
