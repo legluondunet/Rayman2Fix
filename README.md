@@ -801,24 +801,29 @@ If the CD has **no Joliet tree**, the inspector clearly reports that it
 only has primary ISO 9660 names and that original long names may be
 unavailable. No invented name mapping is applied to necessary game files.
 
-For the `RAYMAN2` CD, these **eight exact root-level paths** are
+For the `RAYMAN2` CD, these **ten exact root-level paths** are
 excluded from installation if present:
 
 - `00000001.tmp`, `0000040c.016`, `0000040c.256` (SafeDisc-era auxiliaries).
 - `secdrv.sys`, `rayman2.icd` (original protection-related components).
-- `clcd32.dll`, `clokspl.exe`, `drvmgt.dll` (additional owner-approved
-  SafeDisc-era auxiliary names).
+- `clcd32.dll`, `clokspl.exe`, `drvmgt.dll` (previously approved
+  auxiliary exclusions).
+- `loader.ini`, `dplayerx.dll` (additional owner-approved optional
+  root-level files, not needed by the Rayman2Fix install/verify contract).
 
-A verified inspection of the retail CD found `directx/dplayx.dll`,
-a DirectPlay library in the already-excluded DirectX installer folder.
-Neither `dxplayerx.dll` nor `dplayerx.dll` was present: these were
-mistyped names and have been removed from the exclusion list.
+An earlier inspected retail CD contained `directx/dplayx.dll` under the
+already-excluded DirectX installer directory, but no root `dplayerx.dll`.
+The two names are different; the explicit root `dplayerx.dll` rule is
+retained for editions or legacy installations where that file appears.
+The unrelated root `dxplayerx.dll` is **not** excluded.
 
-The exclusion never matches other files by extension or similarly named
-files under `data/`. Existing installations are migrated without the CD:
-after verifying all retained files by SHA-256, the launcher removes these
-exact root files and their receipt entries. User settings and other game
-assets are preserved.
+Exclusions match only these exact root files on the `RAYMAN2` volume:
+nested namesakes, such as `data/loader.ini` and `data/dplayerx.dll`,
+and other extensions are preserved. Existing installations are migrated
+without needing the CD again: the launcher tolerates missing excluded
+files during verification, then removes any obsolete root copies and
+their entries from the local SHA-256 receipt. Unrelated game assets
+and settings remain verified and preserved.
 
 On a disc whose volume label is exactly `RAYMAN2`, we recognize **23 exact
 `Data/World/Levels/*.DAT` paths** discarded by the author's original
