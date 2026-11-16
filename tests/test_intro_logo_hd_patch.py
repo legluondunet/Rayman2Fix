@@ -10,6 +10,7 @@ class PinnedIntroLogoHDTests(unittest.TestCase):
         (base/"render").mkdir(parents=True)
         (base/"lib.rs").write_text("#[cfg(windows)]\nmod loading_image_fix;\n")
         (base/"render/textures.rs").write_text(
+            "            for (k, (lod, &(a, b))) in levels.zip(&t.ranges).enumerate() {\n"
             "                    Ok(img) => unsafe {\n"
             "                        (gl.TexImage2D)(TEXTURE_2D, k as i32, RGBA8 as i32, lw as i32, lh as i32, 0, RGBA, UNSIGNED_BYTE, img.pixels.as_ptr().cast());\n"
             "                    },\n")
