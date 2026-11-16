@@ -263,6 +263,53 @@ int main() {
         write(user_ini, "[Graphics]\nResolution=1920x1080\nAspectRatio=Auto\n");
         check(r2fix::configured_render_resolution(user_ini) ==
               std::make_pair(1920u,1080u),"default wide unchanged");
+        // Explicit resolutions must retain exact output dimensions in
+        // Auto, or yield the largest integral 4:3 canvas in classic mode.
+        // A parser success is NOT proof of correct in-game rendering.
+        struct CanvasCase { unsigned w,h,classic_w,classic_h; };
+        constexpr CanvasCase canvas_cases[] = {
+            {640,480,640,480},
+            {1024,768,1024,768},
+            {1280,800,1064,798},
+            {1920,1200,1600,1200},
+            {1920,1080,1440,1080},
+            {2560,1440,1920,1440},
+            {3440,1440,1920,1440},
+            {5120,1440,1920,1440},
+            {1280,1024,1280,960}  // narrow 5:4 input; 4:3 crop only
+        };
+        for (const auto& c : canvas_cases) {
+            const auto resolution = std::to_string(c.w) + "x" +
+                                    std::to_string(c.h);
+            write(user_ini, "[Graphics]\nResolution=" + resolution +
+                            "\nAspectRatio=Auto\n");
+            check(r2fix::configured_output_resolution(user_ini) ==
+                  std::make_pair(c.w,c.h), "explicit output pixels retained");
+            check(r2fix::configured_render_resolution(user_ini) ==
+                  std::make_pair(c.w,c.h), "Auto output geometry untouched");
+            write(user_ini, "[Graphics]\nResolution=" + resolution +
+                            "\nAspectRatio=4:3\n");
+            const auto classic=r2fix::configured_render_resolution(user_ini);
+            check(classic==std::make_pair(c.classic_w,c.classic_h),
+                  "exact classic canvas size for output resolution");
+            check(classic.first<=c.w && classic.second<=c.h &&
+                  classic.first/4u==classic.second/3u &&
+                  classic.first%4u==0u && classic.second%3u==0u,
+                  "classic 4:3 canvas fits inside requested output");
+        }
+        for (const auto* bad : {"639x480","640x479","8193x1080",
+                                "1920x4321","1920x0","auto-wide","abc"}) {
+            write(user_ini,std::string("[Graphics]\nResolution=")+bad+"\n");
+            bool refused=false;
+            try {(void)r2fix::configured_output_resolution(user_ini);}
+            catch(const std::exception&) {refused=true;}
+            check(refused,"out-of-bounds/invalid resolution refused");
+        }
+        write(user_ini,"[Graphics]\nResolution=8192x4320\n");
+        check(r2fix::configured_output_resolution(user_ini)==
+              std::make_pair(8192u,4320u),
+              "documented maximum explicit dimensions accepted");
+
         for(const auto* bad:{"2","yes",""}) {
             write(user_ini,std::string("[Graphics]\nAspectRatio=")+bad+"\n");
             bool refused=false;
