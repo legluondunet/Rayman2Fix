@@ -212,7 +212,9 @@ bool managed_fix_filename(const std::string& name) {
         name=="GLIDE2X.DLL" || name=="GLIDE2X.DLL.BAK" ||
         name=="GAMEFRAME-LICENSE-APACHE.TXT" ||
         name=="GAMEFRAME-LICENSE-APACHE.TXT.BAK" ||
-        name=="RAYMAN2FIX_LOGO_HD.RGBA") return true;
+        name=="RAYMAN2FIX_LOGO_HD.RGBA" ||
+        name==".RAYMAN2FIX-CD-FILES.TSV" ||
+        name==".RAYMAN2FIX-EXE-PATCH.TSV") return true;
     for (const std::string prefix :
          {"RAYMAN2FIX.DLL.BACKUP.", "GLIDE2X.DLL.BAK.",
           "GAMEFRAME-LICENSE-APACHE.TXT.BAK."}) {

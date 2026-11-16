@@ -369,10 +369,10 @@ int main() {
               ubi.find("GLI_Mode=1 - 1024 x 768 x 16") != std::string::npos &&
               ubi.find("GLI_Dll=DirectX6") == std::string::npos,
               "Glide 2 selected by single Rayman2Fix.ini at 1024x768");
-        check(contents(game / ".rayman2fix-cd-files.tsv").find("\tubi.ini") ==
+        check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find("\tubi.ini") ==
                   std::string::npos,
               "managed ubi.ini must not be recorded as an immutable CD asset");
-        check(fs::exists(game / ".rayman2fix-cd-files.tsv"),
+        check(fs::exists(game / "rayman2fix" / ".rayman2fix-cd-files.tsv"),
               "local installation receipt created");
         // All eight root-only exclusions are absent from a fresh installation
         // and its SHA256 receipt. Similar but unrelated filenames survive.
@@ -381,14 +381,14 @@ int main() {
                                      "rayman2.icd", "clcd32.dll",
                                      "clokspl.exe", "drvmgt.dll"}) {
             check(!fs::exists(game / filename), "obsolete protection file not extracted");
-            check(contents(game / ".rayman2fix-cd-files.tsv").find(filename) ==
+            check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(filename) ==
                       std::string::npos,
                   "obsolete protection file omitted from receipt");
         }
         for (const auto* name : {"dxplayerx.dll", "dplayerx.dll"}) {
             check(fs::exists(game / name),
                   "unrelated lookalike root names must survive installation");
-            check(contents(game / ".rayman2fix-cd-files.tsv").find(name) !=
+            check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(name) !=
                       std::string::npos,
                   "unrelated lookalike root names stay in SHA256 receipt");
         }
@@ -410,7 +410,7 @@ int main() {
             {"drvmgt.dll", "DRVM"}
         }};
         {
-            std::ofstream receipt(game / ".rayman2fix-cd-files.tsv",
+            std::ofstream receipt(game / "rayman2fix" / ".rayman2fix-cd-files.tsv",
                                   std::ios::binary | std::ios::app);
             for (const auto& file : legacy) {
                 receipt << "FILE\t4\t" << r2fix::sha256_text(file.second)
@@ -427,7 +427,7 @@ int main() {
         for (const auto& file : legacy) {
             check(!fs::exists(game / file.first),
                   "existing obsolete protection file removed by migration");
-            check(contents(game / ".rayman2fix-cd-files.tsv").find(file.first) ==
+            check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(file.first) ==
                       std::string::npos,
                   "obsolete entry removed from old SHA256 receipt");
         }
@@ -445,7 +445,7 @@ int main() {
         // Treat the original CD-sourced ubi.ini as a mutable game config.
         // A legacy manifest entry must be removed without deleting ubi.ini.
         {
-            std::ofstream receipt(game / ".rayman2fix-cd-files.tsv",
+            std::ofstream receipt(game / "rayman2fix" / ".rayman2fix-cd-files.tsv",
                                   std::ios::binary | std::ios::app);
             receipt << "FILE\t" << fs::file_size(game / "ubi.ini") << "\t"
                     << r2fix::sha256_file(game / "ubi.ini") << "\tubi.ini\n";
@@ -465,7 +465,7 @@ int main() {
         check(ubi.find("Language=French") != std::string::npos &&
               ubi.find("Keep=present") != std::string::npos,
               "regenerated config retains other original CD options");
-        check(contents(game / ".rayman2fix-cd-files.tsv").find("\tubi.ini") ==
+        check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find("\tubi.ini") ==
                   std::string::npos,
               "legacy receipt no longer tracks the mutable ubi.ini");
         check(r2fix::verify_installation(app) == 0,

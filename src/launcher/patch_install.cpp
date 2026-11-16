@@ -52,7 +52,7 @@ std::pair<std::uint64_t, std::string> parse_marker_row(
     return {length, hash};
 }
 ExePatchHeader load_marker(const fs::path& game_root) {
-    const auto marker = game_root / kMarker;
+    const auto marker = game_root / "rayman2fix" / kMarker;
     if (!clean_file(marker) || fs::file_size(marker) > 512)
         fail("invalid executable patch marker");
     std::ifstream in(marker, std::ios::binary);
@@ -82,7 +82,7 @@ bool match(const fs::path& file, std::uint64_t expected_size,
 } // namespace
 
 bool is_exe_replaced(const fs::path& root) {
-    return fs::exists(root / kMarker);
+    return fs::exists(root / "rayman2fix" / kMarker);
 }
 
 bool verify_exe_replacement(const fs::path& root,
@@ -95,7 +95,7 @@ bool verify_exe_replacement(const fs::path& root,
             fail("invalid source-executable receipt");
         const fs::path exe = root / "rayman2.exe";
         const fs::path bak = root / "rayman2.exe.bak";
-        const fs::path marker = root / kMarker;
+        const fs::path marker = root / "rayman2fix" / kMarker;
         if (!fs::exists(marker)) {
             if (fs::exists(bak) || fs::is_symlink(bak))
                 fail("unexpected rayman2.exe.bak without patch marker");
@@ -124,8 +124,13 @@ ExePatchHeader install_exe_replacement(
     const fs::path original = root / "rayman2.exe";
     const fs::path backup = root / "rayman2.exe.bak";
     const fs::path patched = root / "rayman2.exe.patching";
-    const fs::path marker = root / kMarker;
-    const fs::path marker_new = root / ".rayman2fix-exe-patch.tsv.new";
+    const fs::path fix_dir=root/"rayman2fix";
+    if(fs::is_symlink(fix_dir) ||
+       (fs::exists(fix_dir) && !fs::is_directory(fix_dir)))
+        fail("unsafe metadata directory");
+    fs::create_directories(fix_dir);
+    const fs::path marker = fix_dir / kMarker;
+    const fs::path marker_new = fix_dir / ".rayman2fix-exe-patch.tsv.new";
     if (!clean_file(original) || fs::exists(backup) || fs::is_symlink(backup) ||
         fs::exists(patched) || fs::is_symlink(patched) ||
         fs::exists(marker) || fs::is_symlink(marker) ||

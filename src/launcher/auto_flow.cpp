@@ -115,7 +115,12 @@ std::vector<fs::path> find_disc_candidates(const fs::path& root) {
 // hashed for later integrity checks; this is NOT a trusted retail-edition
 // manifest because the hash baseline is generated from the same unverified CD.
 void write_receipt(const fs::path& staged, const DiscInfo& info) {
-    const auto receipt = staged / kReceipt;
+    const auto private_dir=staged/"rayman2fix";
+    if(fs::is_symlink(private_dir) ||
+       (fs::exists(private_dir) && !fs::is_directory(private_dir)))
+        throw std::runtime_error("unsafe installer receipt directory");
+    fs::create_directories(private_dir);
+    const auto receipt = private_dir / kReceipt;
     if (fs::exists(receipt))
         throw std::runtime_error("disc includes reserved Rayman2Fix receipt filename");
     std::ofstream out(receipt, std::ios::binary | std::ios::trunc);
@@ -154,6 +159,8 @@ void write_receipt(const fs::path& staged, const DiscInfo& info) {
 bool bootstrap_fix_file(const std::string& name) {
     return name=="RAYMAN2FIX.INI" || name=="RAYMAN2FIX.DLL" ||
            name=="RAYMAN2FIX_LOGO_HD.RGBA" ||
+           name==".RAYMAN2FIX-CD-FILES.TSV" ||
+           name==".RAYMAN2FIX-EXE-PATCH.TSV" ||
            runtime_backup_name(name) || gameframe_bundle_file(name);
 }
 void check_bootstrap_workspace(const fs::path& game_dir) {
@@ -182,7 +189,7 @@ void check_bootstrap_workspace(const fs::path& game_dir) {
 }
 
 bool verify_local_receipt(const fs::path& root, Startup& startup) {
-    const auto receipt = root / kReceipt;
+    const auto receipt = root / "rayman2fix" / kReceipt;
     std::ifstream in(receipt, std::ios::binary);
     if (!in) {
         startup.log("VERIFY: missing local CD receipt");
@@ -289,7 +296,7 @@ bool verify_local_receipt(const fs::path& root, Startup& startup) {
 // Only an otherwise verified RAYMAN2 installation is eligible; the receipt
 // is replaced with rollback before any original files are removed.
 void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {
-    const fs::path receipt = root / kReceipt;
+    const fs::path receipt = root / "rayman2fix" / kReceipt;
     std::ifstream input(receipt, std::ios::binary);
     if (!input) throw std::runtime_error("CD receipt missing during cleanup");
     std::string line;
@@ -385,9 +392,12 @@ void remove_excluded_cd_auxiliaries(const fs::path& root, Startup& startup) {
 void copy_bootstrap_files(const fs::path& original, const fs::path& staged) {
     const auto source=original/"rayman2fix";
     const auto dest=staged/"rayman2fix";
-    if (fs::exists(dest) || fs::is_symlink(dest))
-        throw std::runtime_error("CD contains a reserved rayman2fix directory");
-    fs::create_directory(dest);
+    // SHA256 receipts are written into this subfolder before copying
+    // the launcher-owned DLL, INI, and bundled wrapper.
+    if(fs::is_symlink(dest) ||
+       (fs::exists(dest) && !fs::is_directory(dest)))
+        throw std::runtime_error("unsafe private staging directory");
+    fs::create_directories(dest);
     if(fs::exists(source)) {
         if(!fs::is_directory(source) || fs::is_symlink(source))
             throw std::runtime_error("unsafe Rayman2Fix bootstrap directory");

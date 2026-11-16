@@ -615,9 +615,9 @@ rayman2/
     ubi.ini                    (managed game configuration)
     data/                      (retail game resources)
     dll/                       (retail audio configuration)
-    .rayman2fix-cd-files.tsv  (local CD asset receipt)
-    .rayman2fix-exe-patch.tsv (executable-patch receipt)
     rayman2fix/
+        .rayman2fix-cd-files.tsv  (local CD asset receipt)
+        .rayman2fix-exe-patch.tsv (executable-patch receipt)
         Rayman2Fix.ini         (user mod configuration)
         Rayman2Fix.dll         (x86 injected mod runtime)
         Rayman2Fix.dll.bak     (single runtime backup)
