@@ -7,10 +7,131 @@
 #include <shellapi.h>
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 namespace r2fix {
 namespace {
+// The PE resource path is intentionally independent of shell32's
+// ExtractIconExW. Wine can count a valid RT_GROUP_ICON but still fail to
+// instantiate that group through the shell extraction API.
+struct FirstGroup {
+    bool found=false;
+    bool integer=false;
+    WORD id=0;
+    std::wstring text;
+    LPCWSTR name() const {
+        return integer ? MAKEINTRESOURCEW(id) : text.c_str();
+    }
+};
+BOOL CALLBACK first_icon_group(HMODULE, LPCWSTR, LPWSTR name, LONG_PTR data) {
+    auto& group=*reinterpret_cast<FirstGroup*>(data);
+    group.found=true;
+    group.integer=IS_INTRESOURCE(name)!=0;
+    if(group.integer)group.id=static_cast<WORD>(
+        reinterpret_cast<ULONG_PTR>(name));
+    else group.text=name;
+    return FALSE; // Found the first group, no need to enumerate more.
+}
+unsigned read_word(const BYTE* data) {
+    return unsigned(data[0]) | (unsigned(data[1])<<8);
+}
+struct ExtractedIcons {
+    HICON big=nullptr;
+    HICON small=nullptr;
+    std::string stage;
+};
+ExtractedIcons direct_pe_icons(const std::wstring& path) {
+    ExtractedIcons result;
+    // LOAD_LIBRARY_AS_DATAFILE does not execute code, invoke DllMain or
+    // install dependencies from the user's game executable.
+    const HMODULE module=LoadLibraryExW(
+        path.c_str(),nullptr,LOAD_LIBRARY_AS_DATAFILE);
+    if(!module) {
+        result.stage="LoadLibraryExW(datafile) error="+
+                     std::to_string(GetLastError());
+        return result;
+    }
+    FirstGroup group;
+    EnumResourceNamesW(module,RT_GROUP_ICON,first_icon_group,
+                       reinterpret_cast<LONG_PTR>(&group));
+    if(!group.found) {
+        result.stage="no RT_GROUP_ICON resource names";
+        FreeLibrary(module);
+        return result;
+    }
+    const auto name=group.name();
+    const HRSRC resource=FindResourceW(module,name,RT_GROUP_ICON);
+    if(!resource) {
+        result.stage="RT_GROUP_ICON FindResourceW error="+
+                     std::to_string(GetLastError());
+        FreeLibrary(module);
+        return result;
+    }
+    const DWORD length=SizeofResource(module,resource);
+    const HGLOBAL data=LoadResource(module,resource);
+    const BYTE* dir=data ? static_cast<const BYTE*>(LockResource(data)) : nullptr;
+    // GRPICONDIR header (6 bytes), then 14 bytes per GRPICONDIRENTRY.
+    // Avoid handing malformed resource table lengths to Win32 decoders.
+    if(!dir || length<20 || read_word(dir)!=0 ||
+       read_word(dir+2)!=1 || read_word(dir+4)==0 ||
+       read_word(dir+4)>128u ||
+       6u+14u*read_word(dir+4)>length || length>65536u) {
+        result.stage="invalid RT_GROUP_ICON directory";
+        FreeLibrary(module);
+        return result;
+    }
+    // First try Win32's group-aware LoadImageW, then the individual icon
+    // resource IDs. That bypasses shell32's enumeration/creation layer.
+    result.big=static_cast<HICON>(LoadImageW(
+        module,name,IMAGE_ICON,GetSystemMetrics(SM_CXICON),
+        GetSystemMetrics(SM_CYICON),LR_DEFAULTCOLOR));
+    result.small=static_cast<HICON>(LoadImageW(
+        module,name,IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),
+        GetSystemMetrics(SM_CYSMICON),LR_DEFAULTCOLOR));
+    const auto create_by_id=[&](unsigned id,int width,int height)->HICON {
+        if(!id)return nullptr;
+        const HRSRC entry=FindResourceW(module,MAKEINTRESOURCEW(id),RT_ICON);
+        if(!entry)return nullptr;
+        const DWORD size=SizeofResource(module,entry);
+        if(size<40u || size>2u*1024u*1024u)return nullptr;
+        const HGLOBAL image=LoadResource(module,entry);
+        const auto* bits=image ? static_cast<PBYTE>(LockResource(image)) : nullptr;
+        if(!bits)return nullptr;
+        return CreateIconFromResourceEx(
+            bits,size,TRUE,0x00030000,width,height,LR_DEFAULTCOLOR);
+    };
+    const auto create_nearest=[&](int width,int height)->HICON {
+        const int preferred=LookupIconIdFromDirectoryEx(
+            const_cast<PBYTE>(dir),TRUE,width,height,LR_DEFAULTCOLOR);
+        HICON candidate=create_by_id(
+            preferred>0 ? static_cast<unsigned>(preferred) : 0u,width,height);
+        if(candidate)return candidate;
+        // A damaged preferred-size entry should not hide a valid smaller
+        // icon in the same genuine game's RT_GROUP_ICON.
+        const unsigned count=read_word(dir+4);
+        for(unsigned i=0;i<count;++i) {
+            const unsigned id=read_word(dir+6u+14u*i+12u);
+            if(id==static_cast<unsigned>(preferred))continue;
+            candidate=create_by_id(id,width,height);
+            if(candidate)return candidate;
+        }
+        return nullptr;
+    };
+    if(!result.big)
+        result.big=create_nearest(GetSystemMetrics(SM_CXICON),
+                                  GetSystemMetrics(SM_CYICON));
+    if(!result.small)
+        result.small=create_nearest(GetSystemMetrics(SM_CXSMICON),
+                                    GetSystemMetrics(SM_CYSMICON));
+    if(!result.big && !result.small) {
+        result.stage="RT_GROUP_ICON found but RT_ICON images could not decode";
+    } else {
+        result.stage="PE RT_GROUP_ICON";
+    }
+    FreeLibrary(module);
+    return result;
+}
 struct Search {
     DWORD pid;
     HWND best = nullptr;
@@ -76,14 +197,19 @@ void WindowPresentation::load_game_icons() {
         return;
     }
 
-    HICON big=nullptr,small=nullptr;
-    const UINT extracted=ExtractIconExW(game_executable_.c_str(),0,
+    ExtractedIcons decoded=direct_pe_icons(game_executable_);
+    HICON big=decoded.big,small=decoded.small;
+    std::string method=decoded.stage;
+    if(!big && !small) {
+        const UINT count=ExtractIconExW(game_executable_.c_str(),0,
                                          &big,&small,1);
-    if(extracted!=1 || (!big && !small)) {
-        if(big)DestroyIcon(big);
-        if(small && small!=big)DestroyIcon(small);
-        result_.game_icon_error = "ExtractIconExW failed on rayman2.exe";
-        return;
+        if(!big && !small) {
+            result_.game_icon_error=method+
+                "; ExtractIconExW result="+std::to_string(count)+
+                " Win32="+std::to_string(GetLastError());
+            return;
+        }
+        method="ExtractIconExW";
     }
     // WM_SETICON has independent large/small slots. CopyIcon returns
     // another caller-owned icon when only one embedded size exists.
@@ -99,6 +225,7 @@ void WindowPresentation::load_game_icons() {
     small_icon_=small;
     result_.game_icon_available=true;
     result_.game_icon_source="rayman2.exe";
+    result_.game_icon_method=method;
 }
 
 void WindowPresentation::apply_game_icons(void* raw_window) {
