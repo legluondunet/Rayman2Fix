@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
                 // BITMAPINFOHEADER: biHeight is doubled for XOR+AND.
                 constexpr unsigned char bitmap[40]={
                     40,0,0,0, 16,0,0,0, 32,0,0,0, 1,0,32,0,
-                    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+                    0,0,0,0, 0,0,0,0, 0,0,0,0,
                     0,0,0,0, 0,0,0,0, 0,0,0,0
                 };
                 std::ofstream icon(source,std::ios::binary|std::ios::trunc);
