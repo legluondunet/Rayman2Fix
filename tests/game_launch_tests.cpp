@@ -73,7 +73,8 @@ int main(int argc, char** argv) {
         const auto local_runtime = fs::absolute(fs::path(argv[0])).parent_path() /
                                    "Rayman2Fix.dll";
         check(fs::exists(local_runtime), "native Hor+ runtime built beside tests");
-        fs::copy_file(local_runtime, root / "Rayman2Fix.dll");
+        fs::create_directories(root / "rayman2fix");
+        fs::copy_file(local_runtime, root / "rayman2fix" / "Rayman2Fix.dll");
         options.enable_fov = true;
         options.fps_limit = 75;
         options.log_enabled = false;
