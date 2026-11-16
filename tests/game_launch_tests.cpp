@@ -15,6 +15,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <shellapi.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -266,11 +267,11 @@ int main(int argc, char** argv) {
                 resource_exe.c_str(),FALSE);
             check(edit!=nullptr,"test PE resource updater opened");
             const WORD language=MAKELANGID(LANG_NEUTRAL,SUBLANG_NEUTRAL);
-            check(UpdateResourceW(edit,RT_ICON,MAKEINTRESOURCEW(42),
+            check(UpdateResourceW(edit,MAKEINTRESOURCEW(3),MAKEINTRESOURCEW(42),
                         language,image_bits.data(),
                         static_cast<DWORD>(image_bits.size()))!=0,
                   "synthetic RT_ICON image inserted in test EXE");
-            check(UpdateResourceW(edit,RT_GROUP_ICON,MAKEINTRESOURCEW(7),
+            check(UpdateResourceW(edit,MAKEINTRESOURCEW(14),MAKEINTRESOURCEW(7),
                         language,const_cast<BYTE*>(icon_group.data()),
                         static_cast<DWORD>(icon_group.size()))!=0,
                   "synthetic RT_GROUP_ICON directory inserted in test EXE");
