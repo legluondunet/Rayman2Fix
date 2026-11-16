@@ -48,6 +48,7 @@ std::string presentation_status(const PresentationResult& p) {
         (p.borderless_applied ? "1" : "0") +
         " changes=" + std::to_string(p.changes) +
         " icon_available=" + (p.game_icon_available ? "1" : "0") +
+        " icon_delegated=" + (p.game_icon_delegated ? "1" : "0") +
         " icon_applied=" + (p.game_icon_applied ? "1" : "0") +
         " icon_readback=" + (p.game_icon_readback ? "1" : "0") +
         " icon_groups=" + std::to_string(p.game_icon_groups) +
@@ -292,7 +293,7 @@ ChildProcessResult run_child_process(
 
     if (display.borderless) {
         WindowPresentation presentation(raw.dwProcessId, display.monitor,
-                                        application);
+                                        application,result.fov_hook.active);
         DWORD wait = WAIT_TIMEOUT;
         std::string last_report;
         while ((wait = WaitForSingleObject(process.handle, 120)) == WAIT_TIMEOUT) {
