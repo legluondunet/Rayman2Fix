@@ -268,7 +268,8 @@ ChildProcessResult run_child_process(
     }
 
     if (display.borderless) {
-        WindowPresentation presentation(raw.dwProcessId, display.monitor);
+        WindowPresentation presentation(raw.dwProcessId, display.monitor,
+                                        application);
         DWORD wait = WAIT_TIMEOUT;
         while ((wait = WaitForSingleObject(process.handle, 120)) == WAIT_TIMEOUT) {
             presentation.update();
@@ -410,6 +411,16 @@ int launch_verified_game(Startup& startup, bool verify) {
                 " borderless_applied=" +
                 (result.presentation.borderless_applied ? "1" : "0") +
                 " changes=" + std::to_string(result.presentation.changes) +
+                " icon_available=" +
+                (result.presentation.game_icon_available ? "1" : "0") +
+                " icon_applied=" +
+                (result.presentation.game_icon_applied ? "1" : "0") +
+                " icon_updates=" +
+                std::to_string(result.presentation.game_icon_updates) +
+                (result.presentation.game_icon_source.empty() ? "" :
+                  " icon_source=" + result.presentation.game_icon_source) +
+                (result.presentation.game_icon_error.empty() ? "" :
+                  " icon_error=" + result.presentation.game_icon_error) +
                 " child_window_dpi=" +
                 std::to_string(result.presentation.observed_dpi) +
                 (result.presentation.last_error.empty() ? "" :
