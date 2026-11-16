@@ -250,6 +250,22 @@ int main() {
               r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
               r2fix::configured_remove_cinematic_bars(user_ini),
               "opt-in ESC music coexists with visual filters");
+        // The feature flag and graphics aspect ratio must remain
+        // independent. This validates configuration wiring, NOT in-game
+        // first-ESC Theme availability or a Wine rendering callback.
+        for (const char* aspect : {"Auto", "4:3"}) {
+            write(user_ini,std::string("[Graphics]\nResolution=1920x1080\nAspectRatio=")
+                + aspect + "\n[Features]\nMusicInPauseMenu=1\n"
+                "SkipCinematics=1\n");
+            check(r2fix::configured_music_in_pause_menu(user_ini) &&
+                  r2fix::configured_skip_cinematics(user_ini),
+                  "ESC music and intro skip enabled at any selected aspect");
+            const auto canvas=r2fix::configured_render_resolution(user_ini);
+            check(canvas==(std::string(aspect)=="4:3" ?
+                  std::make_pair(1440u,1080u) :
+                  std::make_pair(1920u,1080u)),
+                  "native output aspect independently controls canvas");
+        }
         write(user_ini,"[Features]\nMusicInPauseMenu=0\n");
         check(!r2fix::configured_music_in_pause_menu(user_ini),
               "explicit ESC music opt-out works");
