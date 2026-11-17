@@ -119,7 +119,7 @@ if(WIN32)
   # Project licensing has not yet been selected (README.md); never invent one.
   file(GENERATE
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc"
-    CONTENT "1105 RCDATA \"${CMAKE_CURRENT_SOURCE_DIR}/README.md\"\\n")
+    CONTENT "1105 RCDATA \"${CMAKE_CURRENT_SOURCE_DIR}/README.md\"\n")
   set_source_files_properties(
     "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc"
     PROPERTIES GENERATED TRUE)
