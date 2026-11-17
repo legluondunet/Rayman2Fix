@@ -8,7 +8,7 @@ class DownloadFallbackTests(unittest.TestCase):
     def test_default_logo_destination(self):
         import inspect
         source=inspect.getsource(main)
-        self.assertIn('rayman2/rayman2fix/textures/logo.rgba',source)
+        self.assertIn('mods/textures/logo.rgba',source)
         self.assertNotIn('Rayman2Fix_logo_hd.rgba',source)
 
     def test_original_url_is_explicit(self):
