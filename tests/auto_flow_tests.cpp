@@ -160,11 +160,13 @@ int main() {
               runtime_log.find("LAUNCH-PRETEST:") == std::string::npos,
               "installer and runtime traces must not mix");
         app.prepare_runtime_log();
-        check(contents(root / "Rayman2Fix.log").find("RUNTIME-HUD:") ==
-                  std::string::npos &&
+        check(contents(root / "Rayman2Fix.log") ==
+                  "RUNTIME-SESSION: fix.dll and GameFrame diagnostics; "
+                  "installer=Rayman2Fix_installer.log\n" &&
               contents(root / "Rayman2Fix_installer.log").find(
                   "LAUNCH-PRETEST:") != std::string::npos,
-              "next game launch clears only the dedicated runtime log");
+              "next game launch starts with exactly one runtime session header "
+              "and no lines from an earlier game");
         check(fs::exists(root / "Rayman2Fix.ini"),
               "bootstrap initialization must create INI when absent");
         check(fs::is_directory(root / "mods" / "textures"),

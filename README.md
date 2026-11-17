@@ -229,6 +229,13 @@ Ray2Fix and does not contain code copied from that project.
 Ordinary builds keep `[Debug] Log=1` for concise renderer/HUD/FOV,
 installation and game errors, with separate
 `Rayman2Fix_installer.log` and `Rayman2Fix.log`.
+**Logs are not cumulative across sessions**: each launcher invocation
+truncates `Rayman2Fix_installer.log`, each `--inspect` replaces
+`Rayman2Fix_inspect.log`, and each actual game launch resets
+`Rayman2Fix.log` before the injected runtime appends its current-session
+events. Commands that do not launch the game preserve the previous runtime
+log for diagnosis, without adding new game events. `[Debug] Log=0`
+removes both installer and runtime logs.
 The exhaustive reverse-engineering probes for the original `Learn_10`
 director and native superimposed-script dispatcher, plus frequent detailed
 HUD snapshots, are disabled in release builds. They previously observed
