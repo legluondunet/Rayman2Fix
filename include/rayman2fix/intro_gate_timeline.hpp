@@ -47,4 +47,61 @@ struct IntroGateTimeline {
         return ring[(start+i)%Capacity];
     }
 };
+// Read-only, bounded samples of the original director's V96 signal.
+// The existing gate timeline observes V96 only when another native
+// variable changes; that misses a possible short V96==104 early-exit
+// request. Sample a *single verified signed integer* at existing render
+// callbacks, independently of gate changes. No new game hooks or writes.
+struct IntroPhase96Change {
+    std::uint32_t elapsed_ms = 0;
+    std::int32_t previous = 0;
+    std::int32_t current = 0;
+};
+template <std::size_t Capacity>
+struct IntroPhase96Timeline {
+    static_assert(Capacity > 0, "At least one entry must be retained");
+    std::array<IntroPhase96Change,Capacity> ring{};
+    std::uint32_t samples = 0;
+    std::uint32_t changes = 0;
+    std::uint32_t samples104 = 0;
+    std::uint32_t samples110 = 0;
+    std::uint32_t entries104 = 0;
+    std::uint32_t first104_ms = 0;
+    bool initialized = false;
+    std::int32_t previous = 0;
+
+    void observe(std::uint32_t elapsed_ms, std::int32_t current) {
+        ++samples;
+        if (current == 104) ++samples104;
+        if (current == 110) ++samples110;
+        if (!initialized) {
+            initialized = true;
+            previous = current;
+            if (current == 104) {
+                ++entries104;
+                first104_ms = elapsed_ms;
+            }
+            return;
+        }
+        if (current == previous) return;
+        ring[changes % Capacity] = {elapsed_ms,previous,current};
+        ++changes;
+        if (current == 104) {
+            if (!entries104) first104_ms = elapsed_ms;
+            ++entries104;
+        }
+        previous = current;
+    }
+    std::size_t retained() const {
+        return changes < Capacity ? changes : Capacity;
+    }
+    std::uint32_t dropped() const {
+        return changes - std::uint32_t(retained());
+    }
+    const IntroPhase96Change& chronological(std::size_t i) const {
+        // Caller guarantees i < retained(); no allocations or pointers.
+        const auto start = changes >= Capacity ? changes % Capacity : 0;
+        return ring[(start+i)%Capacity];
+    }
+};
 } // namespace r2fix
