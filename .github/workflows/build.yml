@@ -497,6 +497,57 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Build isolated Learn_10 native-exit read-only research launcher
+        shell: pwsh
+        run: |
+          # This is NOT the release bootstrap. All game/script writes remain
+          # disabled; compiled read-only probes use the known CD hash guard.
+          # Reset the earlier audio trace and ESC prototype configuration.
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=OFF `
+            -DRAYMAN2FIX_RESEARCH_PROBES=ON `
+            -DRAYMAN2FIX_AUDIO_TRACE=OFF `
+            -DRAYMAN2FIX_ESC_MUSIC_PROTO=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'Learn10 CMake research configure failed' }
+          cmake --build build --config Release --target Rayman2Fix --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Learn10 research launcher build failed' }
+          @'
+          from pathlib import Path
+          data=Path('build/Release/fix.dll').read_bytes()
+          for marker in (
+              b'RUNTIME-INTRO: learn10-signal-history',
+              b'RUNTIME-INTRO: learn10-signal-event',
+              b'RUNTIME-CONFIG: research_probes=1',
+          ):
+              if marker not in data:
+                  raise SystemExit(f'Learn10 research runtime marker missing: {marker!r}')
+          if b'RUNTIME-AUDIO-TRACE: enabled=1' in data:
+              raise SystemExit('Learn10 research DLL unexpectedly contains audio trace')
+          print('Learn10 native V96+Enter read-only instrumentation: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Learn10 instrumentation verification failed' }
+          New-Item -Path learn10-native-research -ItemType Directory -Force | Out-Null
+          Copy-Item build/Release/Rayman2Fix.exe learn10-native-research/Rayman2Fix.exe
+          # Verify the DLL embedded in the SINGLE EXE is exactly the same
+          # as the research DLL and not a stale Release resource.
+          New-Item -Path learn10-native-smoke -ItemType Directory -Force | Out-Null
+          Copy-Item learn10-native-research/Rayman2Fix.exe learn10-native-smoke/Rayman2Fix.exe
+          & ./learn10-native-smoke/Rayman2Fix.exe --verify 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 2) { throw 'No-media Learn10 prototype must refuse safely' }
+          $deployed='learn10-native-smoke/game/fix.dll'
+          if (!(Test-Path $deployed) -or
+              (Get-FileHash $deployed -Algorithm SHA256).Hash -ne
+              (Get-FileHash build/Release/fix.dll -Algorithm SHA256).Hash) {
+            throw 'Embedded Learn10 research DLL differs from compiled runtime'
+          }
+          $global:LASTEXITCODE=0
+      - name: Upload read-only Learn_10 research launcher
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rayman2Fix-Windows-x86-learn10-native-trace
+          path: learn10-native-research/
+          if-no-files-found: error
+          retention-days: 14
+
   linux-tests:
     runs-on: ubuntu-latest
     steps:
