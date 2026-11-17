@@ -1,4 +1,5 @@
 #include "rayman2fix/game_launch.hpp"
+#include "rayman2fix/install_layout.hpp"
 
 #include "rayman2fix/gameframe.hpp"
 #include "rayman2fix/game_config.hpp"
@@ -141,7 +142,7 @@ GameLaunchPreflight check_game_launch(const fs::path& root) {
         std::string problem;
         if (!verify_exe_replacement(root, kOriginalHash, kOriginalBytes, problem))
             return {false, "EXE patch marker verification failed: " + problem};
-        if (!gameframe_glide_ready(root / "rayman2fix"))
+        if (!gameframe_glide_ready(layout::gameframe(root.parent_path())))
             return {false, "required GameFrame glide2x.dll is missing or unverified"};
         // Application-directory DLLs take precedence over PATH. A stale
         // root Glide wrapper would mask the verified nested one.
@@ -231,10 +232,9 @@ ChildProcessResult run_child_process(
     ScopedChildEnvironment cinematic_probe(L"RAYMAN2FIX_CINEMATIC_PROBE");
     ScopedChildEnvironment child_path(L"PATH");
     // The game retains its original working directory, while the verified
-    // Glide wrapper lives with the rest of Rayman2Fix in a child folder.
-    // The Windows loader searches PATH for application-requested DLLs.
-    // The game-facing winmm.dll still resolves from the game directory.
-    const auto fixes=fs::absolute(working_directory/"rayman2fix").wstring();
+    // The verified GameFrame DLL is isolated under third_party/gameframe/.
+    // The child-only PATH makes it available without polluting the launcher.
+    const auto fixes=fs::absolute(layout::gameframe(working_directory.parent_path())).wstring();
     const DWORD path_size=GetEnvironmentVariableW(L"PATH",nullptr,0);
     if(path_size>32768) return {false,0,ERROR_INVALID_PARAMETER};
     std::wstring inherited;
@@ -285,7 +285,7 @@ ChildProcessResult run_child_process(
     if (display.borderless && display.enable_fov) {
         result.fov_hook = initialize_game_fov(
             reinterpret_cast<std::uintptr_t>(process.handle),
-            raw.dwProcessId, working_directory / "rayman2fix" / "Rayman2Fix.dll",
+            raw.dwProcessId, working_directory / "fix.dll",
             display.output_width, display.output_height, display.log_enabled,
             display.skip_cinematics, display.remove_dialogue_backgrounds,
             display.remove_cinematic_bars, display.music_in_pause_menu);
