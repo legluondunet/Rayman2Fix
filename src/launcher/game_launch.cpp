@@ -416,7 +416,7 @@ int launch_verified_game(Startup& startup, bool verify) {
                     " aspect_mode=Auto"));
     startup.log(classic_aspect ?
                 "WIDESCREEN: 4:3 mode selected; world Hor+ inactive, internal and output aspect 4:3" :
-                "WIDESCREEN: desktop output auto-detected; Hor+ 3D FOV active for approved executable");
+                "WIDESCREEN: desktop output auto-detected; Hor+ FOV correction requested for verified executable");
     startup.log(std::string("FEATURES: RemoveDialogueBackgrounds=") +
                 (display.remove_dialogue_backgrounds ? "1 (verified native dialogue filter)" : "0"));
     startup.log(std::string("FEATURES: RemoveCinematicBars=") +
