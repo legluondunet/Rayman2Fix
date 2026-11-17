@@ -91,19 +91,6 @@ bool read_ini_flag(const fs::path& ini,const char* section_name,
             section_name+"] "+key+"; use 0 or 1");
     return value=="1";
 }
-// Desktop resolution is always detected, never read from user INI.
-// The Linux target is a synthetic test harness; the shipping build is Win32.
-std::pair<std::uint32_t,std::uint32_t> desktop_resolution() {
-#ifdef _WIN32
-    const auto display=primary_display_metrics();
-    if(display.width<640u || display.height<480u)
-        throw std::runtime_error("invalid primary display dimensions");
-    return {display.width, display.height};
-#else
-    return {640u,480u};
-#endif
-}
-
 constexpr std::array<const char*, 5> kKeys = {{
     "GLI_DllFile", "GLI_Dll", "GLI_Driver", "GLI_Device", "GLI_Mode"
 }};
@@ -201,6 +188,19 @@ void atomically_install(const fs::path& output, const std::string& bytes) {
     }
 }
 } // namespace
+
+// Desktop resolution is always detected, never read from user INI.
+// The Linux target is a synthetic test harness; the shipping build is Win32.
+std::pair<std::uint32_t,std::uint32_t> desktop_resolution() {
+#ifdef _WIN32
+    const auto display=primary_display_metrics();
+    if(display.width<640u || display.height<480u)
+        throw std::runtime_error("invalid primary display dimensions");
+    return {display.width, display.height};
+#else
+    return {640u,480u};
+#endif
+}
 
 std::string configured_aspect_ratio(const fs::path& ini) {
     const auto value=upper(trim(read_graphics_setting(ini,"AspectRatio","Auto")));
