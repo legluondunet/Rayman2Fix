@@ -264,6 +264,13 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME esc-pause-only-stable-voice-research
     COMMAND esc_pause_only_model_tests)
+  # Correlate read-only source-table aliases using synthetic records.
+  add_executable(esc_source_alias_tests
+    tests/esc_source_alias_tests.cpp)
+  target_include_directories(esc_source_alias_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-source-sound-table-alias-research
+    COMMAND esc_source_alias_tests)
 
   add_executable(fov_math_tests tests/fov_math_tests.cpp)
   target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
