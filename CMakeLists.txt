@@ -257,6 +257,13 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME esc-pre-driver-pause-research-model
     COMMAND esc_pre_driver_pause_tests)
+  # Pure synthetic flag-bit research. No game/DLL linking or runtime hooks.
+  add_executable(esc_pause_only_model_tests
+    tests/esc_pause_only_model_tests.cpp)
+  target_include_directories(esc_pause_only_model_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-pause-only-stable-voice-research
+    COMMAND esc_pause_only_model_tests)
 
   add_executable(fov_math_tests tests/fov_math_tests.cpp)
   target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
