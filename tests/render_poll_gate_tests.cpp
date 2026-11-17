@@ -60,6 +60,20 @@ int main() {
     CHECK(!long_intro.take(RenderPollSource::Viewport,76001,owner,owner,1000));
     CHECK(long_intro.take(RenderPollSource::FrameFlip,76016,owner,owner,1000));
     CHECK(!long_intro.take(RenderPollSource::FrameFlip,76017,174,owner,1000));
+    // Strict opt-in: keep frame-flip isolated to a running jail_20
+    // scene or a source-scoped pending ESC-menu window. Merely
+    // enabling MusicInPauseMenu is not an audio authorization.
+    using r2fix::should_poll_game_frame_flip;
+    CHECK(!should_poll_game_frame_flip(false,false,true,true));
+    CHECK(should_poll_game_frame_flip(true,false,true,true));
+    CHECK(should_poll_game_frame_flip(false,true,true,true));
+    CHECK(should_poll_game_frame_flip(true,true,true,true));
+    CHECK(!should_poll_game_frame_flip(false,true,false,true));
+    CHECK(!should_poll_game_frame_flip(false,true,true,false));
+    CHECK(!should_poll_game_frame_flip(true,false,false,false));
+    CHECK(!should_poll_game_frame_flip(true,false,true,false));
+    CHECK(!should_poll_game_frame_flip(false,false,false,false));
+
     // The native camera takes priority as soon as it resumes and may
     // suppress the flip callback even when that callback is same-thread.
     CHECK(long_intro.take(RenderPollSource::Camera,76100,owner,owner,76100));
