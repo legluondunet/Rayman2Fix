@@ -84,50 +84,13 @@ std::string read_graphics_setting(const fs::path& ini,
     return read_ini_setting(ini,"Graphics",key,fallback);
 }
 bool read_ini_flag(const fs::path& ini,const char* section_name,
-                   const char* key) {
-    const std::string value=read_ini_setting(ini,section_name,key,"0");
+                   const char* key,const char* fallback="0") {
+    const std::string value=read_ini_setting(ini,section_name,key,fallback);
     if(value!="0" && value!="1")
         throw std::runtime_error(std::string("invalid [")+
             section_name+"] "+key+"; use 0 or 1");
     return value=="1";
 }
-std::string read_resolution_setting(const fs::path& ini) {
-    return read_graphics_setting(ini, "Resolution", "Desktop");
-}
-std::pair<std::uint32_t,std::uint32_t> resolution(const std::string& setting) {
-    const auto value = upper(trim(setting));
-    if (value == "DESKTOP" || value == "AUTO") {
-#ifdef _WIN32
-        const auto display = primary_display_metrics();
-        const int w = static_cast<int>(display.width);
-        const int h = static_cast<int>(display.height);
-        if (w <= 0 || h <= 0)
-            throw std::runtime_error("cannot detect primary desktop resolution");
-        return {static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h)};
-#else
-        // Linux build is an ISO unit-test harness, not the shipping Win32
-        // application. Always use an explicit resolution in host tests.
-        return {640, 480};
-#endif
-    }
-    const auto split = value.find('X');
-    if (split == std::string::npos ||
-        value.find('X', split + 1) != std::string::npos)
-        throw std::runtime_error("invalid [Graphics] Resolution; use Desktop or 1920x1080");
-    const auto ws = trim(value.substr(0, split));
-    const auto hs = trim(value.substr(split + 1));
-    const auto decimal = [](const std::string& text) {
-        return !text.empty() && std::all_of(text.begin(), text.end(),
-            [](unsigned char c) { return c >= '0' && c <= '9'; });
-    };
-    if (!decimal(ws) || !decimal(hs) || ws.size() > 5 || hs.size() > 5)
-        throw std::runtime_error("invalid [Graphics] Resolution dimensions");
-    const auto w = std::stoul(ws), h = std::stoul(hs);
-    if (w < 640 || w > 8192 || h < 480 || h > 4320)
-        throw std::runtime_error("unsupported [Graphics] Resolution; expected 640..8192 x 480..4320");
-    return {static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h)};
-}
-
 constexpr std::array<const char*, 5> kKeys = {{
     "GLI_DllFile", "GLI_Dll", "GLI_Driver", "GLI_Device", "GLI_Mode"
 }};
@@ -226,9 +189,20 @@ void atomically_install(const fs::path& output, const std::string& bytes) {
 }
 } // namespace
 
-std::pair<std::uint32_t, std::uint32_t> configured_output_resolution(
-    const fs::path& ini) {
-    return resolution(read_resolution_setting(ini));
+// Desktop resolution is always detected, never read from user INI.
+// The Linux target is a synthetic test harness; the shipping build is Win32.
+std::pair<std::uint32_t,std::uint32_t> desktop_resolution() {
+#ifdef _WIN32
+    // The install/verify path may query dimensions before the game launch.
+    // Ensure physical, not DPI-virtualized, primary monitor coordinates.
+    configure_launcher_dpi_awareness();
+    const auto display=primary_display_metrics();
+    if(display.width<640u || display.height<480u)
+        throw std::runtime_error("invalid primary display dimensions");
+    return {display.width, display.height};
+#else
+    return {640u,480u};
+#endif
 }
 
 std::string configured_aspect_ratio(const fs::path& ini) {
@@ -241,27 +215,33 @@ bool configured_aspect_ratio_is_4_3(const fs::path& ini) {
     return configured_aspect_ratio(ini)=="4:3";
 }
 bool configured_skip_cinematics(const fs::path& ini) {
-    return read_ini_flag(ini,"Features","SkipCinematics");
+    return read_ini_flag(ini,"Features","SkipCinematics","1");
 }
 bool configured_remove_dialogue_backgrounds(const fs::path& ini) {
-    return read_ini_flag(ini,"Features","RemoveDialogueBackgrounds");
+    return read_ini_flag(ini,"Features","RemoveDialogueBackgrounds","1");
 }
 bool configured_remove_cinematic_bars(const fs::path& ini) {
-    return read_ini_flag(ini,"Features","RemoveCinematicBars");
+    return read_ini_flag(ini,"Features","RemoveCinematicBars","1");
 }
 bool configured_music_in_pause_menu(const fs::path& ini) {
-    return read_ini_flag(ini,"Features","MusicInPauseMenu");
+    return read_ini_flag(ini,"Features","MusicInPauseMenu","1");
+}
+std::pair<std::uint32_t,std::uint32_t> render_resolution_for_display(
+    std::uint32_t width,std::uint32_t height,bool classic_4_3) {
+    if(width<640u || height<480u || width>16384u || height>8640u)
+        throw std::runtime_error("invalid primary display geometry");
+    if(!classic_4_3)return {width,height};
+    // Largest exact 4:3 area inside the native physical monitor.
+    const auto units=std::min(width/4u,height/3u);
+    if(units<160u)
+        throw std::runtime_error("unsupported 4:3 canvas on primary display");
+    return {units*4u,units*3u};
 }
 std::pair<std::uint32_t,std::uint32_t> configured_render_resolution(
         const fs::path& ini) {
-    const auto physical=configured_output_resolution(ini);
-    if(!configured_aspect_ratio_is_4_3(ini))return physical;
-    // Preserve exact 4:3 in the largest integer-pixel area. GameFrame's
-    // native present() clears black outside it, without EXE hacks.
-    const auto units=std::min(physical.first/4u,physical.second/3u);
-    if(units<160u)
-        throw std::runtime_error("unsupported [Graphics] AspectRatio=4:3 canvas");
-    return {units*4u,units*3u};
+    const auto physical=desktop_resolution();
+    return render_resolution_for_display(
+        physical.first,physical.second,configured_aspect_ratio_is_4_3(ini));
 }
 
 // FPSLimit=60 by default; 0 = unlimited for troubleshooting, 15-240 =
@@ -284,6 +264,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     std::string current;
     bool graphics=false,features=false,aspect=false,force=false,skip=false;
     bool dialogue=false,cinematic=false,legacy=false,music=false,old_early_theme=false;
+    bool obsolete_resolution=false;
     for(const auto& text:raw) {
         std::string next;
         if(section(text,next)) {
@@ -298,6 +279,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(p==std::string::npos)continue;
         const auto key=upper(trim(t.substr(0,p)));
         if(current=="GRAPHICS" && key=="FORCE4X3")force=true;
+        if(current=="GRAPHICS" && key=="RESOLUTION")obsolete_resolution=true;
         if(current=="GRAPHICS" && key=="ASPECTRATIO")aspect=true;
         if(current=="FEATURES" && key=="SKIPCINEMATICS")skip=true;
         if(current=="FEATURES" && key=="REMOVEDIALOGUEBACKGROUNDS")dialogue=true;
@@ -306,18 +288,20 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(current=="FEATURES" && key=="EARLYTHEMEMUSICEXPERIMENTAL")old_early_theme=true;
         if(current=="FEATURES" && key=="REMOVEBLACKFRAMES")legacy=true;
     }
-    // Existing opt-in users retain BOTH former behaviors. If only one new
-    // setting is present, its explicit value always takes precedence.
+    // Existing user settings, including explicit 0, always take precedence.
+    // A retired combined flag supplies both missing values when present;
+    // otherwise each feature defaults to 1.
     // Invalid legacy values are rejected before editing the user's INI.
     const bool inherited=legacy &&
         read_ini_flag(ini,"Features","RemoveBlackFrames");
+    const bool default_visual=!legacy || inherited;
     // Respect an explicitly configured AspectRatio if both keys are present.
     // Reject invalid settings before changing the user's file.
     if(aspect)(void)configured_aspect_ratio(ini);
     const std::string migrated_aspect=(!aspect && force &&
         read_ini_flag(ini,"Graphics","Force4x3")) ? "4:3" : "Auto";
     if(aspect && !force && skip && dialogue && cinematic && music &&
-       !old_early_theme && !legacy)return;
+       !old_early_theme && !legacy && !obsolete_resolution)return;
     std::vector<std::string> output;
     std::string active;
     bool added_aspect=false,added_skip=false,added_dialogue=false,added_cinematic=false,added_music=false;
@@ -330,24 +314,24 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(active=="FEATURES" && !skip && !added_skip) {
             output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 only");
             output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
-            output.emplace_back("SkipCinematics=0");
+            output.emplace_back("SkipCinematics=1");
             added_skip=true;
         }
         if(active=="FEATURES" && !dialogue && !added_dialogue) {
             output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
-            output.emplace_back(std::string("RemoveDialogueBackgrounds=")+(inherited?"1":"0"));
+            output.emplace_back(std::string("RemoveDialogueBackgrounds=")+(default_visual?"1":"0"));
             added_dialogue=true;
         }
         if(active=="FEATURES" && !cinematic && !added_cinematic) {
             output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
             output.emplace_back("; Does not affect GameFrame AspectRatio=4:3 sidebars");
-            output.emplace_back(std::string("RemoveCinematicBars=")+(inherited?"1":"0"));
+            output.emplace_back(std::string("RemoveCinematicBars=")+(default_visual?"1":"0"));
             added_cinematic=true;
         }
         if(active=="FEATURES" && !music && !added_music) {
             output.emplace_back("; 1 = continue level music throughout ESC, including verified early Theme handoffs");
-            output.emplace_back("; Default 0 (opt in); original SFX and level changes remain native");
-            output.emplace_back("MusicInPauseMenu=0");
+            output.emplace_back("; Default 1; set 0 to restore original ESC pause music behavior");
+            output.emplace_back("MusicInPauseMenu=1");
             added_music=true;
         }
     };
@@ -364,6 +348,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         const auto key=eq==std::string::npos ? std::string{} :
                        upper(trim(t.substr(0,eq)));
         if(active=="GRAPHICS") {
+            if(key=="RESOLUTION")continue; // retired: always use physical monitor size
             if(t=="; 1 = centered 4:3 picture with black sidebars" ||
                t=="; 1 = centered 4:3 picture (black sidebars)")
                 continue; // remove obsolete generated comments
@@ -404,15 +389,15 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         output.emplace_back("[Features]");
         output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 only");
         output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
-        output.emplace_back("SkipCinematics=0");
+        output.emplace_back("SkipCinematics=1");
         output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
-        output.emplace_back("RemoveDialogueBackgrounds=0");
+        output.emplace_back("RemoveDialogueBackgrounds=1");
         output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
         output.emplace_back("; Does not affect GameFrame AspectRatio=4:3 sidebars");
-        output.emplace_back("RemoveCinematicBars=0");
+        output.emplace_back("RemoveCinematicBars=1");
         output.emplace_back("; 1 = continue level music throughout ESC, including verified early Theme handoffs");
-        output.emplace_back("; Default 0 (opt in); preserves native SFX and level changes");
-        output.emplace_back("MusicInPauseMenu=0");
+        output.emplace_back("; Default 1; set 0 to restore original ESC pause music behavior");
+        output.emplace_back("MusicInPauseMenu=1");
     }
     // Retain original BOM, comments, unrelated keys and EOL type.
     std::ifstream old(ini,std::ios::binary);
@@ -446,15 +431,15 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
 }
 
 void synchronize_rayman2_ubi_ini(const fs::path& game_dir, Startup& startup) {
-    const auto [w,h] = configured_output_resolution(startup.ini_path());
+    const auto [w,h] = desktop_resolution();
     const fs::path target = game_dir / "ubi.ini";
     const auto original = fs::exists(target) ? lines_of(target) :
                                                std::vector<std::string>{};
     const auto updated = generated_ubi(original, w, h);
     atomically_install(target, updated);
-    startup.log("CONFIG-UBI: managed from Rayman2Fix.ini, renderer=Glide2"
-                " adapter=GliVd1 internal=1024x768x16 output=" +
+    startup.log("CONFIG-UBI: renderer=Glide2"
+                " adapter=GliVd1 internal=1024x768x16 desktop_output=" +
                 std::to_string(w) + "x" + std::to_string(h) +
-                " (GameFrame GLIDE_SIZE, game-facing ubi.ini)");
+                " (GameFrame GLIDE_SIZE; no user resolution override)");
 }
 } // namespace r2fix

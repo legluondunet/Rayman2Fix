@@ -1,4 +1,5 @@
 #include "rayman2fix/gameframe.hpp"
+#include "rayman2fix/install_layout.hpp"
 #include "rayman2fix/sha256.hpp"
 
 #include <filesystem>
@@ -179,7 +180,14 @@ void ensure_gameframe_glide(const fs::path& game_dir) {
     // A bundled license accompanies the Apache 2.0 GameFrame binary, while
     // the release ZIP still contains only the Rayman2Fix.exe launcher.
     write_and_replace(game_dir / "glide2x.dll", glide, expected);
-    const fs::path license_file = game_dir / "GameFrame-LICENSE-APACHE.txt";
+    // Keep legal notices with the other installed documentation, not DLLs.
+    // The renderer directory is <root>/third_party/gameframe.
+    const fs::path docs=layout::docs(game_dir.parent_path().parent_path());
+    if(fs::is_symlink(docs) ||
+       (fs::exists(docs) && !fs::is_directory(docs)))
+        throw std::runtime_error("unsafe docs/ directory for GameFrame notice");
+    fs::create_directories(docs);
+    const fs::path license_file = docs / "GameFrame-LICENSE-APACHE.txt";
     const std::string license_text(reinterpret_cast<const char*>(license.data), license.size);
     Sha256 checksum;
     checksum.update(license.data, license.size);

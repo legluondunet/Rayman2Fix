@@ -534,11 +534,12 @@ font or HUD box changes were added. Visual verification is still needed.
 
 # Bootstrap validation
 
-Build the x86 Windows `Rayman2Fix.exe`, which **embeds** the project's
-inert `Rayman2Fix.dll`. The workflow archive must contain **only one EXE**;
-the INI, log and runtime directory must be created by that executable.
-The same EXE must now also embed and deploy the pinned GameFrame
-`glide2x.dll` and Apache 2.0 license with verified SHA-256.
+Build the Windows x86 `Rayman2Fix.exe`, which embeds the project's
+`game/fix.dll` runtime. The workflow archive contains **only one EXE**:
+the root INI and logs, the `game/` runtime, `mods/`, `docs/`, `state/`
+(only after a verified CD install), and `third_party/gameframe/` are
+provisioned by that executable. It embeds the SHA-256-verified GameFrame
+`glide2x.dll`; its Apache 2.0 notice belongs in `docs/`.
 Run `ctest` on Windows and Linux for synthetic ISO/CUE and automatic CD
 installation, verification and refusal behavior.
 
@@ -546,17 +547,18 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 
 ## Automatic startup checks
 
-- Launch **`Rayman2Fix.exe` without arguments** and without any CD or
-  `Rayman2Fix/` folder: it creates the folder, its own embedded runtime DLL,
-  the minimal `[Debug] Log=1` and `[Graphics] Resolution=Desktop` INI
-  and the single launcher-side log, then
-  reports the missing CD cleanly. The former `--init` is unsupported.
-- Place exactly one original `.iso` or `.cue` beside the launcher. The
-  default command inspects it, verifies required file paths, extracts into
-  a sibling `Rayman2Fix.installing/` staging folder, initializes
-  `dll/snd_cpa.ini` from `snd_cpa_mmx.ini`, writes a size receipt and
-  promotes the assets to `Rayman2Fix/`. The installed layout must not use
-  `DiscContent/`.
+- Launch **`Rayman2Fix.exe` without arguments** in a new, empty directory,
+  without CD image. It creates root `Rayman2Fix.ini` (default `Log=1`,
+  `FPSLimit=60`, `AspectRatio=Auto` and four enabled features), the
+  installer log, `game/fix.dll`, `mods/textures/`, `third_party/gameframe/`
+  and `docs/`, then reports the missing CD cleanly. It must **not**
+  create `state/` without a verified installation. `--init` is unsupported.
+- Place exactly one supported `.iso` or `.cue` beside the launcher. The
+  default command extracts into temporary `game.installing/` and
+  `state.installing/`, initializes `dll/snd_cpa.ini` from
+  `snd_cpa_mmx.ini`, verifies the SHA-256 receipts, and publishes to
+  `game/` and `state/`. Never create `DiscContent/`, migrate an old
+  installation, or silently overwrite a pre-existing foreign directory.
 - Remove or unmount the source ISO and run without arguments again.
   Existing game files must be **verified without reinstalling**. An
   unpatched, unsupported or modified game executable must **never** run.
@@ -574,24 +576,21 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
   must NOT be excluded if encountered in synthetic test media.
   The real `directx/dplayx.dll` belongs to the already excluded `directx/`
   installer tree, not to the root-only protection auxiliary list.
-- Existing installs recorded by older builds must migrate without the
-  original CD: remove those eight files and receipt entries, tolerate an
-  already-deleted obsolete file, preserve remaining SHA-256 hashes and
-  the user INI, then verify normally.
+- **No migration:** if the launcher directory contains an old `rayman2/`
+  or `Rayman2Fix/` installation, refuse without moving, altering or
+  deleting it. New installations require a fresh directory.
 
-- With two images, no images, a malformed CD, or a foreign folder already
-  occupying `Rayman2Fix/`, the launcher must fail without silently
-  deleting any data.
-- Generate `ubi.ini` on the first install from the CD's settings, preserving
-  unrelated keys and sections, but force Glide 2 and user-selected
-  `[Graphics] Resolution` (e.g. `1024x768`) as
-  `GLI_Mode=1 - 1024 x 768 x 16`.
-- Change `Resolution` to `1280x720` with the original CD removed.
-  On the next launcher run, check that only the managed graphics values
-  change, and the game-facing `ubi.ini` is updated. Removing `ubi.ini`
-  should cause it to be regenerated. Invalid resolution must fail safely.
-- Older manifests that recorded `ubi.ini` must migrate its entry out of
-  the immutable SHA-256 receipt without deleting the game-facing file.
+- With two images, no images, a malformed CD, a foreign `game/` folder
+  or an old `Rayman2Fix/` directory, the launcher must fail without
+  silently deleting any data.
+- Generate `game/ubi.ini` from the CD settings on first installation,
+  preserving unrelated entries, but selecting Glide2 and the internal
+  `GLI_Mode=1 - 1024 x 768 x 16`. The primary monitor's physical
+  resolution is detected automatically and passed to GameFrame.
+- Confirm that the `Resolution` user option is absent; a legacy
+  `Resolution=...` INI line is ignored and removed during normalization,
+  without altering the automatic desktop output. Removing `game/ubi.ini`
+  must allow it to be regenerated; existing unrelated settings remain.
 - Validate `--verify` on installed CD files. It checks **size and SHA-256** against
   a locally generated receipt, but source-edition authentication and
   no-CD/Glide compatibility are not yet certified.
@@ -606,16 +605,21 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
   `tools/gameframe/apply_fps_limit.py` before the Rust build and that the
   limiter is attached to `grBufferSwap` **on the producer/game thread**,
   not only the asynchronous GL swap thread.
-- Test an exe-only copy of the workflow artifact: verify its own
-  `Rayman2Fix.dll` and pinned GameFrame `glide2x.dll` SHA-256 match the
-  original build outputs. Verify the extracted Apache license is identical
-  to the pinned GameFrame source and no DLL/INI/log sidecars are shipped.
-- Replace the installed `Rayman2Fix.dll` twice in succession, with
-  a preexisting `Rayman2Fix.dll.bak` and old
-  `Rayman2Fix.dll.backup.N` files: after each replacement, retain
-  **one** `Rayman2Fix.dll.bak` with the immediately previous runtime.
-  Delete earlier backup generations; a subsequent unchanged launch
-  must not change the backup.
+- Test a standalone workflow `Rayman2Fix.exe`: verify extracted
+  `game/fix.dll` and `third_party/gameframe/glide2x.dll` SHA-256
+  against the build outputs, and `docs/GameFrame-LICENSE-APACHE.txt`
+  against the pinned source. The archive must not contain DLL, INI,
+  receipt, documentation or log sidecars.
+- Replace `game/fix.dll` with a foreign DLL while obsolete
+  `game/fix.dll.bak` and `game/fix.dll.bak.previous` files exist. Verify
+  that the launcher restores the exact embedded runtime **without creating
+  or retaining any `fix.dll` backup**. Repeat using a same-size but altered
+  DLL marked read-only; a subsequent launch with a matching DLL must be
+  idempotent, without modifying the DLL or creating backups. With
+  `Log=1`, the installer log must report
+  `RUNTIME-DEPLOY: status=installed|replaced|unchanged backups_removed=N backup_created=0`,
+  as applicable. On a previously installed game, `status=unchanged`
+  does **not** prove a replacement occurred during that invocation.
 - Replace the installed `glide2x.dll` with an unknown file, rerun the
   launcher, verify the old file is preserved as `glide2x.dll.bak` and
   the pinned DLL is restored. A third launch must be idempotent.
@@ -634,9 +638,9 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 
 ## First approved-game Wine/Windows launch test
 
-After installing the supported retail CD and applying the owner's
-`Rayman2Fix-executable.r2patch` (sidecar next to the launcher), check that
-`Rayman2Fix/rayman2.exe.bak` still hashes to
+After installing the supported CD, supply the owner's approved decrypted
+`rayman2.exe` beside the launcher (or the approved `.r2patch` fallback).
+Check that `game/rayman2.exe.bak` still hashes to
 `7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`
 and `rayman2.exe` hashes to
 `9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`.
@@ -648,8 +652,9 @@ menu, graphics (Glide), sound and keyboard navigation. To check the FPS
 cap, run the game at `FPSLimit=60`, then `FPSLimit=30` and `FPSLimit=0`
 for a brief comparison using an external FPS overlay. Confirm that the
 gameplay speed does not change and that Wine Alt+Tab is still responsive. Record the console
-output and `Rayman2Fix.log` (look for `LAUNCH-READY`,
-`LAUNCH-START`, `LAUNCH-EXIT`, or `LAUNCH-ERROR`).
+output and `Rayman2Fix_installer.log` (look for `LAUNCH-READY`,
+`LAUNCH-START`, `LAUNCH-EXIT` or `LAUNCH-ERROR`), plus the separate
+`Rayman2Fix.log` for native game/runtime/Glide events.
 A nonzero exit code may indicate a game crash or a missing runtime component.
 Do not claim playability from the launch event alone.
 
@@ -662,11 +667,11 @@ With the owner's approved unprotected Rayman 2 EXE plus its original
 WINEDEBUG=-all wine Rayman2Fix.exe
 ```
 
-The **single** user-facing setting `Rayman2Fix/Rayman2Fix.ini` should remain
-`[Graphics] Resolution=Desktop`. On the user's 1920×1080 monitor the
-launcher must log:
+The **single** user-facing configuration is the root `Rayman2Fix.ini`:
+`AspectRatio=Auto` selects automatic output dimensions. On a 1920×1080
+primary monitor, the launcher must log:
 
-- `CONFIG-UBI: ... internal=1024x768x16 output=1920x1080`; the internal
+- `CONFIG-UBI: ... internal=1024x768x16 desktop_output=1920x1080`; the internal
   Glide compatibility mode must **not** be forced to an unsupported 16:9
   value.
 - `DISPLAY: primary_physical=1920x1080 dpi=... output=1920x1080

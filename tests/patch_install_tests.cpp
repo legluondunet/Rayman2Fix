@@ -61,13 +61,13 @@ int main() {
         // The approved local decrypted file uses the same atomic backup,
         // patch receipt and SHA256 checks as the older private .r2patch flow.
         {
-            const fs::path direct = root / "local-decrypted";
+            const fs::path direct = root / "local-decrypted" / "game";
             fs::create_directories(direct);
             const std::string source = "ORIGINAL_PROTECTED";
             const std::string target = "APPROVED_UNPROTECTED";
             const fs::path original = direct / "rayman2.exe";
             const fs::path supplied = root / "Rayman2.exe";
-            const fs::path marker = direct / "rayman2fix" / ".rayman2fix-exe-patch.tsv";
+            const fs::path marker = direct.parent_path() / "state" / ".rayman2fix-exe-patch.tsv";
             const r2fix::ExePatchHeader approved{
                 source.size(), target.size(),
                 r2fix::sha256_text(source), r2fix::sha256_text(target)
@@ -105,7 +105,7 @@ int main() {
             fs::remove(supplied);
         }
         {
-            const fs::path mismatch = root / "unsupported-protected";
+            const fs::path mismatch = root / "unsupported-protected" / "game";
             fs::create_directories(mismatch);
             const std::string source = "GOOD_PROTECTED";
             const std::string target = "GOOD_DECRYPTED";
@@ -129,54 +129,56 @@ int main() {
         const std::string unprotected = "ABCDEFGHnewENDINGS";
         const auto patch = sample_patch(cd_exe, unprotected);
         const auto hash = r2fix::sha256_text(cd_exe);
-        const fs::path exe = root / "rayman2.exe";
-        const fs::path backup = root / "rayman2.exe.bak";
-        const fs::path marker = root / "rayman2fix" / ".rayman2fix-exe-patch.tsv";
+        const fs::path game = root / "game";
+        fs::create_directories(game);
+        const fs::path exe = game / "rayman2.exe";
+        const fs::path backup = game / "rayman2.exe.bak";
+        const fs::path marker = root / "state" / ".rayman2fix-exe-patch.tsv";
         write(exe, cd_exe);
         std::string error;
-        require(r2fix::verify_exe_replacement(root, hash, cd_exe.size(), error),
+        require(r2fix::verify_exe_replacement(game, hash, cd_exe.size(), error),
                 "unpatched original should verify");
-        const auto result = r2fix::install_exe_replacement(root, patch);
+        const auto result = r2fix::install_exe_replacement(game, patch);
         require(result.original_sha256 == hash, "original hash stored");
         require(fs::exists(backup), "CD executable preserved under .bak");
         require(read(backup) == cd_exe, "backup matches original exactly");
         require(read(exe) == unprotected, "new rayman2.exe is patched output");
-        require(fs::exists(marker), "patch receipt generated in private fix directory");
+        require(fs::exists(marker), "patch receipt generated in root state/ directory");
         require(!fs::exists(root / ".rayman2fix-exe-patch.tsv"),
                 "game root must not hold a fix-only patch receipt");
-        require(r2fix::verify_exe_replacement(root, hash, cd_exe.size(), error),
+        require(r2fix::verify_exe_replacement(game, hash, cd_exe.size(), error),
                 "original backup and patched exe both verify");
-        require(!fs::exists(root / "rayman2.exe.patching"),
+        require(!fs::exists(game / "rayman2.exe.patching"),
                 "temporary output removed after patching");
 
         bool refused = false;
-        try { r2fix::install_exe_replacement(root, patch); }
+        try { r2fix::install_exe_replacement(game, patch); }
         catch (const std::exception&) { refused = true; }
         require(refused && read(backup) == cd_exe,
                 "second patch attempt must not replace existing original backup");
 
         write(exe, "ABCDEFGHzzzENDINGS");
-        require(!r2fix::verify_exe_replacement(root, hash, cd_exe.size(), error),
+        require(!r2fix::verify_exe_replacement(game, hash, cd_exe.size(), error),
                 "same-size modified patched EXE must be rejected");
         write(exe, unprotected);
-        require(r2fix::verify_exe_replacement(root, hash, cd_exe.size(), error),
+        require(r2fix::verify_exe_replacement(game, hash, cd_exe.size(), error),
                 "patched EXE restored");
         write(backup, "ABCDEFGHzzzINGS");
-        require(!r2fix::verify_exe_replacement(root, hash, cd_exe.size(), error),
+        require(!r2fix::verify_exe_replacement(game, hash, cd_exe.size(), error),
                 "damaged backup must be rejected");
         write(backup, cd_exe);
 
         fs::remove(marker);
-        require(!r2fix::verify_exe_replacement(root, hash, cd_exe.size(), error),
+        require(!r2fix::verify_exe_replacement(game, hash, cd_exe.size(), error),
                 "stray .bak without a patch marker must be rejected");
         fs::remove(backup);
         write(exe, cd_exe);
-        require(r2fix::verify_exe_replacement(root, hash, cd_exe.size(), error),
+        require(r2fix::verify_exe_replacement(game, hash, cd_exe.size(), error),
                 "unpatched original again verifies");
 
         write(backup, "USERBACKUP");
         refused = false;
-        try { r2fix::install_exe_replacement(root, patch); }
+        try { r2fix::install_exe_replacement(game, patch); }
         catch (const std::exception&) { refused = true; }
         require(refused && read(backup) == "USERBACKUP" &&
                     read(exe) == cd_exe && !fs::exists(marker),

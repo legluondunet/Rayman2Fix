@@ -83,7 +83,7 @@ if(WIN32)
   add_library(Rayman2FixRuntime SHARED
     src/runtime/runtime.cpp
     src/runtime/game_window_icon.cpp)
-  set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME Rayman2Fix)
+  set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME fix)
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
     RAYMAN2FIX_ESC_MUSIC_FEATURE=1
@@ -114,6 +114,18 @@ if(WIN32)
   target_sources(Rayman2Fix PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc")
   add_dependencies(Rayman2Fix Rayman2FixRuntime)
+
+  # A concise installation guide is embedded for docs/README.md.
+  # GitHub README.md remains at the repo root; do not copy it into the game directory.
+  # Project licensing has not yet been selected (README.md); never invent one.
+  file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc"
+    CONTENT "1105 RCDATA \"${CMAKE_CURRENT_SOURCE_DIR}/docs/README.md\"\n")
+  set_source_files_properties(
+    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc"
+    PROPERTIES GENERATED TRUE)
+  target_sources(Rayman2Fix PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc")
 
   set(RAYMAN2FIX_GLIDE_DLL "" CACHE FILEPATH "Pinned Windows x86 GameFrame glide2x.dll")
   set(RAYMAN2FIX_GLIDE_LICENSE "" CACHE FILEPATH "Pinned Apache 2.0 license from GameFrame")
@@ -201,7 +213,8 @@ if(BUILD_TESTING)
   if(WIN32)
     # Startup tests need the same embedded DLL resource as the real launcher.
     target_sources(auto_flow_tests PRIVATE
-      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc")
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc"
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc")
     add_dependencies(auto_flow_tests Rayman2FixRuntime)
     if(RAYMAN2FIX_GLIDE_DLL)
       target_compile_definitions(auto_flow_tests PRIVATE

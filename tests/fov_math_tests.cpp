@@ -12,12 +12,15 @@ int main() {
         // In Rayman 2, alphaY is 0.75 of the reference horizontal angle.
         const float y = 1.2f * 0.75f;
         const auto a43 = r2fix::hor_plus_fov(y, 4.0f / 3.0f);
+        const auto a1610 = r2fix::hor_plus_fov(y, 16.0f / 10.0f);
         const auto a169 = r2fix::hor_plus_fov(y, 16.0f / 9.0f);
         const auto a219 = r2fix::hor_plus_fov(y, 21.0f / 9.0f);
         check(std::abs(a43-1.2f) < 0.0001f,
               "reference 4:3 horizontal FOV unchanged");
-        check(a169 > a43 && a219 > a169,
-              "Hor+ widens visible horizontal coverage at 16:9 and 21:9");
+        check(a1610 > a43 && a169 > a1610 && a219 > a169,
+              "Hor+ widens visible coverage at 16:10, 16:9 and 21:9");
+        check(std::abs(std::tan(a1610/2.0f)/std::tan(a43/2.0f) - 1.2f)
+              < 0.0001f, "16:10 tangent ratio matches a 1920x1200 display");
         check(std::abs(std::tan(a169/2.0f)/std::tan(a43/2.0f) - (4.0f/3.0f))
               < 0.0001f, "horizontal tangent scales with aspect ratio");
         check(r2fix::hor_plus_fov(0.0f, 16.0f/9.0f) == 0.0f,

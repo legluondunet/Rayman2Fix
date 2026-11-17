@@ -1,8 +1,13 @@
 #include "rayman2fix/startup.hpp"
+#include "rayman2fix/install_layout.hpp"
 #include "rayman2fix/gameframe.hpp"
 #include "rayman2fix/game_config.hpp"
 
 #include <chrono>
+#include <cstdint>
+#include <system_error>
+#include <fstream>
+#include <iterator>
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -25,6 +30,50 @@
 namespace fs = std::filesystem;
 
 namespace r2fix {
+
+// Passive inspection only: a valid header does not prove that the source logo
+// tiles were recognized or that GameFrame uploaded the replacement.
+namespace {
+std::string intro_logo_asset_status(const fs::path& root) {
+    const auto asset = layout::mods(root) / "textures" / "logo.rgba";
+    std::error_code ec;
+    const auto st = fs::symlink_status(asset, ec);
+    if (ec == std::errc::no_such_file_or_directory ||
+        st.type() == fs::file_type::not_found)
+        return "missing";
+    if (ec)
+        return "unreadable-metadata";
+    if (!fs::is_regular_file(st) || fs::is_symlink(st))
+        return "invalid-file-type";
+
+    constexpr std::uintmax_t kAtlasSize = 16u + 768u * 384u * 4u;
+    const auto size = fs::file_size(asset, ec);
+    if (ec)
+        return "unreadable-metadata";
+    if (size != kAtlasSize)
+        return "invalid-size";
+
+    std::array<unsigned char, 16> header{};
+    std::ifstream in(asset, std::ios::binary);
+    if (!in || !in.read(reinterpret_cast<char*>(header.data()),
+                        static_cast<std::streamsize>(header.size())))
+        return "unreadable-header";
+    constexpr std::array<unsigned char, 8> kMagic{{
+        'R', '2', 'L', 'O', 'G', 'O', 'H', 'D'
+    }};
+    const auto u32le = [&](std::size_t offset) -> std::uint32_t {
+        return static_cast<std::uint32_t>(header[offset]) |
+               (static_cast<std::uint32_t>(header[offset + 1]) << 8) |
+               (static_cast<std::uint32_t>(header[offset + 2]) << 16) |
+               (static_cast<std::uint32_t>(header[offset + 3]) << 24);
+    };
+    if (!std::equal(kMagic.begin(), kMagic.end(), header.begin()) ||
+        u32le(8) != 768u || u32le(12) != 384u)
+        return "invalid-header";
+
+    return "header-valid"; // Actual substitution is logged by GameFrame.
+}
+} // namespace
 
 fs::path Startup::executable_path(const fs::path& argv0) {
 #ifdef _WIN32
@@ -50,8 +99,8 @@ fs::path Startup::executable_path(const fs::path& argv0) {
 
 Startup::Startup(const fs::path& executable) {
     root_ = fs::absolute(executable).parent_path();
-    game_dir_ = root_ / "rayman2";
-    ini_path_ = game_dir_ / "rayman2fix" / "Rayman2Fix.ini";
+    game_dir_ = layout::game(root_);
+    ini_path_ = root_ / "Rayman2Fix.ini";
     log_path_ = root_ / "Rayman2Fix_installer.log";
     runtime_log_path_ = root_ / "Rayman2Fix.log";
 }
@@ -60,46 +109,60 @@ Startup::Startup(const fs::path& executable) {
 namespace {
 
 // The Windows launcher stores its own x86 runtime DLL as RCDATA #1101.
-// Retain at most one backup: Rayman2Fix.dll.bak always contains the
-// immediately preceding DLL, replacing the previous backup after success.
-// Previous bootstrap versions generated Rayman2Fix.dll.backup.1, .2...
-// Keep only the newest legacy file as .bak if no backup exists yet; otherwise
-// delete only those precisely named obsolete launcher-generated backups.
-void prune_legacy_runtime_backups(const fs::path& directory) {
-    const std::string prefix = "Rayman2Fix.dll.backup.";
-    std::vector<std::pair<unsigned long, fs::path>> found;
-    for (const auto& entry : fs::directory_iterator(directory)) {
-        const auto filename = entry.path().filename().u8string();
-        if (filename.rfind(prefix, 0) != 0) continue;
-        const auto suffix = filename.substr(prefix.size());
-        if (suffix.empty() ||
-            !std::all_of(suffix.begin(), suffix.end(), [](unsigned char c) {
-                return c >= '0' && c <= '9';
-            })) continue;
-        if (entry.is_symlink() || !entry.is_regular_file())
-            throw std::runtime_error("unsafe old Rayman2Fix.dll backup path");
-        unsigned long id = 0;
-        try { id = std::stoul(suffix); }
-        catch (...) { throw std::runtime_error("malformed old runtime backup number"); }
-        found.emplace_back(id, entry.path());
-    }
-    if (found.empty()) return;
-    const fs::path backup = directory / "Rayman2Fix.dll.bak";
-    if (fs::is_symlink(backup) ||
-        (fs::exists(backup) && !fs::is_regular_file(backup)))
-        throw std::runtime_error("unsafe Rayman2Fix.dll.bak path");
-    if (!fs::exists(backup)) {
-        const auto latest = std::max_element(found.begin(), found.end(),
-            [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
-        fs::rename(latest->second, backup);
-    }
-    for (const auto& entry : found) {
-        if (fs::exists(entry.second))
-            fs::remove(entry.second);
-    }
+// The embedded DLL is authoritative; unknown runtime versions are replaced.
+// No old runtime backup is created or preserved.
+void ensure_embedded_readme(const fs::path& root) {
+    // User documentation lives under docs/; state/ contains only receipts.
+    const auto dest=layout::docs(root)/"README.md";
+    if(fs::is_symlink(dest) ||
+       (fs::exists(dest) && !fs::is_regular_file(dest)))
+        throw std::runtime_error("unsafe existing README.md path");
+    if(fs::exists(dest))return; // Never overwrite user documentation.
+    const HRSRC resource=FindResourceW(nullptr,MAKEINTRESOURCEW(1105),
+                                      MAKEINTRESOURCEW(10));
+    if(!resource)throw std::runtime_error("missing bundled README.md");
+    const auto size=SizeofResource(nullptr,resource);
+    const HGLOBAL loaded=LoadResource(nullptr,resource);
+    const auto* bytes=loaded ? static_cast<const char*>(LockResource(loaded)) : nullptr;
+    if(!bytes || !size)throw std::runtime_error("invalid bundled README.md");
+    std::ofstream out(dest,std::ios::binary|std::ios::trunc);
+    if(!out)throw std::runtime_error("cannot deploy README.md");
+    out.write(bytes,static_cast<std::streamsize>(size));
+    out.close();
+    if(!out)throw std::runtime_error("could not write bundled README.md");
 }
 
-void ensure_embedded_runtime(const fs::path& directory) {
+// The launcher owns game/fix.dll. Obsolete copies from older launcher builds
+// are not retained: the verified embedded runtime is the only supported one.
+struct RuntimeDeployment {
+    const char* status;
+    std::size_t backups_removed;
+};
+
+std::size_t discard_legacy_runtime_backups(const fs::path& directory) {
+    std::size_t removed = 0;
+    for (const auto* name : {"fix.dll.bak", "fix.dll.bak.previous"}) {
+        const auto old = directory / name;
+        if (!fs::exists(old) && !fs::is_symlink(old))
+            continue;
+        if (fs::is_directory(old) && !fs::is_symlink(old))
+            throw std::runtime_error("refusing to remove a directory at obsolete runtime backup path");
+        // Old backups may have inherited the read-only flag from the CD or
+        // an older runtime. Unlink the backup itself, never a link target.
+        if (!fs::is_symlink(old)) {
+            const DWORD attrs = GetFileAttributesW(old.c_str());
+            if (attrs == INVALID_FILE_ATTRIBUTES)
+                throw std::runtime_error("cannot inspect obsolete fix.dll backup");
+            if ((attrs & FILE_ATTRIBUTE_READONLY) &&
+                !SetFileAttributesW(old.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY))
+                throw std::runtime_error("cannot clear read-only obsolete fix.dll backup");
+        }
+        if (fs::remove(old)) ++removed; // Never follow a link target.
+    }
+    return removed;
+}
+
+RuntimeDeployment ensure_embedded_runtime(const fs::path& directory) {
     const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1101),
                                         MAKEINTRESOURCEW(10)); // RT_RCDATA
     if (!resource) throw std::runtime_error("Rayman2Fix.exe is missing bundled runtime DLL");
@@ -108,12 +171,15 @@ void ensure_embedded_runtime(const fs::path& directory) {
     const auto* bytes = loaded ?
         static_cast<const unsigned char*>(LockResource(loaded)) : nullptr;
     if (!bytes || !length)
-        throw std::runtime_error("bundled Rayman2Fix.dll is empty or unreadable");
+        throw std::runtime_error("bundled fix.dll is empty or unreadable");
 
-    const auto dest = directory / "Rayman2Fix.dll";
-    if (fs::is_symlink(dest))
-        throw std::runtime_error("refusing a symlink at runtime DLL destination");
-    bool identical = fs::is_regular_file(dest) && fs::file_size(dest) == length;
+    const auto dest = directory / "fix.dll";
+    // Unknown DLLs are replaced, but never follow links or overwrite folders.
+    if (fs::is_symlink(dest) ||
+        (fs::exists(dest) && !fs::is_regular_file(dest)))
+        throw std::runtime_error("unsafe game/fix.dll destination");
+    const bool has_existing = fs::exists(dest);
+    bool identical = has_existing && fs::file_size(dest) == length;
     if (identical) {
         std::ifstream old(dest, std::ios::binary);
         std::array<char, 4096> block{};
@@ -128,152 +194,92 @@ void ensure_embedded_runtime(const fs::path& directory) {
             offset += n;
         }
     }
-    if (identical) {
-        prune_legacy_runtime_backups(directory);
-        return;
-    }
+    if (identical)
+        return {"unchanged", discard_legacy_runtime_backups(directory)};
 
-    const auto temporary = directory / "Rayman2Fix.dll.installing";
-    if (fs::exists(temporary))
+    // Write a complete new DLL first. MoveFileExW with REPLACE_EXISTING
+    // replaces it atomically on the same volume: failure keeps the old DLL.
+    // No fix.dll.bak (or numbered backup) is ever created.
+    const auto temporary = directory / "fix.dll.installing";
+    if (fs::exists(temporary) || fs::is_symlink(temporary))
         throw std::runtime_error("old runtime staging file exists; refusing overwrite");
     {
         std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-        if (!out) throw std::runtime_error("cannot create bundled runtime DLL");
+        if (!out) throw std::runtime_error("cannot stage bundled fix.dll");
         out.write(reinterpret_cast<const char*>(bytes),
                   static_cast<std::streamsize>(length));
-        if (!out) throw std::runtime_error("error writing bundled runtime DLL");
-    }
-    fs::permissions(temporary, fs::perms::owner_write, fs::perm_options::add);
-
-    const fs::path backup = directory / "Rayman2Fix.dll.bak";
-    const fs::path prior = directory / "Rayman2Fix.dll.bak.previous";
-    if (fs::exists(prior) || fs::is_symlink(prior)) {
-        fs::remove(temporary);
-        throw std::runtime_error("unfinished Rayman2Fix.dll backup rotation; preserving files");
-    }
-    if (fs::is_symlink(backup) ||
-        (fs::exists(backup) && !fs::is_regular_file(backup))) {
-        fs::remove(temporary);
-        throw std::runtime_error("Rayman2Fix.dll.bak is not a safe backup file");
-    }
-    if (fs::exists(dest) && !fs::is_regular_file(dest)) {
-        fs::remove(temporary);
-        throw std::runtime_error("Rayman2Fix.dll is not a regular file");
-    }
-
-    bool moved_prior = false;
-    bool backed_up_current = false;
-    bool published = false;
-    try {
-        if (fs::exists(dest)) {
-            if (fs::exists(backup)) {
-                fs::rename(backup, prior);
-                moved_prior = true;
-            }
-            fs::rename(dest, backup);
-            backed_up_current = true;
+        out.close();
+        if (!out) {
+            std::error_code ignored;
+            fs::remove(temporary, ignored);
+            throw std::runtime_error("error writing bundled fix.dll");
         }
-        fs::rename(temporary, dest);
-        published = true;
-    } catch (...) {
+    }
+
+    // Windows may refuse replacement of a read-only DLL. Clear only that
+    // attribute; if publication fails, restore the old file's attributes.
+    DWORD previous_attributes = INVALID_FILE_ATTRIBUTES;
+    bool old_was_readonly = false;
+    if (has_existing) {
+        previous_attributes = GetFileAttributesW(dest.c_str());
+        if (previous_attributes == INVALID_FILE_ATTRIBUTES) {
+            std::error_code ignored;
+            fs::remove(temporary, ignored);
+            throw std::runtime_error("cannot inspect existing game/fix.dll attributes");
+        }
+        old_was_readonly = (previous_attributes & FILE_ATTRIBUTE_READONLY) != 0;
+        if (old_was_readonly &&
+            !SetFileAttributesW(dest.c_str(), previous_attributes & ~FILE_ATTRIBUTE_READONLY)) {
+            std::error_code ignored;
+            fs::remove(temporary, ignored);
+            throw std::runtime_error("cannot make old game/fix.dll writable");
+        }
+    }
+
+    if (!MoveFileExW(temporary.c_str(), dest.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        const DWORD error = GetLastError();
+        if (old_was_readonly)
+            SetFileAttributesW(dest.c_str(), previous_attributes);
         std::error_code ignored;
-        // Restore both the current runtime and the previous backup if the
-        // replacement could not be completed. Never overwrite user data.
-        if (backed_up_current) {
-            if (published) fs::remove(dest, ignored);
-            if (!fs::exists(dest))
-                fs::rename(backup, dest, ignored);
-        }
-        if (moved_prior && !fs::exists(backup))
-            fs::rename(prior, backup, ignored);
         fs::remove(temporary, ignored);
-        throw;
+        throw std::runtime_error("cannot replace game/fix.dll with bundled runtime (Win32=" +
+                                 std::to_string(error) + ")");
     }
-
-    // Only after the new DLL is safely published do we remove the older .bak.
-    // On success there is exactly one backup of the immediately prior DLL.
-    if (moved_prior) {
-        fs::permissions(prior, fs::perms::owner_write, fs::perm_options::add);
-        fs::remove(prior);
-    }
-    prune_legacy_runtime_backups(directory);
+    const auto removed = discard_legacy_runtime_backups(directory);
+    return {has_existing ? "replaced" : "installed", removed};
 }
 } // namespace
 #endif
 
-// Migrate the original flat Rayman2Fix/ layout without re-extracting
-// commercial game data. Never overwrite a pre-existing user file.
-// winmm.dll and rayman2.exe.manifest are game-facing DLL/manifest files:
-// Windows requires them in the directory of rayman2.exe.
-namespace {
-bool managed_fix_filename(const std::string& name) {
-    if (name=="RAYMAN2FIX.INI" || name=="RAYMAN2FIX.DLL" ||
-        name=="RAYMAN2FIX.DLL.BAK" ||
-        name=="GLIDE2X.DLL" || name=="GLIDE2X.DLL.BAK" ||
-        name=="GAMEFRAME-LICENSE-APACHE.TXT" ||
-        name=="GAMEFRAME-LICENSE-APACHE.TXT.BAK" ||
-        name==".RAYMAN2FIX-CD-FILES.TSV" ||
-        name==".RAYMAN2FIX-EXE-PATCH.TSV") return true;
-    for (const std::string prefix :
-         {"RAYMAN2FIX.DLL.BACKUP.", "GLIDE2X.DLL.BAK.",
-          "GAMEFRAME-LICENSE-APACHE.TXT.BAK."}) {
-        if (name.rfind(prefix,0)==0 && name.size()>prefix.size() &&
-            std::all_of(name.begin()+static_cast<std::ptrdiff_t>(prefix.size()),
-                        name.end(),[](unsigned char c){return c>='0'&&c<='9';}))
-            return true;
-    }
-    return false;
-}
-std::string upper_path_name(std::string name) {
-    std::transform(name.begin(),name.end(),name.begin(),[](unsigned char c){
-        return static_cast<char>(std::toupper(c));
-    });
-    return name;
-}
-void migrate_legacy_layout(const fs::path& launcher_root, const fs::path& game) {
-    const fs::path legacy=launcher_root/"Rayman2Fix";
-    const fs::path fix=game/"rayman2fix";
-    if (fs::is_symlink(game) || fs::is_symlink(legacy) || fs::is_symlink(fix))
-        throw std::runtime_error("unsafe symlink in Rayman 2 layout");
-    const bool old_exists=fs::exists(legacy);
-    if(old_exists) {
-        if (!fs::is_directory(legacy))
-            throw std::runtime_error("legacy Rayman2Fix path is not a directory");
-        if (fs::exists(game))
-            throw std::runtime_error("both old Rayman2Fix/ and new rayman2/ exist; preserve both until manually reconciled");
-        // A single rename preserves the retail files, patch marker, receipt,
-        // UBI configuration and custom files, without recopying them.
-        fs::rename(legacy,game);
-    }
-    if (fs::exists(game) && !fs::is_directory(game))
-        throw std::runtime_error("rayman2/ is not a safe game directory");
-    fs::create_directories(fix);
-    // New optional replacement images live here. No old atlas migration.
-    if(fs::is_symlink(fix/"textures"))
-        throw std::runtime_error("unsafe replacement textures symlink");
-    fs::create_directories(fix/"textures");
-    std::vector<std::pair<fs::path,fs::path>> moves;
-    for (const auto& entry:fs::directory_iterator(game)) {
-        const auto name=upper_path_name(entry.path().filename().u8string());
-        if(!managed_fix_filename(name)) continue;
-        const auto target=fix/entry.path().filename();
-        if(entry.is_symlink() || !entry.is_regular_file() ||
-           fs::exists(target) || fs::is_symlink(target))
-            throw std::runtime_error("conflicting/unsafe Rayman2Fix migration file; no overwrite");
-        moves.emplace_back(entry.path(),target);
-    }
-    for(const auto& [source,target]:moves)
-        fs::rename(source,target);
-}
-} // namespace
-
 void Startup::initialize(bool provision_files) {
+    std::string runtime_deployment_status = "not-packaged";
+    std::size_t runtime_backups_removed = 0;
     if (provision_files) {
-        migrate_legacy_layout(root_,game_dir_);
-        const auto fix_dir=game_dir_/"rayman2fix";
+        // Clean layout only: NEVER rename/copy an older installation.
+        // Reject before creating a new workspace so the user can keep it.
+        for (const auto& old : {root_/"rayman2",root_/"Rayman2Fix"}) {
+            if (fs::exists(old) || fs::is_symlink(old))
+                throw std::runtime_error(
+                    "old Rayman2Fix installation detected; use a separate clean folder (no migration)");
+        }
+        const auto glide = layout::gameframe(root_);
+        const auto mods = layout::mods(root_);
+        const auto third = root_/"third_party";
+        const auto textures = mods/"textures";
+        const auto docs=layout::docs(root_);
+        for (const auto& entry : {game_dir_,third,glide,mods,textures,docs}) {
+            if (fs::is_symlink(entry) ||
+                (fs::exists(entry) && !fs::is_directory(entry)))
+                throw std::runtime_error("unsafe clean Rayman2Fix layout directory");
+            fs::create_directories(entry);
+        }
 #ifdef _WIN32
-        ensure_embedded_runtime(fix_dir);
-        ensure_gameframe_glide(fix_dir);
+        const auto runtime = ensure_embedded_runtime(game_dir_);
+        runtime_deployment_status = runtime.status;
+        runtime_backups_removed = runtime.backups_removed;
+        ensure_gameframe_glide(glide);
+        ensure_embedded_readme(root_);
 #endif
     }
 
@@ -286,7 +292,7 @@ void Startup::initialize(bool provision_files) {
                "Log=1\n"
                "\n"
                "[Graphics]\n"
-               "Resolution=Desktop\n"
+
                "; FPSLimit=0 disables the cap; accepted range: 15..240\n"
                "FPSLimit=60\n"
                "; Auto = monitor aspect ratio; 4:3 = centered classic picture\n"
@@ -295,14 +301,14 @@ void Startup::initialize(bool provision_files) {
                "[Features]\n"
                "; 1 = allow Space/Enter/Esc to skip jail_20 only\n"
                "; Learn_10 skip remains disabled (unsafe)\n"
-               "SkipCinematics=0\n"
+               "SkipCinematics=1\n"
                "; 1 = hide native rectangles behind in-game dialogue\n"
-               "RemoveDialogueBackgrounds=0\n"
+               "RemoveDialogueBackgrounds=1\n"
                "; 1 = experimental game-drawn cinematic letterbox removal\n"
                "; GameFrame AspectRatio=4:3 sidebars remain unchanged\n"
-               "RemoveCinematicBars=0\n"
+               "RemoveCinematicBars=1\n"
                "; 1 = continue level music while the ESC menu is open\n"
-               "MusicInPauseMenu=0\n";
+               "MusicInPauseMenu=1\n";
         if (!ini) throw std::runtime_error("failed writing Rayman2Fix.ini");
     }
 
@@ -331,6 +337,50 @@ void Startup::initialize(bool provision_files) {
 #ifndef RAYMAN2FIX_BUILD_COMMIT
 #define RAYMAN2FIX_BUILD_COMMIT "unknown"
 #endif
+    // The build identity is documentation in docs/, not a game/CD asset.
+    // Update only our own recognized file and stage the replacement safely.
+    if(provision_files) {
+        const auto dest=layout::docs(root_)/"build-info.txt";
+        if(fs::is_symlink(dest) ||
+           (fs::exists(dest) && !fs::is_regular_file(dest)))
+            throw std::runtime_error("unsafe build-info.txt");
+        const std::string metadata=
+            std::string("Project=Rayman2Fix\nVersion=")+RAYMAN2FIX_VERSION+
+            "\nCommit="+RAYMAN2FIX_BUILD_COMMIT+
+            "\nLayout=clean-v1\nRuntime=game/fix.dll\n"+
+            "GameFrame=third_party/gameframe/glide2x.dll\n";
+        std::string prior;
+        if(fs::exists(dest)) {
+            std::ifstream old(dest,std::ios::binary);
+            prior.assign(std::istreambuf_iterator<char>(old),
+                         std::istreambuf_iterator<char>());
+            if(old.bad() || prior.rfind("Project=Rayman2Fix\n",0)!=0)
+                throw std::runtime_error("unknown build-info.txt; preserving user file");
+        }
+        if(prior!=metadata) {
+            const auto pending=layout::docs(root_)/"build-info.txt.installing";
+            const auto backup=layout::docs(root_)/"build-info.txt.previous";
+            if(fs::exists(pending) || fs::is_symlink(pending) ||
+               fs::exists(backup) || fs::is_symlink(backup))
+                throw std::runtime_error("unfinished build-info.txt update");
+            {
+                std::ofstream out(pending,std::ios::binary|std::ios::trunc);
+                if(!out)throw std::runtime_error("cannot stage build-info.txt");
+                out << metadata;
+                out.close();
+                if(!out)throw std::runtime_error("cannot write build-info.txt");
+            }
+            const bool existed=fs::exists(dest);
+            if(existed)fs::rename(dest,backup);
+            try { fs::rename(pending,dest); }
+            catch(...) {
+                if(existed)fs::rename(backup,dest);
+                throw;
+            }
+            if(existed)fs::remove(backup);
+        }
+    }
+
     // Log only specific, public configuration enums. Do not expose arbitrary
     // INI strings (which may contain private filesystem paths or tokens).
     auto option = [&](const std::string& section, const std::string& key) {
@@ -377,12 +427,10 @@ void Startup::initialize(bool provision_files) {
     if (!log_stream_) throw std::runtime_error("cannot create Rayman2Fix_installer.log");
     log(std::string("Rayman2Fix ") + RAYMAN2FIX_VERSION + "-bootstrap commit=" + RAYMAN2FIX_BUILD_COMMIT);
     log(std::string("START: local_time=") + when);
-    log("LAYOUT: launcher=Rayman2Fix.exe game=rayman2/ fixes=rayman2/rayman2fix/ winmm=rayman2/winmm.dll config=rayman2/rayman2fix/Rayman2Fix.ini logs=launcher_directory");
+    log("LAYOUT: launcher=Rayman2Fix.exe game=game/ runtime=game/fix.dll config=Rayman2Fix.ini renderer=third_party/gameframe/ mods=mods/ docs=docs/ state=state/ logs=launcher_directory");
     log("CONFIG: Debug.Log=" +
         std::string(debug == "1" ? "1" : "invalid or missing (default 1)"));
-    const auto display = option("Graphics", "Resolution");
-    log("CONFIG: Graphics.Resolution=" +
-        (display.empty() ? "Desktop (default)" : display));
+    log("CONFIG: Graphics.Output=primary desktop (automatic)");
     const auto fps = option("Graphics", "FPSLimit");
     log("CONFIG: Graphics.FPSLimit=" +
         (fps.empty() ? "60 (default)" : fps));
@@ -397,18 +445,23 @@ void Startup::initialize(bool provision_files) {
         (have_ini && configured_remove_cinematic_bars(ini_path_) ? "1" : "0"));
     log(std::string("CONFIG: Features.MusicInPauseMenu=") +
         (have_ini && configured_music_in_pause_menu(ini_path_) ? "1" : "0"));
+    log("MODS: intro_logo=" + intro_logo_asset_status(root_) +
+        " path=mods/textures/logo.rgba (header-only; replacement reported by GameFrame)");
 
     if (provision_files) {
-        log("RUNTIME: Rayman2Fix.dll=" +
+        log("RUNTIME: fix.dll=" +
             std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));
-        if (gameframe_glide_ready(game_dir_ / "rayman2fix"))
+        log("RUNTIME-DEPLOY: status=" + runtime_deployment_status +
+            " backups_removed=" + std::to_string(runtime_backups_removed) +
+            " backup_created=0");
+        if (gameframe_glide_ready(layout::gameframe(root_)))
             log("RENDERER: GameFrame glide2x.dll=verified sha256=" +
                 gameframe_glide_expected_sha256() +
                 " upstream=f195a074a63cc150673c38becdec696163b0b3d1");
         else
             log("RENDERER: GameFrame glide2x.dll=not bundled in this developer build");
         log("INPUT: SDL3 deferred to second phase; controller support not yet active");
-        log("INSTALL: no verified CD edition profile, no playable installation");
+        log("INSTALL: startup resources ready; CD/game verification follows (local SHA256 receipt only)");
     } else {
         log("STARTUP: --launch-no-verify skips DLL deployment, runtime "
             "hash checks, installation repair and INI creation");
@@ -419,7 +472,7 @@ void Startup::prepare_runtime_log() {
     if (!logging_enabled_) return;
     std::ofstream out(runtime_log_path_, std::ios::binary | std::ios::trunc);
     if (!out) throw std::runtime_error("cannot create Rayman2Fix.log");
-    out << "RUNTIME-SESSION: Rayman2Fix.dll and GameFrame diagnostics; "
+    out << "RUNTIME-SESSION: fix.dll and GameFrame diagnostics; "
            "installer=Rayman2Fix_installer.log\n";
     out.close();
     if (!out) throw std::runtime_error("cannot initialize Rayman2Fix.log");
@@ -434,7 +487,7 @@ void Startup::log(const std::string& line) {
 }
 
 bool Startup::has_runtime_dll() const {
-    return fs::is_regular_file(game_dir_ / "rayman2fix" / "Rayman2Fix.dll");
+    return fs::is_regular_file(game_dir_ / "fix.dll");
 }
 
 } // namespace r2fix

@@ -32,7 +32,7 @@ class PinnedIntroLogoHDTests(unittest.TestCase):
             self.assertIn("else",contents)
             self.assertIn("img.pixels.as_ptr().cast()",contents)
             self.assertIn("const TITLE_HASHES:[u64;18]",MODULE)
-            self.assertIn('cwd.join("rayman2fix").join("textures").join("logo.rgba")',MODULE)
+            self.assertIn('cwd.parent()?.join("mods").join("textures").join("logo.rgba")',MODULE)
             self.assertNotIn('Rayman2Fix_logo_hd.rgba',MODULE)
             self.assertIn("let n=17-index;",MODULE)
             self.assertIn("TILE-1-y",MODULE)
