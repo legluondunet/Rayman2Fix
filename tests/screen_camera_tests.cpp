@@ -10,7 +10,7 @@
 // Exercise every geometry check in Debug AND Release (NDEBUG disables assert).
 #define CHECK(expr) do { \
     if (!(expr)) { \
-        std::cerr << "CHECK failed: " #expr << " (" << __FILE__ << ":" << __LINE__ << ")\\n"; \
+        std::cerr << "CHECK failed: " #expr << " (" << __FILE__ << ":" << __LINE__ << ")" << std::endl; \
         std::abort(); \
     } \
 } while (false)
