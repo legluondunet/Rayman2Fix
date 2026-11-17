@@ -4,6 +4,8 @@
 #include "rayman2fix/game_config.hpp"
 
 #include <chrono>
+#include <cstdint>
+#include <system_error>
 #include <fstream>
 #include <iterator>
 #include <algorithm>
@@ -28,6 +30,50 @@
 namespace fs = std::filesystem;
 
 namespace r2fix {
+
+// Passive inspection only: a valid header does not prove that the source logo
+// tiles were recognized or that GameFrame uploaded the replacement.
+namespace {
+std::string intro_logo_asset_status(const fs::path& root) {
+    const auto asset = layout::mods(root) / "textures" / "logo.rgba";
+    std::error_code ec;
+    const auto st = fs::symlink_status(asset, ec);
+    if (ec == std::errc::no_such_file_or_directory ||
+        st.type() == fs::file_type::not_found)
+        return "missing";
+    if (ec)
+        return "unreadable-metadata";
+    if (!fs::is_regular_file(st) || fs::is_symlink(st))
+        return "invalid-file-type";
+
+    constexpr std::uintmax_t kAtlasSize = 16u + 768u * 384u * 4u;
+    const auto size = fs::file_size(asset, ec);
+    if (ec)
+        return "unreadable-metadata";
+    if (size != kAtlasSize)
+        return "invalid-size";
+
+    std::array<unsigned char, 16> header{};
+    std::ifstream in(asset, std::ios::binary);
+    if (!in || !in.read(reinterpret_cast<char*>(header.data()),
+                        static_cast<std::streamsize>(header.size())))
+        return "unreadable-header";
+    constexpr std::array<unsigned char, 8> kMagic{{
+        'R', '2', 'L', 'O', 'G', 'O', 'H', 'D'
+    }};
+    const auto u32le = [&](std::size_t offset) -> std::uint32_t {
+        return static_cast<std::uint32_t>(header[offset]) |
+               (static_cast<std::uint32_t>(header[offset + 1]) << 8) |
+               (static_cast<std::uint32_t>(header[offset + 2]) << 16) |
+               (static_cast<std::uint32_t>(header[offset + 3]) << 24);
+    };
+    if (!std::equal(kMagic.begin(), kMagic.end(), header.begin()) ||
+        u32le(8) != 768u || u32le(12) != 384u)
+        return "invalid-header";
+
+    return "header-valid"; // Actual substitution is logged by GameFrame.
+}
+} // namespace
 
 fs::path Startup::executable_path(const fs::path& argv0) {
 #ifdef _WIN32
@@ -375,6 +421,8 @@ void Startup::initialize(bool provision_files) {
         (have_ini && configured_remove_cinematic_bars(ini_path_) ? "1" : "0"));
     log(std::string("CONFIG: Features.MusicInPauseMenu=") +
         (have_ini && configured_music_in_pause_menu(ini_path_) ? "1" : "0"));
+    log("MODS: intro_logo=" + intro_logo_asset_status(root_) +
+        " path=mods/textures/logo.rgba (header-only; replacement reported by GameFrame)");
 
     if (provision_files) {
         log("RUNTIME: fix.dll=" +
