@@ -6,10 +6,12 @@ namespace r2fix {
 // Pure policy for scheduling game-engine observation from original GLI
 // callbacks. There is no thread creation, audio dispatch or key handling.
 // The original 3D-camera callback establishes the trusted engine thread.
-// When it goes quiet (notably cinematic 4:3 paths), the native viewport
-// and native 2D draw hooks may take over, but ONLY on that same thread.
+// When it goes quiet (notably cinematic 4:3 paths), the native viewport,
+// native 2D and original game GLI frame-flip callbacks may take over, but
+// ONLY on that same trusted thread. A frame-flip fallback is specifically
+// useful when the cinematic renders without camera/2D/viewport callbacks.
 enum class RenderPollSource : std::uint8_t {
-    Camera, Native2D, Viewport
+    Camera, Native2D, Viewport, FrameFlip
 };
 
 class RenderPollGate {
