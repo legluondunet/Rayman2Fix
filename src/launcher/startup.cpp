@@ -4,6 +4,8 @@
 #include "rayman2fix/game_config.hpp"
 
 #include <chrono>
+#include <fstream>
+#include <iterator>
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -63,6 +65,26 @@ namespace {
 // The Windows launcher stores its own x86 runtime DLL as RCDATA #1101.
 // Keep one immediately preceding managed runtime as fix.dll.bak.
 // No numbered legacy backup migration is performed.
+void ensure_embedded_readme(const fs::path& root) {
+    const auto dest=root/"README.md";
+    if(fs::is_symlink(dest) ||
+       (fs::exists(dest) && !fs::is_regular_file(dest)))
+        throw std::runtime_error("unsafe existing README.md path");
+    if(fs::exists(dest))return; // Never overwrite user documentation.
+    const HRSRC resource=FindResourceW(nullptr,MAKEINTRESOURCEW(1105),
+                                      MAKEINTRESOURCEW(10));
+    if(!resource)throw std::runtime_error("missing bundled README.md");
+    const auto size=SizeofResource(nullptr,resource);
+    const HGLOBAL loaded=LoadResource(nullptr,resource);
+    const auto* bytes=loaded ? static_cast<const char*>(LockResource(loaded)) : nullptr;
+    if(!bytes || !size)throw std::runtime_error("invalid bundled README.md");
+    std::ofstream out(dest,std::ios::binary|std::ios::trunc);
+    if(!out)throw std::runtime_error("cannot deploy README.md");
+    out.write(bytes,static_cast<std::streamsize>(size));
+    out.close();
+    if(!out)throw std::runtime_error("could not write bundled README.md");
+}
+
 void ensure_embedded_runtime(const fs::path& directory) {
     const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1101),
                                         MAKEINTRESOURCEW(10)); // RT_RCDATA
@@ -185,6 +207,7 @@ void Startup::initialize(bool provision_files) {
 #ifdef _WIN32
         ensure_embedded_runtime(game_dir_);
         ensure_gameframe_glide(glide);
+        ensure_embedded_readme(root_);
 #endif
     }
 
@@ -242,6 +265,50 @@ void Startup::initialize(bool provision_files) {
 #ifndef RAYMAN2FIX_BUILD_COMMIT
 #define RAYMAN2FIX_BUILD_COMMIT "unknown"
 #endif
+    // The build identity is launcher metadata, not a game/CD asset.
+    // Update only our own recognized file and stage the replacement safely.
+    if(provision_files) {
+        const auto dest=root_/"build-info.txt";
+        if(fs::is_symlink(dest) ||
+           (fs::exists(dest) && !fs::is_regular_file(dest)))
+            throw std::runtime_error("unsafe build-info.txt");
+        const std::string metadata=
+            std::string("Project=Rayman2Fix\\nVersion=")+RAYMAN2FIX_VERSION+
+            "\\nCommit="+RAYMAN2FIX_BUILD_COMMIT+
+            "\\nLayout=clean-v1\\nRuntime=game/fix.dll\\n"+
+            "GameFrame=third_party/gameframe/glide2x.dll\\n";
+        std::string prior;
+        if(fs::exists(dest)) {
+            std::ifstream old(dest,std::ios::binary);
+            prior.assign(std::istreambuf_iterator<char>(old),
+                         std::istreambuf_iterator<char>());
+            if(old.bad() || prior.rfind("Project=Rayman2Fix\\n",0)!=0)
+                throw std::runtime_error("unknown build-info.txt; preserving user file");
+        }
+        if(prior!=metadata) {
+            const auto pending=root_/"build-info.txt.installing";
+            const auto backup=root_/"build-info.txt.previous";
+            if(fs::exists(pending) || fs::is_symlink(pending) ||
+               fs::exists(backup) || fs::is_symlink(backup))
+                throw std::runtime_error("unfinished build-info.txt update");
+            {
+                std::ofstream out(pending,std::ios::binary|std::ios::trunc);
+                if(!out)throw std::runtime_error("cannot stage build-info.txt");
+                out << metadata;
+                out.close();
+                if(!out)throw std::runtime_error("cannot write build-info.txt");
+            }
+            const bool existed=fs::exists(dest);
+            if(existed)fs::rename(dest,backup);
+            try { fs::rename(pending,dest); }
+            catch(...) {
+                if(existed)fs::rename(backup,dest);
+                throw;
+            }
+            if(existed)fs::remove(backup);
+        }
+    }
+
     // Log only specific, public configuration enums. Do not expose arbitrary
     // INI strings (which may contain private filesystem paths or tokens).
     auto option = [&](const std::string& section, const std::string& key) {
