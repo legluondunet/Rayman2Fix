@@ -188,6 +188,12 @@ std::atomic_flag g_render_poll_busy = ATOMIC_FLAG_INIT;
 r2fix::RenderPollGate g_render_poll_gate;
 std::atomic<unsigned> g_render_poll_fallback_reported{0};
 std::atomic<bool> g_render_poll_foreign_thread_reported{false};
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+// Diagnostic is printed only AFTER the original frame flip and any
+// authorized native audio compensation. No log I/O inside the audio
+// callback or ahead of the critical early-menu resume path.
+std::atomic<DWORD> g_last_esc_flip_reported_pending_at{0};
+#endif
 // Source-callback telemetry only, transferred to the ordinary render-thread
 // report. No disk I/O, native audio queries or allocation in Resume wrapper.
 std::atomic<DWORD> g_esc_resume_camera_age{0xffffffffu};
@@ -4656,11 +4662,49 @@ int __cdecl native_frame_flip_for_intro(int first,int second) {
     const auto original=g_original_native_frame_flip;
     if(!original)return 0;
     const int result=original(first,second);
-    if(g_skip_cinematics && g_current_level &&
-       g_game_camera_thread_id.load(std::memory_order_acquire)==
-           GetCurrentThreadId() &&
-       r2fix::is_second_intro(g_current_level))
+    // This hook was originally limited to jail_20. On the owner's
+    // 17 November 4:3 test, two later source-scoped ESC Pauses
+    // happened while native camera/2D/viewport polls went missing.
+    // A native frame flip on the ORIGINAL, camera-proven game thread
+    // can safely service the existing *pending* menu FSM as well.
+    const bool intro=g_skip_cinematics && g_current_level &&
+        r2fix::is_second_intro(g_current_level);
+    bool audio_pending=false;
+    DWORD pending_at=0;
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+    if(g_proto_enabled.load(std::memory_order_acquire) &&
+       g_proto_callsites_installed.load(std::memory_order_acquire)) {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        audio_pending=g_proto.phase()==proto::Phase::pending_menu;
+        if(audio_pending)
+            pending_at=g_proto_pending_at.load(std::memory_order_relaxed);
+    }
+#endif
+    if(!intro && !audio_pending)return result;
+    const DWORD current_tid=GetCurrentThreadId();
+    const DWORD camera_tid=g_game_camera_thread_id.load(
+        std::memory_order_acquire);
+    const bool same_thread=camera_tid!=0u && current_tid==camera_tid;
+    if(same_thread)
         poll_game_render_events(r2fix::RenderPollSource::FrameFlip);
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+    // Log at most once per pending ESC generation, AFTER the possible
+    // native music resume. Never forward a synthetic audio command
+    // or allow a foreign thread to bypass RenderPollGate.
+    if(audio_pending && pending_at && g_log &&
+       g_last_esc_flip_reported_pending_at.exchange(
+           pending_at,std::memory_order_acq_rel)!=pending_at) {
+        char line[255]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-ESC-FLIP: stage=pending-frame-flip "
+            "same_camera_thread=%u camera_seen=%u "
+            "requested_poll=%u (post-original game flip; "
+            "audio identity and thread guards unchanged)",
+            unsigned(same_thread),unsigned(camera_tid!=0u),
+            unsigned(same_thread));
+        log_line(line);
+    }
+#endif
     return result;
 }
 
@@ -5850,7 +5894,11 @@ void install_native_2d_percent_hook() {
 // exact original entry (6-byte instruction) only after the approved
 // camera and GLI hooks are installed. Never patch unknown executables.
 void install_native_frame_flip_hook() {
-    if(!g_skip_cinematics || g_original_native_frame_flip)return;
+    bool needed=g_skip_cinematics;
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+    needed=needed || g_proto_enabled.load(std::memory_order_acquire);
+#endif
+    if(!needed || g_original_native_frame_flip)return;
     auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
     if(!base)return;
     const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
@@ -5896,6 +5944,11 @@ void install_native_frame_flip_hook() {
     VirtualProtect(entry,kCopied,prior,&unused);
     log_line("RUNTIME-INTRO: original game GLI frame-flip fallback "
              "armed for jail_20 (same camera thread, 4:3 input gap)");
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+    if(g_proto_enabled.load(std::memory_order_acquire))
+        log_line("RUNTIME-ESC-FLIP: pending-menu fallback installed "
+                 "(same camera thread only; no altered audio policy)");
+#endif
 }
 
 void initialize_native_intro_skip() {
