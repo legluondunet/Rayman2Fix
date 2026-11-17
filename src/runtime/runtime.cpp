@@ -4421,6 +4421,9 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
 #endif
 #endif
 #if RAYMAN2FIX_RESEARCH_PROBES
+    // This is exclusively the disabled Learn_10 research observer.
+    // Never invoke it from an ordinary release callback, regardless
+    // of whether 3D camera or GLI fallback drove the scheduler.
     poll_learn_intro_skip();
 #endif
     if(first_fallback && g_log) {
