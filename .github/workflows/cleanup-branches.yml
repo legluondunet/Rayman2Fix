@@ -1,0 +1,152 @@
+name: Clean branches without open pull requests
+
+on:
+  # Run once when this workflow is installed or updated on main.
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/cleanup-branches.yml
+
+  # Run automatically once a week, Sundays at 04:17 UTC.
+  schedule:
+    - cron: '17 4 * * 0'
+
+  # Manual runs default to a safe preview. Set dry_run=false to delete.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview only (true) or delete unreferenced branches (false)'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: rayman2fix-branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  clean:
+    if: github.repository == 'legluondunet/Rayman2Fix' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Keep main and both sides of every open PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const project = `${owner}/${repo}`;
+            if (project !== 'legluondunet/Rayman2Fix' ||
+                context.ref !== 'refs/heads/main') {
+              throw new Error('Refusing cleanup outside Rayman2Fix main.');
+            }
+            const dryRun = context.eventName === 'workflow_dispatch' &&
+              '${{ inputs.dry_run }}' !== 'false';
+
+            const info = await github.rest.repos.get({ owner, repo });
+            if (info.data.default_branch !== 'main') {
+              throw new Error('Default branch changed: refusing cleanup.');
+            }
+
+            // Pagination is mandatory: never clean against a truncated PR list.
+            // Protect BOTH the head and the base of an open PR. PR #31, for
+            // example, targets the research branch of still-open PR #30.
+            async function protectedNames() {
+              const prs = await github.paginate(github.rest.pulls.list, {
+                owner, repo, state: 'open', per_page: 100
+              });
+              const names = new Set(['main', info.data.default_branch]);
+              for (const pr of prs) {
+                if (pr.base?.repo?.full_name === project) {
+                  names.add(pr.base.ref);
+                }
+                // A fork's head does not exist in this repository.
+                if (pr.head?.repo?.full_name === project) {
+                  names.add(pr.head.ref);
+                }
+              }
+              return { names, prs };
+            }
+
+            const before = await protectedNames();
+            const allBranches = await github.paginate(
+              github.rest.repos.listBranches, { owner, repo, per_page: 100 }
+            );
+            if (!allBranches.some(b => b.name === 'main')) {
+              throw new Error('Main branch absent from complete inventory.');
+            }
+            const candidates = allBranches.filter(b =>
+              b.name !== 'main' && !b.protected &&
+              !before.names.has(b.name)
+            );
+            core.info(`Mode: ${dryRun ? 'DRY RUN' : 'DELETE'}; ` +
+              `${allBranches.length} branches; ${before.prs.length} open PRs; ` +
+              `${candidates.length} cleanup candidates.`);
+            core.info('Protected by open PRs: ' +
+              [...before.names].sort().join(', '));
+            for (const b of candidates) core.info(`Candidate: ${b.name}`);
+
+            let deleted = 0, skipped = 0;
+            const failures = [];
+            if (!dryRun) {
+              for (const branch of candidates) {
+                try {
+                  // Fail closed if a PR was opened or retargeted while the
+                  // cleanup was running. Never delete heads OR base branches
+                  // used by any currently open pull request.
+                  const current = await protectedNames();
+                  if (current.names.has(branch.name)) {
+                    core.info(`KEEP (new PR): ${branch.name}`);
+                    skipped++;
+                    continue;
+                  }
+                  const fresh = await github.rest.repos.getBranch({
+                    owner, repo, branch: branch.name
+                  });
+                  if (fresh.data.protected ||
+                      fresh.data.name !== branch.name ||
+                      fresh.data.commit.sha !== branch.commit.sha) {
+                    core.info(`KEEP (protected or updated): ${branch.name}`);
+                    skipped++;
+                    continue;
+                  }
+                  // The initial inventory and the fresh check agree, and
+                  // no open PR uses this branch at the time of deletion.
+                  await github.rest.git.deleteRef({
+                    owner, repo, ref: `heads/${branch.name}`
+                  });
+                  core.info(`DELETED: ${branch.name}`);
+                  deleted++;
+                } catch (error) {
+                  if (error.status === 404 || error.status === 422) {
+                    // Another actor already deleted/protected it.
+                    core.warning(`SKIP (already gone/protected): ${branch.name}`);
+                    skipped++;
+                  } else {
+                    core.error(`FAILED: ${branch.name}: ${error.message}`);
+                    failures.push(branch.name);
+                  }
+                }
+              }
+            }
+
+            await core.summary
+              .addHeading('Rayman2Fix branch cleanup')
+              .addTable([
+                [{data:'Mode',header:true}, dryRun ? 'Preview only' : 'Delete'],
+                [{data:'Initial branches',header:true}, String(allBranches.length)],
+                [{data:'Open PRs',header:true}, String(before.prs.length)],
+                [{data:'Protected branch names',header:true}, [...before.names].sort().join(', ')],
+                [{data:'Cleanup candidates',header:true}, String(candidates.length)],
+                [{data:'Deleted',header:true}, String(deleted)],
+                [{data:'Skipped after recheck',header:true}, String(skipped)]
+              ])
+              .write();
+            if (failures.length) {
+              core.setFailed('Unable to delete: ' + failures.join(', '));
+            }
