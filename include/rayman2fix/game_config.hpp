@@ -32,8 +32,8 @@ std::pair<std::uint32_t, std::uint32_t> configured_render_resolution(
 // Only user-triggered jail_20 skip is supported; Learn_10 remains safe.
 bool configured_skip_cinematics(const std::filesystem::path& rayman2fix_ini);
 
-// Independently opt in to native GLI dialogue backdrops or experimental
-// game-drawn cinematic letterbox strips (not GameFrame 4:3 sidebars).
+// Both GLI filtering features default to enabled (1), but retain independent
+// per-user opt-outs (0). GameFrame 4:3 sidebars are never suppressed.
 bool configured_remove_dialogue_backgrounds(const std::filesystem::path& rayman2fix_ini);
 bool configured_remove_cinematic_bars(const std::filesystem::path& rayman2fix_ini);
 bool configured_music_in_pause_menu(const std::filesystem::path& rayman2fix_ini);
