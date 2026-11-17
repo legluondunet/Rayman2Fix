@@ -45,4 +45,45 @@ int main() {
     require(o.sampled && o.same_ref==64 &&
             o.stamped_candidate==64 && o.indices[3]==3);
     require(!o.authorize_audio);
+
+    // The same original 64-record Pause walk can reach the *same*
+    // physical SXD transition twice: one direct source + one Theme-11
+    // generic dispatcher. Only the direct +0 ref aliases the WAVMW
+    // callback object; the Theme's +0 refers to its own controller.
+    RawTable paired{};
+    eligible(paired,1,ref,1);  // direct transition record
+    // A separate active, generic source with a Theme controller ref.
+    set32(paired,5,0,0x456780u);
+    set32(paired,5,0x08,0);
+    set32(paired,5,0x10,0);
+    set32(paired,5,0x14,0x654321u);
+    set32(paired,5,0x1c,1);
+    std::array<int,kRows> classes{};
+    classes.fill(-1);
+    classes[5]=11;
+    const auto direct=summarize(paired,true,ref,1);
+    const auto theme=summarize_theme_routes(paired,classes,true,1);
+    require(direct.sampled && direct.same_ref==1 &&
+            direct.stamped_candidate==1 && direct.indices[0]==1);
+    require(theme.sampled && theme.generic_candidate==1 &&
+            theme.theme_type11==1 && theme.theme_stamped==1 &&
+            theme.indices[0]==5 && !theme.authorize_audio);
+    // A pending or unknown nested descriptor is no evidence.
+    classes[5]=-1;
+    const auto unknown=summarize_theme_routes(paired,classes,true,1);
+    require(unknown.sampled && unknown.unknown_class==1 &&
+            unknown.theme_type11==0 && !unknown.authorize_audio);
+    // No stale readings, invalid depth, or changed source flags
+    // may be interpreted as verified Theme ownership.
+    require(!summarize_theme_routes(paired,classes,false,1).sampled);
+    require(!summarize_theme_routes(paired,classes,true,0).sampled);
+    classes[5]=11;
+    set32(paired,5,8,1);
+    require(summarize_theme_routes(paired,classes,true,1)
+            .theme_type11==0);
+    set32(paired,5,8,0);
+    set32(paired,5,0x1c,9);
+    const auto stamped=summarize_theme_routes(paired,classes,true,1);
+    require(stamped.theme_type11==1 && stamped.theme_stamped==0 &&
+            !stamped.authorize_audio);
 }
