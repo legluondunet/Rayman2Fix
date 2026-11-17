@@ -409,24 +409,37 @@ int main(){
         auto p=scan_phase();
         CHECK(p.complete && !p.malformed && p.phase110_predicates==1);
         CHECK(p.phase110_first_node==1 && p.phase110_first_condition==4);
+        CHECK(p.phase104_predicates==0);
+        // The ending branch is V96==104, not the ordinary V96==110 stage.
+        set_phase(3,12,3,104);
+        auto early=scan_phase();
+        CHECK(early.complete && early.phase104_predicates==1);
+        CHECK(early.phase104_first_node==1 && early.phase104_first_condition==4);
+        CHECK(early.phase110_predicates==0);
         set_phase(3,12,3,111);
         CHECK(scan_phase().phase110_predicates==0);
+        CHECK(scan_phase().phase104_predicates==0);
         set_phase(3,12,3,110);
         set_phase(2,11,3,95);
         CHECK(scan_phase().phase110_predicates==0);
         set_phase(2,11,3,96);
+        set_phase(3,12,3,104);
         set_phase(2,11,2,96); // wrong nested operand
         CHECK(scan_phase().phase110_predicates==0);
+        CHECK(scan_phase().phase104_predicates==0);
         set_phase(2,11,3,96);
         set_phase(1,1,2,49); // unrelated condition
         CHECK(scan_phase().phase110_predicates==0);
+        CHECK(scan_phase().phase104_predicates==0);
         set_phase(1,1,2,6); // lesser-than comparison
-        CHECK(scan_phase().phase110_predicates==1);
+        CHECK(scan_phase().phase104_predicates==1);
+        CHECK(scan_phase().phase110_predicates==0);
         // An unrelated node between the variable and literal breaks
         // the exact expression fingerprint.
         set_phase(3,2,3,11);
         set_phase(4,12,3,110);
         CHECK(scan_phase().phase110_predicates==0);
+        CHECK(scan_phase().phase104_predicates==0);
     }
     return 0;
 }
