@@ -115,6 +115,17 @@ if(WIN32)
     "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc")
   add_dependencies(Rayman2Fix Rayman2FixRuntime)
 
+  # The one-file launcher can install the project README beside the user INI.
+  # Project licensing has not yet been selected (README.md); never invent one.
+  file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc"
+    CONTENT "1105 RCDATA \"${CMAKE_CURRENT_SOURCE_DIR}/README.md\"\\n")
+  set_source_files_properties(
+    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc"
+    PROPERTIES GENERATED TRUE)
+  target_sources(Rayman2Fix PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc")
+
   set(RAYMAN2FIX_GLIDE_DLL "" CACHE FILEPATH "Pinned Windows x86 GameFrame glide2x.dll")
   set(RAYMAN2FIX_GLIDE_LICENSE "" CACHE FILEPATH "Pinned Apache 2.0 license from GameFrame")
   set(RAYMAN2FIX_GLIDE_SHA256 "" CACHE STRING "Exact SHA256 of bundled GameFrame x86 DLL")
