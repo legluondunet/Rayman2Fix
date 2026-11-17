@@ -160,12 +160,12 @@ jobs:
           # The unchecked command must never create a game directory, INI or
           # embedded DLL merely to attempt CreateProcessW.
           New-Item -Path direct-cli-smoke -ItemType Directory -Force | Out-Null
-          Copy-Item $exe direct-cli-smoke/game.exe
-          & ./direct-cli-smoke/game.exe --launch-no-verify
+          Copy-Item $exe direct-cli-smoke/Rayman2Fix.exe
+          & ./direct-cli-smoke/Rayman2Fix.exe --launch-no-verify
           if ($LASTEXITCODE -ne 1 -or (Test-Path direct-cli-smoke/game)) {
             throw '--launch-no-verify must return the OS error without provisioning'
           }
-          if (!(Select-String -Path direct-cli-smoke/game_installer.log -Pattern 'LAUNCH-NO-VERIFY: direct CreateProcessW')) {
+          if (!(Select-String -Path direct-cli-smoke/Rayman2Fix_installer.log -Pattern 'LAUNCH-NO-VERIFY: direct CreateProcessW')) {
             throw '--launch-no-verify must log direct OS launch failure'
           }
           $global:LASTEXITCODE = 0
@@ -198,8 +198,8 @@ jobs:
           if ($expected -ne $actual) {
             throw 'Embedded DLL is not identical to build output'
           }
-          # Retain exactly one original runtime .bak, never numbered histories.
-          $runtimeDir = (Resolve-Path 'package-smoke/third_party/gameframe').Path
+          # Retain exactly one previous runtime as fix.dll.bak.
+          $runtimeDir = (Resolve-Path 'package-smoke/game').Path
           $runtime = Join-Path $runtimeDir 'fix.dll'
           $backup = Join-Path $runtimeDir 'fix.dll.bak'
           [IO.File]::WriteAllText($runtime, 'outdated-runtime-A')
@@ -253,51 +253,21 @@ jobs:
           if ($replacement -cne $glide) {
             throw 'GameFrame Glide replacement did not match the bundled SHA256'
           }
-          # Replacing a modified renderer AGAIN must overwrite the single
-          # preceding .bak, not generate .bak.1... .bak.30, and clean the
-          # legacy files created by older Rayman2Fix releases.
+          # Repeated replacement rotates one managed backup (no migration).
           $glideDest = 'package-smoke/third_party/gameframe/glide2x.dll'
           [IO.File]::WriteAllText(
-            (Resolve-Path $glideDest), 'second-legacy-glide', [Text.Encoding]::ASCII)
-          1..30 | ForEach-Object {
-            [IO.File]::WriteAllText("$glideDest.bak.$_", "old-version-$_", [Text.Encoding]::ASCII)
-          }
-          # The .bak.notes sentinel is deliberately not a managed resource.
-          # It also makes the no-media fixture fail closed in automatic
-          # installation (exit 1), AFTER renderer deployment/cleanup.
-          [IO.File]::WriteAllText("$glideDest.bak.notes", 'keep-me', [Text.Encoding]::ASCII)
+            (Resolve-Path $glideDest), 'second-unknown-glide', [Text.Encoding]::ASCII)
           & ./package-smoke/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 1 -or
-              (Get-Content -Raw $backup) -ne 'second-legacy-glide' -or
-              @(Get-ChildItem 'package-smoke/third_party/gameframe' -File -Filter 'glide2x.dll.bak*').Count -ne 2 -or
-              !(Test-Path "$glideDest.bak.notes")) {
-            throw 'Replacing Glide must rotate only .bak and remove old numeric backups'
+          if ($LASTEXITCODE -ne 2 -or
+              (Get-Content -Raw $backup) -ne 'second-unknown-glide' -or
+              (Get-FileHash $glideDest -Algorithm SHA256).Hash.ToLowerInvariant() -cne $glide) {
+            throw 'GameFrame replacement must rotate one backup'
           }
-          if ((Get-FileHash $glideDest -Algorithm SHA256).Hash.ToLowerInvariant() -cne $glide) {
-            throw 'Glide rotation failed to reinstall the verified GameFrame renderer'
-          }
-
-          # No-op launches preserve the latest .bak and never create numbers.
           & ./package-smoke/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 1 -or
-              (Get-Content -Raw $backup) -ne 'second-legacy-glide' -or
-              @(1..30 | Where-Object { Test-Path "$glideDest.bak.$_" }).Count -ne 0 -or
-              (Test-Path "$glideDest.bak.previous")) {
-            throw 'Unchanged pinned Glide must not produce numbered backups'
+          if ($LASTEXITCODE -ne 2 -or
+              (Get-Content -Raw $backup) -ne 'second-unknown-glide') {
+            throw 'Verified GameFrame must preserve its previous backup'
           }
-          # Recover from old installations that have only numbered backups.
-          Remove-Item $backup
-          [IO.File]::WriteAllText("$glideDest.bak.1", 'legacy-one', [Text.Encoding]::ASCII)
-          [IO.File]::WriteAllText("$glideDest.bak.30", 'legacy-thirty', [Text.Encoding]::ASCII)
-          & ./package-smoke/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 1 -or
-              (Get-Content -Raw $backup) -ne 'legacy-thirty' -or
-              (Test-Path "$glideDest.bak.1") -or
-              (Test-Path "$glideDest.bak.30") -or
-              !(Test-Path "$glideDest.bak.notes")) {
-            throw 'Legacy numbered Glide backups must collapse to newest .bak'
-          }
-          Write-Host 'Single glide2x.dll.bak rotation and legacy cleanup: PASS'
           Remove-Item package-smoke -Recurse -Force
           if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix_installer.log,fix.dll,glide2x.dll) {
             throw 'One-file build must never include generated INI, logs or DLL sidecars'
