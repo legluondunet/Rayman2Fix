@@ -1808,10 +1808,14 @@ int proto_read_transition_type_post_wrapper(DWORD object_ref) {
 // the original type-1 source argument, not an APMMX physical voice epoch.
 // Duplicate two full reads detect some concurrent edits but are NOT atomic
 // with the native callback sequence. No source or driver state is modified.
-r2fix::esc_source_alias::Summary proto_sample_source_alias_after_menu_tick(
+struct ProtoSourceRouteEvidence {
+    r2fix::esc_source_alias::Summary direct{};
+    r2fix::esc_source_alias::ThemeRouteSummary theme{};
+};
+ProtoSourceRouteEvidence proto_sample_source_routes_after_menu_tick(
     DWORD transition_object,DWORD old_game_depth) {
     using namespace r2fix::esc_source_alias;
-    Summary unknown{};
+    ProtoSourceRouteEvidence unknown{};
     if(transition_object<0x10000u || transition_object==0xffffffffu ||
        old_game_depth<1u || old_game_depth>16u)return unknown;
     const auto* base=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
@@ -1822,8 +1826,38 @@ r2fix::esc_source_alias::Summary proto_sample_source_alias_after_menu_tick(
         return ReadProcessMemory(GetCurrentProcess(),base+0xB8C98u,
                 raw.data(),raw.size(),&got)!=0 && got==raw.size();
     };
-    if(!read(first) || !read(second))return unknown;
-    return summarize(first,first==second,transition_object,old_game_depth);
+    if(!read(first) || !read(second) || first!=second)return unknown;
+    ProtoSourceRouteEvidence result{};
+    result.direct=summarize(first,true,transition_object,old_game_depth);
+    // 0x458070: generic native source type is [[record+4]+4].
+    // Only inspect the already snapshotted, currently eligible generic
+    // source rows. Repeated reads detect *some* unstable type fields, not
+    // a stable origin or record epoch. This is outside audio callbacks.
+    std::array<int,kRows> type_tags{};
+    type_tags.fill(-1);
+    for(std::size_t i=0;i<kRows;++i) {
+        const std::size_t begin=i*kStride;
+        if(get32(first,begin+0x14u)==0u ||
+           get32(first,begin+0x08u)!=0u ||
+           get32(first,begin+0x10u)!=0u)continue;
+        const DWORD descriptor=get32(first,begin+4u);
+        if(descriptor<0x10000u || descriptor>0xfffffff8u)continue;
+        DWORD first_tag=0,second_tag=0;
+        SIZE_T got=0;
+        const auto* addr=reinterpret_cast<const void*>(
+            std::uintptr_t(descriptor)+4u);
+        if(ReadProcessMemory(GetCurrentProcess(),addr,&first_tag,
+                             sizeof(first_tag),&got)==0 ||
+           got!=sizeof(first_tag))continue;
+        got=0;
+        if(ReadProcessMemory(GetCurrentProcess(),addr,&second_tag,
+                             sizeof(second_tag),&got)==0 ||
+           got!=sizeof(second_tag) || first_tag!=second_tag ||
+           first_tag>32u)continue;
+        type_tags[i]=int(first_tag);
+    }
+    result.theme=summarize_theme_routes(first,type_tags,true,old_game_depth);
+    return result;
 }
 // Actual owner-supplied WAVMWbvr.dll dispatches type 4 by reading
 // [transition+4] and passing that ADPCM handle to APMMXbvr.dll. The
@@ -2863,12 +2897,14 @@ void proto_menu_tick() {
         // Never interpret a post-wrapper stamp or pointer equality as
         // proof that those source entries actually executed or that an
         // ADPCM record's physical epoch survived the menu.
-        const auto alias=
+        const auto route_evidence=
             report.depth_before>=1 && report.transition_type_post_pause==4 &&
             probe.pause_count==2u && probe.other_handle_count==0u ?
-            proto_sample_source_alias_after_menu_tick(
+            proto_sample_source_routes_after_menu_tick(
                 probe.first_handle,DWORD(report.depth_before)) :
-            r2fix::esc_source_alias::Summary{};
+            ProtoSourceRouteEvidence{};
+        const auto& alias=route_evidence.direct;
+        const auto& theme_routes=route_evidence.theme;
         char alias_line[380]{};
         std::snprintf(alias_line,sizeof(alias_line),
             "RUNTIME-ESC-SOURCE-ALIAS: snapshot=%u same_ref=%u "
@@ -2880,6 +2916,22 @@ void proto_menu_tick() {
             alias.indices[0],alias.indices[1],
             alias.indices[2],alias.indices[3],report.depth_before);
         log_line(alias_line);
+        // A matching direct source ref is not the full native callback
+        // count: original Theme type 11 has its own generic source and
+        // delegates the Pause to the active nested SXD record. This line
+        // discriminates those source classes without attributing calls.
+        char route_line[340]{};
+        std::snprintf(route_line,sizeof(route_line),
+            "RUNTIME-ESC-SOURCE-ROUTES: snapshot=%u generic=%u "
+            "type11=%u type11_stamped=%u unknown_types=%u "
+            "indices=%d,%d,%d,%d "
+            "(post-wrapper type tags; no native dispatch or epoch proof)",
+            unsigned(theme_routes.sampled),theme_routes.generic_candidate,
+            theme_routes.theme_type11,theme_routes.theme_stamped,
+            theme_routes.unknown_class,
+            theme_routes.indices[0],theme_routes.indices[1],
+            theme_routes.indices[2],theme_routes.indices[3]);
+        log_line(route_line);
         // Only compare the ORIGINAL controller gate values after
         // the native Pause and all existing synthetic safety decisions.
         // Eligible flags are never permission to issue a music command.
