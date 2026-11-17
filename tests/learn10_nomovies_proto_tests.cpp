@@ -35,16 +35,16 @@ int main() {
     // Never mutate even one bit in a foreign (already NOMOVIES-enabled)
     // progress array, and no one-shot skip is implied by this policy.
     CHECK(!plan_learn10_nomovies_arm(0xFFFFFFFFu,next));
-    // Alternative native ELSE branch: Enter is deliberately NOT part of
-    // the activation rule; temporary bit exposure is bounded to 2 s.
+    // Original ELSE still has an independent native JustPressedBut and
+    // one-second time guard. Bound exposure for an explicit physical press.
     CHECK(!restore_learn10_nomovies_due(1000u,1000u,false));
-    CHECK(!restore_learn10_nomovies_due(2999u,1000u,false));
-    CHECK( restore_learn10_nomovies_due(3000u,1000u,false));
+    CHECK(!restore_learn10_nomovies_due(5999u,1000u,false));
+    CHECK( restore_learn10_nomovies_due(6000u,1000u,false));
     CHECK( restore_learn10_nomovies_due(1001u,1000u,true));
-    // The subtraction is unsigned and survives GetTickCount rollover.
+    // Unsigned subtraction also handles the 32-bit GetTickCount rollover.
     CHECK(!restore_learn10_nomovies_due(1000u,0xfffffff0u,false));
-    CHECK( restore_learn10_nomovies_due(4000u,0xfffffff0u,false));
-    CHECK(kLearn10NomoviesLatestStartMs==5000u);
-    CHECK(kLearn10NomoviesMaxArmedMs==2000u);
+    CHECK( restore_learn10_nomovies_due(6000u,0xfffffff0u,false));
+    CHECK(kLearn10NomoviesLatestStartMs==3000u);
+    CHECK(kLearn10NomoviesMaxArmedMs==5000u);
     return 0;
 }
