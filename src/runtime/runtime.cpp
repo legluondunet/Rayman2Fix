@@ -21,6 +21,7 @@
 #include "rayman2fix/intro_gate_timeline.hpp"
 #include "rayman2fix/intro_integer_reader.hpp"
 #include "rayman2fix/game_window_icon.hpp"
+#include "rayman2fix/render_poll_gate.hpp"
 #include <mutex>
 #if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
 #include "rayman2fix/esc_music_wine_prototype.hpp"
@@ -178,6 +179,14 @@ bool g_intro_level_logged = false;
 // audio compensation, skip inputs, or changes in foreground policy.
 std::atomic<DWORD> g_last_camera_tick{0};
 std::atomic<DWORD> g_last_native_2d_tick{0};
+// All three callbacks are native game GLI paths. Only the trusted camera
+// identifies the game's main/render thread; fallback callbacks from any
+// other thread must NEVER change a native level or authorize music.
+std::atomic<DWORD> g_game_camera_thread_id{0};
+std::atomic_flag g_render_poll_busy = ATOMIC_FLAG_INIT;
+r2fix::RenderPollGate g_render_poll_gate;
+std::atomic<unsigned> g_render_poll_fallback_reported{0};
+std::atomic<bool> g_render_poll_foreign_thread_reported{false};
 // Source-callback telemetry only, transferred to the ordinary render-thread
 // report. No disk I/O, native audio queries or allocation in Resume wrapper.
 std::atomic<DWORD> g_esc_resume_camera_age{0xffffffffu};
@@ -4363,8 +4372,75 @@ void poll_second_intro_skip() {
     native_change(kAfterIntroLevel, 0);
 }
 
+// Service the existing skip and ESC music decision machines exclusively
+// on the original GLI/game thread. Cinematic 4:3 rendering may not call
+// the 3D camera for 20+ seconds, while its 2D/viewport callbacks run.
+// The 12ms minimum interval de-duplicates these overlapping native paths;
+// the fallback only activates when the last camera frame is >=48ms old.
+void poll_game_render_events(r2fix::RenderPollSource source) {
+    const DWORD tid=GetCurrentThreadId();
+    const DWORD camera_tid=g_game_camera_thread_id.load(
+        std::memory_order_acquire);
+    const DWORD now=GetTickCount();
+    const DWORD camera_at=g_last_camera_tick.load(
+        std::memory_order_acquire);
+    if(source!=r2fix::RenderPollSource::Camera &&
+       camera_tid && camera_tid!=tid &&
+       camera_at && DWORD(now-camera_at)>=48u &&
+       !g_render_poll_foreign_thread_reported.exchange(
+           true,std::memory_order_relaxed)) {
+        log_line("RUNTIME-RENDER-POLL: fallback-rejected-different-thread "
+                 "(no cross-thread native level change or ESC compensation)");
+    }
+    if(g_render_poll_busy.test_and_set(std::memory_order_acquire))
+        return; // nested/cross-thread GLI calls cannot double-dispatch
+    struct ClearBusy {
+        ~ClearBusy() {
+            g_render_poll_busy.clear(std::memory_order_release);
+        }
+    } clear_busy;
+    if(!g_render_poll_gate.take(source,now,tid,camera_tid,camera_at))
+        return;
+    if(source!=r2fix::RenderPollSource::Camera) {
+        const unsigned bit=source==r2fix::RenderPollSource::Native2D ?
+            1u:2u;
+        if(!(g_render_poll_fallback_reported.fetch_or(
+               bit,std::memory_order_relaxed)&bit)) {
+            char msg[220]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-RENDER-POLL: fallback-active source=%s "
+                "camera_age_ms=%lu same_camera_thread=1 "
+                "(existing input/audio guards unchanged)",
+                bit==1u?"native-2d":"native-viewport",
+                static_cast<unsigned long>(DWORD(now-camera_at)));
+            log_line(msg);
+        }
+    }
+    poll_second_intro_skip();
+#if RAYMAN2FIX_AUDIO_HOOKS
+    poll_audio_pause_trace();
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+    proto_menu_tick();
+    // Physical compensation first, diagnostics always afterward.
+    proto_theme_transition_watch_tick();
+    proto_flush_predriver_resume_report();
+#endif
+#endif
+#if RAYMAN2FIX_RESEARCH_PROBES
+    poll_learn_intro_skip();
+#endif
+}
+
+struct PollAfterNativeDraw {
+    r2fix::RenderPollSource source;
+    ~PollAfterNativeDraw() { poll_game_render_events(source); }
+};
+
 void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
-    g_last_camera_tick.store(GetTickCount(),std::memory_order_relaxed);
+    const DWORD now=GetTickCount();
+    g_game_camera_thread_id.store(GetCurrentThreadId(),
+                                   std::memory_order_release);
+    g_last_camera_tick.store(now,std::memory_order_release);
     // The engine has a separate screen-world 3D camera for overlay
     // actors, including dialogue glyph geometry. Preserve its NATIVE
     // 4:3 projection. Hor+ is exclusively for other 3D world cameras.
@@ -4452,23 +4528,9 @@ void __cdecl camera_hor_plus(void* device, void* viewport, void* camera) {
         }
     }
     g_original(device, projection_viewport, camera);
-    // Camera adjustment executes on the game's own render/main thread.
-    // Use it only as a safe tick to request a *deferred* native transition.
-    poll_second_intro_skip();
-#if RAYMAN2FIX_AUDIO_HOOKS
-    poll_audio_pause_trace();
-#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
-    proto_menu_tick();
-    // Never defer native ESC compensation behind diagnostic disk I/O.
-    proto_theme_transition_watch_tick();
-    proto_flush_predriver_resume_report(); // after audio decisions; never in hook
-#endif
-#endif
-#if RAYMAN2FIX_RESEARCH_PROBES
-    // This is exclusively the disabled Learn_10 research observer.
-    // Never invoke it from an ordinary release camera callback.
-    poll_learn_intro_skip();
-#endif
+    // The camera remains the preferred event source. In 4:3 native
+    // 2D/viewport callbacks take over only if this camera stops firing.
+    poll_game_render_events(r2fix::RenderPollSource::Camera);
 }
 Native2DProducer classify_native_2d_producer(const void* retaddr) {
     // Literal *return* addresses after the verified game callsites:
@@ -4656,6 +4718,11 @@ void probe_native_glyph_after_frame(float xmin,float ymin,
 void __cdecl native_2d_percent_sprite(void* viewport,
            float xmin,float ymin,float xmax,float ymax,void* material) {
     g_last_native_2d_tick.store(GetTickCount(),std::memory_order_relaxed);
+    // The old 4:3 menu logs show 2D drawing still arrives every ~17ms
+    // when the camera has been absent for 20+ seconds. Poll AFTER the
+    // original draw/early return, not while the game has its GLI state.
+    PollAfterNativeDraw poll_after{
+        r2fix::RenderPollSource::Native2D};
     // This exact native entry is reached by:
     // - JFFTXT_vDrawString's per-character quads (VA 0x4664D4),
     // - the screen-image pass (VA 0x460653), and
@@ -5363,6 +5430,12 @@ DWORD install_camera_hook() {
 void __cdecl cinematic_viewport_calc(void* dimensions,void* viewport) {
     const auto original=g_original_cinematic_viewport_calc;
     if(!original)return;
+    // Native GLI viewport calculation runs in cinematics even when 3D
+    // camera adjustment is dormant; unlike a timer/worker thread it
+    // preserves the validated game-thread identity. Destructor polls
+    // after the original geometry calculation on ALL return paths.
+    PollAfterNativeDraw poll_after{
+        r2fix::RenderPollSource::Viewport};
     if(!dimensions || !viewport ||
        !r2fix::should_enable_cinematic_viewport_fill(
            g_remove_cinematic_bars,g_hud_scale)) {
@@ -5428,9 +5501,19 @@ void __cdecl cinematic_viewport_calc(void* dimensions,void* viewport) {
 }
 
 void install_cinematic_viewport_hook() {
+    if(g_original_cinematic_viewport_calc)return;
+    // An optional viewport-fill modification is NOT required to poll
+    // native game input. When either feature is enabled, install the same
+    // exact-byte-verified detour but pass viewport geometry unchanged if
+    // RemoveCinematicBars=0.
+    bool needs_render_events=g_skip_cinematics;
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+    needs_render_events=needs_render_events ||
+        g_proto_enabled.load(std::memory_order_acquire);
+#endif
     if(!r2fix::should_enable_cinematic_viewport_fill(
-           g_remove_cinematic_bars,g_hud_scale) ||
-       g_original_cinematic_viewport_calc)return;
+           g_remove_cinematic_bars,g_hud_scale) &&
+       !needs_render_events)return;
     auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
     if(!base)return;
     const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
@@ -6400,13 +6483,19 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         // Hook the common native 2D entry before the game draws any
         // UI; the downstream driver callback monitor still handles
         // screen sprites submitted through other engine paths.
-        if(g_hud_scale<0.9999f || g_remove_dialogue_backgrounds || g_remove_cinematic_bars)
+        bool needs_native_render_events=g_skip_cinematics;
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+        needs_native_render_events=needs_native_render_events ||
+            g_proto_enabled.load(std::memory_order_acquire);
+#endif
+        if(g_hud_scale<0.9999f || g_remove_dialogue_backgrounds ||
+           g_remove_cinematic_bars || needs_native_render_events)
             install_native_2d_percent_hook();
 #if RAYMAN2FIX_RESEARCH_PROBES
         // Read-only hook at VA 0x4710C0 is not part of the actual fix.
         if(g_hud_scale<0.9999f)install_superimposed_proc_probe();
 #endif
-        if(g_remove_cinematic_bars)
+        if(g_remove_cinematic_bars || needs_native_render_events)
             install_cinematic_viewport_hook();
         initialize_native_intro_skip();
         start_hud_monitor();
