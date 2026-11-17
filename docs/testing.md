@@ -610,10 +610,12 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
   against the build outputs, and `docs/GameFrame-LICENSE-APACHE.txt`
   against the pinned source. The archive must not contain DLL, INI,
   receipt, documentation or log sidecars.
-- Replace `game/fix.dll` twice with unknown files, starting with a
-  preexisting `game/fix.dll.bak`. After each replacement, retain **one**
-  `game/fix.dll.bak` containing the immediately preceding runtime;
-  an unchanged launch must not rotate it again.
+- Replace `game/fix.dll` with a foreign DLL while obsolete
+  `game/fix.dll.bak` and `game/fix.dll.bak.previous` files exist. Verify
+  that the launcher restores the exact embedded runtime **without creating
+  or retaining any `fix.dll` backup**. Repeat using a same-size but altered
+  DLL marked read-only; a subsequent launch with a matching DLL must be
+  idempotent, without modifying the DLL or creating backups.
 - Replace the installed `glide2x.dll` with an unknown file, rerun the
   launcher, verify the old file is preserved as `glide2x.dll.bak` and
   the pinned DLL is restored. A third launch must be idempotent.
