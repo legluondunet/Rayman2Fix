@@ -66,7 +66,8 @@ namespace {
 // Keep one immediately preceding managed runtime as fix.dll.bak.
 // No numbered legacy backup migration is performed.
 void ensure_embedded_readme(const fs::path& root) {
-    const auto dest=root/"README.md";
+    // User documentation lives under docs/; state/ contains only receipts.
+    const auto dest=layout::docs(root)/"README.md";
     if(fs::is_symlink(dest) ||
        (fs::exists(dest) && !fs::is_regular_file(dest)))
         throw std::runtime_error("unsafe existing README.md path");
@@ -198,7 +199,8 @@ void Startup::initialize(bool provision_files) {
         const auto mods = layout::mods(root_);
         const auto third = root_/"third_party";
         const auto textures = mods/"textures";
-        for (const auto& entry : {game_dir_,third,glide,mods,textures}) {
+        const auto docs=layout::docs(root_);
+        for (const auto& entry : {game_dir_,third,glide,mods,textures,docs}) {
             if (fs::is_symlink(entry) ||
                 (fs::exists(entry) && !fs::is_directory(entry)))
                 throw std::runtime_error("unsafe clean Rayman2Fix layout directory");
@@ -355,7 +357,7 @@ void Startup::initialize(bool provision_files) {
     if (!log_stream_) throw std::runtime_error("cannot create Rayman2Fix_installer.log");
     log(std::string("Rayman2Fix ") + RAYMAN2FIX_VERSION + "-bootstrap commit=" + RAYMAN2FIX_BUILD_COMMIT);
     log(std::string("START: local_time=") + when);
-    log("LAYOUT: launcher=Rayman2Fix.exe game=game/ runtime=game/fix.dll config=Rayman2Fix.ini renderer=third_party/gameframe/ mods=mods/ state=state/ logs=launcher_directory");
+    log("LAYOUT: launcher=Rayman2Fix.exe game=game/ runtime=game/fix.dll config=Rayman2Fix.ini renderer=third_party/gameframe/ mods=mods/ docs=docs/ state=state/ logs=launcher_directory");
     log("CONFIG: Debug.Log=" +
         std::string(debug == "1" ? "1" : "invalid or missing (default 1)"));
     const auto display = option("Graphics", "Resolution");
