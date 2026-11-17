@@ -407,7 +407,6 @@ struct RuntimeOptions {
     DWORD remove_dialogue_backgrounds;
     DWORD remove_cinematic_bars;
     DWORD music_in_pause_menu;
-    DWORD early_theme_music_experimental;
 };
 
 bool valid_angle(float v) {
@@ -2043,9 +2042,14 @@ void __cdecl proto_script_pause() {
             }
         }
     }
+    // Production early-Theme authorization must never depend on Debug.Log.
+    // Keep the opening native callback evidence on every adopted ESC pause;
+    // limit only the optional diagnostics to their historic 16 samples.
     const unsigned predriver_sample=g_proto_predriver_probe_budget.fetch_add(
         adopted && g_log ? 1u : 0u,std::memory_order_relaxed);
-    const bool predriver_trace=adopted && g_log && predriver_sample<16u;
+    const bool predriver_trace=adopted &&
+        (g_early_theme_enabled.load(std::memory_order_acquire) ||
+         (g_log && predriver_sample<16u));
     if(predriver_trace) {
         depth_before_ok=proto_read_depth(depth_before);
         native_stop_before=g_proto_native_stop_calls.load(std::memory_order_acquire);
@@ -2845,7 +2849,7 @@ void proto_menu_tick() {
     bool early_probe_attempted=false,early_probe_allowed=false;
     int early_ref_class=-1,early_pending_state=-1;
     unsigned early_pause_count=0;
-    // This rare, explicit research opt-in never runs in the strict
+    // This source-proven pending-Theme path never runs in the strict
     // class-1 path. Do not touch the original script Pause wrapper or
     // defer native audio callbacks. A *post-wrapper*, render-thread
     // observation may approve one narrowly sourced Resume decision.
@@ -2953,7 +2957,7 @@ void proto_menu_tick() {
             "RUNTIME-ESC-EARLY-THEME: verdict=%s age_ms=%lu "
             "native_ref_class=%d pending_state=%d "
             "native_pauses=%u current_theme=%u compensated=%u "
-            "(experimental INI; original Pause callbacks unchanged)",
+            "(single music INI; original Pause callbacks unchanged)",
             early_probe_allowed?"eligible":"refused",
             static_cast<unsigned long>(DWORD(GetTickCount()-started)),
             early_ref_class,early_pending_state,early_pause_count,
@@ -2987,7 +2991,8 @@ void proto_menu_tick() {
             g_proto_predriver_report.ready=false;
         }
     }
-    if(report.ready && g_log) {
+    if(report.ready && g_log &&
+       g_proto_predriver_probe_budget.load(std::memory_order_relaxed)<=16u) {
         const auto& probe=report.probe;
         // Run the nontrivial read-only check AFTER current native audio
         // compensation, never in the original wrapper's critical path.
@@ -6868,8 +6873,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
-    if(settings->music_in_pause_menu>1u ||
-       settings->early_theme_music_experimental>1u)return 5;
+    if(settings->music_in_pause_menu>1u)return 5;
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
 #if RAYMAN2FIX_ESC_MUSIC_PROTO
     wchar_t proto_flag[8]{};
@@ -6886,14 +6890,15 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     if(g_proto_enabled.load(std::memory_order_acquire))
         log_line("RUNTIME-ESC-MUSIC: enabled=1 source=Features.MusicInPauseMenu "
                  "mode=native-Theme-SXD (original game music and native Stop)");
+    // One music toggle activates both the strict class-1 path and its
+    // separately source-proven pending-Theme continuation, even at Log=0.
     g_early_theme_enabled.store(
-        g_proto_enabled.load(std::memory_order_acquire) && g_log &&
-        settings->early_theme_music_experimental==1u,
+        g_proto_enabled.load(std::memory_order_acquire),
         std::memory_order_release);
     if(g_early_theme_enabled.load(std::memory_order_acquire))
         log_line("RUNTIME-ESC-EARLY-THEME: enabled=1 "
-                 "Features.EarlyThemeMusicExperimental=1 "
-                 "(research opt-in; pending native Theme target only)");
+                 "source=Features.MusicInPauseMenu "
+                 "(guarded pending native Theme target)");
 #endif
 #endif
 #if RAYMAN2FIX_AUDIO_HOOKS

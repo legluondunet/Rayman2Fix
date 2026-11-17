@@ -288,8 +288,7 @@ ChildProcessResult run_child_process(
             raw.dwProcessId, working_directory / "rayman2fix" / "Rayman2Fix.dll",
             display.output_width, display.output_height, display.log_enabled,
             display.skip_cinematics, display.remove_dialogue_backgrounds,
-            display.remove_cinematic_bars, display.music_in_pause_menu,
-            display.early_theme_music_experimental);
+            display.remove_cinematic_bars, display.music_in_pause_menu);
     }
 
     if (display.borderless) {
@@ -381,8 +380,6 @@ int launch_verified_game(Startup& startup, bool verify) {
         configured_remove_cinematic_bars(startup.ini_path());
     display.music_in_pause_menu = !unchecked_without_ini &&
         configured_music_in_pause_menu(startup.ini_path());
-    display.early_theme_music_experimental = !unchecked_without_ini &&
-        configured_early_theme_music_experiment(startup.ini_path());
     display.enable_fov = true;
     display.fps_limit = unchecked_without_ini
         ? 60u : configured_fps_limit(startup.ini_path());

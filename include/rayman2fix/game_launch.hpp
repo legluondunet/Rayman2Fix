@@ -40,7 +40,6 @@ struct ChildDisplayOptions {
     bool remove_dialogue_backgrounds = false; // verified dialogue frame filter
     bool remove_cinematic_bars = false; // experimental GLI letterbox filter
     bool music_in_pause_menu = false; // opt-in native Theme/SXD ESC compensation
-    bool early_theme_music_experimental = false; // debug-only opt-in early Theme handoff
     std::uint32_t fps_limit = 60; // 0 = unlimited; applies to Glide grBufferSwap
     bool log_enabled = true;
     bool skip_executable_precheck = false; // only explicit --launch-no-verify
