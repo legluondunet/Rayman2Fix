@@ -191,12 +191,12 @@ int main() {
               "bundled guide describes clean installs and receipt separation");
 #endif
         check(contents(root / "Rayman2Fix.ini").find("AspectRatio=Auto") != std::string::npos &&
-              contents(root / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos &&
-              contents(root / "Rayman2Fix.ini").find("RemoveDialogueBackgrounds=0") != std::string::npos &&
-              contents(root / "Rayman2Fix.ini").find("RemoveCinematicBars=0") != std::string::npos &&
-              contents(root / "Rayman2Fix.ini").find("MusicInPauseMenu=0") != std::string::npos &&
+              contents(root / "Rayman2Fix.ini").find("SkipCinematics=1") != std::string::npos &&
+              contents(root / "Rayman2Fix.ini").find("RemoveDialogueBackgrounds=1") != std::string::npos &&
+              contents(root / "Rayman2Fix.ini").find("RemoveCinematicBars=1") != std::string::npos &&
+              contents(root / "Rayman2Fix.ini").find("MusicInPauseMenu=1") != std::string::npos &&
               contents(root / "Rayman2Fix.ini").find("Resolution=") == std::string::npos,
-              "bootstrap has no Resolution setting and independent disabled visual options");
+              "bootstrap has no Resolution setting and four enabled-by-default feature flags");
         write(root / "game" / "fix.dll", "BOOTSTRAP");
         write(root / "Rayman2Fix.ini",
               "[Debug]\nLog=1\n\n[Graphics]\n");
@@ -226,11 +226,11 @@ int main() {
         check(r2fix::configured_aspect_ratio_is_4_3(user_ini) &&
               r2fix::configured_skip_cinematics(user_ini),
               "4:3 and cinematic skip opt-in recognized");
-        check(!r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
-              !r2fix::configured_remove_cinematic_bars(user_ini),
-              "both visual filters disabled when absent");
-        check(!r2fix::configured_music_in_pause_menu(user_ini),
-              "music is disabled when no MusicInPauseMenu setting is present");
+        check(r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
+              r2fix::configured_remove_cinematic_bars(user_ini),
+              "both visual filters default to enabled when absent");
+        check(r2fix::configured_music_in_pause_menu(user_ini),
+              "ESC menu music defaults to enabled when absent");
         write(user_ini,"[Features]\nMusicInPauseMenu=1\nRemoveDialogueBackgrounds=1\nRemoveCinematicBars=1\n");
         check(r2fix::configured_music_in_pause_menu(user_ini) &&
               r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
@@ -320,13 +320,43 @@ int main() {
               migrated.find("; comment\r\n")!=std::string::npos &&
               migrated.find("AspectRatio=Auto\r\n")!=std::string::npos &&
               migrated.find("[Features]\r\n")!=std::string::npos &&
-              migrated.find("SkipCinematics=0\r\n")!=std::string::npos &&
-              migrated.find("RemoveDialogueBackgrounds=0\r\n")!=std::string::npos &&
-              migrated.find("RemoveCinematicBars=0\r\n")!=std::string::npos &&
-              migrated.find("MusicInPauseMenu=0\r\n")!=std::string::npos,
+              migrated.find("SkipCinematics=1\r\n")!=std::string::npos &&
+              migrated.find("RemoveDialogueBackgrounds=1\r\n")!=std::string::npos &&
+              migrated.find("RemoveCinematicBars=1\r\n")!=std::string::npos &&
+              migrated.find("MusicInPauseMenu=1\r\n")!=std::string::npos,
               "existing INI migration retains BOM, CRLF, custom values");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
         check(contents(user_ini)==migrated,"migration is idempotent");
+
+        // User opt-outs must remain respected: new defaults are not forced on
+        // previously explicit 0 values or rewritten on repeat launches.
+        write(user_ini,"[Features]\nSkipCinematics=0\n"
+                       "RemoveDialogueBackgrounds=0\n"
+                       "RemoveCinematicBars=0\n"
+                       "MusicInPauseMenu=0\n[Personal]\nName=kept\n");
+        check(!r2fix::configured_skip_cinematics(user_ini) &&
+              !r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
+              !r2fix::configured_remove_cinematic_bars(user_ini) &&
+              !r2fix::configured_music_in_pause_menu(user_ini),
+              "explicit 0 opt-outs override every new default");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        const auto opted_out=contents(user_ini);
+        check(opted_out.find("SkipCinematics=0")!=std::string::npos &&
+              opted_out.find("RemoveDialogueBackgrounds=0")!=std::string::npos &&
+              opted_out.find("RemoveCinematicBars=0")!=std::string::npos &&
+              opted_out.find("MusicInPauseMenu=0")!=std::string::npos &&
+              opted_out.find("Name=kept")!=std::string::npos,
+              "INI normalization preserves existing disabled options and custom keys");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        check(contents(user_ini)==opted_out,"explicit opt-out normalization is idempotent");
+
+        write(user_ini,"[Features]\nRemoveCinematicBars=0\n");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        check(r2fix::configured_skip_cinematics(user_ini) &&
+              r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
+              !r2fix::configured_remove_cinematic_bars(user_ini) &&
+              r2fix::configured_music_in_pause_menu(user_ini),
+              "missing features default to 1 while explicitly disabled bars stay at 0");
         // Retire the former experimental switch regardless of its value;
         // the explicit single MusicInPauseMenu option always wins.
         for (const char* old_early : {"0","1"}) {
@@ -405,6 +435,11 @@ int main() {
         check(r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
               r2fix::configured_remove_cinematic_bars(user_ini),
               "legacy enabled setting migrates to both enabled");
+        write(user_ini,"[Features]\nRemoveBlackFrames=0\n");
+        r2fix::ensure_rayman2fix_ini_options(user_ini);
+        check(!r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
+              !r2fix::configured_remove_cinematic_bars(user_ini),
+              "explicit legacy disabled setting retains disabled visual filters");
         write(user_ini,"[Features]\nRemoveBlackFrames=bogus\n");
         bool legacy_refused=false;
         try{r2fix::ensure_rayman2fix_ini_options(user_ini);}
