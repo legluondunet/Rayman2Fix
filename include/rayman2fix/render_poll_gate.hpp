@@ -14,6 +14,19 @@ enum class RenderPollSource : std::uint8_t {
     Camera, Native2D, Viewport, FrameFlip
 };
 
+// An original game frame-flip callback may substitute for a dormant
+// camera / native-2D / viewport only in a recognized cinematic or
+// during a source-scoped pending ESC-menu window. The camera must have
+// established the trusted game thread first. This pure policy does
+// NOT authorize sound commands or arbitrary thread migration.
+constexpr bool should_poll_game_frame_flip(bool jail_20_intro,
+                                           bool esc_menu_pending,
+                                           bool camera_thread_known,
+                                           bool same_camera_thread) noexcept {
+    return (jail_20_intro || esc_menu_pending) &&
+           camera_thread_known && same_camera_thread;
+}
+
 class RenderPollGate {
 public:
     static constexpr std::uint32_t kCameraStaleMs = 48;
