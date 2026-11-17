@@ -67,6 +67,11 @@ target_compile_definitions(Rayman2Fix PRIVATE
 # No additional user-facing INI option is needed.
 option(RAYMAN2FIX_RESEARCH_PROBES
   "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
+option(RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+  "Build isolated, opt-in experiment using the native Learn_10 NOMOVIES branch" OFF)
+if(RAYMAN2FIX_LEARN10_NOMOVIES_PROTO AND NOT RAYMAN2FIX_RESEARCH_PROBES)
+  message(FATAL_ERROR "Learn_10 NOMOVIES prototype requires RAYMAN2FIX_RESEARCH_PROBES=ON")
+endif()
 option(RAYMAN2FIX_AUDIO_TRACE
   "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
 option(RAYMAN2FIX_ESC_MUSIC_PROTO
@@ -90,6 +95,9 @@ if(WIN32)
     RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}")
   if(RAYMAN2FIX_RESEARCH_PROBES)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
+  endif()
+  if(RAYMAN2FIX_LEARN10_NOMOVIES_PROTO)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_LEARN10_NOMOVIES_PROTO=1)
   endif()
   if(RAYMAN2FIX_AUDIO_TRACE)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_AUDIO_TRACE=1)
@@ -184,6 +192,10 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(learn10_nomovies_proto_tests tests/learn10_nomovies_proto_tests.cpp)
+  target_include_directories(learn10_nomovies_proto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME learn10-nomovies-proto-guard COMMAND learn10_nomovies_proto_tests)
+
   add_executable(disc_tests tests/disc_tests.cpp)
   target_link_libraries(disc_tests PRIVATE rayman2_disc)
   add_test(NAME disc-image-parser COMMAND disc_tests)
