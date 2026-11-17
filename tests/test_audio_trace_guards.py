@@ -520,10 +520,17 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("report.transition_type_post_pause==4",tick)
         self.assertIn("proto_sample_adpcm_voice_after_dispatch(probe.first_handle)",tick)
         self.assertIn("snapshot=post-dispatch",tick)
+        # Ordinary read-only observer remains AFTER the audio dispatch.
+        # Explicit early-Theme opt-in is a separate source/voice preflight;
+        # it is never reached by default or inside a native driver hook.
+        normal_observer=tick.split(
+            "// Consume diagnostics only AFTER the critical audio compensation path.",1)[1]
+        self.assertIn("proto_sample_adpcm_voice_after_dispatch(probe.first_handle)",
+                      normal_observer)
         self.assertLess(tick.index("proto_dispatch(action);"),
-                        tick.index("proto_sample_adpcm_voice_after_dispatch("))
-        self.assertLess(tick.index("proto_deferred_safety();"),
-                        tick.index("proto_sample_adpcm_voice_after_dispatch("))
+                        tick.index("// Consume diagnostics only AFTER"))
+        self.assertIn("if(g_early_theme_enabled.load(",tick)
+        self.assertIn("can_try_pending_theme_resume(ev)",tick)
         self.assertNotIn("g_proto_predriver_report.adpcm_voice_sampled",self.runtime)
 
     def test_transition_object_type_probe_is_post_native_bounded_and_passive(self):
@@ -1144,8 +1151,20 @@ class AudioTraceGuardTests(unittest.TestCase):
             "proto::Identity proto_identity(DWORD handle,",1)[1].split(
             "// Called on the original game thread",1)[0]
         self.assertIn("owner.native_theme_player_ref_matches_outer!=1",identity)
-        self.assertNotIn("native_pending_target_matches_outer",identity)
-        self.assertNotIn("native_theme_pending_state",identity)
+        # Normal mode remains strictly matched. ONLY an explicitly
+        # activated per-attempt gate with full source/ADPCM evidence can
+        # revalidate the native pending Theme; the observer cannot by
+        # itself authorize an audio command.
+        self.assertIn("g_early_theme_enabled.load(",identity)
+        self.assertIn("g_early_theme_approved_generation.load(",identity)
+        self.assertIn("r2fix::esc_early_theme::same_pending_theme_owner(",identity)
+        self.assertIn("owner.native_theme_player_ref_matches_outer!=1 && !early_pending",identity)
+        self.assertIn("owner.native_pending_target_matches_outer",identity)
+        self.assertIn("owner.native_theme_pending_state",identity)
+        self.assertIn("std::atomic<bool> g_early_theme_enabled{false};",self.runtime)
+        self.assertIn("EarlyThemeMusicExperimental=1",self.runtime)
+        self.assertIn("g_proto_predriver_report.ready",self.runtime)
+        self.assertIn("proto_sample_source_routes_after_menu_tick(",self.runtime)
         self.assertIn("pending_target_matches_outer=%d",self.runtime)
         self.assertIn("pending_target_differs_current=%d",self.runtime)
         # Redundant startup .text scan is removed now that we have the
@@ -1421,12 +1440,19 @@ class AudioTraceGuardTests(unittest.TestCase):
                         scheduler.index("proto_pending_voice_observe_tick();"))
         self.assertLess(scheduler.index("proto_flush_predriver_resume_report();"),
                         scheduler.index("proto_pending_voice_observe_tick();"))
-        # Original production Resume validation remains the exact current
-        # player descriptor pointer, not a matched pending target.
+        # In the default/production path the exact current descriptor
+        # remains mandatory. The exception is separately enabled and
+        # checked by the isolated pure experiment policy.
         identity=source.split("proto::Identity proto_identity(",1)[1].split(
             "void proto_dispatch(",1)[0]
         self.assertIn("owner.native_theme_player_ref_matches_outer!=1",identity)
-        self.assertNotIn("native_pending_target_matches_outer",identity)
+        self.assertIn("&& !early_pending",identity)
+        self.assertIn("g_early_theme_approved_generation.load(",identity)
+        self.assertIn("same_pending_theme_owner(",identity)
+        self.assertIn("std::atomic<bool> g_early_theme_enabled{false};",source)
+        self.assertIn("can_try_pending_theme_resume(ev)",source)
+        # Original game's two script Pauses always go to the native wrapper.
+        self.assertIn("proto_call_original(0x536D0);",source)
 
     def test_focus_loss_diagnostic_uses_real_win32_source_callers(self):
         # Camera/UI callbacks can stop running while Wine is Alt+Tabbed,
