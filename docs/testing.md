@@ -570,12 +570,29 @@ To collect the next comparison on an isolated test install:
    `native-phase-branches early104_count=`,
    `native-early-exit-shape`, and the natural story-bit-1091 handover.
 
-The new `phase104` script locator only detects the *shape* of
-`Condition(V96,104)`; it does not prove that the branch ran. Compare
-its count and node against the distinct `phase110` counter, and correlate
-the existing read-only director state, Rayman flags and handover with
-a normal unmodified game run. Missing matches or a failed natural
-handover are **diagnostic failures, not authorization to inject a signal**.
+The `phase104` script locator detects only the *shape* of
+`Condition(V96,104)`, not proof that the branch ran. On the 17 November
+Windows native user test (runtime build `3f2eacd2`), the script returned
+`early104_count=1 early104_node=158` and
+`stage110_count=1 stage110_node=317`; both native exit shape checks
+matched. During the unmodified 25.016-second introduction, six
+`V96=110` stage pulses moved `var83` from 0 to 6; the native
+director then entered behaviour 1 and story bit 1091 was set.
+`NOMOVIES` bit 1188 remained 0. All 30 recorded gate changes
+were retained, but **none showed V96=104**; this is not evidence
+that a 104 pulse never occurred between the observed gate changes.
+
+The next research build therefore records a *separate*, bounded
+`director-phase96-history` / `director-phase96-event` timeline.
+It reads exactly one validated scalar `V96` at each **existing native
+render callback** while `learn_10` is active, including when no
+`var50`, `var83` or `var110` transition occurs. It counts
+visible `104` and `110` samples and logs up to 24 most recent
+changes **only after** the natural handover. It does not install
+another hook, invoke `F158`, alter timing, or write game memory.
+A missing `104` is still *not proof of absence* for a sub-frame event.
+Missing script matches or a failed natural handover are diagnostic
+failures, **not authorization to inject a signal**.
 
 Do not overwrite personal save slots while collecting evidence. The
 previous direct behaviour `3 -> 1` and `var83=6` experiments are
