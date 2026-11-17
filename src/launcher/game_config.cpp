@@ -193,6 +193,9 @@ void atomically_install(const fs::path& output, const std::string& bytes) {
 // The Linux target is a synthetic test harness; the shipping build is Win32.
 std::pair<std::uint32_t,std::uint32_t> desktop_resolution() {
 #ifdef _WIN32
+    // The install/verify path may query dimensions before the game launch.
+    // Ensure physical, not DPI-virtualized, primary monitor coordinates.
+    configure_launcher_dpi_awareness();
     const auto display=primary_display_metrics();
     if(display.width<640u || display.height<480u)
         throw std::runtime_error("invalid primary display dimensions");
