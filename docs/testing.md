@@ -818,3 +818,38 @@ The Learn_10 movie skip is still disabled; NOMOVIES work remains paused.
 **The ability to spawn a separate Windows process is unit-tested; actual
 Rayman 2 rendering, playable no-CD launch, SDL3 initialization or game
 hooks are not established by CI.**
+
+## Learn_10 native early-exit signal experiment (read-only)
+
+Use the **separate** `Rayman2Fix-Windows-x86-learn10-native-trace` artifact
+from the research PR. **Do not deploy this research launcher as a release**.
+Its DLL is packaged in the single EXE and automatically replaces
+`game/fix.dll`, without an old DLL backup. Keep a copy of the normal
+launcher to restore the original runtime afterwards.
+
+- Work in a **separate test installation / Wine prefix** with backed-up
+  saves. Start with `[Debug] Log=1` and the existing
+  `[Features] SkipCinematics=1`; this still skips **only jail_20**.
+- Enter first-visit `learn_10`, **release Enter**, then press it once
+  during the 3D introduction and release it. Let the entire scene end
+  naturally; do not terminate the game until at least one second after
+  Rayman regains control.
+- Submit both `Rayman2Fix.log` and `Rayman2Fix_installer.log`.
+  Look for `RUNTIME-INTRO: learn10-signal-history` and
+  `RUNTIME-INTRO: learn10-signal-event` in the *runtime* log.
+- `entered104` counts observed entries of the native director variable
+  V96 into the potential early-exit value 104. `entered110` counts
+  ordinary stage signals. `enter_presses` counts physical Enter rising
+  edges at the same engine callback, **not** a proven AI button binding.
+  `unreadable`, `dropped`, and `valid_samples` disclose diagnostic gaps.
+  Values may change between render callbacks and escape observation.
+- This observer **does not execute, skip, emulate or patch scripts**;
+  it does not toggle `NOMOVIES`, mutate progress arrays, change actor
+  behaviours, or touch camera/gameplay/saved data. Existing gameplay
+  and native engine conditions remain authoritative.
+
+The experiment is intended to determine whether pressing Enter correlates
+with the real `V96 == 104` path **before** testing any opt-in native
+handover. A missing 104 observation cannot prove that 104 never existed
+between callbacks. The earlier forced 3->1 and forced V83=6 approaches
+remain prohibited because their gameplay state was corrupted or frozen.
