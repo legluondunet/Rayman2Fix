@@ -861,3 +861,86 @@ audio bypass. Existing first-menu `ref_class=3` refusal remains
 correct; `phase=6` remains safe passthrough, and no full physical
 voice-generation/lifetime proof exists. PR #10 remains draft and
 pre-driver Pause suppression remains NO-GO.
+
+
+## Owner 05:08 trace: frame-flip polling fixed; first-Theme handoff still the audio blocker
+
+Source: owner's `Rayman2Fix(20261117-050854).log` (17 November 2026,
+standard GitHub PR test-merge build `4ee0470f`), 261 lines.
+The tested PR branch included `f6fd06f`, the pending-ESC frame-flip
+scheduler, but **not** any relaxed audio-owner gate.
+
+### Positive regression checks
+
+- `jail_20` was skipped at `elapsed_ms=3869` after 226 actual
+  render-thread input samples, and exit observed 372 ms later. The
+  original GLI frame-flip fallback logged `same_camera_thread=1`.
+  Preserve this independent 4:3 input fix.
+- All five source-scoped ESC openings had a first render/menu verdict
+  at 15–16 ms, rather than any pending-but-unprocessed third/fourth
+  opens. Every opening emitted `RUNTIME-ESC-FLIP` with
+  `same_camera_thread=1 camera_seen=1 requested_poll=1`. This
+  **establishes frame-flip eligibility and timely actual menu decisions**
+  in the tested run, not exclusive reliance on the frame-flip route:
+  native-2D callbacks also ran.
+- Every opening still had the original two slot-2 Pause callbacks on
+  one handle, one direct source alias index 1 and one separate type-11
+  generic Theme source index 8, each with original depth stamps;
+  all original 2-call Resume batches that were observed were forwarded.
+
+### Exact five openings: avoid conflating transport state and sound
+
+| Menu script Pause t_ms | Theme ref | Controller transition | Inner SXD | Driver compensated | Physical ADPCM post-decision |
+| ---: | --- | --- | --- | --- | --- |
+| 38603 | class 3 (current 9:12; target 9:5) | pending=1 | 9:6 | 0, strict owner refusal | paused=1 |
+| 47253 | class 3 (current 9:12; target 9:5) | pending=1 | 9:6 | 0, strict owner refusal | paused=1 |
+| 54087 | class 3 (current 9:12; target 9:5) | pending=1 | 9:6 | 0, strict owner refusal | paused=1 |
+| 58970 | class 1 (current active outer 9:5) | pending=0 | 9:7 | 1, two native Resumes | paused=0 |
+| 68770 | class 1 (current active outer 9:5) | pending=0 | 9:9 | 1, two native Resumes | paused=0 |
+
+The **first three** pending-Theme menus lasted ~6.8, 5.7 and
+2.7 seconds respectively; none produced a controller synchronization
+during the open menu. Native forwarding on exit cleared the sampled
+ADPCM pause bit. The controller changed to class 1 / inner 9:7
+only at `t_ms=56920`, **after** the third menu exited, immediately
+before the fourth menu. Waiting several seconds *inside* an already
+rejected menu would therefore not have made the current strict
+owner test succeed on this recording, even with repeated polling.
+This is a controller handoff / audio-identity issue, **not a
+render-poll scheduler issue** anymore.
+
+The two accepted late menus report `compensated=1` and physical
+`paused=0` in the immediate post-decision snapshots, but there
+is no direct listening evidence in this log. In both, the live
+inner SXD later advanced to 9:8 and 9:10 *while ESC was open*,
+triggering `phase=6` (safe native passthrough). This is concrete
+evidence of mid-menu nested-resource mutation even after a correct
+initial ref match. The original game/mixer may advance resource
+parts without a globally observed Play/Stop command. Neither
+a stable APMMX output counter nor source pointer identity proves
+an immutable physical voice epoch.
+
+### Implementation consequence
+
+The new frame-flip extension **successfully repairs observation
+cadence**. Do not attempt to solve the first three menus by
+increasing the number of polls, extending the timeout, guessing
+a delay, forcing the Theme current pointer to its pending target,
+issuing raw APMMX Resume on a mismatched handle, or bypassing
+half of the two original Pauses. Each requires a genuine,
+source- and voice-generation-specific proof.
+
+The original `PauseTransitionSxd` type-4 route in
+`WAVMWbvr.dll` at RVA `0xC7E0` calls its internal helper
+`0x3C60`, and `ResumeTransitionSxd` RVA `0xC830` calls
+`0x3C90`. The original APMMX pause bit is not a pause
+reference count, but matching the same transition-object pointer
+is **not** sufficient to establish a sound-stream generation
+when a Theme transition is pending. The existing native strict
+class-1 dispatch and quarantine remain authoritative.
+
+**Current decision:** no new physical Pause suppression or
+mismatched-Theme synthetic Resume in the regular launcher.
+PR #10 remains DRAFT; the next relevant owner feedback is
+whether music is actually audible in the fourth/fifth
+class-1 menus, not an inference from `paused=0`.
