@@ -544,6 +544,55 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Build strictly opt-in Learn_10 native NOMOVIES prototype
+        shell: pwsh
+        run: |
+          # This EXPERIMENTAL build differs from the passive learn10-trace:
+          # with a second runtime environment opt-in it may TEMPORARILY
+          # change the game progress bit 1188. Never ship as standard.
+          # Only the original game AI executes the alternate scene branch.
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=OFF -DRAYMAN2FIX_RESEARCH_PROBES=ON -DRAYMAN2FIX_LEARN10_NOMOVIES_PROTO=ON -DRAYMAN2FIX_AUDIO_TRACE=OFF -DRAYMAN2FIX_ESC_MUSIC_PROTO=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'Learn10 native prototype configure failed' }
+          cmake --build build --config Release --target Rayman2Fix --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Learn10 native prototype build failed' }
+          @'
+          from pathlib import Path
+          data=Path('build/Release/fix.dll').read_bytes()
+          for marker in (
+              b'RUNTIME-CONFIG: research_probes=1',
+              b'RUNTIME-LEARN10-PROTOTYPE: enabled=1 route=native-NOMOVIES',
+              b'RUNTIME-LEARN10-PROTOTYPE: phase=armed',
+              b'RUNTIME-LEARN10-PROTOTYPE: phase=restored',
+              b'RUNTIME-INTRO: native-early-exit-shape',
+          ):
+              if marker not in data:
+                  raise SystemExit(f'Native Learn10 prototype DLL missing marker: {marker!r}')
+          if b'RUNTIME-AUDIO-TRACE: enabled=1' in data:
+              raise SystemExit('Native Learn10 prototype unexpectedly contains audio research')
+          print('Experimental only + explicit environment opt in: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Native Learn10 prototype fingerprint failed' }
+          New-Item -Path learn10-nomovies -ItemType Directory -Force | Out-Null
+          Copy-Item build/Release/Rayman2Fix.exe learn10-nomovies/Rayman2Fix.exe
+          New-Item -Path learn10-nomovies-smoke -ItemType Directory -Force | Out-Null
+          Copy-Item learn10-nomovies/Rayman2Fix.exe learn10-nomovies-smoke/Rayman2Fix.exe
+          & ./learn10-nomovies-smoke/Rayman2Fix.exe --verify 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 2) { throw 'Prototype must fail safely without retail CD' }
+          $deployed='learn10-nomovies-smoke/game/fix.dll'
+          if (!(Test-Path $deployed) -or
+              (Get-FileHash $deployed -Algorithm SHA256).Hash -ne
+              (Get-FileHash build/Release/fix.dll -Algorithm SHA256).Hash) {
+            throw 'Standalone Learn10 prototype embeds stale research DLL'
+          }
+          $global:LASTEXITCODE = 0
+      - name: Upload strictly opt-in Learn_10 native NOMOVIES prototype
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rayman2Fix-Windows-x86-learn10-nomovies-PROTOTYPE
+          path: learn10-nomovies/
+          if-no-files-found: error
+          retention-days: 14
+
   linux-tests:
     runs-on: ubuntu-latest
     steps:
