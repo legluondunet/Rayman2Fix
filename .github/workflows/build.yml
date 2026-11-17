@@ -186,8 +186,21 @@ jobs:
           & ./package-smoke/Rayman2Fix.exe
           if ($LASTEXITCODE -ne 2) { throw 'No-media bootstrap must fail safely' }
           if (!(Test-Path package-smoke/mods/textures) -or
-              !(Test-Path package-smoke/third_party/gameframe)) {
-            throw 'New clean directories missing'
+              !(Test-Path package-smoke/third_party/gameframe) -or
+              !(Test-Path package-smoke/docs/README.md) -or
+              (Test-Path package-smoke/README.md)) {
+            throw 'New clean directories or docs/README.md missing, or old root README created'
+          }
+          $doc = Get-Content package-smoke/docs/README.md -Raw -Encoding UTF8
+          if (!$doc.Contains('Installation neuve uniquement') -or
+              !$doc.Contains('state/')) {
+            throw 'Embedded user guide missing clean-layout/receipt instructions'
+          }
+          if (Test-Path package-smoke/state) {
+            throw 'No-CD bootstrap must not create state/ before verification'
+          }
+          if (!(Test-Path package-smoke/build-info.txt)) {
+            throw 'Build identity missing from launcher root'
           }
           if (!(Test-Path package-smoke/game/fix.dll) -or
               !(Test-Path package-smoke/Rayman2Fix.ini)) {
