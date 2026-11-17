@@ -2612,11 +2612,10 @@ void proto_pending_voice_observe_tick() {
        !g_proto_enabled.load(std::memory_order_acquire) ||
        !g_proto_callsites_installed.load(std::memory_order_acquire))
         return;
-    BYTE menu=0;
-    if(!proto_game_read(0xB9BC8,menu) || menu==0u)return;
     DWORD object_ref=0;
     unsigned generation=0;
     bool overlapped=false;
+    DWORD source_thread=0;
     {
         const std::lock_guard<std::mutex> lock(g_proto_mutex);
         const auto& lifetime=g_proto_esc_lifetime_start;
@@ -2624,8 +2623,10 @@ void proto_pending_voice_observe_tick() {
         object_ref=lifetime.transition_ref;
         generation=lifetime.generation;
         overlapped=lifetime.overlap;
+        source_thread=lifetime.thread_id;
     }
-    if(!object_ref || !generation || overlapped)return;
+    if(!object_ref || !generation || overlapped ||
+       source_thread!=GetCurrentThreadId())return;
 
     // 750 ms cadence and 8 snapshots per source-qualified ESC opening;
     // never flood disk during multi-minute pauses. This is ALWAYS after
@@ -2641,6 +2642,8 @@ void proto_pending_voice_observe_tick() {
     }
     if(per_open>=8u || (last_tick && DWORD(now-last_tick)<750u))
         return;
+    BYTE menu=0;
+    if(!proto_game_read(0xB9BC8,menu) || menu==0u)return;
     last_tick=now;
     ++per_open;
     ++total;
