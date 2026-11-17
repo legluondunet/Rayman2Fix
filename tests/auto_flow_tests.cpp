@@ -169,6 +169,20 @@ int main() {
               "bootstrap initialization must create INI when absent");
         check(fs::is_directory(root / "mods" / "textures"),
               "bootstrap creates a textures folder for replacement images");
+        check(fs::is_directory(root / "docs"),
+              "bootstrap creates a separate docs/ folder");
+        check(!fs::exists(root / "state"),
+              "state/ is reserved for verified installation receipts");
+#ifdef _WIN32
+        check(fs::is_regular_file(root / "docs" / "README.md") &&
+              !fs::exists(root / "README.md"),
+              "single EXE deploys documentation only inside docs/");
+        const auto installed_guide=contents(root / "docs" / "README.md");
+        check(installed_guide.find("Installation neuve uniquement") !=
+                    std::string::npos &&
+              installed_guide.find("state/") != std::string::npos,
+              "bundled guide describes clean installs and receipt separation");
+#endif
         check(contents(root / "Rayman2Fix.ini").find("AspectRatio=Auto") != std::string::npos &&
               contents(root / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos &&
               contents(root / "Rayman2Fix.ini").find("RemoveDialogueBackgrounds=0") != std::string::npos &&
@@ -450,6 +464,11 @@ int main() {
               "managed ubi.ini must not be recorded as an immutable CD asset");
         check(fs::exists(root / "state" / ".rayman2fix-cd-files.tsv"),
               "local installation receipt created");
+        check(!fs::exists(root / "docs" / ".rayman2fix-cd-files.tsv") &&
+              !fs::exists(root / "docs" / ".rayman2fix-exe-patch.tsv"),
+              "installation receipts must never be published under docs/");
+        check(fs::is_directory(root / "docs"),
+              "docs/ survives CD publication without being replaced");
         // All ten root-only exclusions are absent from a fresh installation
         // and its SHA256 receipt. Unrelated similarly named files survive.
         for (const auto* filename : {"00000001.tmp", "0000040c.016",
