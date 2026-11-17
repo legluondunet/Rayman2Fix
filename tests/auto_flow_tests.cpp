@@ -194,11 +194,12 @@ int main() {
               contents(root / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos &&
               contents(root / "Rayman2Fix.ini").find("RemoveDialogueBackgrounds=0") != std::string::npos &&
               contents(root / "Rayman2Fix.ini").find("RemoveCinematicBars=0") != std::string::npos &&
-              contents(root / "Rayman2Fix.ini").find("MusicInPauseMenu=0") != std::string::npos,
-              "bootstrap provides independent disabled visual options");
+              contents(root / "Rayman2Fix.ini").find("MusicInPauseMenu=0") != std::string::npos &&
+              contents(root / "Rayman2Fix.ini").find("Resolution=") == std::string::npos,
+              "bootstrap has no Resolution setting and independent disabled visual options");
         write(root / "game" / "fix.dll", "BOOTSTRAP");
         write(root / "Rayman2Fix.ini",
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\n");
+              "[Debug]\nLog=1\n\n[Graphics]\n");
         const auto user_ini = root / "Rayman2Fix.ini";
         check(r2fix::configured_fps_limit(user_ini) == 60,
               "older INI without FPSLimit uses default 60");
@@ -219,8 +220,8 @@ int main() {
             check(refused, "invalid or unsupported FPSLimit rejected");
         }
         write(user_ini,
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n");
-        write(user_ini, "[Graphics]\nResolution=1920x1080\nAspectRatio=4:3\n"
+              "[Debug]\nLog=1\n\n[Graphics]\nFPSLimit=60\n");
+        write(user_ini, "[Graphics]\nAspectRatio=4:3\n"
                         "[Features]\nSkipCinematics=1\n");
         check(r2fix::configured_aspect_ratio_is_4_3(user_ini) &&
               r2fix::configured_skip_cinematics(user_ini),
@@ -239,13 +240,14 @@ int main() {
         // independent. This validates configuration wiring, NOT in-game
         // first-ESC Theme availability or a Wine rendering callback.
         for (const char* aspect : {"Auto", "4:3"}) {
-            write(user_ini,std::string("[Graphics]\nResolution=1920x1080\nAspectRatio=")
+            write(user_ini,std::string("[Graphics]\nAspectRatio=")
                 + aspect + "\n[Features]\nMusicInPauseMenu=1\n"
                 "SkipCinematics=1\n");
             check(r2fix::configured_music_in_pause_menu(user_ini) &&
                   r2fix::configured_skip_cinematics(user_ini),
                   "ESC music and intro skip enabled at any selected aspect");
-            const auto canvas=r2fix::configured_render_resolution(user_ini);
+            const auto canvas=r2fix::render_resolution_for_display(
+                1920u,1080u,r2fix::configured_aspect_ratio_is_4_3(user_ini));
             check(canvas==(std::string(aspect)=="4:3" ?
                   std::make_pair(1440u,1080u) :
                   std::make_pair(1920u,1080u)),
@@ -254,7 +256,7 @@ int main() {
         write(user_ini,"[Features]\nMusicInPauseMenu=0\n");
         check(!r2fix::configured_music_in_pause_menu(user_ini),
               "explicit ESC music opt-out works");
-        write(user_ini,"[Graphics]\nResolution=1920x1080\nAspectRatio=4:3\n"
+        write(user_ini,"[Graphics]\nAspectRatio=4:3\n"
                        "[Features]\nSkipCinematics=1\nRemoveDialogueBackgrounds=1\n"
                        "RemoveCinematicBars=0\n");
         check(r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
@@ -264,17 +266,21 @@ int main() {
         check(!r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
               r2fix::configured_remove_cinematic_bars(user_ini),
               "cinematic-only opt-in does not enable dialogue filter");
-        write(user_ini,"[Graphics]\nResolution=1920x1080\nAspectRatio=4:3\n"
+        write(user_ini,"[Graphics]\nAspectRatio=4:3\n"
                        "[Features]\nSkipCinematics=1\nRemoveDialogueBackgrounds=1\n"
                        "RemoveCinematicBars=1\n");
-        check(r2fix::configured_render_resolution(user_ini) ==
+        check(r2fix::render_resolution_for_display(1920u,1080u,true) ==
               std::make_pair(1440u,1080u),"1920x1080: 4:3 content area 1440x1080");
-        write(user_ini, "[Graphics]\nResolution=1280x800\nAspectRatio=4:3\n");
-        check(r2fix::configured_render_resolution(user_ini) ==
+        write(user_ini, "[Graphics]\nAspectRatio=4:3\n");
+        check(r2fix::render_resolution_for_display(1280u,800u,true) ==
               std::make_pair(1064u,798u),"1280x800 exact 4:3");
-        write(user_ini, "[Graphics]\nResolution=1920x1080\nAspectRatio=Auto\n");
-        check(r2fix::configured_render_resolution(user_ini) ==
+        write(user_ini, "[Graphics]\nAspectRatio=Auto\n");
+        check(r2fix::render_resolution_for_display(1920u,1080u,false) ==
               std::make_pair(1920u,1080u),"default wide unchanged");
+        const auto desktop=r2fix::desktop_resolution();
+        check(desktop.first>=640u && desktop.second>=480u &&
+              r2fix::configured_render_resolution(user_ini)==desktop,
+              "Auto mode uses detected desktop resolution without an INI override");
         for(const auto* bad:{"2","yes",""}) {
             write(user_ini,std::string("[Graphics]\nAspectRatio=")+bad+"\n");
             bool refused=false;
@@ -304,7 +310,7 @@ int main() {
         }
         const std::string bom="\xef\xbb\xbf";
         write(user_ini,bom+"[Debug]\r\nLog=0\r\n"
-              "[Graphics]\r\nResolution=1024x768\r\nFPSLimit=60\r\n"
+              "[Graphics]\r\nFPSLimit=60\r\n"
               "; comment\r\n[Personal]\r\nSetting=keep\r\n");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
         const auto migrated=contents(user_ini);
@@ -351,14 +357,15 @@ int main() {
               contents(user_ini).find("EarlyThemeMusicExperimental")==std::string::npos,
               "legacy experiment cannot override an explicit disabled music option");
         // Existing boolean settings migrate without losing the chosen geometry.
-        write(user_ini,"[Graphics]\nResolution=1920x1080\nForce4x3=1\n"
+        write(user_ini,"[Graphics]\nForce4x3=1\n"
                        "[Personal]\nSetting=keep\n");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
         const auto old_enabled=contents(user_ini);
         check(old_enabled.find("AspectRatio=4:3")!=std::string::npos &&
               old_enabled.find("Force4x3=")==std::string::npos &&
               old_enabled.find("Setting=keep")!=std::string::npos &&
-              r2fix::configured_render_resolution(user_ini)==
+              r2fix::render_resolution_for_display(
+                  1920u,1080u,r2fix::configured_aspect_ratio_is_4_3(user_ini))==
                   std::make_pair(1440u,1080u),
               "Force4x3=1 migrates to 4:3 with identical geometry");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
@@ -405,7 +412,7 @@ int main() {
         check(legacy_refused && contents(user_ini).find("RemoveBlackFrames=bogus")!=std::string::npos,
               "invalid legacy setting rejected without altering INI");
         write(user_ini,
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n");
+              "[Debug]\nLog=1\n\n[Graphics]\nFPSLimit=60\n");
         write(root / "mods" / "textures" / "logo.rgba", "NEW-HD-LOGO");
         write(root / "mods" / "textures" / "custom.rgba", "USER-IMAGE");
         check(r2fix::run_automatic(app) == 2,
@@ -454,7 +461,7 @@ int main() {
         check(contents(game / "fix.dll") == "BOOTSTRAP",
               "launcher runtime payload remains available");
         check(contents(root / "Rayman2Fix.ini") ==
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n",
+              "[Debug]\nLog=1\n\n[Graphics]\nFPSLimit=60\n",
               "user ini retained across staging commit");
         auto ubi = contents(game / "ubi.ini");
         check(ubi.find("Language=French") != std::string::npos &&
@@ -504,16 +511,17 @@ int main() {
         // Treat the original CD-sourced ubi.ini as a mutable game config.
         // The immutable local receipt must never track mutable ubi.ini.
         write(root / "Rayman2Fix.ini",
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1280x720\nFPSLimit=60\n");
+              "[Debug]\nLog=1\n\n[Graphics]\nFPSLimit=60\n");
         check(r2fix::run_automatic(app) == 2,
               "reconfigure graphics from one INI with no CD present");
         ubi = contents(game / "ubi.ini");
         check(ubi.find("GLI_Mode=1 - 1024 x 768 x 16") != std::string::npos &&
               ubi.find("GLI_Mode=1 - 1280 x 720 x 16") == std::string::npos,
               "game-facing config retains supported internal Glide 1024x768 regardless of monitor output");
-        const auto selected = r2fix::configured_output_resolution(app.ini_path());
-        check(selected.first == 1280 && selected.second == 720,
-              "single user INI controls native output dimensions separately from internal Glide mode");
+        const auto selected = r2fix::desktop_resolution();
+        check(selected.first >= 640u && selected.second >= 480u &&
+              r2fix::configured_render_resolution(app.ini_path()) == selected,
+              "output always follows desktop size, independent of the INI");
         check(ubi.find("Language=French") != std::string::npos &&
               ubi.find("Keep=present") != std::string::npos,
               "regenerated config retains other original CD options");
@@ -532,19 +540,19 @@ int main() {
         check(r2fix::verify_installation(app) == 0,
               "recreated game config passes CD asset verification");
 
-        // Invalid resolutions fail before rewriting any game-facing
-        // configuration, and a corrected user INI works on the next start.
-        const auto good_ubi = contents(game / "ubi.ini");
+        // Retired Resolution keys never control output or block startup.
+        // Normalization strips them without changing the game-facing mode.
+        const auto good_ubi=contents(game / "ubi.ini");
         write(root / "Rayman2Fix.ini",
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=invalid\nFPSLimit=60\n");
-        bool rejected_resolution = false;
-        try { r2fix::run_automatic(app); }
-        catch (const std::exception&) { rejected_resolution = true; }
-        check(rejected_resolution &&
-              contents(game / "ubi.ini") == good_ubi,
-              "invalid Rayman2Fix.ini resolution refused with legacy config unchanged");
+              "[Debug]\\nLog=1\\n\\n[Graphics]\\nResolution=invalid\\nFPSLimit=60\\n");
+        check(r2fix::run_automatic(app)==2 &&
+              contents(game / "ubi.ini")==good_ubi,
+              "obsolete invalid Resolution is ignored without modifying Glide mode");
+        r2fix::ensure_rayman2fix_ini_options(root / "Rayman2Fix.ini");
+        check(contents(root / "Rayman2Fix.ini").find("Resolution=")==std::string::npos,
+              "obsolete Resolution line removed from existing user INI");
         write(root / "Rayman2Fix.ini",
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1280x720\nFPSLimit=60\n");
+              "[Debug]\\nLog=1\\n\\n[Graphics]\\nFPSLimit=60\\n");
 
         // Same-size corruption: size-only verification would have missed it.
         write(game / "data" / "game.dat", "OTHER");
