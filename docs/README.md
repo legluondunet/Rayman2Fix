@@ -29,7 +29,6 @@ Rayman2Fix.ini
 Rayman2Fix_installer.log    (si [Debug] Log=1)
 Rayman2Fix.log              (journal du jeu, si activé)
 Rayman2Fix_inspect.log      (lors de --inspect)
-build-info.txt
 game/
     rayman2.exe
     rayman2.exe.bak         (si correctif approuvé appliqué)
@@ -44,8 +43,9 @@ mods/
 third_party/
     gameframe/
         glide2x.dll
-        GameFrame-LICENSE-APACHE.txt
 docs/
+    GameFrame-LICENSE-APACHE.txt
+    build-info.txt
     README.md
 state/
     .rayman2fix-cd-files.tsv
@@ -54,8 +54,10 @@ state/
 
 - `game/` : fichiers nécessaires à Rayman 2 et DLL native du correctif.
 - `mods/` : ressources facultatives personnelles.
-- `third_party/` : bibliothèques tierces et leurs notices de licence.
-- **`docs/` : documentation utilisateur uniquement.**
+- `third_party/` : bibliothèques tierces vérifiées (GameFrame).
+- **`docs/` : documentation, notice Apache de GameFrame et `build-info.txt`.**
+  La licence propre à Rayman2Fix n'est pas encore sélectionnée ; elle sera
+  publiée dans `docs/` lorsqu'elle aura été définie.
 - **`state/` : reçus d'installation et d'intégrité SHA-256 uniquement.**
   Ne pas les supprimer : ils sont indispensables à la vérification normale.
 - `Rayman2Fix.ini` : unique fichier de configuration utilisateur du correctif.
