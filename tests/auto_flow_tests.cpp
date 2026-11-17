@@ -120,58 +120,22 @@ int main() {
         ("r2fix-auto-tests-" + std::to_string(stamp));
     fs::create_directory(root);
     try {
+        // No migration: previously installed trees are refused and untouched.
         {
-            const auto legacy_root=root/"legacy-migration";
-            const auto old=legacy_root/"Rayman2Fix";
-            fs::create_directories(old);
-            write(old/"rayman2.exe","RETAIL-GAME");
-            write(old/"Rayman2Fix.ini","[Debug]\nLog=1\n[User]\nKeep=unchanged\n");
-            write(old/"Rayman2Fix.dll","OLD-FIX-DLL");
-            write(old/"glide2x.dll","OLD-GLIDE");
-            write(old/"winmm.dll","WINMM-GAME");
-            write(legacy_root/"Rayman2Fix_logo_hd.rgba","OLD-ART-LEFT-IN-PLACE");
-            {
-                r2fix::Startup migrating(legacy_root/"Rayman2Fix.exe");
-                migrating.initialize();
-                const auto game=legacy_root/"rayman2";
-                check(!fs::exists(old) && contents(game/"rayman2.exe")=="RETAIL-GAME",
-                      "legacy game moved without disc re-extraction");
-                check(contents(game/"winmm.dll")=="WINMM-GAME",
-                      "legacy winmm retained beside game executable");
-                check(!fs::exists(game/"rayman2fix"/"winmm.dll"),
-                      "no winmm under nested fix folder");
-                check(contents(game/"rayman2fix"/"Rayman2Fix.ini").find("Keep=unchanged")!=std::string::npos,
-                      "existing user INI migrated without losing values");
-#ifndef _WIN32
-                check(contents(game/"rayman2fix"/"Rayman2Fix.dll")=="OLD-FIX-DLL",
-                      "legacy runtime DLL relocated unchanged");
-                check(contents(game/"rayman2fix"/"glide2x.dll")=="OLD-GLIDE",
-                      "legacy Glide DLL relocated unchanged");
-#endif
-                check(contents(legacy_root/"Rayman2Fix_logo_hd.rgba")=="OLD-ART-LEFT-IN-PLACE",
-                      "obsolete atlas is not automatically migrated");
-                check(fs::is_directory(game/"rayman2fix"/"textures"),
-                      "migration creates replacement textures folder");
-                check(!fs::exists(game/"rayman2fix"/"textures"/"logo.rgba"),
-                      "old atlas is never implicitly renamed or converted");
-            }
-            fs::remove_all(legacy_root);
-        }
-        {
-            const auto collision=root/"layout-collision";
-            fs::create_directories(collision/"Rayman2Fix");
-            fs::create_directories(collision/"rayman2");
-            write(collision/"Rayman2Fix"/"rayman2.exe","OLD");
-            write(collision/"rayman2"/"rayman2.exe","NEW");
+            const auto oldroot=root/"legacy-refusal";
+            fs::create_directories(oldroot/"rayman2");
+            write(oldroot/"rayman2"/"rayman2.exe","OLD-GAME");
             bool refused=false;
             try {
-                r2fix::Startup ambiguous(collision/"Rayman2Fix.exe");
-                ambiguous.initialize();
+                r2fix::Startup old(oldroot/"Rayman2Fix.exe");
+                old.initialize();
             } catch(const std::exception&) {refused=true;}
-            check(refused && fs::exists(collision/"Rayman2Fix"/"rayman2.exe") &&
-                  fs::exists(collision/"rayman2"/"rayman2.exe"),
-                  "two layouts cause safe refusal without overwriting data");
-            fs::remove_all(collision);
+            check(refused &&
+                  contents(oldroot/"rayman2"/"rayman2.exe")=="OLD-GAME" &&
+                  !fs::exists(oldroot/"game") &&
+                  !fs::exists(oldroot/"Rayman2Fix.ini"),
+                  "old installations are rejected without migration or mutation");
+            fs::remove_all(oldroot);
         }
         r2fix::Startup app(root / "Rayman2Fix.exe");
         app.initialize();
@@ -201,20 +165,20 @@ int main() {
               contents(root / "Rayman2Fix_installer.log").find(
                   "LAUNCH-PRETEST:") != std::string::npos,
               "next game launch clears only the dedicated runtime log");
-        check(fs::exists(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini"),
+        check(fs::exists(root / "Rayman2Fix.ini"),
               "bootstrap initialization must create INI when absent");
-        check(fs::is_directory(root / "rayman2" / "rayman2fix" / "textures"),
+        check(fs::is_directory(root / "mods" / "textures"),
               "bootstrap creates a textures folder for replacement images");
-        check(contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("AspectRatio=Auto") != std::string::npos &&
-              contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos &&
-              contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("RemoveDialogueBackgrounds=0") != std::string::npos &&
-              contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("RemoveCinematicBars=0") != std::string::npos &&
-              contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("MusicInPauseMenu=0") != std::string::npos,
+        check(contents(root / "Rayman2Fix.ini").find("AspectRatio=Auto") != std::string::npos &&
+              contents(root / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos &&
+              contents(root / "Rayman2Fix.ini").find("RemoveDialogueBackgrounds=0") != std::string::npos &&
+              contents(root / "Rayman2Fix.ini").find("RemoveCinematicBars=0") != std::string::npos &&
+              contents(root / "Rayman2Fix.ini").find("MusicInPauseMenu=0") != std::string::npos,
               "bootstrap provides independent disabled visual options");
-        write(root / "rayman2" / "rayman2fix" / "Rayman2Fix.dll", "BOOTSTRAP");
-        write(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini",
+        write(root / "game" / "fix.dll", "BOOTSTRAP");
+        write(root / "Rayman2Fix.ini",
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\n");
-        const auto user_ini = root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini";
+        const auto user_ini = root / "Rayman2Fix.ini";
         check(r2fix::configured_fps_limit(user_ini) == 60,
               "older INI without FPSLimit uses default 60");
         write(user_ini, "[Graphics]\nFPSLimit=120\n");
@@ -421,15 +385,11 @@ int main() {
               "invalid legacy setting rejected without altering INI");
         write(user_ini,
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n");
-        // winmm is game-facing: preserve it beside rayman2.exe.
-        write(root / "rayman2" / "winmm.dll", "WINMM");
-        write(root / "rayman2" / "rayman2fix" / "textures" / "logo.rgba",
-              "NEW-HD-LOGO");
-        write(root / "rayman2" / "rayman2fix" / "textures" / "custom.rgba",
-              "USER-IMAGE");
+        write(root / "mods" / "textures" / "logo.rgba", "NEW-HD-LOGO");
+        write(root / "mods" / "textures" / "custom.rgba", "USER-IMAGE");
         check(r2fix::run_automatic(app) == 2,
               "no game or image must report missing media, not success");
-        check(!fs::exists(root / "rayman2" / "rayman2.exe"),
+        check(!fs::exists(root / "game" / "rayman2.exe"),
               "missing media must not mark game installed");
 
         const auto bytes = test_disc();
@@ -447,35 +407,32 @@ int main() {
         try { (void)r2fix::run_automatic(app); }
         catch(const std::exception&) { rejected_local_exe = true; }
         check(rejected_local_exe &&
-              !fs::exists(root / "rayman2" / "rayman2.exe") &&
-              !fs::exists(root / "rayman2.installing"),
+              !fs::exists(root / "game" / "rayman2.exe") &&
+              !fs::exists(root / "game.installing"),
               "invalid local executable rejected before publishing original CD files");
         fs::remove(root / "Rayman2.exe");
         check(r2fix::run_automatic(app) == 2,
               "CD assets install but nonfunctional game runtime must not launch");
-        const auto game = root / "rayman2";
+        const auto game = root / "game";
         check(fs::exists(game / "rayman2.exe"), "auto mode installs game in rayman2");
         check(!fs::exists(game / "DiscContent"), "no intermediate DiscContent layout");
         check(contents(game / "rayman2.exe") == "GAME", "retail exe copied unchanged");
-        check(contents(game / "winmm.dll") == "WINMM",
-              "game-facing winmm preserved across staging commit");
-        check(!fs::exists(game / "rayman2fix" / "winmm.dll"),
-              "winmm must not be installed under rayman2fix");
-        check(fs::is_directory(game / "rayman2fix"),
-              "mod directory created under rayman2");
-        check(contents(game / "rayman2fix" / "textures" / "logo.rgba") ==
-              "NEW-HD-LOGO", "HD logo retained during CD extraction");
-        check(contents(game / "rayman2fix" / "textures" / "custom.rgba") ==
-              "USER-IMAGE", "other replacement images retained");
+        check(!fs::exists(game / "winmm.dll"),
+              "fresh install never deploys a project WinMM proxy");
+        check(contents(root / "mods" / "textures" / "logo.rgba") == "NEW-HD-LOGO" &&
+              contents(root / "mods" / "textures" / "custom.rgba") == "USER-IMAGE",
+              "external mod textures are unchanged by disc installation");
+        check(contents(game / "fix.dll") == "BOOTSTRAP",
+              "injected runtime is deployed beside the game executable");
         check(contents(game / "dll" / "snd_cpa_mmx.ini") == "AUDIO\n",
               "MMX sound settings copied from disc");
         check(contents(game / "dll" / "snd_cpa.ini") == "AUDIO\n",
               "snd_cpa.ini initialized from MMX variant");
         check(contents(game / "data" / "game.dat") == "DATA\n",
               "original game data copied in lowercase");
-        check(contents(game / "rayman2fix" / "Rayman2Fix.dll") == "BOOTSTRAP",
+        check(contents(game / "fix.dll") == "BOOTSTRAP",
               "launcher runtime payload remains available");
-        check(contents(game / "rayman2fix" / "Rayman2Fix.ini") ==
+        check(contents(root / "Rayman2Fix.ini") ==
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n",
               "user ini retained across staging commit");
         auto ubi = contents(game / "ubi.ini");
@@ -488,10 +445,10 @@ int main() {
               ubi.find("GLI_Mode=1 - 1024 x 768 x 16") != std::string::npos &&
               ubi.find("GLI_Dll=DirectX6") == std::string::npos,
               "Glide 2 selected by single Rayman2Fix.ini at 1024x768");
-        check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find("\tubi.ini") ==
+        check(contents(root / "state" / ".rayman2fix-cd-files.tsv").find("\tubi.ini") ==
                   std::string::npos,
               "managed ubi.ini must not be recorded as an immutable CD asset");
-        check(fs::exists(game / "rayman2fix" / ".rayman2fix-cd-files.tsv"),
+        check(fs::exists(root / "state" / ".rayman2fix-cd-files.tsv"),
               "local installation receipt created");
         // All ten root-only exclusions are absent from a fresh installation
         // and its SHA256 receipt. Unrelated similarly named files survive.
@@ -501,77 +458,26 @@ int main() {
                                      "clokspl.exe", "drvmgt.dll",
                                      "loader.ini", "dplayerx.dll"}) {
             check(!fs::exists(game / filename), "obsolete protection file not extracted");
-            check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(filename) ==
+            check(contents(root / "state" / ".rayman2fix-cd-files.tsv").find(filename) ==
                       std::string::npos,
                   "obsolete protection file omitted from receipt");
         }
         check(fs::exists(game / "dxplayerx.dll"),
               "unrelated DXPLAYERX root file must survive installation");
-        check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(
+        check(contents(root / "state" / ".rayman2fix-cd-files.tsv").find(
                   "\tdxplayerx.dll") != std::string::npos,
               "unrelated DXPLAYERX remains in the SHA256 receipt");
-        check(!fs::exists(root / "rayman2.installing"),
+        check(!fs::exists(root / "game.installing"),
               "staging directory removed after publishing");
         check(r2fix::verify_installation(app) == 0,
               "installed game resources verify from local receipt");
 
-        // Simulate an already-installed copy made by an older Rayman2Fix
-        // build: the receipt used to list now-excluded root files.
-        const std::array<std::pair<const char*, const char*>, 10> legacy = {{
-            {"00000001.tmp", "TEMP"},
-            {"0000040c.016", "ICON"},
-            {"0000040c.256", "LOGO"},
-            {"secdrv.sys", "DRV!"},
-            {"rayman2.icd", "ICD!"},
-            {"clcd32.dll", "CL32"},
-            {"clokspl.exe", "CLOK"},
-            {"drvmgt.dll", "DRVM"},
-            {"loader.ini", "RAYM"},
-            {"dplayerx.dll", "DPLY"}
-        }};
-        {
-            std::ofstream receipt(game / "rayman2fix" / ".rayman2fix-cd-files.tsv",
-                                  std::ios::binary | std::ios::app);
-            for (const auto& file : legacy) {
-                receipt << "FILE\t4\t" << r2fix::sha256_text(file.second)
-                        << '\t' << file.first << '\n';
-                write(game / file.first, file.second);
-            }
-            check(static_cast<bool>(receipt), "extend old receipt for migration test");
-        }
-        // Also accept an obsolete file which the user had removed manually.
-        fs::remove(game / "00000001.tmp");
-        fs::remove(game / "loader.ini"); // already absent in one legacy install
-        fs::remove(root / "Rayman2.iso");
-        check(r2fix::run_automatic(app) == 2,
-              "old install is migrated without disc and runtime stays gated");
-        for (const auto& file : legacy) {
-            check(!fs::exists(game / file.first),
-                  "existing obsolete protection file removed by migration");
-            check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find(file.first) ==
-                      std::string::npos,
-                  "obsolete entry removed from old SHA256 receipt");
-        }
-        check(r2fix::verify_installation(app) == 0,
-              "post-migration hash verification remains valid");
-        check(fs::exists(game / "dxplayerx.dll"),
-              "unrelated DXPLAYERX root file remains untouched during migration");
-        check(contents(game / "data" / "game.dat") == "DATA\n",
-              "migration preserves unrelated game assets");
-        check(contents(game / "rayman2fix" / "Rayman2Fix.ini") ==
-              "[Debug]\nLog=1\n\n[Graphics]\nResolution=1024x768\nFPSLimit=60\n",
-              "migration preserves user options");
-
+        // A fresh install must not synthesize obsolete files or repair them.
+        check(fs::is_regular_file(root / "state" / ".rayman2fix-cd-files.tsv"),
+              "new receipt is independent of the game directory");
         // Treat the original CD-sourced ubi.ini as a mutable game config.
-        // A legacy manifest entry must be removed without deleting ubi.ini.
-        {
-            std::ofstream receipt(game / "rayman2fix" / ".rayman2fix-cd-files.tsv",
-                                  std::ios::binary | std::ios::app);
-            receipt << "FILE\t" << fs::file_size(game / "ubi.ini") << "\t"
-                    << r2fix::sha256_file(game / "ubi.ini") << "\tubi.ini\n";
-            check(static_cast<bool>(receipt), "legacy ubi.ini receipt appended");
-        }
-        write(game / "rayman2fix" / "Rayman2Fix.ini",
+        // The immutable local receipt must never track mutable ubi.ini.
+        write(root / "Rayman2Fix.ini",
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1280x720\nFPSLimit=60\n");
         check(r2fix::run_automatic(app) == 2,
               "reconfigure graphics from one INI with no CD present");
@@ -585,7 +491,7 @@ int main() {
         check(ubi.find("Language=French") != std::string::npos &&
               ubi.find("Keep=present") != std::string::npos,
               "regenerated config retains other original CD options");
-        check(contents(game / "rayman2fix" / ".rayman2fix-cd-files.tsv").find("\tubi.ini") ==
+        check(contents(root / "state" / ".rayman2fix-cd-files.tsv").find("\tubi.ini") ==
                   std::string::npos,
               "legacy receipt no longer tracks the mutable ubi.ini");
         check(r2fix::verify_installation(app) == 0,
@@ -603,7 +509,7 @@ int main() {
         // Invalid resolutions fail before rewriting any game-facing
         // configuration, and a corrected user INI works on the next start.
         const auto good_ubi = contents(game / "ubi.ini");
-        write(game / "rayman2fix" / "Rayman2Fix.ini",
+        write(root / "Rayman2Fix.ini",
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=invalid\nFPSLimit=60\n");
         bool rejected_resolution = false;
         try { r2fix::run_automatic(app); }
@@ -611,7 +517,7 @@ int main() {
         check(rejected_resolution &&
               contents(game / "ubi.ini") == good_ubi,
               "invalid Rayman2Fix.ini resolution refused with legacy config unchanged");
-        write(game / "rayman2fix" / "Rayman2Fix.ini",
+        write(root / "Rayman2Fix.ini",
               "[Debug]\nLog=1\n\n[Graphics]\nResolution=1280x720\nFPSLimit=60\n");
 
         // Same-size corruption: size-only verification would have missed it.
