@@ -3836,6 +3836,7 @@ bool learn10_proto_original_scripts_match(std::uintptr_t behaviour_table) {
         std::uintptr_t(rules)+8u,reader32,reader8,8192u,156u,249u);
     return r2fix::inspect_learn10_early_exit(early_rule).matched();
 }
+void learn10_proto_try_restore(const char* reason);
 void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
     if (!g_learn10_proto_opted_in || g_learn10_proto_attempted ||
         !g_learn_intro_seen || handed_over ||
@@ -3891,7 +3892,8 @@ void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
     if (!game_story_bit(g_learn10_proto_words,kNoMoviesCheatBit,confirmed) ||
         !confirmed) {
         log_line("RUNTIME-LEARN10-PROTOTYPE: phase=error "
-                 "reason=write-verification-failed (restoring)");
+                 "reason=write-verification-failed (immediate rollback)");
+        learn10_proto_try_restore("verification-failed");
         return;
     }
     char msg[236]{};
