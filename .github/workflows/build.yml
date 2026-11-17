@@ -99,7 +99,7 @@ jobs:
           $initial = (Get-Content $ini | Where-Object {
             $_.Trim() -and !$_.Trim().StartsWith(';')
           })
-          if ($initial.Count -ne 12 -or $initial[0] -ne '[Debug]' -or
+          if ($initial.Count -ne 11 -or $initial[0] -ne '[Debug]' -or
               $initial[1] -ne 'Log=1' -or $initial[2] -ne '[Graphics]' -or
               $initial[3] -ne 'Resolution=Desktop' -or
               $initial[4] -ne 'FPSLimit=60' -or
@@ -108,8 +108,7 @@ jobs:
               $initial[7] -ne 'SkipCinematics=0' -or
               $initial[8] -ne 'RemoveDialogueBackgrounds=0' -or
               $initial[9] -ne 'RemoveCinematicBars=0' -or
-              $initial[10] -ne 'MusicInPauseMenu=0' -or
-              $initial[11] -ne 'EarlyThemeMusicExperimental=0') {
+              $initial[10] -ne 'MusicInPauseMenu=0') {
             throw "Bootstrap INI must contain disabled optional 4:3, cinematic skip and separate dialogue/cinematic filters"
           }
           # Win32 CRLF and UTF-8 BOM parsing plus both-log opt-out.
@@ -494,7 +493,7 @@ jobs:
           test -f build/Rayman2Fix_installer.log
           test ! -e build/Rayman2Fix.log
           grep -q 'SYS-INFO: END' build/Rayman2Fix_installer.log
-          test "$(grep -v '^;' build/rayman2/rayman2fix/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nResolution=Desktop\nFPSLimit=60\nAspectRatio=Auto\n[Features]\nSkipCinematics=0\nRemoveDialogueBackgrounds=0\nRemoveCinematicBars=0\nMusicInPauseMenu=0\nEarlyThemeMusicExperimental=0')" || exit 1
+          test "$(grep -v '^;' build/rayman2/rayman2fix/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nResolution=Desktop\nFPSLimit=60\nAspectRatio=Auto\n[Features]\nSkipCinematics=0\nRemoveDialogueBackgrounds=0\nRemoveCinematicBars=0\nMusicInPauseMenu=0')" || exit 1
           printf 'old game log\n' > build/Rayman2Fix.log
           printf '[Debug]\r\nLog=0\r\n' > build/rayman2/rayman2fix/Rayman2Fix.ini
           result=0
