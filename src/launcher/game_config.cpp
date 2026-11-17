@@ -84,8 +84,8 @@ std::string read_graphics_setting(const fs::path& ini,
     return read_ini_setting(ini,"Graphics",key,fallback);
 }
 bool read_ini_flag(const fs::path& ini,const char* section_name,
-                   const char* key) {
-    const std::string value=read_ini_setting(ini,section_name,key,"0");
+                   const char* key,const char* fallback="0") {
+    const std::string value=read_ini_setting(ini,section_name,key,fallback);
     if(value!="0" && value!="1")
         throw std::runtime_error(std::string("invalid [")+
             section_name+"] "+key+"; use 0 or 1");
@@ -215,16 +215,16 @@ bool configured_aspect_ratio_is_4_3(const fs::path& ini) {
     return configured_aspect_ratio(ini)=="4:3";
 }
 bool configured_skip_cinematics(const fs::path& ini) {
-    return read_ini_flag(ini,"Features","SkipCinematics");
+    return read_ini_flag(ini,"Features","SkipCinematics","1");
 }
 bool configured_remove_dialogue_backgrounds(const fs::path& ini) {
-    return read_ini_flag(ini,"Features","RemoveDialogueBackgrounds");
+    return read_ini_flag(ini,"Features","RemoveDialogueBackgrounds","1");
 }
 bool configured_remove_cinematic_bars(const fs::path& ini) {
-    return read_ini_flag(ini,"Features","RemoveCinematicBars");
+    return read_ini_flag(ini,"Features","RemoveCinematicBars","1");
 }
 bool configured_music_in_pause_menu(const fs::path& ini) {
-    return read_ini_flag(ini,"Features","MusicInPauseMenu");
+    return read_ini_flag(ini,"Features","MusicInPauseMenu","1");
 }
 std::pair<std::uint32_t,std::uint32_t> render_resolution_for_display(
     std::uint32_t width,std::uint32_t height,bool classic_4_3) {
@@ -288,11 +288,13 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(current=="FEATURES" && key=="EARLYTHEMEMUSICEXPERIMENTAL")old_early_theme=true;
         if(current=="FEATURES" && key=="REMOVEBLACKFRAMES")legacy=true;
     }
-    // Existing opt-in users retain BOTH former behaviors. If only one new
-    // setting is present, its explicit value always takes precedence.
+    // Existing user settings, including explicit 0, always take precedence.
+    // A retired combined flag supplies both missing values when present;
+    // otherwise each feature defaults to 1.
     // Invalid legacy values are rejected before editing the user's INI.
     const bool inherited=legacy &&
         read_ini_flag(ini,"Features","RemoveBlackFrames");
+    const bool default_visual=!legacy || inherited;
     // Respect an explicitly configured AspectRatio if both keys are present.
     // Reject invalid settings before changing the user's file.
     if(aspect)(void)configured_aspect_ratio(ini);
@@ -312,24 +314,24 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(active=="FEATURES" && !skip && !added_skip) {
             output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 only");
             output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
-            output.emplace_back("SkipCinematics=0");
+            output.emplace_back("SkipCinematics=1");
             added_skip=true;
         }
         if(active=="FEATURES" && !dialogue && !added_dialogue) {
             output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
-            output.emplace_back(std::string("RemoveDialogueBackgrounds=")+(inherited?"1":"0"));
+            output.emplace_back(std::string("RemoveDialogueBackgrounds=")+(default_visual?"1":"0"));
             added_dialogue=true;
         }
         if(active=="FEATURES" && !cinematic && !added_cinematic) {
             output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
             output.emplace_back("; Does not affect GameFrame AspectRatio=4:3 sidebars");
-            output.emplace_back(std::string("RemoveCinematicBars=")+(inherited?"1":"0"));
+            output.emplace_back(std::string("RemoveCinematicBars=")+(default_visual?"1":"0"));
             added_cinematic=true;
         }
         if(active=="FEATURES" && !music && !added_music) {
             output.emplace_back("; 1 = continue level music throughout ESC, including verified early Theme handoffs");
-            output.emplace_back("; Default 0 (opt in); original SFX and level changes remain native");
-            output.emplace_back("MusicInPauseMenu=0");
+            output.emplace_back("; Default 1; set 0 to restore original ESC pause music behavior");
+            output.emplace_back("MusicInPauseMenu=1");
             added_music=true;
         }
     };
@@ -389,12 +391,12 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
         output.emplace_back("SkipCinematics=0");
         output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
-        output.emplace_back("RemoveDialogueBackgrounds=0");
+        output.emplace_back("RemoveDialogueBackgrounds=1");
         output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
         output.emplace_back("; Does not affect GameFrame AspectRatio=4:3 sidebars");
-        output.emplace_back("RemoveCinematicBars=0");
+        output.emplace_back("RemoveCinematicBars=1");
         output.emplace_back("; 1 = continue level music throughout ESC, including verified early Theme handoffs");
-        output.emplace_back("; Default 0 (opt in); preserves native SFX and level changes");
+        output.emplace_back("; Default 1; set 0 to restore original ESC pause music behavior");
         output.emplace_back("MusicInPauseMenu=0");
     }
     // Retain original BOM, comments, unrelated keys and EOL type.
