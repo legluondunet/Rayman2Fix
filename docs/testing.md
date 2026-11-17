@@ -615,7 +615,11 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
   that the launcher restores the exact embedded runtime **without creating
   or retaining any `fix.dll` backup**. Repeat using a same-size but altered
   DLL marked read-only; a subsequent launch with a matching DLL must be
-  idempotent, without modifying the DLL or creating backups.
+  idempotent, without modifying the DLL or creating backups. With
+  `Log=1`, the installer log must report
+  `RUNTIME-DEPLOY: status=installed|replaced|unchanged backups_removed=N backup_created=0`,
+  as applicable. On a previously installed game, `status=unchanged`
+  does **not** prove a replacement occurred during that invocation.
 - Replace the installed `glide2x.dll` with an unknown file, rerun the
   launcher, verify the old file is preserved as `glide2x.dll.bak` and
   the pinned DLL is restored. A third launch must be idempotent.
