@@ -61,7 +61,11 @@ state/
 - **`state/` : reçus d'installation et d'intégrité SHA-256 uniquement.**
   Ne pas les supprimer : ils sont indispensables à la vérification normale.
 - `Rayman2Fix.ini` : unique fichier de configuration utilisateur du correctif.
-  `game/ubi.ini` est une configuration interne propre au jeu.
+  La résolution de sortie suit automatiquement celle de l'écran principal ;
+  il n'existe plus d'option `Resolution`. Le FOV 3D s'adapte au format
+  de l'affichage, sans modifier le mode Glide interne 1024×768 en 4:3.
+  `AspectRatio=Auto` conserve le panoramique et `AspectRatio=4:3` centre
+  l'image classique. `game/ubi.ini` reste une configuration interne au jeu.
 - Les journaux sont conservés à côté du lanceur, jamais dans `state/`
   ni dans `docs/`.
 
