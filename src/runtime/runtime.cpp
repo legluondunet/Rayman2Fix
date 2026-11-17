@@ -273,6 +273,17 @@ Native2DSprite g_original_2d_sprite=nullptr;
 // (screen_dimensions, GLI viewport) in approved retail CD executable.
 using NativeViewportCalc=void (__cdecl*)(void*,void*);
 NativeViewportCalc g_original_cinematic_viewport_calc=nullptr;
+// A separate verified original retail-CD frame-flip wrapper (VA
+// 0x420F50) remains active when a full-screen jail_20 movie does
+// not invoke camera / native UI / viewport drawing for ~75 seconds.
+// We forward its entire original operation before polling input.
+// This is NOT a timer, foreign-thread callback, or Glide proxy.
+using NativeFrameFlip=int (__cdecl*)(int,int);
+NativeFrameFlip g_original_native_frame_flip=nullptr;
+constexpr uintptr_t kNativeFrameFlipRva=0x20F50u;
+constexpr BYTE kNativeFrameFlipExpected[6]={
+    0x8B,0x0D,0x08,0x72,0x4A,0x00
+};
 constexpr uintptr_t kCinematicViewportCalcRva=0x20660u;
 constexpr BYTE kCinematicViewportCalcExpected[6]={
     0x83,0xEC,0x08,0x53,0x55,0x56
@@ -4598,7 +4609,8 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     // audible when this is the first rendered ESC-menu frame.
     const unsigned fallback_bit=
         source==r2fix::RenderPollSource::Native2D ? 1u :
-        source==r2fix::RenderPollSource::Viewport ? 2u : 0u;
+        source==r2fix::RenderPollSource::Viewport ? 2u :
+        source==r2fix::RenderPollSource::FrameFlip ? 4u : 0u;
     const bool first_fallback=fallback_bit &&
         !(g_render_poll_fallback_reported.fetch_or(
               fallback_bit,std::memory_order_relaxed)&fallback_bit);
@@ -4627,10 +4639,29 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
             "RUNTIME-RENDER-POLL: fallback-active source=%s "
             "camera_age_ms=%lu same_camera_thread=1 "
             "(existing input/audio guards unchanged)",
-            fallback_bit==1u?"native-2d":"native-viewport",
+            fallback_bit==1u?"native-2d":
+            (fallback_bit==2u?"native-viewport":"native-frame-flip"),
             static_cast<unsigned long>(DWORD(now-camera_at)));
         log_line(msg);
     }
+}
+
+// Keep the original two-argument return/ABI and 1999 GLI flip order.
+// Poll only after the original frame flip returned, and ONLY when the
+// original camera previously identified this exact engine thread.
+// NativeFrameFlip's already-validated game callsites include 0x45EEA3,
+// 0x45EF87, 0x40AE81 and 0x40106C. Same source for Auto and 4:3;
+// no per-resolution logic or synthetic keyboard event.
+int __cdecl native_frame_flip_for_intro(int first,int second) {
+    const auto original=g_original_native_frame_flip;
+    if(!original)return 0;
+    const int result=original(first,second);
+    if(g_skip_cinematics && g_current_level &&
+       g_game_camera_thread_id.load(std::memory_order_acquire)==
+           GetCurrentThreadId() &&
+       r2fix::is_second_intro(g_current_level))
+        poll_game_render_events(r2fix::RenderPollSource::FrameFlip);
+    return result;
 }
 
 struct PollAfterNativeDraw {
@@ -5813,6 +5844,60 @@ void install_native_2d_percent_hook() {
     log_line("RUNTIME-HUD: native 2D percent entry hook installed (all levels, shared font/image/frame geometry)");
 }
 
+// The game-side flip wrapper is active during full-screen movies where
+// neither the world camera nor 2D/viewport draw hooks fire, so 4:3
+// may otherwise miss a pressed key for the whole cutscene. Hook this
+// exact original entry (6-byte instruction) only after the approved
+// camera and GLI hooks are installed. Never patch unknown executables.
+void install_native_frame_flip_hook() {
+    if(!g_skip_cinematics || g_original_native_frame_flip)return;
+    auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+    if(!base)return;
+    const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if(dos->e_magic!=IMAGE_DOS_SIGNATURE ||
+       dos->e_lfanew<=0 || dos->e_lfanew>=0x1000)return;
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+        base+dos->e_lfanew);
+    if(pe->Signature!=IMAGE_NT_SIGNATURE ||
+       pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
+       pe->OptionalHeader.Magic!=IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
+       pe->OptionalHeader.SizeOfImage<
+           kNativeFrameFlipRva+sizeof(kNativeFrameFlipExpected))return;
+    auto* entry=base+kNativeFrameFlipRva;
+    if(std::memcmp(entry,kNativeFrameFlipExpected,
+                   sizeof(kNativeFrameFlipExpected))!=0) {
+        log_line("RUNTIME-INTRO: original frame-flip bytes unknown; "
+                 "frame-flip fallback disabled");
+        return;
+    }
+    auto* gateway=static_cast<BYTE*>(VirtualAlloc(
+        nullptr,64,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    if(!gateway)return;
+    constexpr std::size_t kCopied=sizeof(kNativeFrameFlipExpected);
+    std::memcpy(gateway,entry,kCopied);
+    write_jump(gateway+kCopied,entry+kCopied);
+    DWORD unused=0;
+    if(!VirtualProtect(gateway,64,PAGE_EXECUTE_READ,&unused)) {
+        VirtualFree(gateway,0,MEM_RELEASE);
+        return;
+    }
+    DWORD prior=0;
+    if(!VirtualProtect(entry,kCopied,PAGE_EXECUTE_READWRITE,&prior)) {
+        VirtualFree(gateway,0,MEM_RELEASE);
+        return;
+    }
+    g_original_native_frame_flip=
+        reinterpret_cast<NativeFrameFlip>(gateway);
+    write_jump(entry,reinterpret_cast<const void*>(
+        &native_frame_flip_for_intro));
+    entry[5]=0x90;
+    FlushInstructionCache(GetCurrentProcess(),entry,kCopied);
+    VirtualProtect(entry,kCopied,prior,&unused);
+    log_line("RUNTIME-INTRO: original game GLI frame-flip fallback "
+             "armed for jail_20 (same camera thread, 4:3 input gap)");
+}
+
 void initialize_native_intro_skip() {
     if(!g_skip_cinematics) {
         log_line("RUNTIME-INTRO: jail_20 skip disabled by Features.SkipCinematics=0; Learn_10 remains unskippable");
@@ -6700,6 +6785,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         if(g_remove_cinematic_bars || needs_native_render_events)
             install_cinematic_viewport_hook();
         initialize_native_intro_skip();
+        install_native_frame_flip_hook();
         start_hud_monitor();
         // Apply game EXE icon in its own process, independently of ESC audio.
         r2fix::start_game_window_icon_worker(&log_line);
