@@ -389,7 +389,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         output.emplace_back("[Features]");
         output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 only");
         output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
-        output.emplace_back("SkipCinematics=0");
+        output.emplace_back("SkipCinematics=1");
         output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
         output.emplace_back("RemoveDialogueBackgrounds=1");
         output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
@@ -397,7 +397,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         output.emplace_back("RemoveCinematicBars=1");
         output.emplace_back("; 1 = continue level music throughout ESC, including verified early Theme handoffs");
         output.emplace_back("; Default 1; set 0 to restore original ESC pause music behavior");
-        output.emplace_back("MusicInPauseMenu=0");
+        output.emplace_back("MusicInPauseMenu=1");
     }
     // Retain original BOM, comments, unrelated keys and EOL type.
     std::ifstream old(ini,std::ios::binary);
