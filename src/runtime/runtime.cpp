@@ -19,6 +19,7 @@
 #include "rayman2fix/scene_intro.hpp"
 #include "rayman2fix/scene_script_probe.hpp"
 #include "rayman2fix/intro_gate_timeline.hpp"
+#include "rayman2fix/intro_native_signal.hpp"
 #include "rayman2fix/intro_integer_reader.hpp"
 #include "rayman2fix/game_window_icon.hpp"
 #include "rayman2fix/render_poll_gate.hpp"
@@ -235,6 +236,11 @@ ObservedDirectorByte g_director_var95{};
 ObservedDirectorByte g_director_var96{};
 r2fix::IntroGateTimeline<48> g_director_gate_history{};
 bool g_director_gate_history_reported = false;
+#if RAYMAN2FIX_RESEARCH_PROBES
+// The existing engine/render callback, not a worker or timer, samples
+// V96 and the physical Enter edge while the intro director is live.
+r2fix::IntroNativeSignalTimeline<64> g_learn_native_signals{};
+#endif
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
@@ -4469,6 +4475,16 @@ void trace_native_exit_gates(DWORD elapsed) {
     sample(110,g_director_var110);
     sample(83,g_director_var83);
     sample(14,g_director_var14);
+#if RAYMAN2FIX_RESEARCH_PROBES
+    // Unlike the coarse phase snapshots, sample the integer V96 on
+    // each permitted native callback. Captures only bounded CHANGES,
+    // and associates them with physical Enter press edges, read-only.
+    // Missed game frames can still hide short native signals.
+    std::int32_t v96=0;
+    const bool valid=read_cached(g_director_var96,v96);
+    const bool enter_down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
+    g_learn_native_signals.observe(elapsed,valid,v96,enter_down);
+#endif
 }
 
 // Flush at least one second *after* natural handover: printing dozens
@@ -4499,6 +4515,38 @@ void log_native_gate_history(DWORD elapsed) {
     }
 }
 
+#if RAYMAN2FIX_RESEARCH_PROBES
+void log_learn_native_signal_history(DWORD elapsed) {
+    if (!g_log) return;
+    const auto& history=g_learn_native_signals;
+    char message[260]{};
+    std::snprintf(message,sizeof(message),
+        "RUNTIME-INTRO: learn10-signal-history t=%ums "
+        "known=%u initial=%d last=%d valid_samples=%u unreadable=%u "
+        "transitions=%u entered104=%u entered110=%u enter_presses=%u "
+        "events=%u retained=%u dropped=%u (read-only; callback sampling only)",
+        unsigned(elapsed),unsigned(history.signal_known),
+        int(history.initial_signal),int(history.last_signal),
+        unsigned(history.valid_samples),unsigned(history.invalid_samples),
+        unsigned(history.signal_changes),unsigned(history.enters_104),
+        unsigned(history.enters_110),unsigned(history.enter_presses),
+        unsigned(history.total),unsigned(history.retained()),
+        unsigned(history.dropped()));
+    log_line(message);
+    for (std::size_t i=0;i<history.retained();++i) {
+        const auto& e=history.chronological(i);
+        std::snprintf(message,sizeof(message),
+            "RUNTIME-INTRO: learn10-signal-event t=%ums kind=%s signal=%d "
+            "(observed; no state writes)",
+            unsigned(e.elapsed_ms),
+            e.kind==r2fix::IntroNativeSignalKind::enter_press ?
+                "enter-press" : "signal-transition",
+            int(e.signal));
+        log_line(message);
+    }
+}
+#endif
+
 void poll_learn_intro_skip() {
     if (!g_current_level) return;
     if (!r2fix::is_first_playable_level(g_current_level)) {
@@ -4528,6 +4576,9 @@ void poll_learn_intro_skip() {
         g_director_var96={};
         g_director_gate_history={};
         g_director_gate_history_reported=false;
+#if RAYMAN2FIX_RESEARCH_PROBES
+        g_learn_native_signals={};
+#endif
         return;
     }
     if (!g_progress_words) {
@@ -4617,6 +4668,9 @@ void poll_learn_intro_skip() {
         g_learn_handover_start = 0;
         log_natural_intro_snapshot("handover-plus-1s",DWORD(GetTickCount()-g_learn_intro_start));
         log_native_gate_history(DWORD(GetTickCount()-g_learn_intro_start));
+#if RAYMAN2FIX_RESEARCH_PROBES
+        log_learn_native_signal_history(DWORD(GetTickCount()-g_learn_intro_start));
+#endif
     }
 }
 
