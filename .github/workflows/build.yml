@@ -242,6 +242,9 @@ jobs:
           if ($expected -ne $actual) {
             throw 'Embedded DLL is not identical to build output'
           }
+          if (!(Select-String -Path package-smoke/Rayman2Fix_installer.log -Pattern '^RUNTIME-DEPLOY: status=installed backups_removed=0 backup_created=0$')) {
+            throw 'Expected runtime deployment log: installed backups_removed=0'
+          }
           # A mismatched embedded runtime is authoritative: replace it without
           # retaining any old DLL, even if legacy backups remain from old builds.
           $runtimeDir = (Resolve-Path 'package-smoke/game').Path
@@ -258,6 +261,9 @@ jobs:
               (Test-Path "$runtime.installing")) {
             throw 'Runtime replacement must discard old DLL and legacy backups'
           }
+          if (!(Select-String -Path package-smoke/Rayman2Fix_installer.log -Pattern '^RUNTIME-DEPLOY: status=replaced backups_removed=2 backup_created=0$')) {
+            throw 'Expected runtime deployment log: replaced backups_removed=2'
+          }
 
           # Same-size tampering must also be replaced. Check read-only legacy
           # runtime handling, then ensure a third unchanged run is idempotent.
@@ -272,6 +278,9 @@ jobs:
               (Test-Path "$runtime.installing")) {
             throw 'Read-only same-size unknown runtime must be replaced without backup'
           }
+          if (!(Select-String -Path package-smoke/Rayman2Fix_installer.log -Pattern '^RUNTIME-DEPLOY: status=replaced backups_removed=0 backup_created=0$')) {
+            throw 'Expected runtime deployment log: replaced backups_removed=0'
+          }
           $timestamp = (Get-Item $runtime).LastWriteTimeUtc.Ticks
           & ./package-smoke/Rayman2Fix.exe
           if ($LASTEXITCODE -ne 2 -or
@@ -279,6 +288,9 @@ jobs:
               (Get-Item $runtime).LastWriteTimeUtc.Ticks -ne $timestamp -or
               @(Get-ChildItem $runtimeDir -File -Filter 'fix.dll.bak*').Count -ne 0) {
             throw 'Unchanged runtime must not be rewritten or generate backups'
+          }
+          if (!(Select-String -Path package-smoke/Rayman2Fix_installer.log -Pattern '^RUNTIME-DEPLOY: status=unchanged backups_removed=0 backup_created=0$')) {
+            throw 'Expected runtime deployment log: unchanged backups_removed=0'
           }
           Write-Host 'Single authoritative game/fix.dll replacement, no backup: PASS'
           if (!(Test-Path package-smoke/third_party/gameframe/glide2x.dll) -or
