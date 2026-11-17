@@ -25,6 +25,7 @@
 #include <mutex>
 #if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
 #include "rayman2fix/esc_music_wine_prototype.hpp"
+#include "rayman2fix/esc_source_alias.hpp"
 #endif
 #include <atomic>
 #include <cmath>
@@ -1801,6 +1802,29 @@ int proto_read_transition_type_post_wrapper(DWORD object_ref) {
     if(!ok)return -1;
     return (type==1u || type==2u || type==4u) ? int(type) : 0;
 }
+// Read ONLY after the original Pause wrapper and the existing menu audio
+// decision, on the render thread. Exact original CD source table:
+// 64 records of 0x20 bytes at RVA 0xB8C98. The table's +0 reference is
+// the original type-1 source argument, not an APMMX physical voice epoch.
+// Duplicate two full reads detect some concurrent edits but are NOT atomic
+// with the native callback sequence. No source or driver state is modified.
+r2fix::esc_source_alias::Summary proto_sample_source_alias_after_menu_tick(
+    DWORD transition_object,DWORD old_game_depth) {
+    using namespace r2fix::esc_source_alias;
+    Summary unknown{};
+    if(transition_object<0x10000u || transition_object==0xffffffffu ||
+       old_game_depth<1u || old_game_depth>16u)return unknown;
+    const auto* base=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+    if(!base)return unknown;
+    RawTable first{},second{};
+    const auto read=[&](RawTable& raw) {
+        SIZE_T got=0;
+        return ReadProcessMemory(GetCurrentProcess(),base+0xB8C98u,
+                raw.data(),raw.size(),&got)!=0 && got==raw.size();
+    };
+    if(!read(first) || !read(second))return unknown;
+    return summarize(first,first==second,transition_object,old_game_depth);
+}
 // Actual owner-supplied WAVMWbvr.dll dispatches type 4 by reading
 // [transition+4] and passing that ADPCM handle to APMMXbvr.dll. The
 // owner-supplied APMMXbvr.dll checks [handle] against its 0xE4-stride
@@ -2833,6 +2857,29 @@ void proto_menu_tick() {
             owner.inner_bank_provenance.resource_index,
             report.transition_type_post_pause);
         log_line(line);
+        // Bounded source-table cross-check: does the original 64-slot
+        // table currently contain one or several entries pointing to the
+        // driver argument observed in the *already forwarded* native pair?
+        // Never interpret a post-wrapper stamp or pointer equality as
+        // proof that those source entries actually executed or that an
+        // ADPCM record's physical epoch survived the menu.
+        const auto alias=
+            report.depth_before>=1 && report.transition_type_post_pause==4 &&
+            probe.pause_count==2u && probe.other_handle_count==0u ?
+            proto_sample_source_alias_after_menu_tick(
+                probe.first_handle,DWORD(report.depth_before)) :
+            r2fix::esc_source_alias::Summary{};
+        char alias_line[380]{};
+        std::snprintf(alias_line,sizeof(alias_line),
+            "RUNTIME-ESC-SOURCE-ALIAS: snapshot=%u same_ref=%u "
+            "transition_candidates=%u depth_stamped=%u "
+            "indices=%d,%d,%d,%d depth_before=%d "
+            "(post-wrapper double-read; not callback or physical voice proof)",
+            unsigned(alias.sampled),alias.same_ref,
+            alias.transition_candidate,alias.stamped_candidate,
+            alias.indices[0],alias.indices[1],
+            alias.indices[2],alias.indices[3],report.depth_before);
+        log_line(alias_line);
         // Only compare the ORIGINAL controller gate values after
         // the native Pause and all existing synthetic safety decisions.
         // Eligible flags are never permission to issue a music command.
