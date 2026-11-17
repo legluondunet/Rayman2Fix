@@ -271,6 +271,13 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME esc-source-sound-table-alias-research
     COMMAND esc_source_alias_tests)
+  # Independent fail-closed policy for the deliberately disabled-by-default
+  # early pending-Theme listening experiment (no native game/driver APIs).
+  add_executable(esc_early_theme_tests tests/esc_early_theme_tests.cpp)
+  target_include_directories(esc_early_theme_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-early-theme-experimental-gate
+    COMMAND esc_early_theme_tests)
 
   add_executable(fov_math_tests tests/fov_math_tests.cpp)
   target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
