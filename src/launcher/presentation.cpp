@@ -296,7 +296,7 @@ void WindowPresentation::update() {
     result_.window_found = true;
 
     // In multi-monitor configurations choose the primary screen used by
-    // GLIDE_SIZE and the single user-facing Graphics.Resolution=Desktop.
+    // automatic GLIDE_SIZE; no user resolution override exists.
     const HWND hwnd = search.best;
     // Updating the icon is independent of borderless geometry; avoid
     // skipping it when style/position have already converged.
