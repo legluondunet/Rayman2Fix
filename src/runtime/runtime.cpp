@@ -251,6 +251,7 @@ bool g_director_gate_history_reported = false;
 bool g_learn10_proto_opted_in = false;
 bool g_learn10_proto_attempted = false;
 bool g_learn10_proto_armed = false;
+DWORD g_learn10_proto_armed_at = 0;
 std::uintptr_t g_learn10_proto_words = 0;
 #endif
 std::uintptr_t g_progress_words = 0;
@@ -3840,6 +3841,7 @@ void learn10_proto_try_restore(const char* reason);
 void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
     if (!g_learn10_proto_opted_in || g_learn10_proto_attempted ||
         !g_learn_intro_seen || handed_over ||
+        elapsed>r2fix::kLearn10NomoviesLatestStartMs ||
         !g_learn_script_probe_done || !g_progress_words ||
         g_observed_director_index!=3 ||
         !g_observed_director_intelligence ||
@@ -3887,6 +3889,7 @@ void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
         return;
     }
     g_learn10_proto_words=g_progress_words;
+    g_learn10_proto_armed_at=GetTickCount();
     g_learn10_proto_armed=true;
     bool confirmed=false;
     if (!game_story_bit(g_learn10_proto_words,kNoMoviesCheatBit,confirmed) ||
@@ -3900,8 +3903,8 @@ void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
     std::snprintf(msg,sizeof(msg),
         "RUNTIME-LEARN10-PROTOTYPE: phase=armed t=%ums "
         "nomovies_bit1188=1 original=0 director=3 "
-        "native-original-branch=verified "
-        "release Enter then press Enter once to request original skip",
+        "native-original-alternative=verified "
+        "no-key-required max_armed_ms=2000",
         unsigned(elapsed));
     log_line(msg);
 }
@@ -3921,6 +3924,7 @@ void learn10_proto_try_restore(const char* reason) {
         if (!read_u32(address,before)) break;
         if (!(before&r2fix::story_word_mask(kNoMoviesCheatBit))) {
             g_learn10_proto_armed=false;
+            g_learn10_proto_armed_at=0;
             g_learn10_proto_words=0;
             log_line("RUNTIME-LEARN10-PROTOTYPE: phase=restored "
                      "state=already-clear (no game memory changed)");
@@ -3929,6 +3933,7 @@ void learn10_proto_try_restore(const char* reason) {
         if (r2fix::plan_learn10_nomovies_restore(before,replacement) &&
             learn10_proto_compare_exchange(address,before,replacement)) {
             g_learn10_proto_armed=false;
+            g_learn10_proto_armed_at=0;
             g_learn10_proto_words=0;
             char msg[220]{};
             std::snprintf(msg,sizeof(msg),
@@ -4730,6 +4735,31 @@ void log_native_gate_history(DWORD elapsed) {
 }
 
 void poll_learn_intro_skip() {
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+    // The original NOMOVIES branch is the top-level ELSE of IfNot(1188).
+    // It does NOT wait for the JustPressedBut condition inside the IF.
+    // Stop exposing the progress flag as soon as the native director
+    // leaves behaviour 3, or after 2 seconds at the latest. No use of
+    // synthetic Enter/Space/Esc events.
+    if (g_learn10_proto_armed) {
+        bool left_b3=false;
+        std::uint32_t active=0;
+        if (g_observed_director_intelligence &&
+            g_observed_director_behaviours &&
+            read_u32(g_observed_director_intelligence+8u,active)) {
+            const auto table=g_observed_director_behaviours;
+            const auto pointer=std::uintptr_t(active);
+            if (pointer>=table && pointer<table+6u*12u &&
+                (pointer-table)%12u==0u &&
+                pointer!=table+3u*12u)
+                left_b3=true;
+        }
+        if (r2fix::restore_learn10_nomovies_due(
+                GetTickCount(),g_learn10_proto_armed_at,left_b3))
+            learn10_proto_try_restore(left_b3?
+                "director-left-b3":"max-exposure-2000ms");
+    }
+#endif
     if (!g_current_level) return;
     if (!r2fix::is_first_playable_level(g_current_level)) {
 #if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
@@ -7129,7 +7159,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         learn10_length==1 && enable_learn10[0]==L'1';
     log_line(g_learn10_proto_opted_in ?
         "RUNTIME-LEARN10-PROTOTYPE: enabled=1 route=native-NOMOVIES "
-        "manual-Enter=required isolated-save-copy=required; "
+        "automatic-alternative=1 max_armed_ms=2000 isolated-save-copy=required; "
         "never use with personal saves" :
         "RUNTIME-LEARN10-PROTOTYPE: enabled=0 "
         "set env RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE=1 "
