@@ -703,3 +703,63 @@ read-only facts, without treating a shared driver handle as a durable
 voice epoch. Existing strict `ref_class=1` authorization and
 `phase=6` passthrough remain unchanged. Do not activate this model
 via `MusicInPauseMenu`; PR #10 stays draft.
+
+## Post-menu source alias observer (17 November 2026)
+
+The original retail-CD disassembly verifies that
+`0x4580B0` iterates **64 source records** of 32 bytes beginning at
+`0x4B8C98` (loaded RVA `0xB8C98`). For an eligible transition record,
+`0x4584A0` selects the source type through `[[record+4]+4]`. The
+type-1 route loads `[record+0]` and passes it to `0x4553A0`, whose
+registered callback goes to the native SXD transition driver. In
+contrast, the type-2 route can dispatch through another driver.
+A matching `[record+0]` pointer alone therefore does **not** prove
+which source entry reached WAVMW or that an entry was invoked at all.
+
+A **diagnostic-only, bounded** observer now runs on the render-thread
+menu tick, **after** both the unchanged original script Pause wrapper
+and the existing native audio compensation. When the already captured
+script source reported exactly two matching native slot-2 callbacks,
+the observed WAVMW object type was 4, and the previous game pause
+depth is known, it reads the exact original 64-source table **twice**
+(2 KiB per read) via the existing Win32 memory reader. If both full
+byte snapshots match, it compares each entry's `+0` reference to
+the *previously observed* native transition callback argument. The
+report contains ONLY counts, first four **source indices**,
+source-table transition eligibility (`+0x14 != 0`, `+0x08 == 0`,
+`+0x10 != 0`) and original game depth stamps (`+0x1c` equal to
+the old depth). No pointer/address is logged or retained, and no
+memory is written.
+
+The new log marker is:
+
+```text
+RUNTIME-ESC-SOURCE-ALIAS: snapshot=0|1 same_ref=N transition_candidates=N depth_stamped=N indices=a,b,c,d depth_before=N (post-wrapper double-read; not callback or physical voice proof)
+```
+
+This is intentionally **not** a pre-dispatch predictor: the table
+may have changed during the original source wrapper and again between
+the original callbacks and the menu tick. Two equal render-thread
+reads are **not atomic with the native calls**; depth stamps can
+predate this ESC and do not identify physical ADPCM handles. It is
+still useful to distinguish whether the original source table
+currently has **zero, one, two or more distinct indices** that alias
+the observed transition *object*. For example, a count of 2 would be
+consistent with two separate source entries referencing one object,
+not proof of the two exact originating callbacks.
+
+The pure classifier `include/rayman2fix/esc_source_alias.hpp`
+has synthetic C++ regression tests
+`tests/esc_source_alias_tests.cpp` (alias multiplicity, excluded
+source, old depth stamp, torn/incomplete observation, bounded indices).
+Both this classifier and the earlier flag-only model always set
+`authorize_audio=false`. Neither is linked to an active Pause
+suppression decision, and there is **no new driver callback hook**.
+
+**Next owner-log check** (only after Windows x86 CI succeeds): a
+post-intro early ESC and a later stable ESC with `[Debug] Log=1`,
+`[Features] MusicInPauseMenu=1`. Compare `same_ref`,
+`transition_candidates` and `depth_stamped` against the existing
+`RUNTIME-ESC-PREDRIVER-GATE` line. Do not infer original callback
+identity, atomicity, or native voice generation from matching counts.
+Leave physical Pause withholding NO-GO and PR #10 DRAFT.
