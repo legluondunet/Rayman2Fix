@@ -29,16 +29,19 @@ static void write(const fs::path& target, const std::string& content) {
 }
 
 int main(int argc, char** argv) {
-    const auto root = fs::temp_directory_path() /
+    const auto launcher_root = fs::temp_directory_path() /
         ("r2fix process with spaces " +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto root=launcher_root/"game";
     fs::create_directories(root);
     try {
         const auto preflight = r2fix::check_game_launch(root);
         check(!preflight.allowed, "empty installation must be refused");
         write(root / "rayman2.exe", "untrusted executable");
         write(root / "rayman2.exe.bak", "untrusted backup");
-        write(root / ".rayman2fix-exe-patch.tsv", "invalid patch marker");
+        fs::create_directories(launcher_root/"state");
+        write(launcher_root / "state" / ".rayman2fix-exe-patch.tsv",
+              "invalid patch marker");
         write(root / "ubi.ini", "[Rayman2]\nGLI_Dll=Glide2\n");
         check(!r2fix::check_game_launch(root).allowed,
               "tampered executable/marker must not be allowed to launch");
@@ -71,9 +74,9 @@ int main(int argc, char** argv) {
             check(static_cast<bool>(probe),"child PATH probe missing");
             std::wstring actual;
             std::getline(probe,actual);
-            const auto expected=fs::absolute(root/"rayman2fix").wstring();
+            const auto expected=fs::absolute(launcher_root/"third_party"/"gameframe").wstring();
             check(actual==expected || actual.rfind(expected+L";",0)==0,
-                  "game child must search nested rayman2fix before inherited PATH");
+                  "game child must search third_party/gameframe before inherited PATH");
         }
         r2fix::configure_launcher_dpi_awareness();
         r2fix::ChildDisplayOptions options;
@@ -84,10 +87,9 @@ int main(int argc, char** argv) {
         // The fixture is deliberately not an approved Rayman 2 build.
         // Injection must load the local DLL but safely refuse to hook it.
         const auto local_runtime = fs::absolute(fs::path(argv[0])).parent_path() /
-                                   "Rayman2Fix.dll";
+                                   "fix.dll";
         check(fs::exists(local_runtime), "native Hor+ runtime built beside tests");
-        fs::create_directories(root / "rayman2fix");
-        fs::copy_file(local_runtime, root / "rayman2fix" / "Rayman2Fix.dll");
+        fs::copy_file(local_runtime, root / "fix.dll");
         options.enable_fov = true;
         options.fps_limit = 75;
         options.log_enabled = false;
@@ -369,12 +371,12 @@ int main(int argc, char** argv) {
         const auto failure = r2fix::run_child_process(root / "missing.exe", root);
         check(!failure.started, "non-Windows tests do not spawn Windows EXEs");
 #endif
-        fs::remove_all(root);
+        fs::remove_all(launcher_root);
         std::cout << "Launch preflight / process tests passed\n";
         return 0;
     } catch (const std::exception& e) {
         std::error_code ignored;
-        fs::remove_all(root, ignored);
+        fs::remove_all(launcher_root, ignored);
         std::cerr << "Launch tests failed: " << e.what() << '\n';
         return 1;
     }
