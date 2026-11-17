@@ -253,6 +253,8 @@ bool g_learn10_proto_attempted = false;
 bool g_learn10_proto_armed = false;
 DWORD g_learn10_proto_armed_at = 0;
 std::uintptr_t g_learn10_proto_words = 0;
+bool g_learn10_proto_enter_down = false;
+unsigned g_learn10_proto_enter_edges = 0;
 #endif
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
@@ -3890,6 +3892,8 @@ void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
     }
     g_learn10_proto_words=g_progress_words;
     g_learn10_proto_armed_at=GetTickCount();
+    g_learn10_proto_enter_down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
+    g_learn10_proto_enter_edges=0;
     g_learn10_proto_armed=true;
     bool confirmed=false;
     if (!game_story_bit(g_learn10_proto_words,kNoMoviesCheatBit,confirmed) ||
@@ -3904,7 +3908,7 @@ void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
         "RUNTIME-LEARN10-PROTOTYPE: phase=armed t=%ums "
         "nomovies_bit1188=1 original=0 director=3 "
         "native-original-alternative=verified "
-        "no-key-required max_armed_ms=2000",
+        "physical-input-needed max_armed_ms=5000",
         unsigned(elapsed));
     log_line(msg);
 }
@@ -3938,14 +3942,31 @@ void learn10_proto_try_restore(const char* reason) {
             char msg[220]{};
             std::snprintf(msg,sizeof(msg),
                 "RUNTIME-LEARN10-PROTOTYPE: phase=restored "
-                "reason=%s nomovies_bit1188=0 other_progress_bits=preserved",
-                reason);
+                "reason=%s nomovies_bit1188=0 other_progress_bits=preserved enter_edges=%u",
+                reason,unsigned(g_learn10_proto_enter_edges));
             log_line(msg);
             return;
         }
     }
     log_line("RUNTIME-LEARN10-PROTOTYPE: phase=restore-pending "
              "reason=compare-exchange-failed (do not save game)");
+}
+// Passive physical Enter observation only, not the game's unknown
+// opaque JustPressedBut mapping and NEVER a synthetic input event.
+void learn10_proto_trace_physical_enter(DWORD elapsed) {
+    if (!g_learn10_proto_armed) return;
+    const bool down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
+    if (down && !g_learn10_proto_enter_down &&
+        g_learn10_proto_enter_edges<4u) {
+        ++g_learn10_proto_enter_edges;
+        char msg[188]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-LEARN10-PROTOTYPE: phase=physical-enter-edge t=%ums "
+            "count=%u (does not prove native JustPressedBut match)",
+            unsigned(elapsed),g_learn10_proto_enter_edges);
+        log_line(msg);
+    }
+    g_learn10_proto_enter_down=down;
 }
 #endif // RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
 
@@ -4737,11 +4758,13 @@ void log_native_gate_history(DWORD elapsed) {
 void poll_learn_intro_skip() {
 #if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
     // The original NOMOVIES branch is the top-level ELSE of IfNot(1188).
-    // It does NOT wait for the JustPressedBut condition inside the IF.
-    // Stop exposing the progress flag as soon as the native director
-    // leaves behaviour 3, or after 2 seconds at the latest. No use of
-    // synthetic Enter/Space/Esc events.
+    // The ELSE also has its own original JustPressedBut plus a 1000ms
+    // time guard. Enter is a tentative physical input, not a verified
+    // engine mapping. Stop exposing the flag on native director exit
+    // or after five seconds; no synthetic key events.
     if (g_learn10_proto_armed) {
+        learn10_proto_trace_physical_enter(
+            g_learn_intro_start ? DWORD(GetTickCount()-g_learn_intro_start):0u);
         bool left_b3=false;
         std::uint32_t active=0;
         if (g_observed_director_intelligence &&
@@ -4757,7 +4780,7 @@ void poll_learn_intro_skip() {
         if (r2fix::restore_learn10_nomovies_due(
                 GetTickCount(),g_learn10_proto_armed_at,left_b3))
             learn10_proto_try_restore(left_b3?
-                "director-left-b3":"max-exposure-2000ms");
+                "director-left-b3":"max-exposure-5000ms");
     }
 #endif
     if (!g_current_level) return;
@@ -7159,7 +7182,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         learn10_length==1 && enable_learn10[0]==L'1';
     log_line(g_learn10_proto_opted_in ?
         "RUNTIME-LEARN10-PROTOTYPE: enabled=1 route=native-NOMOVIES "
-        "automatic-alternative=1 max_armed_ms=2000 isolated-save-copy=required; "
+        "native-else-input-gate=1 max_armed_ms=5000 isolated-save-copy=required; "
         "never use with personal saves" :
         "RUNTIME-LEARN10-PROTOTYPE: enabled=0 "
         "set env RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE=1 "
