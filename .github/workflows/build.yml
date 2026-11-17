@@ -95,6 +95,15 @@ jobs:
           if (!(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern 'SYS-OS:')) {
             throw "Expected system inventory in the installer log"
           }
+          # Do not keep lines from an earlier installer invocation.
+          Add-Content -Path build/Release/Rayman2Fix_installer.log -Value 'STALE-INSTALLER-SESSION'
+          & ./build/Release/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or
+              (Select-String -Path build/Release/Rayman2Fix_installer.log -SimpleMatch 'STALE-INSTALLER-SESSION') -or
+              @(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern '^START: local_time=').Count -ne 1 -or
+              !(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern '^RUNTIME-DEPLOY:')) {
+            throw 'Installer log must contain exactly the latest launcher invocation'
+          }
           # Optional HD logo must be diagnosed without accessing any
           # original game texture. Presence/header checks never claim a
           # successful GPU replacement; that proof belongs to GameFrame.
@@ -177,6 +186,15 @@ jobs:
           if (!(Test-Path build/Release/Rayman2Fix_inspect.log) -or
               !(Select-String -Path build/Release/Rayman2Fix_inspect.log -Pattern 'INSPECT_RESULT=FAILED')) {
             throw 'Inspect must create a separate failure report'
+          }
+          # A second --inspect must truncate its own report, not append.
+          Add-Content -Path build/Release/Rayman2Fix_inspect.log -Value 'STALE-INSPECT-SESSION'
+          & $exe --inspect test.iso
+          if ($LASTEXITCODE -ne 2 -or
+              (Select-String -Path build/Release/Rayman2Fix_inspect.log -SimpleMatch 'STALE-INSPECT-SESSION') -or
+              @(Select-String -Path build/Release/Rayman2Fix_inspect.log -Pattern '^Rayman2Fix INSPECT v1$').Count -ne 1 -or
+              @(Select-String -Path build/Release/Rayman2Fix_inspect.log -Pattern '^INSPECT_RESULT=FAILED$').Count -ne 1) {
+            throw 'Inspect report must contain only the latest inspection'
           }
           & $exe -h
           if ($LASTEXITCODE -ne 0) { throw '-h must show help' }
