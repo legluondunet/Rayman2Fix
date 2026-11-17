@@ -234,6 +234,7 @@ ObservedDirectorByte g_director_var16{};
 ObservedDirectorByte g_director_var95{};
 ObservedDirectorByte g_director_var96{};
 r2fix::IntroGateTimeline<48> g_director_gate_history{};
+r2fix::IntroPhase96Timeline<24> g_director_phase96_history{};
 bool g_director_gate_history_reported = false;
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
@@ -4441,15 +4442,28 @@ void trace_native_exit_gates(DWORD elapsed) {
             [](std::uintptr_t p,std::uint32_t& w){return read_u32(p,w);},
             out);
     };
-    // Read v16/95/96 only on a native change, once per callback. Reuse
-    // the existing 48-entry event ring; no additional per-frame tracing.
+    // A V96==104 early-exit signal may be shorter than any of the
+    // four gate transitions. Observe exactly one verified scalar per
+    // existing camera callback, without hooking the interpreter or
+    // changing timing/game state. This is RESEARCH-ONLY, and a zero count
+    // does not prove there was no signal between callbacks.
+    std::int32_t v96_observed=0;
+    const bool v96_valid=g_director_var96.type==5 &&
+        read_cached(g_director_var96,v96_observed);
+    if (v96_valid)
+        g_director_phase96_history.observe(elapsed,v96_observed);
+    // Reuse the same V96 read when sampling the ordinary gate changes;
+    // V16/95 remain sampled only on a native gate change.
     bool sampled=false;
     r2fix::IntroPhaseSample phase{};
     const auto capture_phase=[&]() -> const r2fix::IntroPhaseSample& {
         if (!sampled) {
             if (read_cached(g_director_var16,phase.v16)) phase.valid|=1;
             if (read_cached(g_director_var95,phase.v95)) phase.valid|=2;
-            if (read_cached(g_director_var96,phase.v96)) phase.valid|=4;
+            if (v96_valid) {
+                phase.v96=v96_observed;
+                phase.valid|=4;
+            }
             sampled=true;
         }
         return phase;
@@ -4498,6 +4512,25 @@ void log_native_gate_history(DWORD elapsed) {
             int(e.phase.v95),int(e.phase.v96));
         log_line(message);
     }
+    // The old trace sampled V96 ONLY when V50/110/83/14 changed.
+    // Report an independent bounded view of every read-valid native
+    // render callback, after handover to avoid perturbing the scene.
+    const auto& phases=g_director_phase96_history;
+    std::snprintf(message,sizeof(message),
+        "RUNTIME-INTRO: director-phase96-history t=%ums samples=%u transitions=%u retained=%u dropped=%u samples104=%u entries104=%u first104_ms=%u samples110=%u (read-only; callbacks may miss short signals)",
+        unsigned(elapsed),unsigned(phases.samples),
+        unsigned(phases.changes),unsigned(phases.retained()),
+        unsigned(phases.dropped()),unsigned(phases.samples104),
+        unsigned(phases.entries104),unsigned(phases.first104_ms),
+        unsigned(phases.samples110));
+    log_line(message);
+    for(std::size_t i=0;i<phases.retained();++i) {
+        const auto& e=phases.chronological(i);
+        std::snprintf(message,sizeof(message),
+            "RUNTIME-INTRO: director-phase96-event t=%ums old=%d new=%d (observed, not written)",
+            unsigned(e.elapsed_ms),int(e.previous),int(e.current));
+        log_line(message);
+    }
 }
 
 void poll_learn_intro_skip() {
@@ -4528,6 +4561,7 @@ void poll_learn_intro_skip() {
         g_director_var95={};
         g_director_var96={};
         g_director_gate_history={};
+        g_director_phase96_history={};
         g_director_gate_history_reported=false;
         return;
     }
