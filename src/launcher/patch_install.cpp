@@ -1,4 +1,5 @@
 #include "rayman2fix/patch_install.hpp"
+#include "rayman2fix/install_layout.hpp"
 #include "rayman2fix/sha256.hpp"
 
 #include <algorithm>
@@ -52,7 +53,7 @@ std::pair<std::uint64_t, std::string> parse_marker_row(
     return {length, hash};
 }
 ExePatchHeader load_marker(const fs::path& game_root) {
-    const auto marker = game_root / "rayman2fix" / kMarker;
+    const auto marker = layout::exe_receipt(game_root);
     if (!clean_file(marker) || fs::file_size(marker) > 512)
         fail("invalid executable patch marker");
     std::ifstream in(marker, std::ios::binary);
@@ -95,7 +96,7 @@ ExePatchHeader commit_verified_replacement(const fs::path& root,
     const fs::path original = root / "rayman2.exe";
     const fs::path backup = root / "rayman2.exe.bak";
     const fs::path patched = root / "rayman2.exe.patching";
-    const fs::path fix_dir = root / "rayman2fix";
+    const fs::path fix_dir = layout::state_for_game(root);
     if (fs::is_symlink(fix_dir) ||
         (fs::exists(fix_dir) && !fs::is_directory(fix_dir)))
         fail("unsafe metadata directory");
@@ -149,7 +150,7 @@ ExePatchHeader commit_verified_replacement(const fs::path& root,
 } // namespace
 
 bool is_exe_replaced(const fs::path& root) {
-    return fs::exists(root / "rayman2fix" / kMarker);
+    return fs::exists(layout::exe_receipt(root));
 }
 
 bool verify_exe_replacement(const fs::path& root,
@@ -162,7 +163,7 @@ bool verify_exe_replacement(const fs::path& root,
             fail("invalid source-executable receipt");
         const fs::path exe = root / "rayman2.exe";
         const fs::path bak = root / "rayman2.exe.bak";
-        const fs::path marker = root / "rayman2fix" / kMarker;
+        const fs::path marker = layout::state_for_game(root) / kMarker;
         if (!fs::exists(marker)) {
             if (fs::exists(bak) || fs::is_symlink(bak))
                 fail("unexpected rayman2.exe.bak without patch marker");
