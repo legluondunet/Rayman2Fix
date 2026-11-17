@@ -1,3 +1,39 @@
+> **PR #10 — opt-in ESC pause music (not yet approved for release).**
+> This branch retains the validated nested installation layout from `main`.
+> In `rayman2/rayman2fix/Rayman2Fix.ini`, set
+> `[Features] MusicInPauseMenu=1` to test the guarded native
+> Theme/SXD continuation during the ESC menu (`0` by default).
+> First-menu continuation remains unverified and earlier retry attempts
+> caused audio regressions; the strict fail-closed policy stays in force.
+> Requires an explicitly tested PR preview build; ordinary `main`
+> installers do not implement this INI option.
+
+> **NEW: first-menu Theme handoff experiment (PR #10 only).** The
+> regular MusicInPauseMenu path has now been confirmed audible once
+> the original Theme player is synchronized. If you want to test music
+> during the *earlier* Theme handoff, keep `MusicInPauseMenu=1` and
+> `[Debug] Log=1`, then explicitly set
+> `[Features] EarlyThemeMusicExperimental=1` in the SAME
+> `Rayman2Fix.ini`. The key is created as `0` by default.
+> This research experiment attempts a native resume ONLY after the
+> original game forwarded two script-sourced Pauses, the real ESC menu
+> actor appeared, the pending Theme target matches the unique live
+> resource, direct+type-11 sources match, no global Play/Stop occurs
+> across the original Pause wrapper, and the original APMMX voice is
+> sampled active and paused. It never changes the native script
+> pause-depth or suppresses those two original Pause callbacks.
+> A later ref mismatch, Stop, or unexpected focus/stream event
+> still quarantines the sound modification.
+>
+> **Experimental warning:** this does NOT prove the physical ADPCM
+> record's creation epoch; voice reuse or an unexpected concurrent
+> Theme switch may still cause silence, wrong music or audio glitches.
+> It has synthetic tests only until an owner listening test under Wine
+> and Windows. Revert the experimental key to `0` if you hear
+> overlapping music, missing effects, music restarting incorrectly,
+> or silence after leaving ESC. Do not merge PR #10 based only
+> on CI results.
+
 ## New nested layout and safe migration
 
 The **retail game** is installed under `rayman2/`; the mod's
@@ -90,12 +126,26 @@ conversion deliberately maps the reference artwork to the exact
 historic atlas bounds; it is not promised to be pixel-identical to
 the retail title's low-res palette.
 
-## Music in the Escape pause menu — research build
+## Music in the Escape pause menu — experimental PR #10
 
-Requested future setting: `[Features] MusicInPauseMenu=0` (disabled by
-default). **Not yet implemented in the user INI**, because a reliable
-audio-only pause policy has not been identified. No placebo option is
-shipped. The original music and the game's sound driver are unchanged.
+The PR #10 test build exposes `[Features] MusicInPauseMenu=1` (disabled
+by default). It attempts guarded continuation of the **already-verified**
+native Theme/SXD music during the ESC menu. It does not replace the
+game's audio driver, and all uncertain or changed resource states
+fall back to the original native audio behavior.
+
+**Important limitation:** during the first pauses after the
+`jail_20` → `learn_10` transition, the original controller may
+still reference Theme `9:12` while the active Theme is `9:5`.
+The compensation refuses this unverified pairing, so music can remain
+silent in the menu until the original controller synchronizes. The
+owner's latest successful `AspectRatio=Auto` test showed that
+synchronization around 57.6 seconds of play and subsequent audible
+menu music, but did **not** validate first-ESC continuation.
+`AspectRatio=4:3` does **not** disable the INI setting; its
+in-game behavior still requires validation. Do not weaken the native
+Theme ownership checks to force audio during initial or changing
+SXD parts. This feature remains experimental and unmerged.
 
 The separately labelled GitHub Actions artifact
 `Rayman2Fix-Windows-x86-audio-trace` has a **research-only** DLL with
@@ -656,6 +706,8 @@ SkipCinematics=0
 RemoveDialogueBackgrounds=0
 ; 1 = experimental removal of game-drawn cinematic letterbox bars
 RemoveCinematicBars=0
+; 1 = continue the current level music during the ESC menu (experimental)
+MusicInPauseMenu=0
 ```
 
 `Resolution=Desktop` automatically uses the primary desktop resolution on

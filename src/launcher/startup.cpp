@@ -300,7 +300,9 @@ void Startup::initialize(bool provision_files) {
                "RemoveDialogueBackgrounds=0\n"
                "; 1 = experimental game-drawn cinematic letterbox removal\n"
                "; GameFrame AspectRatio=4:3 sidebars remain unchanged\n"
-               "RemoveCinematicBars=0\n";
+               "RemoveCinematicBars=0\n"
+               "; 1 = continue level music while the ESC menu is open\n"
+               "MusicInPauseMenu=0\n";
         if (!ini) throw std::runtime_error("failed writing Rayman2Fix.ini");
     }
 
@@ -393,6 +395,8 @@ void Startup::initialize(bool provision_files) {
         (have_ini && configured_remove_dialogue_backgrounds(ini_path_) ? "1" : "0"));
     log(std::string("CONFIG: Features.RemoveCinematicBars=") +
         (have_ini && configured_remove_cinematic_bars(ini_path_) ? "1" : "0"));
+    log(std::string("CONFIG: Features.MusicInPauseMenu=") +
+        (have_ini && configured_music_in_pause_menu(ini_path_) ? "1" : "0"));
 
     if (provision_files) {
         log("RUNTIME: Rayman2Fix.dll=" +

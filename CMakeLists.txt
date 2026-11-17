@@ -86,6 +86,7 @@ if(WIN32)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME Rayman2Fix)
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
+    RAYMAN2FIX_ESC_MUSIC_FEATURE=1
     RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}")
   if(RAYMAN2FIX_RESEARCH_PROBES)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
@@ -249,6 +250,34 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME esc-music-wine-prototype-policy
     COMMAND esc_music_wine_prototype_tests)
+  # Policy-only research; this does not intercept native audio.
+  add_executable(esc_pre_driver_pause_tests
+    tests/esc_pre_driver_pause_tests.cpp)
+  target_include_directories(esc_pre_driver_pause_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-pre-driver-pause-research-model
+    COMMAND esc_pre_driver_pause_tests)
+  # Pure synthetic flag-bit research. No game/DLL linking or runtime hooks.
+  add_executable(esc_pause_only_model_tests
+    tests/esc_pause_only_model_tests.cpp)
+  target_include_directories(esc_pause_only_model_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-pause-only-stable-voice-research
+    COMMAND esc_pause_only_model_tests)
+  # Correlate read-only source-table aliases using synthetic records.
+  add_executable(esc_source_alias_tests
+    tests/esc_source_alias_tests.cpp)
+  target_include_directories(esc_source_alias_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-source-sound-table-alias-research
+    COMMAND esc_source_alias_tests)
+  # Independent fail-closed policy for the deliberately disabled-by-default
+  # early pending-Theme listening experiment (no native game/driver APIs).
+  add_executable(esc_early_theme_tests tests/esc_early_theme_tests.cpp)
+  target_include_directories(esc_early_theme_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME esc-early-theme-experimental-gate
+    COMMAND esc_early_theme_tests)
 
   add_executable(fov_math_tests tests/fov_math_tests.cpp)
   target_include_directories(fov_math_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -288,6 +317,14 @@ if(BUILD_TESTING)
   add_executable(intro_skip_tests tests/intro_skip_tests.cpp)
   target_include_directories(intro_skip_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME second-intro-skip-guard COMMAND intro_skip_tests)
+
+  # Verify multi-source callbacks stay on the trusted game thread and
+  # never duplicate native menu or intro observations within one frame.
+  add_executable(render_poll_gate_tests tests/render_poll_gate_tests.cpp)
+  target_include_directories(render_poll_gate_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-render-callback-fallback-gate
+    COMMAND render_poll_gate_tests)
 
   add_executable(scene_script_probe_tests tests/scene_script_probe_tests.cpp)
   target_include_directories(scene_script_probe_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

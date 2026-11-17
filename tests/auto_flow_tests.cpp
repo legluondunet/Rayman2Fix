@@ -208,7 +208,8 @@ int main() {
         check(contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("AspectRatio=Auto") != std::string::npos &&
               contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("SkipCinematics=0") != std::string::npos &&
               contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("RemoveDialogueBackgrounds=0") != std::string::npos &&
-              contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("RemoveCinematicBars=0") != std::string::npos,
+              contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("RemoveCinematicBars=0") != std::string::npos &&
+              contents(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini").find("MusicInPauseMenu=0") != std::string::npos,
               "bootstrap provides independent disabled visual options");
         write(root / "rayman2" / "rayman2fix" / "Rayman2Fix.dll", "BOOTSTRAP");
         write(root / "rayman2" / "rayman2fix" / "Rayman2Fix.ini",
@@ -242,6 +243,32 @@ int main() {
         check(!r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
               !r2fix::configured_remove_cinematic_bars(user_ini),
               "both visual filters disabled when absent");
+        check(!r2fix::configured_music_in_pause_menu(user_ini),
+              "music is disabled when no MusicInPauseMenu setting is present");
+        write(user_ini,"[Features]\nMusicInPauseMenu=1\nRemoveDialogueBackgrounds=1\nRemoveCinematicBars=1\n");
+        check(r2fix::configured_music_in_pause_menu(user_ini) &&
+              r2fix::configured_remove_dialogue_backgrounds(user_ini) &&
+              r2fix::configured_remove_cinematic_bars(user_ini),
+              "opt-in ESC music coexists with visual filters");
+        // The feature flag and graphics aspect ratio must remain
+        // independent. This validates configuration wiring, NOT in-game
+        // first-ESC Theme availability or a Wine rendering callback.
+        for (const char* aspect : {"Auto", "4:3"}) {
+            write(user_ini,std::string("[Graphics]\nResolution=1920x1080\nAspectRatio=")
+                + aspect + "\n[Features]\nMusicInPauseMenu=1\n"
+                "SkipCinematics=1\n");
+            check(r2fix::configured_music_in_pause_menu(user_ini) &&
+                  r2fix::configured_skip_cinematics(user_ini),
+                  "ESC music and intro skip enabled at any selected aspect");
+            const auto canvas=r2fix::configured_render_resolution(user_ini);
+            check(canvas==(std::string(aspect)=="4:3" ?
+                  std::make_pair(1440u,1080u) :
+                  std::make_pair(1920u,1080u)),
+                  "native output aspect independently controls canvas");
+        }
+        write(user_ini,"[Features]\nMusicInPauseMenu=0\n");
+        check(!r2fix::configured_music_in_pause_menu(user_ini),
+              "explicit ESC music opt-out works");
         write(user_ini,"[Graphics]\nResolution=1920x1080\nAspectRatio=4:3\n"
                        "[Features]\nSkipCinematics=1\nRemoveDialogueBackgrounds=1\n"
                        "RemoveCinematicBars=0\n");
@@ -284,6 +311,11 @@ int main() {
             try{(void)r2fix::configured_remove_cinematic_bars(user_ini);}
             catch(const std::exception&){refused=true;}
             check(refused,"invalid cinematic bars flag rejected");
+            write(user_ini,std::string("[Features]\nMusicInPauseMenu=")+bad+"\n");
+            refused=false;
+            try{(void)r2fix::configured_music_in_pause_menu(user_ini);}
+            catch(const std::exception&){refused=true;}
+            check(refused,"invalid ESC music flag rejected");
         }
         const std::string bom="\xef\xbb\xbf";
         write(user_ini,bom+"[Debug]\r\nLog=0\r\n"
@@ -299,7 +331,8 @@ int main() {
               migrated.find("[Features]\r\n")!=std::string::npos &&
               migrated.find("SkipCinematics=0\r\n")!=std::string::npos &&
               migrated.find("RemoveDialogueBackgrounds=0\r\n")!=std::string::npos &&
-              migrated.find("RemoveCinematicBars=0\r\n")!=std::string::npos,
+              migrated.find("RemoveCinematicBars=0\r\n")!=std::string::npos &&
+              migrated.find("MusicInPauseMenu=0\r\n")!=std::string::npos,
               "existing INI migration retains BOM, CRLF, custom values");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
         check(contents(user_ini)==migrated,"migration is idempotent");

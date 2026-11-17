@@ -249,6 +249,12 @@ bool configured_remove_dialogue_backgrounds(const fs::path& ini) {
 bool configured_remove_cinematic_bars(const fs::path& ini) {
     return read_ini_flag(ini,"Features","RemoveCinematicBars");
 }
+bool configured_music_in_pause_menu(const fs::path& ini) {
+    return read_ini_flag(ini,"Features","MusicInPauseMenu");
+}
+bool configured_early_theme_music_experiment(const fs::path& ini) {
+    return read_ini_flag(ini,"Features","EarlyThemeMusicExperimental");
+}
 std::pair<std::uint32_t,std::uint32_t> configured_render_resolution(
         const fs::path& ini) {
     const auto physical=configured_output_resolution(ini);
@@ -280,7 +286,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     const auto raw=lines_of(ini);
     std::string current;
     bool graphics=false,features=false,aspect=false,force=false,skip=false;
-    bool dialogue=false,cinematic=false,legacy=false;
+    bool dialogue=false,cinematic=false,legacy=false,music=false,early_theme=false;
     for(const auto& text:raw) {
         std::string next;
         if(section(text,next)) {
@@ -299,6 +305,8 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(current=="FEATURES" && key=="SKIPCINEMATICS")skip=true;
         if(current=="FEATURES" && key=="REMOVEDIALOGUEBACKGROUNDS")dialogue=true;
         if(current=="FEATURES" && key=="REMOVECINEMATICBARS")cinematic=true;
+        if(current=="FEATURES" && key=="MUSICINPAUSEMENU")music=true;
+        if(current=="FEATURES" && key=="EARLYTHEMEMUSICEXPERIMENTAL")early_theme=true;
         if(current=="FEATURES" && key=="REMOVEBLACKFRAMES")legacy=true;
     }
     // Existing opt-in users retain BOTH former behaviors. If only one new
@@ -311,10 +319,11 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     if(aspect)(void)configured_aspect_ratio(ini);
     const std::string migrated_aspect=(!aspect && force &&
         read_ini_flag(ini,"Graphics","Force4x3")) ? "4:3" : "Auto";
-    if(aspect && !force && skip && dialogue && cinematic && !legacy)return;
+    if(aspect && !force && skip && dialogue && cinematic && music &&
+       early_theme && !legacy)return;
     std::vector<std::string> output;
     std::string active;
-    bool added_aspect=false,added_skip=false,added_dialogue=false,added_cinematic=false;
+    bool added_aspect=false,added_skip=false,added_dialogue=false,added_cinematic=false,added_music=false,added_early_theme=false;
     const auto inject=[&]() {
         if(active=="GRAPHICS" && !aspect && !force && !added_aspect) {
             output.emplace_back("; Auto = monitor aspect ratio; 4:3 = centered classic picture");
@@ -337,6 +346,18 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
             output.emplace_back("; Does not affect GameFrame AspectRatio=4:3 sidebars");
             output.emplace_back(std::string("RemoveCinematicBars=")+(inherited?"1":"0"));
             added_cinematic=true;
+        }
+        if(active=="FEATURES" && !music && !added_music) {
+            output.emplace_back("; 1 = continue the current level music in the ESC menu");
+            output.emplace_back("; Default 0 (opt in); original SFX and level changes remain native");
+            output.emplace_back("MusicInPauseMenu=0");
+            added_music=true;
+        }
+        if(active=="FEATURES" && !early_theme && !added_early_theme) {
+            output.emplace_back("; Experimental: attempt ESC music while Theme handoff is pending");
+            output.emplace_back("; Default 0; requires MusicInPauseMenu=1 and Debug Log=1");
+            output.emplace_back("EarlyThemeMusicExperimental=0");
+            added_early_theme=true;
         }
     };
     for(const auto& text:raw) {
@@ -392,6 +413,12 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
         output.emplace_back("; Does not affect GameFrame AspectRatio=4:3 sidebars");
         output.emplace_back("RemoveCinematicBars=0");
+        output.emplace_back("; 1 = continue the current level music in the ESC menu");
+        output.emplace_back("; Default 0 (opt in); preserves native SFX and level changes");
+        output.emplace_back("MusicInPauseMenu=0");
+        output.emplace_back("; Experimental: attempt ESC music while Theme handoff is pending");
+        output.emplace_back("; Default 0; requires MusicInPauseMenu=1 and Debug Log=1");
+        output.emplace_back("EarlyThemeMusicExperimental=0");
     }
     // Retain original BOM, comments, unrelated keys and EOL type.
     std::ifstream old(ini,std::ios::binary);
