@@ -4685,7 +4685,9 @@ int __cdecl native_frame_flip_for_intro(int first,int second) {
     const DWORD camera_tid=g_game_camera_thread_id.load(
         std::memory_order_acquire);
     const bool same_thread=camera_tid!=0u && current_tid==camera_tid;
-    if(same_thread)
+    const bool permitted=r2fix::should_poll_game_frame_flip(
+        intro,audio_pending,camera_tid!=0u,same_thread);
+    if(permitted)
         poll_game_render_events(r2fix::RenderPollSource::FrameFlip);
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
     // Log at most once per pending ESC generation, AFTER the possible
@@ -4701,7 +4703,7 @@ int __cdecl native_frame_flip_for_intro(int first,int second) {
             "requested_poll=%u (post-original game flip; "
             "audio identity and thread guards unchanged)",
             unsigned(same_thread),unsigned(camera_tid!=0u),
-            unsigned(same_thread));
+            unsigned(permitted));
         log_line(line);
     }
 #endif
@@ -5942,8 +5944,9 @@ void install_native_frame_flip_hook() {
     entry[5]=0x90;
     FlushInstructionCache(GetCurrentProcess(),entry,kCopied);
     VirtualProtect(entry,kCopied,prior,&unused);
-    log_line("RUNTIME-INTRO: original game GLI frame-flip fallback "
-             "armed for jail_20 (same camera thread, 4:3 input gap)");
+    if(g_skip_cinematics)
+        log_line("RUNTIME-INTRO: original game GLI frame-flip fallback "
+                 "armed for jail_20 (same camera thread, 4:3 input gap)");
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
     if(g_proto_enabled.load(std::memory_order_acquire))
         log_line("RUNTIME-ESC-FLIP: pending-menu fallback installed "
