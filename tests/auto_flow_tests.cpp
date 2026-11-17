@@ -171,12 +171,19 @@ int main() {
               "bootstrap creates a textures folder for replacement images");
         check(fs::is_directory(root / "docs"),
               "bootstrap creates a separate docs/ folder");
+        check(fs::is_regular_file(root / "docs" / "build-info.txt") &&
+              !fs::exists(root / "build-info.txt"),
+              "installer writes build identity exclusively to docs/");
         check(!fs::exists(root / "state"),
               "state/ is reserved for verified installation receipts");
 #ifdef _WIN32
         check(fs::is_regular_file(root / "docs" / "README.md") &&
               !fs::exists(root / "README.md"),
               "single EXE deploys documentation only inside docs/");
+        check(fs::is_regular_file(root / "docs" / "GameFrame-LICENSE-APACHE.txt") &&
+              !fs::exists(root / "third_party" / "gameframe" /
+                          "GameFrame-LICENSE-APACHE.txt"),
+              "GameFrame Apache license remains deployed, under docs/ only");
         const auto installed_guide=contents(root / "docs" / "README.md");
         check(installed_guide.find("Installation neuve uniquement") !=
                     std::string::npos &&
