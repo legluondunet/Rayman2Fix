@@ -763,3 +763,101 @@ post-intro early ESC and a later stable ESC with `[Debug] Log=1`,
 `RUNTIME-ESC-PREDRIVER-GATE` line. Do not infer original callback
 identity, atomicity, or native voice generation from matching counts.
 Leave physical Pause withholding NO-GO and PR #10 DRAFT.
+
+## Owner 04:27 trace: a single direct alias is compatible with TWO genuine native Pause callbacks
+
+The owner's `Rayman2Fix(20261117-042730).log` identifies the standard
+build as `db8c79fb` (GitHub PR test-merge commit with second parent
+`cc8102c`). It contains **four** fully sampled
+`RUNTIME-ESC-PREDRIVER-GATE` lines, all reporting exactly two genuine
+source-scoped native transition Pause callbacks on one driver argument
+(`slots=2,2`, `different_handles=0`, depth `1→2`). The
+**new** `RUNTIME-ESC-SOURCE-ALIAS` record reports the *same*
+read-only post-wrapper result four times:
+
+```text
+snapshot=1 same_ref=1 transition_candidates=1
+depth_stamped=1 indices=1,-1,-1,-1 depth_before=1
+```
+
+This **does not contradict** the already present synthetic
+`tests/test_audio_dual_dispatch_model.py` (a direct transition source
+*plus* an outer Theme source that delegates to the same inner
+transition). Our alias probe deliberately matches `[source+0]`
+against the *WAVMW transition object argument*. The type-11 Theme
+source has a **different [source+0] object** (its own controller), so
+that original observer may report `same_ref=1` even when both
+native sources are present. The earlier wording "two matching source
+entries" was over-specific; it is **not** required for two native
+Pause callbacks on one handle.
+
+### Original retail-CD x86 static proof for the two routes
+
+Now SHA-256-locked to the owner's
+`Rayman2(3).exe` (`7927a106...bb0d5e3`),
+`tools/audit_original_cd_dual_pause_routes.py` independently checks
+the exact original code and native type-dispatch table:
+
+1. The 64-record original Pause scanner at VA `0x4580B0` branches on
+   each record's `+0x10`. A direct transition routes at
+   `0x4580E1 → 0x4584A0`. A **generic source** routes at
+   `0x4580EF → 0x458070`.
+2. `0x458070` obtains native type via
+   `[[source+4]+4]` and dispatches through
+   `[0x4A3BA8 + type*24]`.
+   For original native type **11 (Theme)**, the exact table
+   pointer at `0x4A3CB0` is `0x459C40`.
+3. The type-11 function at `0x459C40` checks
+   `[controller+0]!=0`, loads its **nested transition**
+   reference at `[controller+0x30]`, and calls the
+   *same* `0x4584A0` at `0x459C4D`.
+4. For type-1 transition routing, `0x4584C9 → 0x4553A0`,
+   which calls the loaded native PauseTransitionSxd
+   function pointer `[0x4B8708]`.
+5. The mirror resume path is
+   `0x458110 → 0x458090 →` type-11 table
+   `[0x4A3CB4]=0x459C60 → 0x458470 → 0x4553C0`,
+   also reachable from the direct original Resume scan.
+
+**Thus there are two verified original-code source paths that may
+converge on the identical native Pause/Resume callback.**
+Their existence and shared endpoint are **static facts**. The
+04:27 owner log is consistent with both being active and with a
+single direct source-alias index; it does *not* prove which route
+was executed for each of the two callbacks. Nor does it establish a
+single durable ADPCM voice epoch through a scene/Theme switch.
+
+### Four live ESC sessions in this trace
+
+| Source script Pause t_ms | Current Theme gate | Audio compensation | Post-wrapper alias | Exit |
+| ---: | --- | --- | --- | --- |
+| 127751 | ref_class=3, pending switch | refused | direct index 1 | 2 native Resumes forwarded at 129784 |
+| 131418 | ref_class=3, pending switch | refused | direct index 1 | 2 native Resumes forwarded at 133384 |
+| 136785 | ref_class=1, stable current pointer | 2 synthetic Resumes authorized | direct index 1 | phase=6 native passthrough; 2 native Resumes forwarded at 140151 |
+| 142684 | ref_class=1, stable current pointer | 2 synthetic Resumes authorized | direct index 1 | phase=6 native passthrough seen; log ends without a paired script Resume |
+
+The third session emits `phase=6` even though the bounded
+`SXD-LIFETIME` line has one sample `first=last=9:7 changes=0`.
+This is **not** conflicting evidence: the lifetime watcher can miss
+resource changes after its observation budget, whereas
+`proto_dispatch()` checks the live source at the point of attempting
+a safety command and quarantines on mismatch. The fourth session
+also reaches phase 6, with no logged exit; do **not** classify the
+unseen exit as success or failure.
+
+**New read-only discriminator:** the standard runtime now also emits
+`RUNTIME-ESC-SOURCE-ROUTES` immediately after the existing alias line.
+It double-reads generic source descriptor type fields for currently
+eligible generic entries and reports how many are type 11
+(Theme), their current source pause-depth stamps and first four
+source indices. It never changes memory or callbacks and never
+authorizes a new Pause/Resume. Its type reads are after the original
+wrapper; two equal reads do not prove atomicity with the source
+callbacks, and incomplete types remain unknown. This will help
+separate the direct transition from the generic Theme path.
+
+**Decision:** update research interpretation rather than enable any
+audio bypass. Existing first-menu `ref_class=3` refusal remains
+correct; `phase=6` remains safe passthrough, and no full physical
+voice-generation/lifetime proof exists. PR #10 remains draft and
+pre-driver Pause suppression remains NO-GO.
