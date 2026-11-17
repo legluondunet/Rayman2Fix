@@ -4730,6 +4730,13 @@ void log_native_gate_history(DWORD elapsed) {
 void poll_learn_intro_skip() {
     if (!g_current_level) return;
     if (!r2fix::is_first_playable_level(g_current_level)) {
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+        // Best-effort restoration also covers native level changes.
+        // Never write a stale address if the Fix actor disappeared.
+        learn10_proto_try_restore("level-left");
+        if (!g_learn10_proto_armed)
+            g_learn10_proto_attempted=false;
+#endif
         g_progress_words = 0;
         g_learn_logged = false;
         g_learn_intro_seen = false;
@@ -4827,6 +4834,16 @@ void poll_learn_intro_skip() {
             }
         }
     }
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+    // The native script controls all actor/camera changes. We only
+    // enable its own NOMOVIES branch for an explicitly opted-in test.
+    // End temporary state BEFORE the handover diagnostic and any
+    // subsequent potential save.
+    if (handed_over)
+        learn10_proto_try_restore("story1091-handover");
+    else
+        learn10_proto_try_arm(handed_over,elapsed);
+#endif
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
         g_learn_handover_start = GetTickCount();
