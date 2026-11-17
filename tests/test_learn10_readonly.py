@@ -52,6 +52,14 @@ class Learn10SafeFallback(unittest.TestCase):
         self.assertIn("var110_low8=",source)
         self.assertIn("trace_native_exit_gates(elapsed)",block)
         self.assertIn("IntroGateTimeline<48>",source)
+        # V96 is observed once on existing camera callbacks, not
+        # exclusively when a director gate variable changes.
+        self.assertIn("IntroPhase96Timeline<24>",source)
+        self.assertIn("g_director_phase96_history.observe(elapsed,v96_observed)",source)
+        self.assertIn('director-phase96-history t=%ums',source)
+        self.assertIn('director-phase96-event t=%ums',source)
+        self.assertIn("g_director_phase96_history={};",block)
+        self.assertNotIn("WriteProcessMemory(",source)
         self.assertIn("log_native_gate_history(",source)
         self.assertIn("var110_u32=",source)
         self.assertIn("director-gate-event",source)
