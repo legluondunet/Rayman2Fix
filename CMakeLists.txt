@@ -115,7 +115,8 @@ if(WIN32)
     "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc")
   add_dependencies(Rayman2Fix Rayman2FixRuntime)
 
-  # A concise installation guide is embedded for docs/README.md.\n  # GitHub README.md remains at the repo root; do not copy it into the game directory.
+  # A concise installation guide is embedded for docs/README.md.
+  # GitHub README.md remains at the repo root; do not copy it into the game directory.
   # Project licensing has not yet been selected (README.md); never invent one.
   file(GENERATE
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc"
