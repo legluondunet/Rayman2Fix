@@ -11,9 +11,10 @@ namespace r2fix {
 // Win32 research build, never by the normal Rayman2Fix runtime.
 constexpr unsigned kLearn10NomoviesBit = 1188u;
 // Only a short, one-time exposure of the in-memory progress bit is
-// allowed. The native ELSE route does not require an Enter keypress.
-constexpr std::uint32_t kLearn10NomoviesLatestStartMs = 5000u;
-constexpr std::uint32_t kLearn10NomoviesMaxArmedMs = 2000u;
+// allowed. The ELSE route contains its own native JustPressedBut and
+// timing condition; a physical key must reach that original input gate.
+constexpr std::uint32_t kLearn10NomoviesLatestStartMs = 3000u;
+constexpr std::uint32_t kLearn10NomoviesMaxArmedMs = 5000u;
 inline bool restore_learn10_nomovies_due(std::uint32_t current_ms,
                                         std::uint32_t armed_ms,
                                         bool director_left_behaviour3) {
