@@ -64,7 +64,7 @@ pub fn observe_source(w:usize,h:usize,format:u32,mips:usize) {
 fn load_atlas() -> Option<Vec<u8>> {
     let cwd=std::env::current_dir().ok()?;
     // Only the new canonical texture path is supported. No legacy fallback.
-    let paths=[cwd.parent().join("mods").join("textures").join("logo.rgba")];
+    let paths=[cwd.parent()?.join("mods").join("textures").join("logo.rgba")];
     for path in paths {
         let Ok(meta)=fs::metadata(&path) else {continue};
         if meta.len()!=BYTES as u64 {
