@@ -141,6 +141,16 @@ void discard_legacy_runtime_backups(const fs::path& directory) {
             continue;
         if (fs::is_directory(old) && !fs::is_symlink(old))
             throw std::runtime_error("refusing to remove a directory at obsolete runtime backup path");
+        // Old backups may have inherited the read-only flag from the CD or
+        // an older runtime. Unlink the backup itself, never a link target.
+        if (!fs::is_symlink(old)) {
+            const DWORD attrs = GetFileAttributesW(old.c_str());
+            if (attrs == INVALID_FILE_ATTRIBUTES)
+                throw std::runtime_error("cannot inspect obsolete fix.dll backup");
+            if ((attrs & FILE_ATTRIBUTE_READONLY) &&
+                !SetFileAttributesW(old.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY))
+                throw std::runtime_error("cannot clear read-only obsolete fix.dll backup");
+        }
         fs::remove(old); // Unlinks a symlink itself, never its target.
     }
 }
