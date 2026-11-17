@@ -3896,9 +3896,10 @@ void log_compiled_director_script(unsigned behaviour, const char* kind,
     }
     if (long_rule && line_budget) {
         std::snprintf(message,sizeof(message),
-            "RUNTIME-INTRO: phase110-predicates count=%u first_node=%u first_condition=%u (script-only, no state writes)",
-            p.phase110_predicates,p.phase110_first_node,
-            p.phase110_first_condition);
+            "RUNTIME-INTRO: native-phase-branches early104_count=%u early104_node=%u early104_condition=%u stage110_count=%u stage110_node=%u stage110_condition=%u (read-only; no state writes)",
+            p.phase104_predicates,p.phase104_first_node,
+            p.phase104_first_condition,p.phase110_predicates,
+            p.phase110_first_node,p.phase110_first_condition);
         log_line(message);
         --line_budget;
     }
