@@ -231,14 +231,14 @@ void Startup::initialize(bool provision_files) {
                "[Features]\n"
                "; 1 = allow Space/Enter/Esc to skip jail_20 only\n"
                "; Learn_10 skip remains disabled (unsafe)\n"
-               "SkipCinematics=0\n"
+               "SkipCinematics=1\n"
                "; 1 = hide native rectangles behind in-game dialogue\n"
-               "RemoveDialogueBackgrounds=0\n"
+               "RemoveDialogueBackgrounds=1\n"
                "; 1 = experimental game-drawn cinematic letterbox removal\n"
                "; GameFrame AspectRatio=4:3 sidebars remain unchanged\n"
-               "RemoveCinematicBars=0\n"
+               "RemoveCinematicBars=1\n"
                "; 1 = continue level music while the ESC menu is open\n"
-               "MusicInPauseMenu=0\n";
+               "MusicInPauseMenu=1\n";
         if (!ini) throw std::runtime_error("failed writing Rayman2Fix.ini");
     }
 
