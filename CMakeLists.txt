@@ -212,7 +212,8 @@ if(BUILD_TESTING)
   if(WIN32)
     # Startup tests need the same embedded DLL resource as the real launcher.
     target_sources(auto_flow_tests PRIVATE
-      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc")
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc"
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc")
     add_dependencies(auto_flow_tests Rayman2FixRuntime)
     if(RAYMAN2FIX_GLIDE_DLL)
       target_compile_definitions(auto_flow_tests PRIVATE
