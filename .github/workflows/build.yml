@@ -242,31 +242,45 @@ jobs:
           if ($expected -ne $actual) {
             throw 'Embedded DLL is not identical to build output'
           }
-          # Retain exactly one previous runtime as fix.dll.bak.
+          # A mismatched embedded runtime is authoritative: replace it without
+          # retaining any old DLL, even if legacy backups remain from old builds.
           $runtimeDir = (Resolve-Path 'package-smoke/game').Path
           $runtime = Join-Path $runtimeDir 'fix.dll'
           $backup = Join-Path $runtimeDir 'fix.dll.bak'
+          $priorBackup = Join-Path $runtimeDir 'fix.dll.bak.previous'
           [IO.File]::WriteAllText($runtime, 'outdated-runtime-A')
-          [IO.File]::WriteAllText($backup, 'outdated-older-backup')
-          & ./package-smoke/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 2) { throw 'Runtime update must preserve no-media exit code' }
-          if ((Get-Content -Raw $backup) -ne 'outdated-runtime-A' -or
-              (Get-FileHash $runtime -Algorithm SHA256).Hash -ne $expected) {
-            throw 'Runtime must replace its single .bak with newest previous DLL'
-          }
-          [IO.File]::WriteAllText($runtime, 'outdated-runtime-B')
+          [IO.File]::WriteAllText($backup, 'obsolete-backup-A')
+          [IO.File]::WriteAllText($priorBackup, 'obsolete-rotation-A')
           & ./package-smoke/Rayman2Fix.exe
           if ($LASTEXITCODE -ne 2 -or
-              (Get-Content -Raw $backup) -ne 'outdated-runtime-B') {
-            throw 'Second DLL replacement must rotate the single .bak'
+              (Get-FileHash $runtime -Algorithm SHA256).Hash -ne $expected -or
+              (Test-Path $backup) -or (Test-Path $priorBackup) -or
+              (Test-Path "$runtime.installing")) {
+            throw 'Runtime replacement must discard old DLL and legacy backups'
           }
+
+          # Same-size tampering must also be replaced. Check read-only legacy
+          # runtime handling, then ensure a third unchanged run is idempotent.
+          $tampered = [IO.File]::ReadAllBytes($runtime)
+          $tampered[0] = $tampered[0] -bxor 0xFF
+          [IO.File]::WriteAllBytes($runtime, $tampered)
+          [IO.File]::SetAttributes($runtime, [IO.FileAttributes]::ReadOnly)
           & ./package-smoke/Rayman2Fix.exe
           if ($LASTEXITCODE -ne 2 -or
-              (Get-Content -Raw $backup) -ne 'outdated-runtime-B' -or
-              @(Get-ChildItem $runtimeDir -File -Filter 'fix.dll.bak*').Count -ne 1) {
-            throw 'Unchanged runtime must preserve exactly one backup'
+              (Get-FileHash $runtime -Algorithm SHA256).Hash -ne $expected -or
+              @(Get-ChildItem $runtimeDir -File -Filter 'fix.dll.bak*').Count -ne 0 -or
+              (Test-Path "$runtime.installing")) {
+            throw 'Read-only same-size unknown runtime must be replaced without backup'
           }
-          Write-Host 'Single fix.dll.bak rotation: PASS'
+          $timestamp = (Get-Item $runtime).LastWriteTimeUtc.Ticks
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or
+              (Get-FileHash $runtime -Algorithm SHA256).Hash -ne $expected -or
+              (Get-Item $runtime).LastWriteTimeUtc.Ticks -ne $timestamp -or
+              @(Get-ChildItem $runtimeDir -File -Filter 'fix.dll.bak*').Count -ne 0) {
+            throw 'Unchanged runtime must not be rewritten or generate backups'
+          }
+          Write-Host 'Single authoritative game/fix.dll replacement, no backup: PASS'
           if (!(Test-Path package-smoke/third_party/gameframe/glide2x.dll) -or
               !(Test-Path package-smoke/docs/GameFrame-LICENSE-APACHE.txt) -or
               (Test-Path package-smoke/third_party/gameframe/GameFrame-LICENSE-APACHE.txt)) {
