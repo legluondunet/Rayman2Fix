@@ -222,7 +222,7 @@ void Startup::initialize(bool provision_files) {
                "Log=1\n"
                "\n"
                "[Graphics]\n"
-               "Resolution=Desktop\n"
+
                "; FPSLimit=0 disables the cap; accepted range: 15..240\n"
                "FPSLimit=60\n"
                "; Auto = monitor aspect ratio; 4:3 = centered classic picture\n"
@@ -360,9 +360,7 @@ void Startup::initialize(bool provision_files) {
     log("LAYOUT: launcher=Rayman2Fix.exe game=game/ runtime=game/fix.dll config=Rayman2Fix.ini renderer=third_party/gameframe/ mods=mods/ docs=docs/ state=state/ logs=launcher_directory");
     log("CONFIG: Debug.Log=" +
         std::string(debug == "1" ? "1" : "invalid or missing (default 1)"));
-    const auto display = option("Graphics", "Resolution");
-    log("CONFIG: Graphics.Resolution=" +
-        (display.empty() ? "Desktop (default)" : display));
+    log("CONFIG: Graphics.Output=primary desktop (automatic)");
     const auto fps = option("Graphics", "FPSLimit");
     log("CONFIG: Graphics.FPSLimit=" +
         (fps.empty() ? "60 (default)" : fps));
