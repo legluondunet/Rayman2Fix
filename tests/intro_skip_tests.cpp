@@ -3,61 +3,71 @@
 #include "rayman2fix/scene_intro.hpp"
 #include <unordered_map>
 #include <cstdint>
-#include <cassert>
+#include <cstdlib>
+#include <iostream>
+
+// Explicitly check in both Debug and Release (assert is disabled by NDEBUG).
+#define CHECK(expr) do { \
+    if (!(expr)) { \
+        std::cerr << "CHECK failed: " #expr << " (" << __FILE__ << ":" << __LINE__ << ")" << std::endl; \
+        std::abort(); \
+    } \
+} while (false)
+
 
 int main() {
-    assert(r2fix::is_second_intro("jail_20"));
-    assert(r2fix::is_second_intro("Jail_20"));
-    assert(!r2fix::is_second_intro("jail_10"));
-    assert(!r2fix::is_second_intro("learn_10"));
-    assert(!r2fix::is_second_intro("jail_201"));
-    assert(!r2fix::is_second_intro(""));
-    assert(!r2fix::is_second_intro(nullptr));
+    CHECK(r2fix::is_second_intro("jail_20"));
+    CHECK(r2fix::is_second_intro("Jail_20"));
+    CHECK(!r2fix::is_second_intro("jail_10"));
+    CHECK(!r2fix::is_second_intro("learn_10"));
+    CHECK(!r2fix::is_second_intro("jail_201"));
+    CHECK(!r2fix::is_second_intro(""));
+    CHECK(!r2fix::is_second_intro(nullptr));
 
     r2fix::IntroSkipGuard guard;
-    assert(!guard.update("menu_10", true));
-    assert(!guard.update("jail_10", true));
+    CHECK(!guard.update("menu_10", true));
+    CHECK(!guard.update("jail_10", true));
     // If Enter is being held during the second intro load, do not skip.
-    assert(!guard.update("jail_20", true));
-    assert(!guard.update("jail_20", true));
-    assert(!guard.update("jail_20", false));
-    assert(guard.update("jail_20", true));
+    CHECK(!guard.update("jail_20", true));
+    CHECK(!guard.update("jail_20", true));
+    CHECK(!guard.update("jail_20", false));
+    CHECK(guard.update("jail_20", true));
     // A single press can only request one level transition.
-    assert(!guard.update("jail_20", true));
-    assert(!guard.update("jail_20", false));
-    assert(!guard.update("jail_20", true));
+    CHECK(!guard.update("jail_20", true));
+    CHECK(!guard.update("jail_20", false));
+    CHECK(!guard.update("jail_20", true));
     // Re-entering a new game re-arms the feature.
-    assert(!guard.update("learn_10", false));
-    assert(!guard.update("jail_20", false));
-    assert(!guard.update("jail_20", false));
-    assert(guard.update("jail_20", true));
+    CHECK(!guard.update("learn_10", false));
+    CHECK(!guard.update("jail_20", false));
+    CHECK(!guard.update("jail_20", false));
+    CHECK(guard.update("jail_20", true));
 
     // Learn_10 is a playable level; only a pending *intro* can be skipped.
-    assert(r2fix::is_first_playable_level("Learn_10"));
-    assert(r2fix::is_first_playable_level("learn_10"));
-    assert(!r2fix::is_first_playable_level("jail_20"));
-    assert(!r2fix::is_first_playable_level("learn_101"));
-    assert(!r2fix::is_first_playable_level(nullptr));
-    assert(r2fix::story_word_index(1091) == 34u);
-    assert(r2fix::story_word_mask(1091) == 4u);
-    assert(r2fix::story_word_index(1188) == 37u);
-    assert(r2fix::story_word_mask(1188) == 8u);
+    CHECK(r2fix::is_first_playable_level("Learn_10"));
+    CHECK(r2fix::is_first_playable_level("learn_10"));
+    CHECK(!r2fix::is_first_playable_level("jail_20"));
+    CHECK(!r2fix::is_first_playable_level("learn_101"));
+    CHECK(!r2fix::is_first_playable_level(nullptr));
+    CHECK(r2fix::story_word_index(1091) == 34u);
+    CHECK(r2fix::story_word_mask(1091) == 4u);
+    CHECK(r2fix::story_word_index(1188) == 37u);
+    CHECK(r2fix::story_word_mask(1188) == 8u);
 
     r2fix::LearnIntroGuard learn;
-    assert(!learn.update("jail_20", false, true));
-    assert(!learn.update("learn_10", true, true));
-    assert(!learn.update("learn_10", true, true));
-    assert(!learn.update("learn_10", true, false));
-    assert(learn.update("learn_10", true, true));
-    assert(!learn.update("learn_10", true, true));
-    assert(!learn.update("learn_10", true, false));
-    assert(learn.update("learn_10", true, true)); // retry after failed attempt
-    assert(!learn.update("learn_10", true, true)); // holding won't repeat
-    assert(!learn.update("learn_10", false, false));
-    assert(!learn.update("learn_10", true, false));
-    assert(!learn.update("learn_10", true, false));
-    assert(learn.update("learn_10", true, true));
-    assert(!learn.update("menu", false, false));
+    CHECK(!learn.update("jail_20", false, true));
+    CHECK(!learn.update("learn_10", true, true));
+    CHECK(!learn.update("learn_10", true, true));
+    CHECK(!learn.update("learn_10", true, false));
+    CHECK(learn.update("learn_10", true, true));
+    CHECK(!learn.update("learn_10", true, true));
+    CHECK(!learn.update("learn_10", true, false));
+    CHECK(learn.update("learn_10", true, true)); // retry after failed attempt
+    CHECK(!learn.update("learn_10", true, true)); // holding won't repeat
+    CHECK(!learn.update("learn_10", false, false));
+    CHECK(!learn.update("learn_10", true, false));
+    CHECK(!learn.update("learn_10", true, false));
+    CHECK(learn.update("learn_10", true, true));
+    CHECK(!learn.update("menu", false, false));
 
     // The game's Fix-actor table holds DIRECT actor pointers, not
     // super-object pointers. Regression: an extra actor+4 dereference
@@ -111,18 +121,18 @@ int main() {
             [&](std::uintptr_t p, std::uint32_t& v) { return mem.rd32(p, v); },
             [&](std::uintptr_t p, std::uint8_t& v) { return mem.rd8(p, v); });
     };
-    assert(lookup() == values);
+    CHECK(lookup() == values);
     mem.u32.erase(decl_ref);
-    assert(lookup() == 0);             // missing second indirection
+    CHECK(lookup() == 0);             // missing second indirection
     mem.u32[decl_ref] = decl;
     mem.u32[infos + 42 * 16 + 4] = 7;
-    assert(lookup() == 0);              // wrong variable type
+    CHECK(lookup() == 0);              // wrong variable type
     mem.u32[infos + 42 * 16 + 4] = 21;
     mem.u8[buffer + 0x120 + 4] = 36;
-    assert(lookup() == 0);              // too few words for 1188
+    CHECK(lookup() == 0);              // too few words for 1188
     mem.u8[buffer + 0x120 + 4] = 45;
     mem.u32.erase(actor + 0x0C);
-    assert(lookup() == 0);              // inaccessible brain pointer
+    CHECK(lookup() == 0);              // inaccessible brain pointer
 
 
     {
@@ -171,42 +181,42 @@ int main() {
     };
     r2fix::IntroDirectorScanStats stats{};
     auto found=detect(&stats);
-    assert(found.valid());
-    assert(found.superobject==so && found.intelligence==normal);
-    assert(found.ending_behaviour==behaviours+12);
-    assert(stats.identified_directors==1 && stats.null_waypoints==1);
-    assert(stats.valid_behaviour_tables==1 && stats.in_intro_behaviour==1);
-    assert(stats.rayman_suspended==1 && stats.current_behaviour_index==5);
+    CHECK(found.valid());
+    CHECK(found.superobject==so && found.intelligence==normal);
+    CHECK(found.ending_behaviour==behaviours+12);
+    CHECK(stats.identified_directors==1 && stats.null_waypoints==1);
+    CHECK(stats.valid_behaviour_tables==1 && stats.in_intro_behaviour==1);
+    CHECK(stats.rayman_suspended==1 && stats.current_behaviour_index==5);
     // Native intro can have other current normal behaviours at the
     // moment of the press, but only if Rayman is script-controlled.
     m.a[normal+8]=behaviours+2*12;
     r2fix::IntroDirectorScanStats other{};
-    assert(detect(&other).valid());
-    assert(other.other_behaviours==1 && other.current_behaviour_index==2);
+    CHECK(detect(&other).valid());
+    CHECK(other.other_behaviours==1 && other.current_behaviour_index==2);
     m.a[normal+8]=behaviours+12;
     r2fix::IntroDirectorScanStats ending{};
-    assert(!detect(&ending).valid());
-    assert(ending.already_ending==1);
+    CHECK(!detect(&ending).valid());
+    CHECK(ending.already_ending==1);
     m.a[normal+8]=behaviours+5*12+4;
     r2fix::IntroDirectorScanStats misaligned{};
-    assert(!detect(&misaligned).valid());
-    assert(misaligned.outside_table==1);
+    CHECK(!detect(&misaligned).valid());
+    CHECK(misaligned.outside_table==1);
     m.a[normal+8]=behaviours+5*12;
     m.a[raystandard+0x24]=1u<<13;
     r2fix::IntroDirectorScanStats unsuspended{};
-    assert(!detect(&unsuspended).valid());
-    assert(unsuspended.rayman_suspended==0);
+    CHECK(!detect(&unsuspended).valid());
+    CHECK(unsuspended.rayman_suspended==0);
     m.a[raystandard+0x24]=(1u<<13)|(1u<<16);
     m.a[script+4]=3;
-    assert(!detect().valid()); // Need >=6 possible behaviours
+    CHECK(!detect().valid()); // Need >=6 possible behaviours
     m.a[script+4]=7;
     m.a[buffer+24]=so;
-    assert(!detect().valid()); // Wrong Rayman pointer
+    CHECK(!detect().valid()); // Wrong Rayman pointer
     m.a[buffer+24]=ray;
     m.a[standard+0x24]=0;
-    assert(!detect().valid()); // Controller isn't armed
+    CHECK(!detect().valid()); // Controller isn't armed
     m.a[standard+0x24]=1u<<27;
-    assert(detect().valid());
+    CHECK(detect().valid());
     }
 
     return 0;
