@@ -273,16 +273,16 @@ void Startup::initialize(bool provision_files) {
            (fs::exists(dest) && !fs::is_regular_file(dest)))
             throw std::runtime_error("unsafe build-info.txt");
         const std::string metadata=
-            std::string("Project=Rayman2Fix\\nVersion=")+RAYMAN2FIX_VERSION+
-            "\\nCommit="+RAYMAN2FIX_BUILD_COMMIT+
-            "\\nLayout=clean-v1\\nRuntime=game/fix.dll\\n"+
-            "GameFrame=third_party/gameframe/glide2x.dll\\n";
+            std::string("Project=Rayman2Fix\nVersion=")+RAYMAN2FIX_VERSION+
+            "\nCommit="+RAYMAN2FIX_BUILD_COMMIT+
+            "\nLayout=clean-v1\nRuntime=game/fix.dll\n"+
+            "GameFrame=third_party/gameframe/glide2x.dll\n";
         std::string prior;
         if(fs::exists(dest)) {
             std::ifstream old(dest,std::ios::binary);
             prior.assign(std::istreambuf_iterator<char>(old),
                          std::istreambuf_iterator<char>());
-            if(old.bad() || prior.rfind("Project=Rayman2Fix\\n",0)!=0)
+            if(old.bad() || prior.rfind("Project=Rayman2Fix\n",0)!=0)
                 throw std::runtime_error("unknown build-info.txt; preserving user file");
         }
         if(prior!=metadata) {
