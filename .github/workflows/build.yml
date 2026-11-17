@@ -565,8 +565,9 @@ jobs:
               b'RUNTIME-LEARN10-PROTOTYPE: enabled=1 route=native-NOMOVIES',
               b'RUNTIME-LEARN10-PROTOTYPE: phase=armed',
               b'RUNTIME-LEARN10-PROTOTYPE: phase=restored',
-              b'no-key-required max_armed_ms=2000',
-              b'max-exposure-2000ms',
+              b'physical-input-needed max_armed_ms=5000',
+              b'phase=physical-enter-edge',
+              b'max-exposure-5000ms',
               b'RUNTIME-INTRO: native-early-exit-shape',
           ):
               if marker not in data:
