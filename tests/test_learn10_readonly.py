@@ -89,6 +89,27 @@ class Learn10SafeFallback(unittest.TestCase):
         self.assertIn("kind=unsigned(type)",runtime)
         self.assertIn("read_director_phase_integer(director.superobject,96",runtime)
 
+    def test_native_nomovies_prototype_is_separately_gated(self):
+        cmake=(ROOT/"CMakeLists.txt").read_text(encoding="utf-8")
+        source=(ROOT/"src/runtime/runtime.cpp").read_text(encoding="utf-8")
+        self.assertIn('option(RAYMAN2FIX_LEARN10_NOMOVIES_PROTO',cmake)
+        self.assertIn('native-NOMOVIES',source)
+        self.assertIn('RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE',source)
+        self.assertIn('#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO',source)
+        self.assertIn('#error Learn_10 experimental NOMOVIES path requires separate research build',source)
+        self.assertIn('g_learn10_proto_opted_in=g_log && settings->skip_cinematics==1u',source)
+        self.assertIn('learn10_proto_original_scripts_match(',source)
+        self.assertIn('inspect_learn10_nomovies_gate(',source)
+        self.assertIn('inspect_learn10_nomovies_alternative(',source)
+        self.assertIn('inspect_learn10_early_exit(',source)
+        self.assertIn('inspect_learn10_native_exit(',source)
+        self.assertIn('InterlockedCompareExchange(',source)
+        self.assertIn('learn10_proto_try_restore("story1091-handover")',source)
+        self.assertIn('learn10_proto_try_restore("level-left")',source)
+        self.assertIn('other_progress_bits=preserved',source)
+        self.assertNotIn('WriteProcessMemory(',source)
+        self.assertNotIn('AI_fn_ucChangeComportIntell',source)
+
     def test_retains_jail_20_skip_only(self):
         source=(ROOT/"src/runtime/runtime.cpp").read_text(encoding="utf-8")
         self.assertIn("void poll_second_intro_skip()",source)
