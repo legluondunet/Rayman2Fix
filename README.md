@@ -620,10 +620,11 @@ refuses the operation without modifying that folder.
   checks, preserving the original protected EXE under `game/rayman2.exe.bak`
   when the approved decrypted executable is supplied. No copyrighted game
   binaries are bundled.
-- The single launcher installs `game/fix.dll` (and retains exactly one
-  `game/fix.dll.bak` on update), plus a SHA-256-pinned GameFrame runtime
-  under `third_party/gameframe/`. Its only maintained mod INI is
-  `Rayman2Fix.ini` at the launcher root.
+- The single launcher installs the exact embedded `game/fix.dll`. A foreign
+  or outdated runtime is replaced directly, **without preserving**
+  `game/fix.dll.bak`; legacy managed runtime backups are discarded. The
+  SHA-256-pinned GameFrame runtime remains under `third_party/gameframe/`.
+  The only maintained mod INI is `Rayman2Fix.ini` at the launcher root.
 - User textures under `mods/textures/` are independent of retail CD
   extraction and are not touched by installer file publication.
 
