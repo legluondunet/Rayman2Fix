@@ -21,7 +21,6 @@ Rayman2Fix.ini
 Rayman2Fix_installer.log  (if Log=1)
 Rayman2Fix.log            (if Log=1 and a game session begins)
 Rayman2Fix_inspect.log    (only for --inspect)
-build-info.txt
 game/
   rayman2.exe             (verified approved decrypted executable)
   rayman2.exe.bak         (verified protected original)
@@ -36,8 +35,9 @@ mods/
 third_party/
   gameframe/
     glide2x.dll           (SHA256-pinned GameFrame Glide 2)
-    GameFrame-LICENSE-APACHE.txt
 docs/
+  GameFrame-LICENSE-APACHE.txt
+  build-info.txt
   README.md              (user guide bundled by the launcher)
 state/
   .rayman2fix-cd-files.tsv
@@ -47,7 +47,9 @@ state/
 The launcher creates `game/`, `mods/textures/`,
 `third_party/gameframe/` and `docs/` in a new folder. Its embedded
 installation guide is deployed at `docs/README.md`, never beside the
-launcher. `state/` is published with a verified CD installation and is
+launcher. The GameFrame Apache notice and build metadata also live in
+`docs/`, while the vendor's verified `glide2x.dll` remains in
+`third_party/gameframe/`. `state/` is published with a verified CD installation and is
 reserved for SHA-256 installation receipts, **not documentation**. The original game retains `game/` as its working
 directory. A child-only DLL lookup path points at `third_party/gameframe/`;
 the runtime is injected as `game/fix.dll` by the existing verified
