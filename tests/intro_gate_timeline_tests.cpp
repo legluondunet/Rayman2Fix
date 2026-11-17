@@ -36,5 +36,37 @@ int main() {
     CHECK(trace.total==6);
     trace={};
     CHECK(trace.total==0 && trace.retained()==0 && trace.var110_equal_one==0);
+
+    // Independent V96 observer: no inference from native V110/var83
+    // changes, and no claim that an unobserved short pulse was absent.
+    r2fix::IntroPhase96Timeline<3> signal{};
+    CHECK(!signal.initialized && signal.samples==0);
+    signal.observe(0,0);
+    signal.observe(10,0);
+    CHECK(signal.samples==2 && signal.changes==0);
+    signal.observe(20,110);
+    signal.observe(35,110);
+    signal.observe(45,0);
+    CHECK(signal.changes==2 && signal.samples110==2);
+    CHECK(signal.samples104==0 && signal.entries104==0);
+    signal.observe(60,104);
+    signal.observe(70,104);
+    signal.observe(80,0);
+    CHECK(signal.samples104==2 && signal.entries104==1);
+    CHECK(signal.first104_ms==60);
+    CHECK(signal.changes==4 && signal.retained()==3 && signal.dropped()==1);
+    CHECK(signal.chronological(0).elapsed_ms==45);
+    CHECK(signal.chronological(1).elapsed_ms==60);
+    CHECK(signal.chronological(1).current==104);
+    CHECK(signal.chronological(2).elapsed_ms==80);
+    signal.observe(90,104);
+    CHECK(signal.entries104==2 && signal.first104_ms==60);
+    CHECK(signal.chronological(2).current==104);
+    signal={};
+    CHECK(!signal.initialized && signal.samples==0 &&
+          signal.entries104==0 && signal.changes==0);
+    signal.observe(5,104); // first valid sample already sees the signal
+    CHECK(signal.entries104==1 && signal.first104_ms==5 &&
+          signal.changes==0 && signal.samples104==1);
     return 0;
 }
