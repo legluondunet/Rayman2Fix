@@ -20,6 +20,9 @@
 #include "rayman2fix/scene_script_probe.hpp"
 #include "rayman2fix/intro_gate_timeline.hpp"
 #include "rayman2fix/intro_integer_reader.hpp"
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+#include "rayman2fix/learn10_nomovies_proto.hpp"
+#endif
 #include "rayman2fix/game_window_icon.hpp"
 #include "rayman2fix/render_poll_gate.hpp"
 #include <mutex>
@@ -49,6 +52,12 @@
 #endif
 #ifndef RAYMAN2FIX_RESEARCH_PROBES
 #define RAYMAN2FIX_RESEARCH_PROBES 0
+#endif
+#ifndef RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+#define RAYMAN2FIX_LEARN10_NOMOVIES_PROTO 0
+#endif
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO && !RAYMAN2FIX_RESEARCH_PROBES
+#error Learn_10 experimental NOMOVIES path requires separate research build
 #endif
 #ifndef RAYMAN2FIX_AUDIO_TRACE
 #define RAYMAN2FIX_AUDIO_TRACE 0
@@ -236,6 +245,14 @@ ObservedDirectorByte g_director_var96{};
 r2fix::IntroGateTimeline<48> g_director_gate_history{};
 r2fix::IntroPhase96Timeline<24> g_director_phase96_history{};
 bool g_director_gate_history_reported = false;
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+// Experimental native cheat gate only; compiled OUT of all standard and
+// read-only research DLLs. No synthetic keypress or director-state jump.
+bool g_learn10_proto_opted_in = false;
+bool g_learn10_proto_attempted = false;
+bool g_learn10_proto_armed = false;
+std::uintptr_t g_learn10_proto_words = 0;
+#endif
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
@@ -6908,6 +6925,20 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+    wchar_t enable_learn10[8]{};
+    const DWORD learn10_length=GetEnvironmentVariableW(
+        L"RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE",enable_learn10,8);
+    g_learn10_proto_opted_in=g_log && settings->skip_cinematics==1u &&
+        learn10_length==1 && enable_learn10[0]==L'1';
+    log_line(g_learn10_proto_opted_in ?
+        "RUNTIME-LEARN10-PROTOTYPE: enabled=1 route=native-NOMOVIES "
+        "manual-Enter=required isolated-save-copy=required; "
+        "never use with personal saves" :
+        "RUNTIME-LEARN10-PROTOTYPE: enabled=0 "
+        "set env RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE=1 "
+        "and Features.SkipCinematics=1 to opt in");
+#endif
     if(settings->music_in_pause_menu>1u)return 5;
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
 #if RAYMAN2FIX_ESC_MUSIC_PROTO
