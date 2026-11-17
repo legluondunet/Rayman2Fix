@@ -109,8 +109,8 @@ Startup::Startup(const fs::path& executable) {
 namespace {
 
 // The Windows launcher stores its own x86 runtime DLL as RCDATA #1101.
-// Keep one immediately preceding managed runtime as fix.dll.bak.
-// No numbered legacy backup migration is performed.
+// The embedded DLL is authoritative; unknown runtime versions are replaced.
+// No old runtime backup is created or preserved.
 void ensure_embedded_readme(const fs::path& root) {
     // User documentation lives under docs/; state/ contains only receipts.
     const auto dest=layout::docs(root)/"README.md";
@@ -132,6 +132,19 @@ void ensure_embedded_readme(const fs::path& root) {
     if(!out)throw std::runtime_error("could not write bundled README.md");
 }
 
+// The launcher owns game/fix.dll. Obsolete copies from older launcher builds
+// are not retained: the verified embedded runtime is the only supported one.
+void discard_legacy_runtime_backups(const fs::path& directory) {
+    for (const auto* name : {"fix.dll.bak", "fix.dll.bak.previous"}) {
+        const auto old = directory / name;
+        if (!fs::exists(old) && !fs::is_symlink(old))
+            continue;
+        if (fs::is_directory(old) && !fs::is_symlink(old))
+            throw std::runtime_error("refusing to remove a directory at obsolete runtime backup path");
+        fs::remove(old); // Unlinks a symlink itself, never its target.
+    }
+}
+
 void ensure_embedded_runtime(const fs::path& directory) {
     const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1101),
                                         MAKEINTRESOURCEW(10)); // RT_RCDATA
@@ -144,9 +157,12 @@ void ensure_embedded_runtime(const fs::path& directory) {
         throw std::runtime_error("bundled fix.dll is empty or unreadable");
 
     const auto dest = directory / "fix.dll";
-    if (fs::is_symlink(dest))
-        throw std::runtime_error("refusing a symlink at runtime DLL destination");
-    bool identical = fs::is_regular_file(dest) && fs::file_size(dest) == length;
+    // Unknown DLLs are replaced, but never follow links or overwrite folders.
+    if (fs::is_symlink(dest) ||
+        (fs::exists(dest) && !fs::is_regular_file(dest)))
+        throw std::runtime_error("unsafe game/fix.dll destination");
+    const bool has_existing = fs::exists(dest);
+    bool identical = has_existing && fs::file_size(dest) == length;
     if (identical) {
         std::ifstream old(dest, std::ios::binary);
         std::array<char, 4096> block{};
@@ -162,72 +178,60 @@ void ensure_embedded_runtime(const fs::path& directory) {
         }
     }
     if (identical) {
+        discard_legacy_runtime_backups(directory);
         return;
     }
 
+    // Write a complete new DLL first. MoveFileExW with REPLACE_EXISTING
+    // replaces it atomically on the same volume: failure keeps the old DLL.
+    // No fix.dll.bak (or numbered backup) is ever created.
     const auto temporary = directory / "fix.dll.installing";
-    if (fs::exists(temporary))
+    if (fs::exists(temporary) || fs::is_symlink(temporary))
         throw std::runtime_error("old runtime staging file exists; refusing overwrite");
     {
         std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-        if (!out) throw std::runtime_error("cannot create bundled runtime DLL");
+        if (!out) throw std::runtime_error("cannot stage bundled fix.dll");
         out.write(reinterpret_cast<const char*>(bytes),
                   static_cast<std::streamsize>(length));
-        if (!out) throw std::runtime_error("error writing bundled runtime DLL");
-    }
-    fs::permissions(temporary, fs::perms::owner_write, fs::perm_options::add);
-
-    const fs::path backup = directory / "fix.dll.bak";
-    const fs::path prior = directory / "fix.dll.bak.previous";
-    if (fs::exists(prior) || fs::is_symlink(prior)) {
-        fs::remove(temporary);
-        throw std::runtime_error("unfinished fix.dll backup rotation; preserving files");
-    }
-    if (fs::is_symlink(backup) ||
-        (fs::exists(backup) && !fs::is_regular_file(backup))) {
-        fs::remove(temporary);
-        throw std::runtime_error("fix.dll.bak is not a safe backup file");
-    }
-    if (fs::exists(dest) && !fs::is_regular_file(dest)) {
-        fs::remove(temporary);
-        throw std::runtime_error("fix.dll is not a regular file");
-    }
-
-    bool moved_prior = false;
-    bool backed_up_current = false;
-    bool published = false;
-    try {
-        if (fs::exists(dest)) {
-            if (fs::exists(backup)) {
-                fs::rename(backup, prior);
-                moved_prior = true;
-            }
-            fs::rename(dest, backup);
-            backed_up_current = true;
+        out.close();
+        if (!out) {
+            std::error_code ignored;
+            fs::remove(temporary, ignored);
+            throw std::runtime_error("error writing bundled fix.dll");
         }
-        fs::rename(temporary, dest);
-        published = true;
-    } catch (...) {
+    }
+
+    // Windows may refuse replacement of a read-only DLL. Clear only that
+    // attribute; if publication fails, restore the old file's attributes.
+    DWORD previous_attributes = INVALID_FILE_ATTRIBUTES;
+    bool old_was_readonly = false;
+    if (has_existing) {
+        previous_attributes = GetFileAttributesW(dest.c_str());
+        if (previous_attributes == INVALID_FILE_ATTRIBUTES) {
+            std::error_code ignored;
+            fs::remove(temporary, ignored);
+            throw std::runtime_error("cannot inspect existing game/fix.dll attributes");
+        }
+        old_was_readonly = (previous_attributes & FILE_ATTRIBUTE_READONLY) != 0;
+        if (old_was_readonly &&
+            !SetFileAttributesW(dest.c_str(), previous_attributes & ~FILE_ATTRIBUTE_READONLY)) {
+            std::error_code ignored;
+            fs::remove(temporary, ignored);
+            throw std::runtime_error("cannot make old game/fix.dll writable");
+        }
+    }
+
+    if (!MoveFileExW(temporary.c_str(), dest.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        const DWORD error = GetLastError();
+        if (old_was_readonly)
+            SetFileAttributesW(dest.c_str(), previous_attributes);
         std::error_code ignored;
-        // Restore both the current runtime and the previous backup if the
-        // replacement could not be completed. Never overwrite user data.
-        if (backed_up_current) {
-            if (published) fs::remove(dest, ignored);
-            if (!fs::exists(dest))
-                fs::rename(backup, dest, ignored);
-        }
-        if (moved_prior && !fs::exists(backup))
-            fs::rename(prior, backup, ignored);
         fs::remove(temporary, ignored);
-        throw;
+        throw std::runtime_error("cannot replace game/fix.dll with bundled runtime (Win32=" +
+                                 std::to_string(error) + ")");
     }
-
-    // Only after the new DLL is safely published do we remove the older .bak.
-    // On success there is exactly one backup of the immediately prior DLL.
-    if (moved_prior) {
-        fs::permissions(prior, fs::perms::owner_write, fs::perm_options::add);
-        fs::remove(prior);
-    }
+    discard_legacy_runtime_backups(directory);
 }
 } // namespace
 #endif
