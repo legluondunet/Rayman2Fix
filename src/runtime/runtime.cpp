@@ -26,6 +26,7 @@
 #if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
 #include "rayman2fix/esc_music_wine_prototype.hpp"
 #include "rayman2fix/esc_source_alias.hpp"
+#include "rayman2fix/esc_early_theme.hpp"
 #endif
 #include <atomic>
 #include <cmath>
@@ -406,6 +407,7 @@ struct RuntimeOptions {
     DWORD remove_dialogue_backgrounds;
     DWORD remove_cinematic_bars;
     DWORD music_in_pause_menu;
+    DWORD early_theme_music_experimental;
 };
 
 bool valid_angle(float v) {
@@ -1502,6 +1504,11 @@ DWORD __stdcall audio_play_transition_ex(DWORD a,DWORD b,DWORD c,DWORD d,DWORD e
 // confirmed contract for every APM backend.
 namespace proto=r2fix::esc_proto;
 std::atomic<bool> g_proto_enabled{false};
+// Explicit, single-INI experiment. Normal class-1 music compensation does
+// not consult these flags. The token is a script ESC attempt, NOT an APMMX
+// voice creation epoch; every driver call also rechecks native ownership.
+std::atomic<bool> g_early_theme_enabled{false};
+std::atomic<unsigned> g_early_theme_approved_generation{0};
 std::atomic<bool> g_proto_callsites_installed{false};
 // Only an ESC script-attempt/session token, incremented when we begin
 // a source-confirmed menu Pause wrapper. NOT the original APMMX ADPCM
@@ -1712,7 +1719,20 @@ proto::Identity proto_identity(DWORD handle,std::uint64_t generation,
                               bool require_current_theme=true) {
     proto::Identity id{};
     if(!handle || handle==0xffffffffu || !generation)return id;
-    const auto owner=inspect_audio_theme_owner(handle);
+    const bool early_token=require_current_theme &&
+        g_early_theme_enabled.load(std::memory_order_acquire) &&
+        g_early_theme_approved_generation.load(std::memory_order_acquire)==
+           unsigned(generation);
+    const auto owner=inspect_audio_theme_owner(handle,early_token);
+    const bool early_pending=early_token &&
+        r2fix::esc_early_theme::same_pending_theme_owner(
+            true,true,owner.theme_owned_driver,
+            owner.native_theme_player_ref_class,
+            owner.native_theme_pending_state,
+            owner.native_pending_target_matches_outer,
+            owner.native_pending_target_differs_current,
+            owner.alternative_ref_complete,owner.alternative_ref_candidates,
+            owner.alternative_ref_same_bank);
     // The native player reference may briefly disagree with the unique
     // Theme/SXD ownership while script pause callbacks are arriving.
     // Record the *candidate* only from the separately hooked script path,
@@ -1720,7 +1740,7 @@ proto::Identity proto_identity(DWORD handle,std::uint64_t generation,
     // pointer equality at the later menu-open transition.
     if(owner.theme_owned_driver!=1u ||
        (require_current_theme &&
-        owner.native_theme_player_ref_matches_outer!=1) ||
+        owner.native_theme_player_ref_matches_outer!=1 && !early_pending) ||
        owner.outer_bank_provenance.list_complete!=1u ||
        owner.inner_bank_provenance.list_complete!=1u ||
        owner.outer_bank_provenance.candidates!=1u ||
@@ -2822,6 +2842,91 @@ void proto_menu_tick() {
     const bool actor_ok=!(phase==proto::Phase::pending_menu &&
                           known && menu!=0) ||
                          proto_esc_menu_actor_open();
+    bool early_probe_attempted=false,early_probe_allowed=false;
+    int early_ref_class=-1,early_pending_state=-1;
+    unsigned early_pause_count=0;
+    // This rare, explicit research opt-in never runs in the strict
+    // class-1 path. Do not touch the original script Pause wrapper or
+    // defer native audio callbacks. A *post-wrapper*, render-thread
+    // observation may approve one narrowly sourced Resume decision.
+    if(g_early_theme_enabled.load(std::memory_order_acquire) &&
+       phase==proto::Phase::pending_menu && started &&
+       known && menu!=0 && actor_ok && game_window_is_foreground() &&
+       g_early_theme_approved_generation.load(
+           std::memory_order_acquire)!=unsigned(generation)) {
+        early_probe_attempted=true;
+        ProtoPreDriverReport opening{};
+        {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            if(g_proto_predriver_report.ready)
+                opening=g_proto_predriver_report;
+        }
+        const auto owner=inspect_audio_theme_owner(handle,true);
+        early_ref_class=owner.native_theme_player_ref_class;
+        early_pending_state=owner.native_theme_pending_state;
+        early_pause_count=opening.probe.pause_count;
+        r2fix::esc_early_theme::Evidence ev{};
+        ev.experimental_enabled=true;
+        ev.pending_menu=true;
+        ev.foreground=true;
+        ev.menu_open=true;
+        ev.esc_actor_open=actor_ok;
+        ev.pending_age_ms=DWORD(GetTickCount()-started);
+        ev.pause_callbacks=opening.probe.pause_count;
+        ev.other_callbacks=opening.probe.unrelated_slots;
+        ev.different_handles=opening.probe.other_handle_count;
+        ev.transition_type=opening.transition_type_post_pause;
+        ev.depth_before=opening.depth_before;
+        ev.depth_after=opening.depth_after;
+        ev.global_play_stop_stable=opening.ready &&
+            opening.native_stop_before==opening.native_stop_after &&
+            opening.native_play_before==opening.native_play_after &&
+            opening.native_stop_after==
+              g_proto_native_stop_calls.load(std::memory_order_acquire) &&
+            opening.native_play_after==
+              g_transition_play_calls.load(std::memory_order_acquire);
+        ev.owner_driver=owner.theme_owned_driver;
+        ev.native_ref_class=owner.native_theme_player_ref_class;
+        ev.native_pending_state=owner.native_theme_pending_state;
+        ev.native_target_matches_outer=
+            owner.native_pending_target_matches_outer;
+        ev.native_target_differs_current=
+            owner.native_pending_target_differs_current;
+        ev.alternate_complete=owner.alternative_ref_complete;
+        ev.alternate_candidates=owner.alternative_ref_candidates;
+        ev.alternate_same_bank=owner.alternative_ref_same_bank;
+        ev.outer_complete=owner.outer_bank_provenance.list_complete;
+        ev.inner_complete=owner.inner_bank_provenance.list_complete;
+        ev.outer_candidates=owner.outer_bank_provenance.candidates;
+        ev.inner_candidates=owner.inner_bank_provenance.candidates;
+        if(opening.ready && opening.probe.pause_count==2 &&
+           opening.probe.other_handle_count==0 &&
+           opening.probe.first_handle==handle &&
+           opening.depth_before>=1 && opening.depth_before<=16) {
+            const auto routes=proto_sample_source_routes_after_menu_tick(
+                handle,DWORD(opening.depth_before));
+            ev.direct_snapshot=routes.direct.sampled;
+            ev.direct_refs=routes.direct.same_ref;
+            ev.direct_candidates=routes.direct.transition_candidate;
+            ev.direct_stamped=routes.direct.stamped_candidate;
+            ev.theme_snapshot=routes.theme.sampled;
+            ev.type11_sources=routes.theme.theme_type11;
+            ev.type11_stamped=routes.theme.theme_stamped;
+            ev.unknown_types=routes.theme.unknown_class;
+            if(opening.transition_type_post_pause==4) {
+                const auto voice=proto_sample_adpcm_voice_after_dispatch(handle);
+                ev.original_adpcm_voice_sampled=voice.sampled!=0;
+                ev.voice_active=voice.active;
+                ev.voice_paused=voice.pause;
+                ev.voice_other_gate=voice.other_gate;
+            }
+        }
+        early_probe_allowed=
+            r2fix::esc_early_theme::can_try_pending_theme_resume(ev);
+        if(early_probe_allowed)
+            g_early_theme_approved_generation.store(
+                unsigned(generation),std::memory_order_release);
+    }
     const proto::Identity live=actor_ok ?
         proto_identity(handle,generation) : proto::Identity{};
     const DWORD verify_ms=DWORD(GetTickCount()-verify_start);
@@ -2842,6 +2947,20 @@ void proto_menu_tick() {
     proto_dispatch(action);
     proto_deferred_safety();
     const DWORD dispatch_ms=DWORD(GetTickCount()-dispatch_start);
+    if(early_probe_attempted && g_log) {
+        char line[275]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-ESC-EARLY-THEME: verdict=%s age_ms=%lu "
+            "native_ref_class=%d pending_state=%d "
+            "native_pauses=%u current_theme=%u compensated=%u "
+            "(experimental INI; original Pause callbacks unchanged)",
+            early_probe_allowed?"eligible":"refused",
+            static_cast<unsigned long>(DWORD(GetTickCount()-started)),
+            early_ref_class,early_pending_state,early_pause_count,
+            unsigned(current),
+            unsigned(action.command==proto::Command::resume));
+        log_line(line);
+    }
     // Never emit this diagnostic before the possible physical compensation:
     // file I/O at this point can otherwise cause audible Wine pauses.
     if(g_log && phase==proto::Phase::pending_menu && started &&
@@ -6749,7 +6868,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
-    if(settings->music_in_pause_menu>1u)return 5;
+    if(settings->music_in_pause_menu>1u ||
+       settings->early_theme_music_experimental>1u)return 5;
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
 #if RAYMAN2FIX_ESC_MUSIC_PROTO
     wchar_t proto_flag[8]{};
@@ -6766,6 +6886,14 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     if(g_proto_enabled.load(std::memory_order_acquire))
         log_line("RUNTIME-ESC-MUSIC: enabled=1 source=Features.MusicInPauseMenu "
                  "mode=native-Theme-SXD (original game music and native Stop)");
+    g_early_theme_enabled.store(
+        g_proto_enabled.load(std::memory_order_acquire) && g_log &&
+        settings->early_theme_music_experimental==1u,
+        std::memory_order_release);
+    if(g_early_theme_enabled.load(std::memory_order_acquire))
+        log_line("RUNTIME-ESC-EARLY-THEME: enabled=1 "
+                 "Features.EarlyThemeMusicExperimental=1 "
+                 "(research opt-in; pending native Theme target only)");
 #endif
 #endif
 #if RAYMAN2FIX_AUDIO_HOOKS
