@@ -45,6 +45,27 @@ int main() {
     CHECK(no_camera.take(RenderPollSource::Native2D,21000,owner,owner,1000));
     CHECK(no_camera.take(RenderPollSource::Viewport,21016,owner,owner,1000));
     CHECK(!no_camera.take(RenderPollSource::Native2D,21017,174,owner,1000));
+    // Regression: the 4:3 jail_20 camera and native 2D/viewport callbacks
+    // can all go quiet for ~75 s while the original game's GLI frame flip
+    // continues to draw the cinematic. FrameFlip must sample the *same*
+    // trusted game thread with a fresh key release + press.
+    RenderPollGate long_intro;
+    CHECK(long_intro.take(RenderPollSource::Camera,1000,owner,owner,1000));
+    CHECK(!long_intro.take(RenderPollSource::FrameFlip,1030,owner,owner,1000));
+    CHECK(!long_intro.take(RenderPollSource::FrameFlip,1048,174,owner,1000));
+    CHECK(long_intro.take(RenderPollSource::FrameFlip,1048,owner,owner,1000));
+    CHECK(!long_intro.take(RenderPollSource::FrameFlip,1054,owner,owner,1000));
+    CHECK(long_intro.take(RenderPollSource::FrameFlip,1064,owner,owner,1000));
+    CHECK(long_intro.take(RenderPollSource::FrameFlip,76000,owner,owner,1000));
+    CHECK(!long_intro.take(RenderPollSource::Viewport,76001,owner,owner,1000));
+    CHECK(long_intro.take(RenderPollSource::FrameFlip,76016,owner,owner,1000));
+    CHECK(!long_intro.take(RenderPollSource::FrameFlip,76017,174,owner,1000));
+    // The native camera takes priority as soon as it resumes and may
+    // suppress the flip callback even when that callback is same-thread.
+    CHECK(long_intro.take(RenderPollSource::Camera,76100,owner,owner,76100));
+    CHECK(!long_intro.take(RenderPollSource::FrameFlip,76120,owner,owner,76100));
+    CHECK(long_intro.take(RenderPollSource::FrameFlip,76148,owner,owner,76100));
+
     // There is intentionally NO authorization to fake a synchronized
     // Theme/SXD identity: this gate only schedules existing checks.
 }
