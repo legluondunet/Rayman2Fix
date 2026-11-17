@@ -636,3 +636,70 @@ Physical pre-driver interception remains disabled, even for
 early `9:12` controller-reference mismatches. The fact that
 two callbacks have the same module/handle is not enough to
 prove rollback from a withheld Pause.
+
+## Immediate Pause-only counterexample model (17 November 2026)
+
+The owner's `Rayman2Fix(20261117-034508).log` (standard build `942f09cb`)
+reconfirms that the **first early source-specific ESC** has an original
+pending controller (`ref_class=3`, `pending_target_matches_outer=1`,
+outer `9:5`, inner `9:6`). Its original wrapper produces two native
+slot-2 Pauses on one handle, both forwarded; native pause depth `1→2`,
+sampled original ADPCM `paused=1`. Its original exit forwards two slot-3
+Resumes, depth `2→1`, and sampled `paused=0`. A later ESC when the
+current Theme has synchronized (`ref_class=1`, inner `9:7`) requests
+the existing compensation; it changes to SXD `9:8` while the menu is
+open, enters `phase=6` and forwards the two original Resumes. These
+are **source/driver observations**, not proof of continuous voice lifetime.
+
+The independently SHA-verified original 1999 CD binaries establish one
+useful *conditional* algebraic fact for WAVMW type-4 → APMMX:
+`APMMXbvr.dll` `0x1EF0` assigns `record+0x1C=1` on a validated
+native Pause; `0x1F30` assigns `record+0x1C=0` on a validated
+Resume. No pause-depth counter is read at those two writes. These
+functions run under the original APMMX lock via `0x3380` and
+`0x33C0`. The **game's** source-table `+0x1C` remains a different
+depth field, and the source wrappers must never be bypassed.
+
+The new **unconnected, pure C++** model
+`include/rayman2fix/esc_pause_only_model.hpp`, exercised by
+`tests/esc_pause_only_model_tests.cpp`, enumerates both Pause decisions
+for one **initially playing, unique, unchanged physical record**, followed
+by exactly the two **unmodified original** Resumes. It computes:
+
+| First native Pause | Second native Pause | While ESC (bit) | After native Resumes (bit) |
+| --- | --- | --- | --- |
+| forwarded | forwarded | 1 | 0 |
+| skipped | forwarded | 1 | 0 |
+| forwarded | skipped | 1 | 0 |
+| skipped | skipped | 0 | 0 |
+
+**Narrow result:** in this hypothetical stable-voice case, skipping only
+one Pause **does not keep music playing**: the other Pause still sets the
+same bit. Yet the original Resume bit clears are idempotent and do
+not require a previous Pause bit set on that same unchanged record.
+Therefore an isolated *flag-write* model does **not** inherently create
+a refcount debt for a half-skipped pair. This is **not** a general claim
+about CPA lifetime or the effects of skipping original driver callbacks.
+
+All materially difficult cases are expressly **outside the model**:
+already paused voice, unmatched original Resume, focus/Alt+Tab, nested
+menu, other original driver operations, new Theme part, retired or
+reused native handle/record (ABA), source/driver interleaving,
+cross-thread code, or alternative sound backends. Real logs do not
+establish that the two observed slot-2 callbacks and subsequent slot-3
+callbacks target the exact same physical **generation** throughout the
+menu. A transition can advance SXD `9:7→9:8` without recorded global
+Play/Stop, and the original APMMX mixer can inactivate a voice itself.
+The model always returns
+`runtime_interception_authorized=false`, even for its passing case.
+
+**Decision: NO-GO for enabling immediate Pause skipping.** This
+research narrows an over-strong assumption that *every* partially
+omitted Pause must necessarily accumulate an APMMX counter debt; it
+does **not** solve source identity, physical generation or independent
+focus ownership. Future work should first trace the two original
+sound-table **source indices and nested native objects** as separate
+read-only facts, without treating a shared driver handle as a durable
+voice epoch. Existing strict `ref_class=1` authorization and
+`phase=6` passthrough remain unchanged. Do not activate this model
+via `MusicInPauseMenu`; PR #10 stays draft.
