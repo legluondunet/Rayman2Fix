@@ -377,7 +377,9 @@ jobs:
           binary=Path('build/Release/fix.dll').read_bytes()
           if b'RUNTIME-AUDIO-TRACE: enabled=1' in binary:
               raise SystemExit('Normal DLL unexpectedly contains experimental audio tracer')
-          print('Standard DLL excludes audio tracer: PASS')
+          if b'RUNTIME-LEARN10-PROTOTYPE: enabled=1' in binary:
+              raise SystemExit('Normal DLL unexpectedly contains experimental Learn10 memory-write feature')
+          print('Standard DLL excludes audio and Learn10 experimental hooks: PASS')
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Standard DLL included research probes' }
       - name: Build separate research-only audio trace launcher
