@@ -3765,6 +3765,183 @@ bool game_story_bit(std::uintptr_t words, unsigned bit, bool& value) {
     return true;
 }
 
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+// The test route toggles only one native story-array flag, on explicit
+// opt-in. No behaviour pointers, V96, script opcodes, F158, camera, or
+// synthetic input are touched. Never enable in a normal build.
+bool learn10_proto_writable_story_word(std::uintptr_t address) {
+    if (!address || (address & (alignof(LONG)-1u)) != 0u)
+        return false;
+    MEMORY_BASIC_INFORMATION mem{};
+    if (!VirtualQuery(reinterpret_cast<const void*>(address),&mem,sizeof(mem)) ||
+        mem.State!=MEM_COMMIT || (mem.Protect&(PAGE_GUARD|PAGE_NOACCESS)))
+        return false;
+    const DWORD protection=mem.Protect&0xffu;
+    if (protection!=PAGE_READWRITE && protection!=PAGE_WRITECOPY &&
+        protection!=PAGE_EXECUTE_READWRITE &&
+        protection!=PAGE_EXECUTE_WRITECOPY) return false;
+    const auto first=reinterpret_cast<std::uintptr_t>(mem.BaseAddress);
+    const auto length=static_cast<std::uintptr_t>(mem.RegionSize);
+    return address>=first && length>=sizeof(LONG) &&
+           (address-first)<=length-sizeof(LONG);
+}
+bool learn10_proto_compare_exchange(std::uintptr_t address,
+                                    std::uint32_t expected,
+                                    std::uint32_t replacement) {
+    if (!learn10_proto_writable_story_word(address)) return false;
+    static_assert(sizeof(LONG)==sizeof(std::uint32_t),
+                  "Win32 32-bit atomic progress word required");
+    LONG old_bits=0, new_bits=0;
+    std::memcpy(&old_bits,&expected,sizeof(old_bits));
+    std::memcpy(&new_bits,&replacement,sizeof(new_bits));
+    const LONG actual=InterlockedCompareExchange(
+        reinterpret_cast<volatile LONG*>(address),new_bits,old_bits);
+    return actual==old_bits;
+}
+// Both ORIGINAL behaviour-3 rules and their nesting must match the
+// approved disc before the prototype temporarily enables NOMOVIES.
+// A matching branch is a prerequisite only, not proof of safe gameplay.
+bool learn10_proto_original_scripts_match(std::uintptr_t behaviour_table) {
+    if (!behaviour_table || behaviour_table<0x10000u ||
+        behaviour_table>0xFFFFFFFFu-5u*12u) return false;
+    const auto b3=behaviour_table+3u*12u;
+    std::uint32_t rules=0;
+    std::uint8_t count=0;
+    if (!read_u32(b3,rules) || !rules ||
+        !read_u8(b3+8u,count) || count!=6) return false;
+    const auto reader32=[](std::uintptr_t addr,std::uint32_t& value){
+        return read_u32(addr,value);
+    };
+    const auto reader8=[](std::uintptr_t addr,std::uint8_t& value){
+        return read_u8(addr,value);
+    };
+    const auto input_rule=r2fix::observe_scene_script(
+        std::uintptr_t(rules)+4u,reader32,reader8,1024u,100u,265u);
+    const auto button=r2fix::inspect_learn10_nomovies_buttons(input_rule);
+    if (!r2fix::inspect_learn10_nomovies_gate(input_rule).matched() ||
+        !r2fix::inspect_learn10_nomovies_alternative(input_rule).matched() ||
+        !button.known() || !button.same_operand ||
+        !button.first_opaque || !button.second_opaque)
+        return false;
+    const auto exit_rule=r2fix::observe_scene_script(
+        std::uintptr_t(rules)+8u,reader32,reader8,8192u,870u,1100u);
+    if (exit_rule.phase104_predicates!=1u ||
+        exit_rule.phase104_first_node!=158u ||
+        exit_rule.phase110_predicates!=1u ||
+        exit_rule.phase110_first_node!=317u ||
+        !r2fix::inspect_learn10_native_exit(
+            exit_rule,behaviour_table,6u).matched())
+        return false;
+    const auto early_rule=r2fix::observe_scene_script(
+        std::uintptr_t(rules)+8u,reader32,reader8,8192u,156u,249u);
+    return r2fix::inspect_learn10_early_exit(early_rule).matched();
+}
+void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
+    if (!g_learn10_proto_opted_in || g_learn10_proto_attempted ||
+        !g_learn_intro_seen || handed_over ||
+        !g_learn_script_probe_done || !g_progress_words ||
+        g_observed_director_index!=3 ||
+        !g_observed_director_intelligence ||
+        !g_observed_director_behaviours)
+        return;
+    // One attempt per first-visit level. Never enter a persistent
+    // retry loop writing to the engine while the director is running.
+    g_learn10_proto_attempted=true;
+    bool already=false;
+    std::uint32_t behaviour=0;
+    const auto expected_b3=g_observed_director_behaviours+3u*12u;
+    const bool live_match=read_u32(
+        g_observed_director_intelligence+8u,behaviour) &&
+        std::uintptr_t(behaviour)==expected_b3;
+    const bool verified=live_match &&
+        learn10_proto_original_scripts_match(g_observed_director_behaviours);
+    const bool flag_known=game_story_bit(
+        g_progress_words,kNoMoviesCheatBit,already);
+    const bool first_visit=game_story_bit(
+        g_progress_words,kLearnHandoverBit,handed_over) && !handed_over;
+    if (!r2fix::may_try_learn10_nomovies(
+            g_learn10_proto_opted_in,g_log,first_visit,live_match,
+            verified,already) || !flag_known) {
+        log_line("RUNTIME-LEARN10-PROTOTYPE: phase=refused "
+                 "reason=flags-director-or-script-not-exact "
+                 "(no game memory changed)");
+        return;
+    }
+    // This is a game progress array. Users MUST test with a separate
+    // copy of the game/saves: runtime rollback cannot undo a game save
+    // made while the flag is temporarily enabled.
+    if (find_story_words()!=g_progress_words) {
+        log_line("RUNTIME-LEARN10-PROTOTYPE: phase=refused "
+                 "reason=progress-array-identity-changed");
+        return;
+    }
+    const auto address=g_progress_words+
+        r2fix::story_word_index(kNoMoviesCheatBit)*4u;
+    std::uint32_t before=0,replacement=0;
+    if (!read_u32(address,before) ||
+        !r2fix::plan_learn10_nomovies_arm(before,replacement) ||
+        !learn10_proto_compare_exchange(address,before,replacement)) {
+        log_line("RUNTIME-LEARN10-PROTOTYPE: phase=refused "
+                 "reason=progress-word-not-writable-or-changed");
+        return;
+    }
+    g_learn10_proto_words=g_progress_words;
+    g_learn10_proto_armed=true;
+    bool confirmed=false;
+    if (!game_story_bit(g_learn10_proto_words,kNoMoviesCheatBit,confirmed) ||
+        !confirmed) {
+        log_line("RUNTIME-LEARN10-PROTOTYPE: phase=error "
+                 "reason=write-verification-failed (restoring)");
+        return;
+    }
+    char msg[236]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-LEARN10-PROTOTYPE: phase=armed t=%ums "
+        "nomovies_bit1188=1 original=0 director=3 "
+        "native-original-branch=verified "
+        "release Enter then press Enter once to request original skip",
+        unsigned(elapsed));
+    log_line(msg);
+}
+void learn10_proto_try_restore(const char* reason) {
+    if (!g_learn10_proto_armed) return;
+    const auto words=find_story_words();
+    if (!words || words!=g_learn10_proto_words) {
+        log_line("RUNTIME-LEARN10-PROTOTYPE: phase=restore-pending "
+                 "reason=progress-array-identity-unavailable "
+                 "(do not save game; exit test installation)");
+        return;
+    }
+    const auto address=words+
+        r2fix::story_word_index(kNoMoviesCheatBit)*4u;
+    for(unsigned attempt=0;attempt<8;++attempt) {
+        std::uint32_t before=0,replacement=0;
+        if (!read_u32(address,before)) break;
+        if (!(before&r2fix::story_word_mask(kNoMoviesCheatBit))) {
+            g_learn10_proto_armed=false;
+            g_learn10_proto_words=0;
+            log_line("RUNTIME-LEARN10-PROTOTYPE: phase=restored "
+                     "state=already-clear (no game memory changed)");
+            return;
+        }
+        if (r2fix::plan_learn10_nomovies_restore(before,replacement) &&
+            learn10_proto_compare_exchange(address,before,replacement)) {
+            g_learn10_proto_armed=false;
+            g_learn10_proto_words=0;
+            char msg[220]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-LEARN10-PROTOTYPE: phase=restored "
+                "reason=%s nomovies_bit1188=0 other_progress_bits=preserved",
+                reason);
+            log_line(msg);
+            return;
+        }
+    }
+    log_line("RUNTIME-LEARN10-PROTOTYPE: phase=restore-pending "
+             "reason=compare-exchange-failed (do not save game)");
+}
+#endif // RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+
 // Read-only samples of the genuine game handover. The previous experimental
 // behaviour-3->1 shortcut corrupted graphics despite story bit 1091 changing.
 // No native scene function is called and no game state is changed here.
