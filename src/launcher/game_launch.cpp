@@ -425,7 +425,7 @@ int launch_verified_game(Startup& startup, bool verify) {
                 (display.fps_limit ? " cap at GameFrame.grBufferSwap"
                                    : " unlimited (GameFrame pacing disabled)"));
     std::cout << "Launching Rayman 2 (Glide2)...\n" << std::flush;
-    startup.log("LAUNCH-START: child=rayman2/rayman2.exe working_directory=rayman2 nested_glide_path=rayman2/rayman2fix");
+    startup.log("LAUNCH-START: child=game/rayman2.exe working_directory=game renderer=third_party/gameframe/glide2x.dll runtime=game/fix.dll");
     const auto started = std::chrono::steady_clock::now();
     // Launcher and DLL no longer share a file handle: only the approved
     // game launch resets Rayman2Fix.log, keeping installer messages separate.
