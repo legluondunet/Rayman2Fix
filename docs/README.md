@@ -53,7 +53,12 @@ state/
 ```
 
 - `game/` : fichiers nécessaires à Rayman 2 et DLL native du correctif.
-- `mods/` : ressources facultatives personnelles.
+- `mods/` : ressources facultatives personnelles. Si `Log=1`, le journal
+  d'installation contient `MODS: intro_logo=missing`, `invalid-size`,
+  `invalid-header` ou `header-valid` pour le fichier facultatif
+  `mods/textures/logo.rgba`. `header-valid` vérifie seulement le format du
+  fichier : seul un message `RUNTIME-GLIDE: INTRO-LOGO-HD: tile=...`
+  dans le journal du jeu confirme le remplacement effectif d'une texture.
 - `third_party/` : bibliothèques tierces vérifiées (GameFrame).
 - **`docs/` : documentation, notice Apache de GameFrame et `build-info.txt`.**
   La licence propre à Rayman2Fix n'est pas encore sélectionnée ; elle sera
