@@ -4415,7 +4415,7 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     poll_audio_pause_trace();
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
     proto_menu_tick();
-    // Physical compensation first, diagnostics always afterward.
+    // Never defer native ESC compensation behind diagnostic disk I/O.
     proto_theme_transition_watch_tick();
     proto_flush_predriver_resume_report();
 #endif
