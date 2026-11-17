@@ -544,7 +544,7 @@ int main() {
         // Normalization strips them without changing the game-facing mode.
         const auto good_ubi=contents(game / "ubi.ini");
         write(root / "Rayman2Fix.ini",
-              "[Debug]\\nLog=1\\n\\n[Graphics]\\nResolution=invalid\\nFPSLimit=60\\n");
+              "[Debug]\nLog=1\n\n[Graphics]\nResolution=invalid\nFPSLimit=60\n");
         check(r2fix::run_automatic(app)==2 &&
               contents(game / "ubi.ini")==good_ubi,
               "obsolete invalid Resolution is ignored without modifying Glide mode");
@@ -552,7 +552,7 @@ int main() {
         check(contents(root / "Rayman2Fix.ini").find("Resolution=")==std::string::npos,
               "obsolete Resolution line removed from existing user INI");
         write(root / "Rayman2Fix.ini",
-              "[Debug]\\nLog=1\\n\\n[Graphics]\\nFPSLimit=60\\n");
+              "[Debug]\nLog=1\n\n[Graphics]\nFPSLimit=60\n");
 
         // Same-size corruption: size-only verification would have missed it.
         write(game / "data" / "game.dat", "OTHER");
