@@ -297,6 +297,14 @@ if(BUILD_TESTING)
   target_include_directories(intro_skip_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME second-intro-skip-guard COMMAND intro_skip_tests)
 
+  # Verify multi-source callbacks stay on the trusted game thread and
+  # never duplicate native menu or intro observations within one frame.
+  add_executable(render_poll_gate_tests tests/render_poll_gate_tests.cpp)
+  target_include_directories(render_poll_gate_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-render-callback-fallback-gate
+    COMMAND render_poll_gate_tests)
+
   add_executable(scene_script_probe_tests tests/scene_script_probe_tests.cpp)
   target_include_directories(scene_script_probe_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME learn10-scene-script-readonly-probe COMMAND scene_script_probe_tests)
