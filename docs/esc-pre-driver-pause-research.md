@@ -944,3 +944,74 @@ mismatched-Theme synthetic Resume in the regular launcher.
 PR #10 remains DRAFT; the next relevant owner feedback is
 whether music is actually audible in the fourth/fifth
 class-1 menus, not an inference from `paused=0`.
+
+## Experimental pending-Theme resume prototype (17 November 2026)
+
+This deliberately **does not replace** the stable, owner-listening-validated
+`ref_class=1` Theme/SXD compensation. It also does **not suppress**
+the two native `PauseTransitionSxd` callbacks. Such physical pre-driver
+suppression remains NO-GO due to unknown stream and voice epochs.
+
+The owner's 05:08 4:3 log is sufficiently specific for an *opt-in,
+non-default runtime experiment*:
+
+- Three real first-menu Pauses satisfy the matching native sequence:
+  two slot-2 original callbacks, unchanged game depth `1->2`,
+  same transition object, one original direct SXD source, one original
+  generic type-11 Theme source, original APMMX ADPCM voice sampled
+  paused/active, unique outer/inner BNM origins.
+- The native Theme player still holds the previous descriptor `9:12`,
+  with its real pending target `9:5` matching the active outer Theme.
+  Both belong to the same original loaded bank; the nested SXD is `9:6`.
+- The regular strict guard rejects all three because the current
+  descriptor is not yet the new outer Theme. Fourth and fifth ESC
+  openings are synchronized and genuinely audible to the owner.
+
+The new pure `esc_early_theme.hpp` policy only permits an *experimental*
+first-menu Resume if **all** of the following are true within 100 ms:
+explicit `EarlyThemeMusicExperimental=1` and `MusicInPauseMenu=1`
+with debug logging, original script Pause begun with ESC and foreground,
+verified real open ESC actor, original *two same-handle* WAVMW type-4
+Pauses and source depth `1->2`, no other driver callbacks in that source
+wrapper, no original global Play/Stop across and immediately after the
+wrapper, unique double-read direct+type-11 sources stamped at the prior
+depth, actual controller switch flag=1 and pending target equals unique
+active outer Theme while the previous player ref is a separately
+verified original Theme descriptor in the same loaded bank,
+and an exact-original APMMX 1999 voice snapshot reporting
+`active=1 paused=1 other_gate=0`.
+
+The runtime then authorizes **only this ESC attempt token** to pass
+the existing `proto_identity` strict revalidation and send its
+existing paired native `ResumeTransitionSxd` calls on the game render
+thread. Before **each** physical call it rechecks live pending
+Theme state, resource bank/index and original driver handle identity.
+The usual native Stop/focus/stream mismatch quarantine and script
+Resume handling stay untouched. If any prerequisite fails, this
+specific ESC is native passthrough and later ESCs can still use
+the previously validated strict class-1 path. No driver DLL is
+replaced; no original EXE is modified on disk.
+
+**Limits — this is NOT a proven safe stable-voice algorithm.**
+Source snapshots are post-wrapper, not atomic with calls.
+The script ESC token and original loaded bank resource identity do
+not identify an APMMX physical mixer record creation epoch. Original
+SXD can change under a stable native handle within a menu
+without a globally observed Play/Stop call. A music or sound error
+under asynchronous record reuse is possible. Only opt-in for an
+owner-controlled prototype; no general-release enabling.
+
+**Expected test diagnostics:** when enabled,
+`RUNTIME-ESC-EARLY-THEME: enabled=1` at initialization;
+during one of the first 3 ESC openings,
+`RUNTIME-ESC-EARLY-THEME: verdict=eligible native_ref_class=3
+pending_state=1 ... current_theme=1 compensated=1`.
+If `verdict=refused`, no new audio calls are made; older strict
+`RUNTIME-ESC-MUSIC` diagnostics remain authoritative. Confirm by
+listening for actual continuous music within first ESC, and
+normal playback on leaving the menu, then check later
+class-1 fourth/fifth ESC and both Auto and 4:3. If sound breaks,
+turn `EarlyThemeMusicExperimental=0` off.
+
+**Status:** built source plus synthetic tests; awaits live listening
+evidence. PR #10 remains DRAFT.
