@@ -95,6 +95,37 @@ jobs:
           if (!(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern 'SYS-OS:')) {
             throw "Expected system inventory in the installer log"
           }
+          # Optional HD logo must be diagnosed without accessing any
+          # original game texture. Presence/header checks never claim a
+          # successful GPU replacement; that proof belongs to GameFrame.
+          $logo = 'build/Release/mods/textures/logo.rgba'
+          if (!(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern 'MODS: intro_logo=missing ')) {
+            throw 'Missing optional HD logo must be reported clearly'
+          }
+          [IO.File]::WriteAllText($logo, 'invalid', [Text.Encoding]::ASCII)
+          & ./build/Release/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or
+              !(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern 'MODS: intro_logo=invalid-size ')) {
+            throw 'Malformed optional HD logo size must not pass'
+          }
+          $bytes = New-Object byte[] (16 + 768 * 384 * 4)
+          [Text.Encoding]::ASCII.GetBytes('R2LOGOHD').CopyTo($bytes, 0)
+          [BitConverter]::GetBytes([uint32]768).CopyTo($bytes, 8)
+          [BitConverter]::GetBytes([uint32]384).CopyTo($bytes, 12)
+          [IO.File]::WriteAllBytes($logo, $bytes)
+          & ./build/Release/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or
+              !(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern 'MODS: intro_logo=header-valid ')) {
+            throw 'Canonical HD logo atlas header must be recognized'
+          }
+          $bytes[0] = [byte]0
+          [IO.File]::WriteAllBytes($logo, $bytes)
+          & ./build/Release/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or
+              !(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern 'MODS: intro_logo=invalid-header ')) {
+            throw 'Incorrect HD atlas signature must be rejected'
+          }
+          Remove-Item $logo -Force
           $ini = 'build/Release/Rayman2Fix.ini'
           $initial = (Get-Content $ini | Where-Object {
             $_.Trim() -and !$_.Trim().StartsWith(';')
