@@ -134,7 +134,13 @@ void ensure_embedded_readme(const fs::path& root) {
 
 // The launcher owns game/fix.dll. Obsolete copies from older launcher builds
 // are not retained: the verified embedded runtime is the only supported one.
-void discard_legacy_runtime_backups(const fs::path& directory) {
+struct RuntimeDeployment {
+    const char* status;
+    std::size_t backups_removed;
+};
+
+std::size_t discard_legacy_runtime_backups(const fs::path& directory) {
+    std::size_t removed = 0;
     for (const auto* name : {"fix.dll.bak", "fix.dll.bak.previous"}) {
         const auto old = directory / name;
         if (!fs::exists(old) && !fs::is_symlink(old))
@@ -151,11 +157,12 @@ void discard_legacy_runtime_backups(const fs::path& directory) {
                 !SetFileAttributesW(old.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY))
                 throw std::runtime_error("cannot clear read-only obsolete fix.dll backup");
         }
-        fs::remove(old); // Unlinks a symlink itself, never its target.
+        if (fs::remove(old)) ++removed; // Never follow a link target.
     }
+    return removed;
 }
 
-void ensure_embedded_runtime(const fs::path& directory) {
+RuntimeDeployment ensure_embedded_runtime(const fs::path& directory) {
     const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1101),
                                         MAKEINTRESOURCEW(10)); // RT_RCDATA
     if (!resource) throw std::runtime_error("Rayman2Fix.exe is missing bundled runtime DLL");
@@ -187,10 +194,8 @@ void ensure_embedded_runtime(const fs::path& directory) {
             offset += n;
         }
     }
-    if (identical) {
-        discard_legacy_runtime_backups(directory);
-        return;
-    }
+    if (identical)
+        return {"unchanged", discard_legacy_runtime_backups(directory)};
 
     // Write a complete new DLL first. MoveFileExW with REPLACE_EXISTING
     // replaces it atomically on the same volume: failure keeps the old DLL.
@@ -241,12 +246,15 @@ void ensure_embedded_runtime(const fs::path& directory) {
         throw std::runtime_error("cannot replace game/fix.dll with bundled runtime (Win32=" +
                                  std::to_string(error) + ")");
     }
-    discard_legacy_runtime_backups(directory);
+    const auto removed = discard_legacy_runtime_backups(directory);
+    return {has_existing ? "replaced" : "installed", removed};
 }
 } // namespace
 #endif
 
 void Startup::initialize(bool provision_files) {
+    std::string runtime_deployment_status = "not-packaged";
+    std::size_t runtime_backups_removed = 0;
     if (provision_files) {
         // Clean layout only: NEVER rename/copy an older installation.
         // Reject before creating a new workspace so the user can keep it.
@@ -267,7 +275,9 @@ void Startup::initialize(bool provision_files) {
             fs::create_directories(entry);
         }
 #ifdef _WIN32
-        ensure_embedded_runtime(game_dir_);
+        const auto runtime = ensure_embedded_runtime(game_dir_);
+        runtime_deployment_status = runtime.status;
+        runtime_backups_removed = runtime.backups_removed;
         ensure_gameframe_glide(glide);
         ensure_embedded_readme(root_);
 #endif
@@ -441,6 +451,9 @@ void Startup::initialize(bool provision_files) {
     if (provision_files) {
         log("RUNTIME: fix.dll=" +
             std::string(has_runtime_dll() ? "present" : "not packaged in this directory"));
+        log("RUNTIME-DEPLOY: status=" + runtime_deployment_status +
+            " backups_removed=" + std::to_string(runtime_backups_removed) +
+            " backup_created=0");
         if (gameframe_glide_ready(layout::gameframe(root_)))
             log("RENDERER: GameFrame glide2x.dll=verified sha256=" +
                 gameframe_glide_expected_sha256() +
@@ -448,7 +461,7 @@ void Startup::initialize(bool provision_files) {
         else
             log("RENDERER: GameFrame glide2x.dll=not bundled in this developer build");
         log("INPUT: SDL3 deferred to second phase; controller support not yet active");
-        log("INSTALL: no verified CD edition profile, no playable installation");
+        log("INSTALL: startup resources ready; CD/game verification follows (local SHA256 receipt only)");
     } else {
         log("STARTUP: --launch-no-verify skips DLL deployment, runtime "
             "hash checks, installation repair and INI creation");
