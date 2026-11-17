@@ -53,6 +53,10 @@ state/
 ```
 
 - `game/` : fichiers nécessaires à Rayman 2 et DLL native du correctif.
+  Toute version inconnue de `game/fix.dll` est remplacée par celle embarquée
+  dans le lanceur, sans conserver de `fix.dll.bak`. Les anciens fichiers
+  de sauvegarde propres à `fix.dll` sont supprimés après vérification.
+  Cette règle ne concerne pas `game/rayman2.exe.bak`.
 - `mods/` : ressources facultatives personnelles. Si `Log=1`, le journal
   d'installation contient `MODS: intro_logo=missing`, `invalid-size`,
   `invalid-header` ou `header-valid` pour le fichier facultatif
