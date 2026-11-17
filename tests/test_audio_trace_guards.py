@@ -1386,6 +1386,48 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn('audio_origin="windows-activation-pause"',self.runtime)
         self.assertIn('audio_origin="windows-activation-resume"',self.runtime)
 
+    def test_pending_theme_adpcm_voice_observer_cannot_authorize_music(self):
+        # Early ESC still has current native Theme 9:12 while the pending
+        # target is 9:5. Inspecting the ADPCM voice proves neither a
+        # durable voice epoch nor permission for a synthetic Resume.
+        source=self.runtime
+        helper=source.split(
+            "void proto_pending_voice_observe_tick() {",1)[1].split(
+            "void proto_menu_tick() {",1)[0]
+        scheduler=source.split(
+            "void poll_game_render_events(",1)[1].split(
+            "struct PollAfterNativeDraw",1)[0]
+        pause=source.split(
+            "void __cdecl proto_script_pause() {",1)[1].split(
+            "void __cdecl proto_script_resume() {",1)[0]
+        self.assertIn("RUNTIME-ESC-PENDING-VOICE:",helper)
+        self.assertIn("g_proto_esc_lifetime_start.transition_ref=",pause)
+        self.assertIn("g_proto_predriver_probe.pause_count==2u",pause)
+        self.assertIn("transition_type_post_pause==4",pause)
+        self.assertIn("source_thread!=GetCurrentThreadId()",helper)
+        self.assertIn("per_open>=8u",helper)
+        self.assertIn("total>=40u",helper)
+        self.assertIn("DWORD(now-last_tick)<750u",helper)
+        self.assertIn("proto_read_transition_type_post_wrapper(object_ref)",helper)
+        self.assertIn("proto_sample_adpcm_voice_after_dispatch(object_ref)",helper)
+        self.assertIn("pool reuse possible",helper)
+        self.assertIn("no TestIsPlaying and no audio authorization",helper)
+        self.assertNotIn("proto_dispatch(",helper)
+        self.assertNotIn("g_audio_original[",helper)
+        self.assertNotIn("proto_allow_resume(",helper)
+        self.assertNotIn("GetAsyncKeyState(",helper)
+        self.assertNotIn("PostMessage",helper)
+        self.assertLess(scheduler.index("proto_menu_tick();"),
+                        scheduler.index("proto_pending_voice_observe_tick();"))
+        self.assertLess(scheduler.index("proto_flush_predriver_resume_report();"),
+                        scheduler.index("proto_pending_voice_observe_tick();"))
+        # Original production Resume validation remains the exact current
+        # player descriptor pointer, not a matched pending target.
+        identity=source.split("proto::Identity proto_identity(",1)[1].split(
+            "void proto_dispatch(",1)[0]
+        self.assertIn("owner.native_theme_player_ref_matches_outer!=1",identity)
+        self.assertNotIn("native_pending_target_matches_outer",identity)
+
     def test_focus_loss_diagnostic_uses_real_win32_source_callers(self):
         # Camera/UI callbacks can stop running while Wine is Alt+Tabbed,
         # and GetForegroundWindow() can be stale or map the Wine desktop.
