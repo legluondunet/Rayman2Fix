@@ -339,18 +339,18 @@ int main() {
         // Retire the former experimental switch regardless of its value;
         // the explicit single MusicInPauseMenu option always wins.
         for (const char* old_early : {"0","1"}) {
-            write(user_ini,bom+std::string("[Debug]\\r\\nLog=0\\r\\n")+
-                  "[Features]\\r\\nMusicInPauseMenu=1\\r\\n"
-                  "; Experimental: attempt ESC music while Theme handoff is pending\\r\\n"
-                  "; Default 0; requires MusicInPauseMenu=1 and Debug Log=1\\r\\n"
-                  "EarlyThemeMusicExperimental="+old_early+"\\r\\n"
-                  "[Personal]\\r\\nSetting=keep\\r\\n");
+            write(user_ini,bom+std::string("[Debug]\r\nLog=0\r\n")+
+                  "[Features]\r\nMusicInPauseMenu=1\r\n"
+                  "; Experimental: attempt ESC music while Theme handoff is pending\r\n"
+                  "; Default 0; requires MusicInPauseMenu=1 and Debug Log=1\r\n"
+                  "EarlyThemeMusicExperimental="+old_early+"\r\n"
+                  "[Personal]\r\nSetting=keep\r\n");
             r2fix::ensure_rayman2fix_ini_options(user_ini);
             const auto cleaned=contents(user_ini);
             check(cleaned.find(bom)==0 &&
-                  cleaned.find("Log=0\\r\\n")!=std::string::npos &&
-                  cleaned.find("MusicInPauseMenu=1\\r\\n")!=std::string::npos &&
-                  cleaned.find("Setting=keep\\r\\n")!=std::string::npos &&
+                  cleaned.find("Log=0\r\n")!=std::string::npos &&
+                  cleaned.find("MusicInPauseMenu=1\r\n")!=std::string::npos &&
+                  cleaned.find("Setting=keep\r\n")!=std::string::npos &&
                   cleaned.find("EarlyThemeMusicExperimental")==std::string::npos &&
                   cleaned.find("; Experimental: attempt ESC music")==std::string::npos &&
                   r2fix::configured_music_in_pause_menu(user_ini),
@@ -359,8 +359,8 @@ int main() {
             check(contents(user_ini)==cleaned,
                   "retired experimental-key migration is idempotent");
         }
-        write(user_ini,"[Features]\\nMusicInPauseMenu=0\\n"
-                       "EarlyThemeMusicExperimental=1\\n");
+        write(user_ini,"[Features]\nMusicInPauseMenu=0\n"
+                       "EarlyThemeMusicExperimental=1\n");
         r2fix::ensure_rayman2fix_ini_options(user_ini);
         check(!r2fix::configured_music_in_pause_menu(user_ini) &&
               contents(user_ini).find("EarlyThemeMusicExperimental")==std::string::npos,
