@@ -37,6 +37,18 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertNotIn("native_pending_target_matches_outer",
                          self.esc_music_header)
 
+    def test_early_theme_one_toggle_works_without_debug_logging(self):
+        # INI has one switch; no feature logic may depend on Log=1.
+        init=self.runtime.split("DWORD WINAPI Rayman2Fix_Initialize(void* input) {",1)[1]
+        self.assertNotIn("early_theme_music_experimental",init)
+        self.assertIn("g_early_theme_enabled.store(\\n        g_proto_enabled.load(",init)
+        wrapper=self.runtime.split("void __cdecl proto_script_pause() {",1)[1].split(
+            "void __cdecl proto_script_resume() {",1)[0]
+        self.assertIn("g_early_theme_enabled.load(std::memory_order_acquire)",wrapper)
+        self.assertIn("(g_log && predriver_sample<16u)",wrapper)
+        self.assertNotIn("adopted && g_log && predriver_sample<16u",wrapper)
+        self.assertNotIn("configured_early_theme_music_experiment",self.config)
+
     def test_compilation_requires_explicit_audio_trace_build(self):
         self.assertRegex(self.cmake,r'option\(RAYMAN2FIX_AUDIO_TRACE\s+[^\n]+\s+OFF\)')
         self.assertIn("if(RAYMAN2FIX_AUDIO_TRACE)",self.cmake)
