@@ -71,7 +71,7 @@ class FlipTests(unittest.TestCase):
             def __init__(self,data):
                 super().__init__(data)
                 self.bytes[0x5EF87+2]=0x00
-        with self.assertRaisesRegex(F.PEFormatError,'frame-flip caller'):
+        with self.assertRaisesRegex(F.PEFormatError,'cinematic_flip_caller_two'):
             positive(Bad)
 
     def test_resolver_name_changed_rejected(self):
