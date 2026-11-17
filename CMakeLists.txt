@@ -83,7 +83,7 @@ if(WIN32)
   add_library(Rayman2FixRuntime SHARED
     src/runtime/runtime.cpp
     src/runtime/game_window_icon.cpp)
-  set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME fixFix)
+  set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME fix)
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
     RAYMAN2FIX_ESC_MUSIC_FEATURE=1
