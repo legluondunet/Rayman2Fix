@@ -75,8 +75,19 @@ state/
 - `Rayman2Fix.exe --inspect image.iso` : inspecter le support et produire
   `Rayman2Fix_inspect.log`.
 - `Rayman2Fix.exe --help` : consulter les commandes disponibles.
-- `[Features] MusicInPauseMenu=1` : maintenir la musique du niveau pendant le
-  menu Échap, désactivé par défaut. Une valeur `0` conserve le comportement natif.
+- `[Features] SkipCinematics=1` (défaut) : autoriser Espace/Entrée/Échap
+  à passer uniquement la deuxième introduction (`jail_20`). `learn_10` ne
+  peut toujours pas être passé de cette façon.
+- `[Features] RemoveDialogueBackgrounds=1` (défaut) : masquer les fonds
+  natifs noirs derrière les dialogues.
+- `[Features] RemoveCinematicBars=1` (défaut) : essayer de retirer les
+  bandes cinématiques natives ; fonctionnalité expérimentale encore à
+  confirmer visuellement dans le jeu.
+- `[Features] MusicInPauseMenu=1` (défaut) : maintenir la musique du
+  niveau pendant le menu Échap. Mettre une option à `0` pour la désactiver.
+
+Ces quatre options sont activées pour une installation neuve. Une valeur
+`0` déjà présente dans un INI existant reste respectée.
 
 Le chargement du runtime `game/fix.dll` utilise l'injection validée ; la
 bibliothèque GameFrame est recherchée dans `third_party/gameframe/`.
