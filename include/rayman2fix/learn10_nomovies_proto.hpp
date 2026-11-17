@@ -19,14 +19,14 @@ inline bool may_try_learn10_nomovies(bool opted_in, bool debug_log,
 }
 inline bool plan_learn10_nomovies_arm(std::uint32_t word,
                                     std::uint32_t& replacement) {
-    constexpr auto mask = story_word_mask(kLearn10NomoviesBit);
+    const auto mask = story_word_mask(kLearn10NomoviesBit);
     if ((word & mask) != 0u) return false;
     replacement = word | mask;
     return (replacement ^ word) == mask;
 }
 inline bool plan_learn10_nomovies_restore(std::uint32_t word,
                                         std::uint32_t& replacement) {
-    constexpr auto mask = story_word_mask(kLearn10NomoviesBit);
+    const auto mask = story_word_mask(kLearn10NomoviesBit);
     if ((word & mask) == 0u) return false;
     replacement = word & ~mask;
     return (replacement ^ word) == mask;
