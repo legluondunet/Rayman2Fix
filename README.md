@@ -1,38 +1,11 @@
-> **PR #10 — opt-in ESC pause music (not yet approved for release).**
-> This branch retains the validated nested installation layout from `main`.
-> In `rayman2/rayman2fix/Rayman2Fix.ini`, set
-> `[Features] MusicInPauseMenu=1` to test the guarded native
-> Theme/SXD continuation during the ESC menu (`0` by default).
-> First-menu continuation remains unverified and earlier retry attempts
-> caused audio regressions; the strict fail-closed policy stays in force.
-> Requires an explicitly tested PR preview build; ordinary `main`
-> installers do not implement this INI option.
-
-> **NEW: first-menu Theme handoff experiment (PR #10 only).** The
-> regular MusicInPauseMenu path has now been confirmed audible once
-> the original Theme player is synchronized. If you want to test music
-> during the *earlier* Theme handoff, keep `MusicInPauseMenu=1` and
-> `[Debug] Log=1`, then explicitly set
-> `[Features] EarlyThemeMusicExperimental=1` in the SAME
-> `Rayman2Fix.ini`. The key is created as `0` by default.
-> This research experiment attempts a native resume ONLY after the
-> original game forwarded two script-sourced Pauses, the real ESC menu
-> actor appeared, the pending Theme target matches the unique live
-> resource, direct+type-11 sources match, no global Play/Stop occurs
-> across the original Pause wrapper, and the original APMMX voice is
-> sampled active and paused. It never changes the native script
-> pause-depth or suppresses those two original Pause callbacks.
-> A later ref mismatch, Stop, or unexpected focus/stream event
-> still quarantines the sound modification.
->
-> **Experimental warning:** this does NOT prove the physical ADPCM
-> record's creation epoch; voice reuse or an unexpected concurrent
-> Theme switch may still cause silence, wrong music or audio glitches.
-> It has synthetic tests only until an owner listening test under Wine
-> and Windows. Revert the experimental key to `0` if you hear
-> overlapping music, missing effects, music restarting incorrectly,
-> or silence after leaving ESC. Do not merge PR #10 based only
-> on CI results.
+> **ESC menu music (opt-in):** in `rayman2/rayman2fix/Rayman2Fix.ini`,
+> set `[Features] MusicInPauseMenu=1`. This single option enables the
+> guarded native Theme/SXD continuation, including verified early Theme
+> handoffs. The default is `0`. `[Debug] Log` controls diagnostics only.
+> Native game Pause bookkeeping, Stop, focus and stream-change safety
+> checks remain active. The retired `EarlyThemeMusicExperimental` key
+> is removed during INI migration; an existing MusicInPauseMenu choice
+> is preserved.
 
 ## New nested layout and safe migration
 
@@ -126,26 +99,27 @@ conversion deliberately maps the reference artwork to the exact
 historic atlas bounds; it is not promised to be pixel-identical to
 the retail title's low-res palette.
 
-## Music in the Escape pause menu — experimental PR #10
+## Music in the Escape pause menu
 
-The PR #10 test build exposes `[Features] MusicInPauseMenu=1` (disabled
-by default). It attempts guarded continuation of the **already-verified**
-native Theme/SXD music during the ESC menu. It does not replace the
-game's audio driver, and all uncertain or changed resource states
-fall back to the original native audio behavior.
+Set `[Features] MusicInPauseMenu=1` in
+`rayman2/rayman2fix/Rayman2Fix.ini` to keep the game's native
+Theme/SXD music audible during the ESC menu. With `0` (default),
+Rayman 2 retains its native pause behavior. Both the synchronized Theme
+and the early pending-Theme handoff use this one option; `Log=0` does
+not disable either route. The guarded early path requires original
+script-sourced paired pause callbacks, the real ESC actor, unique Theme
+and SXD resource provenance, original sound source agreement, and a
+coherent active paused APMMX voice. It forwards the original native
+pause operations, never changes script pause depth, and revalidates
+resource ownership before compensating driver calls.
 
-**Important limitation:** during the first pauses after the
-`jail_20` → `learn_10` transition, the original controller may
-still reference Theme `9:12` while the active Theme is `9:5`.
-The compensation refuses this unverified pairing, so music can remain
-silent in the menu until the original controller synchronizes. The
-owner's latest successful `AspectRatio=Auto` test showed that
-synchronization around 57.6 seconds of play and subsequent audible
-menu music, but did **not** validate first-ESC continuation.
-`AspectRatio=4:3` does **not** disable the INI setting; its
-in-game behavior still requires validation. Do not weaken the native
-Theme ownership checks to force audio during initial or changing
-SXD parts. This feature remains experimental and unmerged.
+The owner validated early-pause audio continuity and subsequent return
+into gameplay in multiple Wine sessions before PR #10 was merged.
+Native Stop, focus and stream-change quarantine remain fail-closed.
+The physical lifetime of a reused ADPCM voice cannot be proven from
+source snapshots alone; avoid broadening the source gates without
+independent runtime tests. The former `EarlyThemeMusicExperimental`
+setting is obsolete and removed automatically during INI migration.
 
 The separately labelled GitHub Actions artifact
 `Rayman2Fix-Windows-x86-audio-trace` has a **research-only** DLL with
@@ -706,7 +680,7 @@ SkipCinematics=0
 RemoveDialogueBackgrounds=0
 ; 1 = experimental removal of game-drawn cinematic letterbox bars
 RemoveCinematicBars=0
-; 1 = continue the current level music during the ESC menu (experimental)
+; 1 = continue native Theme music during ESC (including early handoff)
 MusicInPauseMenu=0
 ```
 
