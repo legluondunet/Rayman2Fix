@@ -464,6 +464,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_audio_cd_parity.py'
       - name: Verify dual Theme and SXD native pause routing with synthetic model
         run: python3 -m unittest discover -s tests -p 'test_audio_dual_dispatch_model.py'
+      - name: Verify SHA-pinned original CD Theme-11 dual routing with synthetic PE
+        run: python3 -m unittest discover -s tests -p 'test_original_cd_dual_pause_routes.py'
       - name: Check minimal native ESC music model and mandatory nested-pause counterexample
         run: python3 -m unittest discover -s tests -p 'test_esc_music_record_experiment.py'
       - name: Verify ESC music shadow reconciler with 4096 mixed native pause sequences
