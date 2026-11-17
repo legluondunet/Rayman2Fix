@@ -59,4 +59,52 @@ constexpr Summary summarize(const RawTable& table,bool two_reads_agree,
     return out;
 }
 
+
+struct ThemeRouteSummary {
+    bool sampled=false;
+    unsigned generic_candidate=0;
+    unsigned theme_type11=0;
+    unsigned theme_stamped=0;
+    unsigned unknown_class=0;
+    std::array<int,4> indices{{-1,-1,-1,-1}};
+    // Post-wrapper table snapshots and type classification do not
+    // establish which native callback actually fired, nor its voice epoch.
+    bool authorize_audio=false;
+};
+
+// The caller obtains each descriptor type via the ORIGINAL generic
+// sound-table route: record+4 -> descriptor -> descriptor+4.
+// An entry with +0x10=0 is dispatched by 0x458070 through the native
+// resource-type vtable; type 11 may delegate to the nested SXD record.
+// "types" are already read-only, checked classifications (-1 unknown),
+// not memory addresses or native physical voice identities.
+constexpr ThemeRouteSummary summarize_theme_routes(
+    const RawTable& table,
+    const std::array<int,kRows>& types,
+    bool coherent_table,
+    std::uint32_t old_game_pause_depth) noexcept {
+    ThemeRouteSummary out{};
+    if(!coherent_table || old_game_pause_depth<1u ||
+       old_game_pause_depth>16u)return out;
+    out.sampled=true;
+    for(std::size_t i=0;i<kRows;++i) {
+        const std::size_t start=i*kStride;
+        if(get32(table,start+0x14u)==0u ||
+           get32(table,start+0x08u)!=0u ||
+           get32(table,start+0x10u)!=0u)continue;
+        ++out.generic_candidate;
+        if(types[i]<0) {
+            ++out.unknown_class;
+            continue;
+        }
+        if(types[i]!=11)continue;
+        if(out.theme_type11<out.indices.size())
+            out.indices[out.theme_type11]=int(i);
+        ++out.theme_type11;
+        if(get32(table,start+0x1cu)==old_game_pause_depth)
+            ++out.theme_stamped;
+    }
+    return out;
+}
+
 } // namespace r2fix::esc_source_alias
