@@ -37,14 +37,18 @@ third_party/
   gameframe/
     glide2x.dll           (SHA256-pinned GameFrame Glide 2)
     GameFrame-LICENSE-APACHE.txt
+docs/
+  README.md              (user guide bundled by the launcher)
 state/
   .rayman2fix-cd-files.tsv
   .rayman2fix-exe-patch.tsv  (only after an approved EXE replacement)
 ```
 
-The launcher creates `game/`, `mods/textures/` and
-`third_party/gameframe/` in a new folder; `state/` is published with a
-verified CD installation. The original game retains `game/` as its working
+The launcher creates `game/`, `mods/textures/`,
+`third_party/gameframe/` and `docs/` in a new folder. Its embedded
+installation guide is deployed at `docs/README.md`, never beside the
+launcher. `state/` is published with a verified CD installation and is
+reserved for SHA-256 installation receipts, **not documentation**. The original game retains `game/` as its working
 directory. A child-only DLL lookup path points at `third_party/gameframe/`;
 the runtime is injected as `game/fix.dll` by the existing verified
 `LoadLibraryW` route. No bundled WinMM proxy or changes to the on-disk
@@ -632,7 +636,7 @@ in-game Windows/Wine acceptance test prior to release.
 
 The Windows workflow distributes **one executable**, `Rayman2Fix.exe`.
 Running it in a new folder creates the clean `game/`, `mods/`,
-`third_party/`, `state/` layout documented above. There is **no
+`third_party/`, `docs/`, `state/` layout documented above. There is **no
 automatic migration** from historical install trees. The game runtime is
 `game/fix.dll`; the pinned renderer is in
 `third_party/gameframe/glide2x.dll`. Third-party or game DLLs are never
@@ -984,6 +988,7 @@ unpacked copy byte-for-byte, and exercise the upgrade/backup path.
 
 ## Architecture and evidence
 
+- [Installed user guide](docs/README.md) — bundled in the single launcher
 - [Design and roadmap](docs/architecture.md)
 - [How to document retail disc editions](docs/disc-evidence.md)
 - [CD installation steps from the author's Lutris installer](docs/lutris-cd-install.md)
