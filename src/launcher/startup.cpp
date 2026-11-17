@@ -267,10 +267,10 @@ void Startup::initialize(bool provision_files) {
 #ifndef RAYMAN2FIX_BUILD_COMMIT
 #define RAYMAN2FIX_BUILD_COMMIT "unknown"
 #endif
-    // The build identity is launcher metadata, not a game/CD asset.
+    // The build identity is documentation in docs/, not a game/CD asset.
     // Update only our own recognized file and stage the replacement safely.
     if(provision_files) {
-        const auto dest=root_/"build-info.txt";
+        const auto dest=layout::docs(root_)/"build-info.txt";
         if(fs::is_symlink(dest) ||
            (fs::exists(dest) && !fs::is_regular_file(dest)))
             throw std::runtime_error("unsafe build-info.txt");
@@ -288,8 +288,8 @@ void Startup::initialize(bool provision_files) {
                 throw std::runtime_error("unknown build-info.txt; preserving user file");
         }
         if(prior!=metadata) {
-            const auto pending=root_/"build-info.txt.installing";
-            const auto backup=root_/"build-info.txt.previous";
+            const auto pending=layout::docs(root_)/"build-info.txt.installing";
+            const auto backup=layout::docs(root_)/"build-info.txt.previous";
             if(fs::exists(pending) || fs::is_symlink(pending) ||
                fs::exists(backup) || fs::is_symlink(backup))
                 throw std::runtime_error("unfinished build-info.txt update");
