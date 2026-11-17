@@ -11,6 +11,9 @@ inline fs::path game(const fs::path& launcher_root) {
 inline fs::path mods(const fs::path& launcher_root) {
     return launcher_root / "mods";
 }
+inline fs::path docs(const fs::path& launcher_root) {
+    return launcher_root / "docs";
+}
 inline fs::path gameframe(const fs::path& launcher_root) {
     return launcher_root / "third_party" / "gameframe";
 }
