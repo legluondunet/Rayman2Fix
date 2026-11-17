@@ -18,6 +18,13 @@ class FakePE:
         for rva,raw in A.ANCHORS.values():
             raw=bytes.fromhex(raw)
             self.code[rva:rva+len(raw)]=raw
+        # The positive fixture must include each verified rel32 call,
+        # including the original Theme->inner paths whose bytes lie
+        # beyond the short opcode windows checked separately.
+        for at,target in A.EDGES.values():
+            rel=target-at-5
+            self.code[at:at+5]=bytes([0xE8])+rel.to_bytes(
+                4,'little',signed=True)
         for name,at in (
             ('pause',A.GENERIC_PAUSE_TABLE_RVA),
             ('resume',A.GENERIC_RESUME_TABLE_RVA)):
