@@ -8,6 +8,32 @@
 > Requires an explicitly tested PR preview build; ordinary `main`
 > installers do not implement this INI option.
 
+> **NEW: first-menu Theme handoff experiment (PR #10 only).** The
+> regular MusicInPauseMenu path has now been confirmed audible once
+> the original Theme player is synchronized. If you want to test music
+> during the *earlier* Theme handoff, keep `MusicInPauseMenu=1` and
+> `[Debug] Log=1`, then explicitly set
+> `[Features] EarlyThemeMusicExperimental=1` in the SAME
+> `Rayman2Fix.ini`. The key is created as `0` by default.
+> This research experiment attempts a native resume ONLY after the
+> original game forwarded two script-sourced Pauses, the real ESC menu
+> actor appeared, the pending Theme target matches the unique live
+> resource, direct+type-11 sources match, no global Play/Stop occurs
+> across the original Pause wrapper, and the original APMMX voice is
+> sampled active and paused. It never changes the native script
+> pause-depth or suppresses those two original Pause callbacks.
+> A later ref mismatch, Stop, or unexpected focus/stream event
+> still quarantines the sound modification.
+>
+> **Experimental warning:** this does NOT prove the physical ADPCM
+> record's creation epoch; voice reuse or an unexpected concurrent
+> Theme switch may still cause silence, wrong music or audio glitches.
+> It has synthetic tests only until an owner listening test under Wine
+> and Windows. Revert the experimental key to `0` if you hear
+> overlapping music, missing effects, music restarting incorrectly,
+> or silence after leaving ESC. Do not merge PR #10 based only
+> on CI results.
+
 ## New nested layout and safe migration
 
 The **retail game** is installed under `rayman2/`; the mod's
