@@ -106,8 +106,7 @@ void write_receipt(const fs::path& staged, const DiscInfo& info) {
         if (file.skipped_by_cd_recipe || file.invalid_extent ||
             file.relative_path.generic_u8string() == "ubi.ini") continue;
         const auto name = file.relative_path.generic_u8string();
-        // Fix assets are managed only by the installer and never imported
-        // from a CD image into the private runtime directory.
+        // Reject a retail file that conflicts with the launcher-owned fix.dll.
         if (name=="rayman2fix" || name.rfind("rayman2fix/",0)==0)
             throw std::runtime_error("CD conflicts with reserved rayman2fix/ directory");
         if (name.find('\t') != std::string::npos ||
@@ -123,6 +122,10 @@ void write_receipt(const fs::path& staged, const DiscInfo& info) {
     }
     if (!count || !out)
         throw std::runtime_error("CD installation receipt is incomplete");
+}
+
+bool bootstrap_fix_file(const std::string& name) {
+    return name=="FIX.DLL" || name=="FIX.DLL.BAK";
 }
 
 // Fresh bootstrap game/ must contain only the launcher-owned runtime and
@@ -318,7 +321,7 @@ std::optional<fs::path> find_local_unprotected_exe(const fs::path& launcher_root
 }
 
 // The original is preserved as rayman2.exe.bak and the receipt stays in
-// rayman2/rayman2fix/. Unknown CD editions are never modified.
+// state/. Unknown CD editions are never modified.
 void patch_executable_if_supported(const fs::path& game_root, Startup& startup) {
     if (is_exe_replaced(game_root)) {
         startup.log("EXE-PATCH: installed patch marker present; original preserved as rayman2.exe.bak");
