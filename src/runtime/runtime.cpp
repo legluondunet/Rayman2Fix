@@ -4401,21 +4401,15 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     } clear_busy;
     if(!g_render_poll_gate.take(source,now,tid,camera_tid,camera_at))
         return;
-    if(source!=r2fix::RenderPollSource::Camera) {
-        const unsigned bit=source==r2fix::RenderPollSource::Native2D ?
-            1u:2u;
-        if(!(g_render_poll_fallback_reported.fetch_or(
-               bit,std::memory_order_relaxed)&bit)) {
-            char msg[220]{};
-            std::snprintf(msg,sizeof(msg),
-                "RUNTIME-RENDER-POLL: fallback-active source=%s "
-                "camera_age_ms=%lu same_camera_thread=1 "
-                "(existing input/audio guards unchanged)",
-                bit==1u?"native-2d":"native-viewport",
-                static_cast<unsigned long>(DWORD(now-camera_at)));
-            log_line(msg);
-        }
-    }
+    // Audio compensation must run BEFORE any diagnostic disk output.
+    // Even one WriteFile here can make the brief original Wine pause
+    // audible when this is the first rendered ESC-menu frame.
+    const unsigned fallback_bit=
+        source==r2fix::RenderPollSource::Native2D ? 1u :
+        source==r2fix::RenderPollSource::Viewport ? 2u : 0u;
+    const bool first_fallback=fallback_bit &&
+        !(g_render_poll_fallback_reported.fetch_or(
+              fallback_bit,std::memory_order_relaxed)&fallback_bit);
     poll_second_intro_skip();
 #if RAYMAN2FIX_AUDIO_HOOKS
     poll_audio_pause_trace();
@@ -4429,6 +4423,16 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
 #if RAYMAN2FIX_RESEARCH_PROBES
     poll_learn_intro_skip();
 #endif
+    if(first_fallback && g_log) {
+        char msg[220]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-RENDER-POLL: fallback-active source=%s "
+            "camera_age_ms=%lu same_camera_thread=1 "
+            "(existing input/audio guards unchanged)",
+            fallback_bit==1u?"native-2d":"native-viewport",
+            static_cast<unsigned long>(DWORD(now-camera_at)));
+        log_line(msg);
+    }
 }
 
 struct PollAfterNativeDraw {
