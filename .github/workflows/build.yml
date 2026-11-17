@@ -199,8 +199,9 @@ jobs:
           if (Test-Path package-smoke/state) {
             throw 'No-CD bootstrap must not create state/ before verification'
           }
-          if (!(Test-Path package-smoke/build-info.txt)) {
-            throw 'Build identity missing from launcher root'
+          if (!(Test-Path package-smoke/docs/build-info.txt) -or
+              (Test-Path package-smoke/build-info.txt)) {
+            throw 'Build identity must live under docs/ only'
           }
           if (!(Test-Path package-smoke/game/fix.dll) -or
               !(Test-Path package-smoke/Rayman2Fix.ini)) {
@@ -237,7 +238,8 @@ jobs:
           }
           Write-Host 'Single fix.dll.bak rotation: PASS'
           if (!(Test-Path package-smoke/third_party/gameframe/glide2x.dll) -or
-              !(Test-Path package-smoke/third_party/gameframe/GameFrame-LICENSE-APACHE.txt)) {
+              !(Test-Path package-smoke/docs/GameFrame-LICENSE-APACHE.txt) -or
+              (Test-Path package-smoke/third_party/gameframe/GameFrame-LICENSE-APACHE.txt)) {
             throw 'Single EXE failed to unpack GameFrame Glide or Apache license'
           }
           $glide = (Get-FileHash package-smoke/third_party/gameframe/glide2x.dll -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -245,7 +247,7 @@ jobs:
             throw "GameFrame embedded payload SHA256 mismatch: $glide"
           }
           $sourceLicense = (Get-FileHash third_party/game-frame/LICENSE-APACHE -Algorithm SHA256).Hash
-          $localLicense = (Get-FileHash package-smoke/third_party/gameframe/GameFrame-LICENSE-APACHE.txt -Algorithm SHA256).Hash
+          $localLicense = (Get-FileHash package-smoke/docs/GameFrame-LICENSE-APACHE.txt -Algorithm SHA256).Hash
           if ($sourceLicense -ne $localLicense) {
             throw 'Embedded Apache 2.0 license is not from pinned GameFrame source'
           }
