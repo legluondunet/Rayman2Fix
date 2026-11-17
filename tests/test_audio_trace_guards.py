@@ -41,7 +41,7 @@ class AudioTraceGuardTests(unittest.TestCase):
         # INI has one switch; no feature logic may depend on Log=1.
         init=self.runtime.split("DWORD WINAPI Rayman2Fix_Initialize(void* input) {",1)[1]
         self.assertNotIn("early_theme_music_experimental",init)
-        self.assertIn("g_early_theme_enabled.store(\\n        g_proto_enabled.load(",init)
+        self.assertIn("g_early_theme_enabled.store(\n        g_proto_enabled.load(",init)
         wrapper=self.runtime.split("void __cdecl proto_script_pause() {",1)[1].split(
             "void __cdecl proto_script_resume() {",1)[0]
         self.assertIn("g_early_theme_enabled.load(std::memory_order_acquire)",wrapper)
