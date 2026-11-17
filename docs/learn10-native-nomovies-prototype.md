@@ -30,11 +30,12 @@ inject keyboard events, or request a new level.
 
 **Important:** the bit is temporarily in a progress array that the
 game may save. The revised prototype exposes the flag for **at most
-2 seconds of observed render callbacks**, restoring it as soon as the
-native director leaves behaviour 3, at the 2-second deadline, at
-handover (bit 1091) or on leaving the level. If the game freezes and
-stops calling the existing render callback, the 2-second deadline
-cannot execute until a callback resumes. It also cannot guarantee
+5 seconds of observed render callbacks**, restoring it as soon as the
+native director leaves behaviour 3, at the 5-second deadline, at
+handover (bit 1091) or on leaving the level. It only arms during the
+first 3 seconds of the scene. If the game freezes and stops calling the
+existing render callback, that deadline cannot execute until callbacks
+resume. It also cannot guarantee
 that an unexpected automatic save, crash, or level transition will
 not persist experimental state. **Never run this on your normal
 installation, real saves, or work profile.** Use a full, disposable
@@ -57,18 +58,24 @@ disposable copy.
 3. In **PowerShell**, from the disposable copy:
    ```powershell
    $env:RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE = '1'
-   .\Rayman2Fix.exe
-   Remove-Item Env:RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE
+   try {
+       .\Rayman2Fix.exe
+   } finally {
+       Remove-Item Env:RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE -ErrorAction SilentlyContinue
+   }
    ```
 4. Start a **new game** and skip the second cinematic (`jail_20`)
-   as usual. When the 3D introduction in `learn_10` begins,
-   **do not press Enter, Space or Esc**. The prototype tests the
-   *top-level ELSE branch* of `IfNot(NOMOVIES)`, which is distinct
-   from the `JustPressedBut` condition inside the `IfNot` branch.
-   The research build attempts to arm the flag once, early in the
-   scene (up to t=5 seconds), then automatically clears it once the
-   director leaves behaviour 3 or after a maximum of 2 seconds.
-   Input is neither synthesized nor required.
+   as usual. Once the 3D introduction in `learn_10` has started,
+   **release all keys**, wait approximately **2 seconds**, then
+   **press and release Enter once** (do not mash keys). The original
+   script's *NOMOVIES ELSE* route contains its **own**
+   `JustPressedBut` and `IsTimeElapsed(V93,1000)` input/time gate,
+   **distinct** from the button check in the `IfNot` route.
+   The original button operand is opaque, so Enter is a **hypothesis**
+   rather than a proven key mapping. No input is synthesized by the fix.
+   The prototype activates the flag early (up to t=3 seconds) and
+   attempts to clear it when the director leaves behaviour 3 or after
+   five seconds, whichever happens first.
 5. If Rayman gains control early, check the 3D world, camera,
    HUD, movement, pause and return to normal gameplay. **Do not
    save** during this initial test. Exit and provide the new
@@ -92,9 +99,12 @@ RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE=1 wine Rayman2Fix.exe
   temporarily enabled. **This does not prove the game used the skip.**
 - `phase=refused`: no bit changed (unknown director/script,
   changed pointer/flags, or unsupported installation).
+- `phase=physical-enter-edge`: physical Enter pressed while the
+  experimental bit was active. This **does not prove** that the game's
+  opaque `JustPressedBut` operand recognized it.
 - `phase=restored reason=director-left-b3` or
-  `reason=max-exposure-2000ms`: flag cleared promptly without waiting
-  for the end of the ~25-second cinematic.
+  `reason=max-exposure-5000ms`: flag cleared without waiting for the
+  end of the ~25-second cinematic.
 - `phase=restored reason=story1091-handover`: fallback restoration if
   still armed, then `nomovies-flag at-handover enabled=0` confirms this.
 - `phase=restore-pending` or `phase=error`: stop, do not save,
@@ -103,10 +113,12 @@ RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE=1 wine Rayman2Fix.exe
   normal Rayman/camera/HUD/controls: compare visually to the
   unmodified ~25-second natural sequence.
 
-The first prototype mistakenly suggested pressing Enter while NOMOVIES
-was enabled. The original `IfNot(NOMOVIES)` prevents that input gate
-from being evaluated; the corrected test checks the *other*, native
-alternative branch automatically instead.
+The first prototype incorrectly treated the two native button gates as
+interchangeable; the second attempt incorrectly assumed the ELSE route
+needs no input. The actual compiled rule has **two separate
+`JustPressedBut` conditions**, one in each branch, and the ELSE gate
+also has a native 1-second timer condition. This test uses the ELSE
+gate with real physical input and a bounded flag exposure window.
 
 No conclusion about safety or effectiveness follows solely from
 successful compilation or from the bit being armed. The experimental
