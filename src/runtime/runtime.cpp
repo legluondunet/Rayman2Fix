@@ -1560,6 +1560,9 @@ struct ProtoEscLifetimeStart {
     unsigned sxd_samples=0;
     unsigned sxd_changes=0;
     unsigned sxd_unknown=0;
+    // Read-only, source-verified type-4 transition OBJECT ref. This is
+    // neither an ADPCM voice generation nor permission to send Resume.
+    DWORD transition_ref=0;
 };
 ProtoEscLifetimeStart g_proto_esc_lifetime_start{}; // g_proto_mutex
 
@@ -1996,6 +1999,16 @@ void __cdecl proto_script_pause() {
                 g_proto_generation.load(std::memory_order_relaxed),
                 native_play_before,native_stop_before
             };
+            // This reference comes from the exact observed pair of
+            // original PauseTransitionSxd calls AFTER their wrapper.
+            // Never retain or infer the underlying ADPCM record's epoch.
+            if(!overlap && transition_type_post_pause==4 &&
+               g_proto_predriver_probe.pause_count==2u &&
+               g_proto_predriver_probe.other_handle_count==0u &&
+               g_proto_predriver_probe.first_handle>=0x10000u &&
+               g_proto_predriver_probe.first_handle!=0xffffffffu)
+                g_proto_esc_lifetime_start.transition_ref=
+                    g_proto_predriver_probe.first_handle;
         } else if(g_proto_esc_lifetime_start.valid && !adopted) {
             // An unexpected script-origin Pause breaks unique pairing.
             g_proto_esc_lifetime_start.overlap=true;
@@ -2585,6 +2598,83 @@ void proto_theme_transition_watch_tick() {
         owner.outer_bank_provenance.list_complete,
         owner.inner_bank_provenance.list_complete,
         owner.alternative_ref_complete);
+    log_line(line);
+}
+// Diagnostic only. The FIRST ESC menus can be inside a pending Theme
+// handoff: the original current descriptor is stale while the +0x44
+// target already matches the 9:5 sound table. This observer samples the
+// original ADPCM paused/active bits for the source-qualified transition
+// object *after* the usual menu compensation decision and without any
+// original audio-driver function call. A matching pool ordinal across
+// samples is NOT a voice epoch; Stop may retire/compact the pool.
+void proto_pending_voice_observe_tick() {
+    if(!g_log ||
+       !g_proto_enabled.load(std::memory_order_acquire) ||
+       !g_proto_callsites_installed.load(std::memory_order_acquire))
+        return;
+    BYTE menu=0;
+    if(!proto_game_read(0xB9BC8,menu) || menu==0u)return;
+    DWORD object_ref=0;
+    unsigned generation=0;
+    bool overlapped=false;
+    {
+        const std::lock_guard<std::mutex> lock(g_proto_mutex);
+        const auto& lifetime=g_proto_esc_lifetime_start;
+        if(!lifetime.valid)return;
+        object_ref=lifetime.transition_ref;
+        generation=lifetime.generation;
+        overlapped=lifetime.overlap;
+    }
+    if(!object_ref || !generation || overlapped)return;
+
+    // 750 ms cadence and 8 snapshots per source-qualified ESC opening;
+    // never flood disk during multi-minute pauses. This is ALWAYS after
+    // proto_menu_tick's time-sensitive original/compensated audio path.
+    static unsigned last_generation=0,per_open=0,total=0;
+    static DWORD last_tick=0;
+    if(total>=40u)return;
+    const DWORD now=GetTickCount();
+    if(generation!=last_generation) {
+        last_generation=generation;
+        per_open=0;
+        last_tick=0;
+    }
+    if(per_open>=8u || (last_tick && DWORD(now-last_tick)<750u))
+        return;
+    last_tick=now;
+    ++per_open;
+    ++total;
+
+    const auto owner=inspect_audio_theme_owner(object_ref,true);
+    const int transition_type=
+        proto_read_transition_type_post_wrapper(object_ref);
+    const auto voice=transition_type==4 ?
+        proto_sample_adpcm_voice_after_dispatch(object_ref) :
+        ProtoAdpcmVoiceSnapshot{};
+    const unsigned stopped=g_proto_native_stop_calls.load(
+        std::memory_order_acquire);
+    const unsigned played=g_transition_play_calls.load(
+        std::memory_order_acquire);
+    char line[520]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-ESC-PENDING-VOICE: generation=%u sample=%u "
+        "t_ms=%lu menu=1 ref_class=%d pending=%d pending_matches_outer=%d "
+        "transition_type=%d sampled=%d voice_index=%d paused=%d active=%d "
+        "other_gate=%d native_play_count=%u native_stop_count=%u "
+        "mode0_output=%lu mode1_output=%lu "
+        "(source-paired read-only; pool reuse possible; NOT a voice epoch, "
+        "no TestIsPlaying and no audio authorization)",
+        generation,per_open,
+        static_cast<unsigned long>(DWORD(now-
+            g_audio_origin.load(std::memory_order_acquire))),
+        owner.native_theme_player_ref_class,
+        owner.native_theme_pending_state,
+        owner.native_pending_target_matches_outer,
+        transition_type,voice.sampled,voice.voice_index,
+        voice.pause,voice.active,voice.other_gate,
+        played,stopped,
+        static_cast<unsigned long>(voice.mode0_output),
+        static_cast<unsigned long>(voice.mode1_output));
     log_line(line);
 }
 void proto_menu_tick() {
@@ -4418,6 +4508,9 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     // Never defer native ESC compensation behind diagnostic disk I/O.
     proto_theme_transition_watch_tick();
     proto_flush_predriver_resume_report();
+    // Existing physical audio decisions are final before the read-only
+    // early-handoff ADPCM voice sampler can touch memory or disk.
+    proto_pending_voice_observe_tick();
 #endif
 #endif
 #if RAYMAN2FIX_RESEARCH_PROBES
