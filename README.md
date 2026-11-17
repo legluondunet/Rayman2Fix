@@ -599,46 +599,34 @@ Wine and Windows before the PR is merged.
 
 ## Automatic launcher workflow
 
-Run **`Rayman2Fix.exe` without arguments**. The obsolete `--init` command
-has been removed.
+Run `Rayman2Fix.exe` without arguments from a **new, clean directory**.
+The installer neither detects nor migrates older installations into the new
+layout. If a legacy `rayman2/` or `Rayman2Fix/` folder is present, it
+refuses the operation without modifying that folder.
 
-- When `rayman2/rayman2.exe` already exists, the launcher checks the
-  local CD installation receipt (original filenames, sizes and SHA-256) and audio assets
-  without needing the source CD again. Missing or changed files are reported,
-  not silently overwritten.
-- Otherwise, it searches for **exactly one** adjacent `.iso` or `.cue` file.
-  It refuses absent or ambiguous media, and requires an identifiable
-  `RAYMAN2` volume with `rayman2.exe`, `dll/snd_cpa_mmx.ini`, game data,
-  and no unrecognized invalid file extents.
-- It extracts the supported CD files to a sibling staging directory, omitting
-  the known installer-only material and dummy entries, preserving long Joliet
-  names in lowercase and writable. It creates `dll/snd_cpa.ini` from
-  `dll/snd_cpa_mmx.ini`, writes a local **SHA-256** CD file receipt,
-  then publishes into `rayman2/` with fixes in `game/` transactionally. Existing
-  unrelated files are preserved; an incomplete/unrecognized installation is
-  never silently overwritten.
-- The launcher embeds and deploys its own x86 `Rayman2Fix.dll`, creating
-  the `game/` directory and minimal INI automatically. If the
-  runtime DLL changes, its **immediately previous version** is kept as
-  `Rayman2Fix.dll.bak`; the older backup is replaced, never accumulated
-  as numbered history.
+- With a verified `game/rayman2.exe` and a valid `state/` CD receipt, the
+  launcher checks original assets and audio settings before starting the
+  approved decrypted game. Missing/changed assets are not silently repaired.
+- Without an installed game, it finds exactly one adjacent ISO/CUE image and
+  extracts approved CD assets to `game.installing/`. In parallel it creates
+  `state.installing/` with the CD SHA-256 receipt and optional approved
+  executable-patch receipt.
+- The installer stages and publishes `game/` and `state/` with rollback
+  checks, preserving the original protected EXE under `game/rayman2.exe.bak`
+  when the approved decrypted executable is supplied. No copyrighted game
+  binaries are bundled.
+- The single launcher installs `game/fix.dll` (and retains exactly one
+  `game/fix.dll.bak` on update), plus a SHA-256-pinned GameFrame runtime
+  under `third_party/gameframe/`. Its only maintained mod INI is
+  `Rayman2Fix.ini` at the launcher root.
+- User textures under `mods/textures/` are independent of retail CD
+  extraction and are not touched by installer file publication.
 
-**Important:** a SHA-256 receipt generated from the same CD verifies
-subsequent file integrity, but does not authenticate the retail edition.
-**Game launch is now attempted only** for the approved protected/unprotected
-executable SHA-256 pair, with `rayman2.exe.bak` and patch receipt verified.
-An unsupported EXE or unverified GameFrame library still blocks launch.
-No-CD/gameplay compatibility is not yet established by tests.
-SDL3/gamepad integration is deferred to a later phase.
-
-The single EXE now deploys an exact-edition-gated x86 `Rayman2Fix.dll`:
-it can adjust the game's camera horizontal field of view (Hor+) **in
-memory** for widescreen output, after checking the exact 32-bit executable
-signature. It refuses all other game versions. GameFrame's Apache-2.0
-OpenGL Glide 2 wrapper is embedded as `glide2x.dll`.
-Window styling and FOV are implemented for the owner's first Wine/Windows
-test; gameplay appearance, HUD alignment, video behavior and Alt+Tab are
-**not yet validated**. SDL3/gamepad integration remains deferred.
+The local CD receipt proves consistency with the media that generated it,
+**not the authenticity of an unknown CD edition**. Game launch remains gated
+to the exact supported protected/unprotected executable pair; unexpected
+files and hashes fail closed. The new directory layout requires a separate
+in-game Windows/Wine acceptance test prior to release.
 
 ## Installed-file layout
 
@@ -796,7 +784,7 @@ correction. The projection angle is calculated for the output aspect,
 while the FOV reference stays 4:3. Glide, 16-bit internal mode,
 borderless window and Hor+ are mandatory fixes, not redundant user options.
 `ubi.ini` is mutable, so it is deliberately excluded from the immutable
-CD SHA-256 receipt. Old receipts with this entry are migrated without the CD.
+CD SHA-256 receipt. The clean-install receipt omits this mutable file.
 
 The game-facing configuration and Hor+ projection calculation are
 unit-tested, but **actual Rayman 2 widescreen visuals and HUD still require
@@ -841,11 +829,8 @@ The unrelated root `dxplayerx.dll` is **not** excluded.
 
 Exclusions match only these exact root files on the `RAYMAN2` volume:
 nested namesakes, such as `data/loader.ini` and `data/dplayerx.dll`,
-and other extensions are preserved. Existing installations are migrated
-without needing the CD again: the launcher tolerates missing excluded
-files during verification, then removes any obsolete root copies and
-their entries from the local SHA-256 receipt. Unrelated game assets
-and settings remain verified and preserved.
+and other extensions are preserved. No legacy installation is migrated:
+this policy applies only while extracting a new CD installation.
 
 On a disc whose volume label is exactly `RAYMAN2`, we recognize **23 exact
 `Data/World/Levels/*.DAT` paths** discarded by the author's original
@@ -874,7 +859,7 @@ Rayman2Fix.exe --verbose             print detailed diagnostics to console
 `--verbose` is an optional modifier, e.g. `Rayman2Fix.exe --install-only --verbose`;
 it may appear before or after the primary command. If no command is given,
 the launcher detects an existing installation or exactly one neighboring
-`.iso`/`.cue` image, safely stages files under `rayman2/`, verifies
+`.iso`/`.cue` image, safely stages files under `game/`, verifies
 them, and attempts to launch the approved game. `--install-only` uses
 the **same installation and verification logic** but finishes without
 starting the game. `--inspect` is the one supported *read-only* disc
@@ -895,7 +880,7 @@ not a trusted retail-edition allowlist.
 `--launch-no-verify` is for intentional troubleshooting: it does **not**
 verify executable presence, hashes, backup, CD assets or GameFrame and it
 does not extract, patch, repair or provision game DLLs. It attempts to start
-`rayman2/rayman2.exe` using the existing display settings (desktop
+`game/rayman2.exe` using the existing display settings (desktop
 defaults if the INI is absent); Win32 reports the error if the file is
 missing. It can therefore attempt an unsupported executable and **does not**
 imply that the installation was authenticated.
@@ -904,7 +889,7 @@ GameFrame integration means the correct open-source graphics DLL is installed
 and SHA-256-verified; it does **not** prove that Rayman 2 can render with it.
 The launcher now performs an initial game-startup experiment with strict
 original/unprotected EXE SHA-256 and size checks. It starts `rayman2.exe`
-through Win32 `CreateProcessW` with `rayman2/` as the working directory,
+through Win32 `CreateProcessW` with `game/` as the working directory,
 waits for the process to exit, and logs the full exit code and duration in
 `Rayman2Fix_installer.log`; the injected DLL and GameFrame diagnostics
 go to the separate `Rayman2Fix.log`. In the default verified path, unknown editions are never executed; the explicitly requested `--launch-no-verify` mode bypasses these safeguards for troubleshooting.
@@ -938,9 +923,9 @@ The underlying game executables are **never distributed or committed**.
   Both the protected installed executable and the local decrypted
   candidate must match the approved size and SHA-256 values above.
   On the next normal startup or `--install-only`, the installer copies
-  the decrypted EXE to `rayman2/rayman2.exe`, backs up the original as
+  the decrypted EXE to `game/rayman2.exe`, backs up the original as
   `game/rayman2.exe.bak`, and writes the patch receipt under
-  `game/`. The supplied file next to the launcher remains
+  `state/`. The supplied file next to the launcher remains
   untouched. An unsupported candidate aborts safely with a diagnostic.
 - Alternatively, place a generated `Rayman2Fix-executable.r2patch`
   beside `Rayman2Fix.exe`. On a different edition, the source stays
