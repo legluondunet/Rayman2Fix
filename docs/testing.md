@@ -545,6 +545,44 @@ installation, verification and refusal behavior.
 
 Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 
+## Learn_10 native completion research build (read-only)
+
+The experimental `Rayman2Fix-Windows-x86-learn10-trace` artifact is built
+separately with `RAYMAN2FIX_RESEARCH_PROBES=ON`. It must **not** be
+confused with the normal `Rayman2Fix-Windows-x86-bootstrap` release.
+It enables the existing bounded read-only director/script observer
+but **does not skip the Learn_10 cinematic**, change the original
+`NOMOVIES` progress bit, set `v96` or `var83`, alter the camera,
+or write a save file. The native director may still take 25–40 seconds.
+
+To collect the next comparison on an isolated test install:
+1. Keep `[Debug] Log=1` and `[Features] SkipCinematics=1`.
+2. Replace only `Rayman2Fix.exe` with the dedicated `learn10-trace`
+   version in a disposable installation; the launcher replaces its
+   managed `game/fix.dll` automatically without making a backup.
+3. Start a **new game**, skip `jail_20` as normal, and let the
+   `learn_10` 3D introduction finish naturally without pressing
+   experimental shortcut keys.
+4. Continue normal gameplay briefly, close the game, and retain
+   `Rayman2Fix.log` and `Rayman2Fix_installer.log` from this one
+   session (the logs are intentionally non-cumulative).
+5. Confirm the log contains `research_probes=1`,
+   `native-phase-branches early104_count=`,
+   `native-early-exit-shape`, and the natural story-bit-1091 handover.
+
+The new `phase104` script locator only detects the *shape* of
+`Condition(V96,104)`; it does not prove that the branch ran. Compare
+its count and node against the distinct `phase110` counter, and correlate
+the existing read-only director state, Rayman flags and handover with
+a normal unmodified game run. Missing matches or a failed natural
+handover are **diagnostic failures, not authorization to inject a signal**.
+
+Do not overwrite personal save slots while collecting evidence. The
+previous direct behaviour `3 -> 1` and `var83=6` experiments are
+permanently disabled in this build. Keep the default runtime in
+production installations. Review [issue #3](https://github.com/legluondunet/Rayman2Fix/issues/3)
+before considering a native completion request.
+
 ## Automatic startup checks
 
 - Launch **`Rayman2Fix.exe` without arguments** in a new, empty directory,
