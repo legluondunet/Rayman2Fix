@@ -652,7 +652,6 @@ generated installations contain:
 Log=1
 
 [Graphics]
-Resolution=Desktop
 ; FPSLimit=0 disables the cap; accepted range: 15..240
 FPSLimit=60
 ; Auto = monitor aspect ratio; 4:3 = centered classic picture
@@ -670,10 +669,12 @@ RemoveCinematicBars=0
 MusicInPauseMenu=0
 ```
 
-`Resolution=Desktop` automatically uses the primary desktop resolution on
-Windows/Wine. You can alternatively select an explicit resolution such as
-`Resolution=1280x720` or `Resolution=1920x1080`.
-The format is validated and invalid values are refused, not silently ignored.
+**The output resolution always matches the primary screen's physical desktop
+resolution** (DPI-aware Windows/Wine detection). There is no manual
+`Resolution` setting: GameFrame uses this size automatically and Rayman2Fix
+adapts the game's 3D Hor+ field of view to the displayed aspect ratio.
+The original 4:3 internal Glide mode stays fixed at 1024×768.
+An obsolete `Resolution=` entry is ignored and removed when the INI is normalized.
 `FPSLimit=60` caps the **game's rendered frame rate** by pacing its
 `grBufferSwap` calls; set `FPSLimit=30`, `120`, or another rate
 between 15 and 240 if required. `FPSLimit=0` disables the cap.
