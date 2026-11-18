@@ -91,6 +91,30 @@ only for the test command:
 RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE=1 wine Rayman2Fix.exe
 ```
 
+## First live Windows result (17 November 2026)
+
+The 406-line test log `Rayman2Fix(20261117-192631).log`
+demonstrated an accelerated engine-managed handover with the opt-in
+build: NOMOVIES armed at **281 ms**, physical Enter detected at
+**3,078 ms**, original director changed behaviour via index 7 toward 1,
+NOMOVIES restored at **3,109 ms**, and story bit 1091 confirmed at
+**3,125 ms**. At handover the temporary bit 1188 was **0**, compared
+with about 25 seconds for the natural cinematic. No direct V96 write,
+director-behaviour jump or artificial keyboard event was used.
+
+The log also shows HUD callbacks and native ESC menu state changes
+after handover, **but that does not prove the graphics, camera, music,
+input or menu look and behave correctly**. Neither a persistently
+clean game save nor Wine parity has been demonstrated. This
+experimental build must remain separate from release until those
+checks are complete.
+
+The next revision clarifies the log wording: in the opt-in build,
+`phase=handover` reports whether NOMOVIES was ever armed, whether
+it was rolled back, whether it remained armed, and the number of
+physical Enter edges. All of these are **observations of in-memory
+state**, not proof that every saved file is uncontaminated.
+
 ## Evidence in the non-cumulative runtime log
 
 - `RUNTIME-LEARN10-PROTOTYPE: enabled=1`: compile-time and environment
