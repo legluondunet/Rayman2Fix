@@ -4,7 +4,8 @@ on:
   push:
     branches: [ main, feat/bootstrap-cd-images ]
   pull_request:
-    branches: [ main ]
+    # The NOMOVIES draft is stacked on the passive Learn_10 research PR.
+    branches: [ main, research/learn10-native-exit-probe ]
   workflow_dispatch:
 
 permissions:
