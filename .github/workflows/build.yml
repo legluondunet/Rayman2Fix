@@ -618,6 +618,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_learn10_trace_validator.py'
       - name: Verify Learn_10 read-only save inventory (synthetic fixtures)
         run: python3 -m unittest discover -s tests -p 'test_learn10_save_audit.py'
+      - name: Check Wine save-reload test Bash syntax
+        run: bash -n tools/rayman2fix_test_wine_save_reload.sh
       - name: Verify audio research trace stays out of normal builds
         run: python3 -m unittest discover -s tests -p 'test_audio_trace_guards.py'
       - name: Verify standalone PE32 audio inspector with synthetic fixtures
