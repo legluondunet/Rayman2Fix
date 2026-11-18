@@ -54,6 +54,9 @@ def audit(text: str) -> dict:
     post_rollback = _all(
         lines, PROTOTYPE + " phase=physical-enter-after-rollback "
     )
+    native_input_snapshots = _all(
+        lines, PROTOTYPE + " phase=native-input-snapshot "
+    )
     restore = _all(lines, PROTOTYPE + " phase=restored ")
     pending = _all(lines, PROTOTYPE + " phase=restore-pending ")
     errors = _all(lines, PROTOTYPE + " phase=error ")
@@ -75,6 +78,7 @@ def audit(text: str) -> dict:
             "post_rollback_enter_edges": len(post_rollback),
             "first_enter_since_arm_ms": None,
             "edge_timing": [],
+            "native_input_snapshots": [],
             "exposure_ms": None,
             "failures": failures,
             "missing": ["Dedicated NOMOVIES prototype not enabled"],
@@ -149,6 +153,27 @@ def audit(text: str) -> dict:
             "Early Enter followed by later Enter while NOMOVIES was armed; "
             "timing correlation only, NOT proof of native timer or key mapping"
         )
+    native_input_states = [{
+        "t_ms": _integer(line, "t"),
+        "enter_count": _integer(line, "enter_count"),
+        "director_b3": _integer(line, "director_b3"),
+        "v93": _integer(line, "V93"),
+        "v93_valid": _integer(line, "V93_valid"),
+        "v119": _integer(line, "V119"),
+        "v119_valid": _integer(line, "V119_valid"),
+        "v95": _integer(line, "V95"),
+        "v95_valid": _integer(line, "V95_valid"),
+        "v96": _integer(line, "V96"),
+        "v96_valid": _integer(line, "V96_valid"),
+    } for _, line in native_input_snapshots]
+    for snapshot in native_input_states:
+        if snapshot["director_b3"] != 1 or any(
+                snapshot[key] != 1 for key in
+                ("v93_valid", "v119_valid", "v95_valid", "v96_valid")):
+            warnings.append(
+                "Native input snapshot not fully readable; no native "
+                "input/timer gate result can be inferred"
+            )
     if first_enter_since_arm_ms is not None and first_enter_since_arm_ms < 1000:
         warnings.append(
             "Physical Enter occurred less than 1000ms after bit1188 arm; "
@@ -222,6 +247,7 @@ def audit(text: str) -> dict:
         "post_rollback_enter_edges": len(post_rollback),
         "first_enter_since_arm_ms": first_enter_since_arm_ms,
         "edge_timing": edge_timing,
+        "native_input_snapshots": native_input_states,
         "exposure_ms": exposure_ms,
         "failures": failures, "missing": missing, "warnings": warnings,
         "visual_verified": False, "saves_verified": False,
@@ -248,6 +274,9 @@ def main(argv: list[str] | None = None) -> int:
               report["post_rollback_enter_edges"])
         print("First Enter after arming:", report["first_enter_since_arm_ms"], "ms")
         print("Flag exposure:", report["exposure_ms"], "ms")
+        for state in report["native_input_snapshots"]:
+            print("Native input snapshot:", state,
+                  "(not the actual native condition result)")
         for i, press in enumerate(report["edge_timing"], 1):
             print(f"Enter #{i}: t={press['t_ms']}ms, "
                   f"since arm={press['since_arm_ms']}ms, "

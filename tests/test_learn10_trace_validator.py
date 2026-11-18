@@ -110,6 +110,38 @@ class TraceValidationTests(unittest.TestCase):
         self.assertEqual(result["edge_timing"][1]["director7_after_enter_ms"], 16)
         self.assertTrue(any("timing correlation only" in msg for msg in result["warnings"]))
 
+    def test_native_edge_snapshot_is_read_only_observation(self):
+        trace = sample().replace(
+            "RUNTIME-INTRO: director behaviour transition t=3078ms",
+            "RUNTIME-LEARN10-PROTOTYPE: phase=native-input-snapshot "
+            "t=3078ms enter_count=1 director_b3=1 V93=66 V93_valid=1 "
+            "V119=0 V119_valid=1 V95=1200 V95_valid=1 "
+            "V96=0 V96_valid=1\\n"
+            "RUNTIME-INTRO: director behaviour transition t=3078ms",
+        )
+        report = audit(trace)
+        self.assertEqual(report["status"], "CANDIDATE")
+        self.assertEqual(len(report["native_input_snapshots"]), 1)
+        state = report["native_input_snapshots"][0]
+        self.assertEqual(state["enter_count"], 1)
+        self.assertEqual(state["v93"], 66)
+        self.assertEqual(state["v119"], 0)
+        self.assertEqual(state["v95"], 1200)
+
+    def test_unavailable_input_snapshot_is_not_gate_proof(self):
+        trace = sample().replace(
+            "RUNTIME-INTRO: director behaviour transition t=3078ms",
+            "RUNTIME-LEARN10-PROTOTYPE: phase=native-input-snapshot "
+            "t=3078ms enter_count=1 director_b3=0 V93=0 V93_valid=0 "
+            "V119=0 V119_valid=0 V95=0 V95_valid=0 "
+            "V96=0 V96_valid=0\\n"
+            "RUNTIME-INTRO: director behaviour transition t=3078ms",
+        )
+        report = audit(trace)
+        self.assertEqual(report["status"], "CANDIDATE")
+        self.assertTrue(any("not fully readable" in w
+                            for w in report["warnings"]))
+
     def test_failure_if_handover_bit_is_not_clear(self):
         bad = sample().replace(
             "nomovies-flag at-handover known=1 enabled=0",

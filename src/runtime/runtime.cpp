@@ -259,6 +259,9 @@ bool g_learn10_proto_enter_down = false;
 unsigned g_learn10_proto_enter_edges = 0;
 unsigned g_learn10_proto_post_rollback_enter_edges = 0;
 unsigned g_learn10_proto_gate_samples = 0;
+// Verified scalar storage locations, not script opcodes or actor pointers.
+ObservedDirectorByte g_learn10_proto_v93{};
+ObservedDirectorByte g_learn10_proto_v119{};
 #endif
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
@@ -3977,6 +3980,38 @@ void learn10_proto_try_restore(const char* reason) {
     log_line("RUNTIME-LEARN10-PROTOTYPE: phase=restore-pending "
              "reason=compare-exchange-failed (do not save game)");
 }
+// Bounded read-only snapshot of the native director at each physical Enter.
+void learn10_proto_log_input_snapshot(DWORD elapsed,unsigned count) {
+    std::uint32_t current=0;
+    const auto base=g_observed_director_behaviours;
+    const bool b3=base && g_observed_director_intelligence &&
+        read_u32(g_observed_director_intelligence+8u,current) &&
+        std::uintptr_t(current)==base+3u*12u;
+    const auto read_cached=[](const ObservedDirectorByte& field,
+                              std::int32_t& out) {
+        return field.location && r2fix::read_intro_integer(
+            field.location,field.type,
+            [](std::uintptr_t p,std::uint8_t& x){return read_u8(p,x);},
+            [](std::uintptr_t p,std::uint32_t& x){return read_u32(p,x);},
+            out);
+    };
+    std::int32_t v93=0,v119=0,v95=0,v96=0;
+    const bool ok93=b3 && read_cached(g_learn10_proto_v93,v93);
+    const bool ok119=b3 && read_cached(g_learn10_proto_v119,v119);
+    const bool ok95=b3 && read_cached(g_director_var95,v95);
+    const bool ok96=b3 && read_cached(g_director_var96,v96);
+    char msg[330]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-LEARN10-PROTOTYPE: phase=native-input-snapshot "
+        "t=%ums enter_count=%u director_b3=%u "
+        "V93=%d V93_valid=%u V119=%d V119_valid=%u "
+        "V95=%d V95_valid=%u V96=%d V96_valid=%u "
+        "(read-only; NOT a native input/timer gate evaluation)",
+        unsigned(elapsed),count,unsigned(b3),
+        int(v93),unsigned(ok93),int(v119),unsigned(ok119),
+        int(v95),unsigned(ok95),int(v96),unsigned(ok96));
+    log_line(msg);
+}
 // Passive physical Enter observation only, not the game's unknown
 // opaque JustPressedBut mapping and NEVER a synthetic input event.
 void learn10_proto_trace_physical_enter(DWORD elapsed) {
@@ -3998,6 +4033,8 @@ void learn10_proto_trace_physical_enter(DWORD elapsed) {
                 unsigned(elapsed),g_learn10_proto_enter_edges,since_arm,
                 unsigned(since_arm<1000u));
             log_line(msg);
+            learn10_proto_log_input_snapshot(
+                elapsed,g_learn10_proto_enter_edges);
         } else if (!g_learn10_proto_armed &&
                    g_learn10_proto_post_rollback_enter_edges<8u) {
             ++g_learn10_proto_post_rollback_enter_edges;
@@ -4516,14 +4553,28 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
             // never follow arbitrary pointer/array designer variables.
             unsigned k11=0,k49=0,k93=0,k119=0;
             std::int32_t v11=0,v49=0,v93=0,v119=0;
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+            std::uintptr_t addr93=0,addr119=0;
+#endif
             const bool ok11=read_director_phase_integer(
                 director.superobject,11,k11,v11);
             const bool ok49=read_director_phase_integer(
                 director.superobject,49,k49,v49);
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+            const bool ok93=read_director_phase_integer(
+                director.superobject,93,k93,v93,&addr93);
+            const bool ok119=read_director_phase_integer(
+                director.superobject,119,k119,v119,&addr119);
+            if (ok93 && addr93)
+                g_learn10_proto_v93={addr93,k93,std::uint32_t(v93)};
+            if (ok119 && addr119)
+                g_learn10_proto_v119={addr119,k119,std::uint32_t(v119)};
+#else
             const bool ok93=read_director_phase_integer(
                 director.superobject,93,k93,v93);
             const bool ok119=read_director_phase_integer(
                 director.superobject,119,k119,v119);
+#endif
             char conditions[320]{};
             std::snprintf(conditions,sizeof(conditions),
                 "RUNTIME-INTRO: native-nomovies-conditions at-first-b3 V11=%d(valid=%u,type=%u) V49=%d(valid=%u,type=%u) V93=%d(valid=%u,type=%u) V119=%d(valid=%u,type=%u) (read-only)",
@@ -4865,6 +4916,8 @@ void poll_learn_intro_skip() {
             g_learn10_proto_restored=false;
             g_learn10_proto_post_rollback_enter_edges=0;
             g_learn10_proto_gate_samples=0;
+            g_learn10_proto_v93={};
+            g_learn10_proto_v119={};
         }
 #endif
         g_progress_words = 0;

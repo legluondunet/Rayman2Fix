@@ -252,3 +252,20 @@ since arming and any nearby behaviour-7 transition, explicitly as
 timer outcome before experimenting with buffered early input. Do not
 inject synthetic keys, change V93/V119, extend flag exposure or merge
 the prototype on this log alone.
+
+## Input-edge native scalar snapshots (18 November 2026)
+
+The next strictly isolated experimental build records a bounded,
+**read-only** `phase=native-input-snapshot` after every physical Enter
+edge (maximum eight). It validates that the original director still
+points to behaviour 3 and reads four previously verified scalar integer
+locations: V93 (timer identifier candidate), V119 (latch candidate),
+V95 and V96 (native phase). Individual `_valid` flags distinguish
+read failures from genuine zero values. The offline validator displays
+these snapshots without claiming that `JustPressedBut` or
+`IsTimeElapsed(V93,1000)` evaluated to true.
+
+No game input or timer is modified, no key is synthesized, no native
+script is called, and the NOMOVIES exposure stays capped at 5 seconds.
+The existing 14:10 log predates these additional snapshots; a new
+disposable Windows/Wine session is needed to collect them.
