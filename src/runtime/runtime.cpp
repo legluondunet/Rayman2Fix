@@ -251,6 +251,8 @@ bool g_director_gate_history_reported = false;
 bool g_learn10_proto_opted_in = false;
 bool g_learn10_proto_attempted = false;
 bool g_learn10_proto_armed = false;
+bool g_learn10_proto_ever_armed = false;
+bool g_learn10_proto_restored = false;
 DWORD g_learn10_proto_armed_at = 0;
 std::uintptr_t g_learn10_proto_words = 0;
 bool g_learn10_proto_enter_down = false;
@@ -3895,6 +3897,8 @@ void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
     g_learn10_proto_enter_down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
     g_learn10_proto_enter_edges=0;
     g_learn10_proto_armed=true;
+    g_learn10_proto_ever_armed=true;
+    g_learn10_proto_restored=false;
     bool confirmed=false;
     if (!game_story_bit(g_learn10_proto_words,kNoMoviesCheatBit,confirmed) ||
         !confirmed) {
@@ -3928,6 +3932,7 @@ void learn10_proto_try_restore(const char* reason) {
         if (!read_u32(address,before)) break;
         if (!(before&r2fix::story_word_mask(kNoMoviesCheatBit))) {
             g_learn10_proto_armed=false;
+            g_learn10_proto_restored=true;
             g_learn10_proto_armed_at=0;
             g_learn10_proto_words=0;
             log_line("RUNTIME-LEARN10-PROTOTYPE: phase=restored "
@@ -3937,6 +3942,7 @@ void learn10_proto_try_restore(const char* reason) {
         if (r2fix::plan_learn10_nomovies_restore(before,replacement) &&
             learn10_proto_compare_exchange(address,before,replacement)) {
             g_learn10_proto_armed=false;
+            g_learn10_proto_restored=true;
             g_learn10_proto_armed_at=0;
             g_learn10_proto_words=0;
             char msg[220]{};
@@ -4789,8 +4795,11 @@ void poll_learn_intro_skip() {
         // Best-effort restoration also covers native level changes.
         // Never write a stale address if the Fix actor disappeared.
         learn10_proto_try_restore("level-left");
-        if (!g_learn10_proto_armed)
+        if (!g_learn10_proto_armed) {
             g_learn10_proto_attempted=false;
+            g_learn10_proto_ever_armed=false;
+            g_learn10_proto_restored=false;
+        }
 #endif
         g_progress_words = 0;
         g_learn_logged = false;
@@ -4841,13 +4850,24 @@ void poll_learn_intro_skip() {
         const bool known=game_story_bit(g_progress_words,
                                         kNoMoviesCheatBit,nomovies);
         char flag[180]{};
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+        std::snprintf(flag,sizeof(flag),
+            "RUNTIME-INTRO: nomovies-flag at-entry known=%u enabled=%u bit=1188 (before prototype arm)",
+            unsigned(known),unsigned(nomovies));
+#else
         std::snprintf(flag,sizeof(flag),
             "RUNTIME-INTRO: nomovies-flag at-entry known=%u enabled=%u bit=1188 (read-only; never modified)",
             unsigned(known),unsigned(nomovies));
+#endif
         log_line(flag);
         g_learn_logged = true;
         g_learn_intro_seen = !handed_over;
         g_learn_intro_start = GetTickCount();
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+        if (!handed_over && g_learn10_proto_opted_in)
+            log_line("RUNTIME-INTRO: learn_10 native NOMOVIES test enabled (experimental; story bit1188 may be toggled)");
+        else
+#endif
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
             : "RUNTIME-INTRO: learn_10 skip disabled after visual regression; natural scene unchanged");
@@ -4902,14 +4922,35 @@ void poll_learn_intro_skip() {
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
         g_learn_handover_start = GetTickCount();
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+        if (g_learn10_proto_ever_armed) {
+            char outcome[225]{};
+            std::snprintf(outcome,sizeof(outcome),
+                "RUNTIME-LEARN10-PROTOTYPE: phase=handover elapsed_ms=%u story1091=1 ever_armed=1 restored=%u still_armed=%u enter_edges=%u (visual and save validation still required)",
+                unsigned(DWORD(GetTickCount()-g_learn_intro_start)),
+                unsigned(g_learn10_proto_restored),
+                unsigned(g_learn10_proto_armed),
+                unsigned(g_learn10_proto_enter_edges));
+            log_line(outcome);
+        } else {
+            log_line("RUNTIME-INTRO: learn_10 native handover observed without experimental NOMOVIES activation (story bit 1091)");
+        }
+#else
         log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
+#endif
         bool nomovies=false;
         const bool known=game_story_bit(g_progress_words,
                                        kNoMoviesCheatBit,nomovies);
         char flag[180]{};
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+        std::snprintf(flag,sizeof(flag),
+            "RUNTIME-INTRO: nomovies-flag at-handover known=%u enabled=%u bit=1188 (readback after experimental rollback)",
+            unsigned(known),unsigned(nomovies));
+#else
         std::snprintf(flag,sizeof(flag),
             "RUNTIME-INTRO: nomovies-flag at-handover known=%u enabled=%u bit=1188 (read-only; never modified)",
             unsigned(known),unsigned(nomovies));
+#endif
         log_line(flag);
         log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
     }
