@@ -4952,6 +4952,25 @@ void poll_learn_intro_skip() {
             unsigned(known),unsigned(nomovies));
 #endif
         log_line(flag);
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+        if (g_learn10_proto_ever_armed) {
+            // This is an IN-MEMORY verification only. It cannot certify
+            // that a save was not created while the flag was temporarily
+            // set. Never report a completed restoration on read failure.
+            const bool clean_in_memory =
+                known && !nomovies && g_learn10_proto_restored &&
+                !g_learn10_proto_armed;
+            char verdict[220]{};
+            std::snprintf(verdict,sizeof(verdict),
+                "RUNTIME-LEARN10-PROTOTYPE: phase=handover-verification "
+                "status=%s known=%u bit1188=%u rollback_complete=%u "
+                "(in-memory only; saved files not verified)",
+                clean_in_memory ? "pass" : "FAIL",
+                unsigned(known),unsigned(nomovies),
+                unsigned(g_learn10_proto_restored && !g_learn10_proto_armed));
+            log_line(verdict);
+        }
+#endif
         log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
     }
     if (handed_over && g_learn_handover_start &&
