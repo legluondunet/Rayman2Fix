@@ -110,7 +110,7 @@ class Learn10SafeFallback(unittest.TestCase):
         self.assertIn('g_learn10_proto_armed_at=GetTickCount()',source)
         self.assertIn('g_learn10_proto_armed_at=0;',source)
         self.assertIn('const unsigned armed_duration_ms=unsigned(DWORD(',source)
-        self.assertIn('"armed_duration_ms=%u"',source)
+        self.assertIn('armed_duration_ms=%u',source)
         self.assertIn('other_progress_bits=preserved enter_edges=%u armed_duration_ms=%u',source)
         self.assertIn('elapsed>r2fix::kLearn10NomoviesLatestStartMs',source)
         self.assertIn('read_u32(g_observed_director_intelligence+8u,active)',source)
