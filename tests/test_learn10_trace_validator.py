@@ -82,6 +82,34 @@ class TraceValidationTests(unittest.TestCase):
         self.assertTrue(any("after" in w and "rollback" in w
                             for w in result["warnings"]))
 
+    def test_early_then_late_enter_is_timing_not_causal_proof(self):
+        # The 18 Nov pattern: first Enter ignored, second followed by
+        # a native director-7 transition 16ms later.
+        trace = sample(duration=3578, exposed=3171)
+        trace = trace.replace("phase=armed t=281ms", "phase=armed t=391ms")
+        trace = trace.replace(
+            "phase=physical-enter-edge t=3078ms count=1",
+            "phase=physical-enter-edge t=500ms count=1 since_arm_ms=109",
+        )
+        trace = trace.replace(
+            "RUNTIME-INTRO: director behaviour transition t=3078ms index=7",
+            "RUNTIME-LEARN10-PROTOTYPE: phase=physical-enter-edge "
+            "t=3531ms count=2 since_arm_ms=3140\n"
+            "RUNTIME-INTRO: director behaviour transition t=3547ms index=7",
+        )
+        trace = trace.replace(
+            "director behaviour transition t=3109ms index=1",
+            "director behaviour transition t=3562ms index=1",
+        ).replace("enter_edges=1", "enter_edges=2")
+        result = audit(trace)
+        self.assertEqual(result["status"], "CANDIDATE")
+        self.assertEqual(result["enter_edges"], 2)
+        self.assertEqual(result["edge_timing"][0]["since_arm_ms"], 109)
+        self.assertIsNone(result["edge_timing"][0]["director7_after_enter_ms"])
+        self.assertEqual(result["edge_timing"][1]["since_arm_ms"], 3140)
+        self.assertEqual(result["edge_timing"][1]["director7_after_enter_ms"], 16)
+        self.assertTrue(any("timing correlation only" in msg for msg in result["warnings"]))
+
     def test_failure_if_handover_bit_is_not_clear(self):
         bad = sample().replace(
             "nomovies-flag at-handover known=1 enabled=0",

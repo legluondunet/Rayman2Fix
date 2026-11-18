@@ -74,6 +74,7 @@ def audit(text: str) -> dict:
             "enter_edges": len(edge),
             "post_rollback_enter_edges": len(post_rollback),
             "first_enter_since_arm_ms": None,
+            "edge_timing": [],
             "exposure_ms": None,
             "failures": failures,
             "missing": ["Dedicated NOMOVIES prototype not enabled"],
@@ -116,6 +117,38 @@ def audit(text: str) -> dict:
         first_enter_t = _integer(edge[0][1], "t")
         if first_enter_t is not None:
             first_enter_since_arm_ms = first_enter_t - armed_ms
+    # Read-only correlation of each physical Enter with a later native
+    # director-7 transition. Neither proves opaque button mapping.
+    director7_times = [
+        _integer(line, "t")
+        for _, line in _all(lines, INTRO + " director behaviour transition ")
+        if _integer(line, "index") == 7
+    ]
+    edge_timing = []
+    for _, line in edge:
+        entered_at = _integer(line, "t")
+        since_arm = _integer(line, "since_arm_ms")
+        if since_arm is None and entered_at is not None and armed_ms is not None:
+            since_arm = entered_at - armed_ms
+        delays = [
+            director_t - entered_at for director_t in director7_times
+            if director_t is not None and entered_at is not None
+            and 0 <= director_t - entered_at <= 250
+        ]
+        edge_timing.append({
+            "t_ms": entered_at,
+            "since_arm_ms": since_arm,
+            "director7_after_enter_ms": min(delays) if delays else None,
+        })
+    if (len(edge_timing) > 1 and
+            edge_timing[0]["since_arm_ms"] is not None and
+            edge_timing[0]["since_arm_ms"] < 1000 and
+            any(e["since_arm_ms"] is not None and e["since_arm_ms"] >= 1000
+                for e in edge_timing[1:])):
+        warnings.append(
+            "Early Enter followed by later Enter while NOMOVIES was armed; "
+            "timing correlation only, NOT proof of native timer or key mapping"
+        )
     if first_enter_since_arm_ms is not None and first_enter_since_arm_ms < 1000:
         warnings.append(
             "Physical Enter occurred less than 1000ms after bit1188 arm; "
@@ -188,6 +221,7 @@ def audit(text: str) -> dict:
         "enter_edges": len(edge),
         "post_rollback_enter_edges": len(post_rollback),
         "first_enter_since_arm_ms": first_enter_since_arm_ms,
+        "edge_timing": edge_timing,
         "exposure_ms": exposure_ms,
         "failures": failures, "missing": missing, "warnings": warnings,
         "visual_verified": False, "saves_verified": False,
@@ -214,6 +248,11 @@ def main(argv: list[str] | None = None) -> int:
               report["post_rollback_enter_edges"])
         print("First Enter after arming:", report["first_enter_since_arm_ms"], "ms")
         print("Flag exposure:", report["exposure_ms"], "ms")
+        for i, press in enumerate(report["edge_timing"], 1):
+            print(f"Enter #{i}: t={press['t_ms']}ms, "
+                  f"since arm={press['since_arm_ms']}ms, "
+                  f"director 7 after={press['director7_after_enter_ms']}ms "
+                  "(timing only)")
         for kind in ("failures", "missing", "warnings"):
             for message in report[kind]:
                 print(kind.upper() + ":", message)

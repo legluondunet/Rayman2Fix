@@ -219,3 +219,30 @@ No conclusion about safety or effectiveness follows solely from
 successful compilation or from the bit being armed. The experimental
 PR must remain separate and unmerged until Windows and Wine gameplay
 tests confirm correct cleanup **without save contamination**.
+
+## Two Enter presses in one successful session (18 November 2026)
+
+New Windows log: `Rayman2Fix(20261118-141030).log`, one experimental
+runtime session. The native NOMOVIES flag was armed at **391 ms**.
+Physical Enter #1 occurred at **500 ms** (109 ms after arming) and did
+not cause a transition. Enter #2 occurred at **3,531 ms** (3,140 ms
+after arming). The original director changed behaviour **3 -> 7**
+at **3,547 ms** (16 ms later), then **7 -> 1** at **3,562 ms**.
+Engine handover followed at **3,578 ms**.
+
+Bit1188 was restored when the director left behaviour 3, after
+**3,171 ms** exposure; in-memory `handover-verification status=pass`
+confirmed bit1188=0 and rollback_complete=1. This does **not**
+verify graphics, controls or saved files.
+
+Native V93 remained 66 and V119 remained 0 at 1,000 ms and 2,500 ms.
+Those scalar snapshots do not reveal the engine's actual
+`IsTimeElapsed(V93,1000)` evaluation. The timing correlation of the
+second press and native exit does not prove causal input mapping.
+
+The offline trace validator now lists each Enter edge, its time
+since arming and any nearby behaviour-7 transition, explicitly as
+**timing evidence only**. Next: establish the native input mapping and
+timer outcome before experimenting with buffered early input. Do not
+inject synthetic keys, change V93/V119, extend flag exposure or merge
+the prototype on this log alone.
