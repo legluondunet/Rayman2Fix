@@ -257,6 +257,8 @@ DWORD g_learn10_proto_armed_at = 0;
 std::uintptr_t g_learn10_proto_words = 0;
 bool g_learn10_proto_enter_down = false;
 unsigned g_learn10_proto_enter_edges = 0;
+unsigned g_learn10_proto_post_rollback_enter_edges = 0;
+unsigned g_learn10_proto_gate_samples = 0;
 #endif
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
@@ -3896,6 +3898,8 @@ void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
     g_learn10_proto_armed_at=GetTickCount();
     g_learn10_proto_enter_down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
     g_learn10_proto_enter_edges=0;
+    g_learn10_proto_post_rollback_enter_edges=0;
+    g_learn10_proto_gate_samples=0;
     g_learn10_proto_armed=true;
     g_learn10_proto_ever_armed=true;
     g_learn10_proto_restored=false;
@@ -3970,17 +3974,34 @@ void learn10_proto_try_restore(const char* reason) {
 // Passive physical Enter observation only, not the game's unknown
 // opaque JustPressedBut mapping and NEVER a synthetic input event.
 void learn10_proto_trace_physical_enter(DWORD elapsed) {
-    if (!g_learn10_proto_armed) return;
+    // Monitor physical Enter AFTER the five-second NOMOVIES rollback
+    // until handover, without re-arming or changing game behaviour.
+    if (!g_learn10_proto_ever_armed || !g_learn_intro_seen ||
+        g_learn_handover) return;
     const bool down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
-    if (down && !g_learn10_proto_enter_down &&
-        g_learn10_proto_enter_edges<4u) {
-        ++g_learn10_proto_enter_edges;
-        char msg[188]{};
-        std::snprintf(msg,sizeof(msg),
-            "RUNTIME-LEARN10-PROTOTYPE: phase=physical-enter-edge t=%ums "
-            "count=%u (does not prove native JustPressedBut match)",
-            unsigned(elapsed),g_learn10_proto_enter_edges);
-        log_line(msg);
+    if (down && !g_learn10_proto_enter_down) {
+        char msg[236]{};
+        if (g_learn10_proto_armed && g_learn10_proto_enter_edges<8u) {
+            ++g_learn10_proto_enter_edges;
+            const unsigned since_arm=unsigned(DWORD(
+                GetTickCount()-g_learn10_proto_armed_at));
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-LEARN10-PROTOTYPE: phase=physical-enter-edge t=%ums "
+                "count=%u since_arm_ms=%u within_first_second_of_arm=%u "
+                "(proxy only; NOT proof of native V93 timer readiness)",
+                unsigned(elapsed),g_learn10_proto_enter_edges,since_arm,
+                unsigned(since_arm<1000u));
+            log_line(msg);
+        } else if (!g_learn10_proto_armed &&
+                   g_learn10_proto_post_rollback_enter_edges<8u) {
+            ++g_learn10_proto_post_rollback_enter_edges;
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-LEARN10-PROTOTYPE: phase=physical-enter-after-rollback "
+                "t=%ums count=%u nomovies_bit1188=not-armed "
+                "(cannot use the experimental native skip gate)",
+                unsigned(elapsed),g_learn10_proto_post_rollback_enter_edges);
+            log_line(msg);
+        }
     }
     g_learn10_proto_enter_down=down;
 }
@@ -4778,9 +4799,10 @@ void poll_learn_intro_skip() {
     // time guard. Enter is a tentative physical input, not a verified
     // engine mapping. Stop exposing the flag on native director exit
     // or after five seconds; no synthetic key events.
-    if (g_learn10_proto_armed) {
+    if (g_learn10_proto_ever_armed && g_learn_intro_seen && !g_learn_handover)
         learn10_proto_trace_physical_enter(
             g_learn_intro_start ? DWORD(GetTickCount()-g_learn_intro_start):0u);
+    if (g_learn10_proto_armed) {
         bool left_b3=false;
         std::uint32_t active=0;
         if (g_observed_director_intelligence &&
@@ -4809,6 +4831,8 @@ void poll_learn_intro_skip() {
             g_learn10_proto_attempted=false;
             g_learn10_proto_ever_armed=false;
             g_learn10_proto_restored=false;
+            g_learn10_proto_post_rollback_enter_edges=0;
+            g_learn10_proto_gate_samples=0;
         }
 #endif
         g_progress_words = 0;
