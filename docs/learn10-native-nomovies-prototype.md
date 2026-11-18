@@ -5,6 +5,26 @@ This research variant is **not** the ordinary Rayman2Fix release and is
 experiment to see whether the original game's **NOMOVIES** director branch
 can end the 3D introduction using the **engine's own** scene transitions.
 
+## Current decision — no save/reload test requested at the intro
+
+The owner clarified that a normal, user-loadable game save is **not
+available before level 2**. Our successful Learn_10 test is still in the
+opening sequence. **Do not ask the owner to create or reload a manual
+save at this point**; the two-session test below is **deferred, optional
+research only**, not a required next step for the current prototype.
+
+The earlier Wine inventory showed changes to `HiddenSlot/*.sav` even
+without a usable manual save. That is evidence of internal automatic
+file changes, **not** evidence that the owner possesses a reloadable
+save, and **not** proof that bit 1188 persisted on disk.
+
+The observed memory state at the native handover was clean
+(`handover-verification status=pass`, bit 1188 clear), and the
+transition, camera and controls have been user-validated under
+Windows and Wine. This supports the current opt-in prototype; it
+does not certify all possible save writes/crash paths. For now,
+continue with static code review and CI checks, not user save tests.
+
 ## Scope and risks
 
 Only the supported, SHA-256-verified Rayman 2 executable is eligible.
