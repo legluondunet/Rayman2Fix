@@ -33,7 +33,12 @@ def _all(lines: list[str], needle: str) -> list[tuple[int, str]]:
 
 
 def _integer(line: str, key: str) -> int | None:
-    match = re.search(r"(?:^|\s)" + re.escape(key) + r"=(\d+)(?=\s|$)", line)
+    # Some native timestamps are logged as t=3125ms, while integer
+    # state fields use plain values separated by whitespace.
+    match = re.search(
+        r"(?:^|\s)" + re.escape(key) + r"=(\d+)(?=ms(?:\s|$)|\s|$)",
+        line,
+    )
     return int(match.group(1)) if match else None
 
 
