@@ -147,6 +147,45 @@ the game picture, feel controls, detect unlogged frame stalls, certify
 Wine compatibility, or inspect whether bit 1188 was written to a save
 file. Run the test only with truly isolated, disposable saves.
 
+## Early-Enter diagnostic (18 November 2026)
+
+Two **Windows logs from the same runtime build** establish a timing
+sensitivity without yet proving the native cause:
+
+| Test log | NOMOVIES armed | Physical Enter | Rollback | Gameplay |
+| --- | ---: | ---: | --- | ---: |
+| `Rayman2Fix(20261118-133619).log` | 640 ms | **843 ms** | after 5,000 ms exposure | 25,406 ms (natural) |
+| `Rayman2Fix(20261118-133715).log` | 281 ms | **4,109 ms** | after 3,735 ms exposure; native director left b3 | 4,156 ms (fast) |
+
+The native NOMOVIES ELSE rule checks
+`JustPressedBut` **and** `IsTimeElapsed(V93,1000)`. The failed
+press occurred only **203 ms after the experimental bit was armed**,
+whereas the successful press occurred **3,828 ms after**. That
+correlation suggests an early timer-gate rejection but does not prove
+the engine's timer `V93` was reset when we armed the bit. The
+`V119` guard might also contribute; neither variable was observed
+after the first native script snapshot.
+
+**Important:** the previous experiment observed physical Enter only
+while bit1188 was armed. Its single observed early press does NOT
+prove the user did not retry after the five-second rollback. The game
+may also miss a very short input between sampling callbacks.
+
+The new research-only diagnostic adds:
+- `since_arm_ms` and `within_first_second_of_arm` to physical Enter
+  logs, explicitly **only a timing proxy** (not native timer evidence)
+- `phase=physical-enter-after-rollback` to record later physical
+  keypresses **without reactivating bit1188**
+- `phase=native-gate-snapshot` with bounded, read-only integer
+  samples of `V93` and `V119` while the original director is in
+  behaviour 3, to distinguish an elapsed-time guard from a persistent
+  early-key latch
+
+**No synthesized input, no longer NOMOVIES exposure, and no changed
+gameplay behaviour** are introduced. The goal is to establish which
+engine-native condition blocks an early press before implementing a
+safe buffered input approach. Use disposable saves only.
+
 ## Evidence in the non-cumulative runtime log
 
 - `RUNTIME-LEARN10-PROTOTYPE: enabled=1`: compile-time and environment
