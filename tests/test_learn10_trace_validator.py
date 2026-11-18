@@ -74,7 +74,7 @@ class TraceValidationTests(unittest.TestCase):
         text = sample().replace(
             "RUNTIME-INTRO: director behaviour transition t=3109ms",
             "RUNTIME-LEARN10-PROTOTYPE: "
-            "phase=physical-enter-after-rollback t=6100ms count=1\\n"
+            "phase=physical-enter-after-rollback t=6100ms count=1\n"
             "RUNTIME-INTRO: director behaviour transition t=3109ms",
         )
         result = audit(text)
