@@ -1,86 +1,131 @@
-# Learn_10 script-keyword alternative — independent research candidate
+# Learn_10 script-keyword candidate — read-only ownership research
 
-**Draft only. NOT for installation or user testing.**
+**Status: DRAFT, LIVE SCRIPT WRITES BLOCKED. Not for installation or user testing.**
+Never replace the validated PR #31 prototype based on this branch alone.
 
-## What changed
+## Motivation
 
-The existing, user-validated PR #31 temporarily sets story bit 1188
-(`NOMOVIES`) to select the original native ELSE branch in director
-behaviour 3. Although the bit is restored at handover on Windows and
-Wine, it resides in the persistable progression array, which may be
-written automatically before a manual save slot exists.
+PR #31 has a user-validated native Learn_10 skip on Windows and Wine.
+It temporarily sets the original NOMOVIES story flag **1188** in the
+Fix actor's progress array, then clears it at native handover. In-memory
+restoration was verified, but automatic writes under the game's
+`HiddenSlot` directory mean persistent save safety is not established.
+The game does not offer a normal user-loadable save before level 2;
+no manual save/reload test is requested for the intro.
 
-The supported Rayman 2 director's behaviour-3 rule 1 has this exact
-root structure (original node indices in parentheses):
+The original behaviour-3 rule 1, observed in the approved CD binary,
+begins:
 
 ```
-(0) K1  IfNot                  // keyword value 1
+(0) K1  IfNot                 // keyword 1
 (1) F248 GetBooleanInArray
-(2) O12 actor.V42             // progress-bit array
-(5) I1188                    // story bit 1188
+(2) O12 actor.V42             // persistable story bits
+(5) I1188
 (6) K8  Then                 // normal cinematic
 ...
 (100) K9 Else                // native NOMOVIES alternative
-(106) C45 JustPressedBut     // physical input, no injection
-(109) C48 IsTimeElapsed
+(106) C45 JustPressedBut     // real game input
+(109) C48 IsTimeElapsed      // original timing guard
 ...
 ```
 
-Rayman 2's own keyword enum in `raytools/ACP_Ray2/src/AI/AI_Const.h`
-declares `AI_E_kw_If=0` and `AI_E_kw_IfNot=1`. Its node
-structure `AI_tdstNodeInterpret` in `src/AI/AI_Scr.h` is an
-8-byte x86 record with the 32-bit keyword at offset 0, depth at
-offset 6 and type at offset 7.
+The original Rayman 2 keyword enum
+[`AI_Const.h`](https://github.com/raytools/ACP_Ray2/blob/master/src/AI/AI_Const.h)
+defines `AI_E_kw_If=0` and `AI_E_kw_IfNot=1`. The corresponding
+[`AI_tdstNodeInterpret`](https://github.com/raytools/ACP_Ray2/blob/master/src/AI/AI_Scr.h)
+is an 8-byte x86 script record with parameter at offset 0,
+indent at offset 6, and type at offset 7.
 
-**Hypothesis:** when original bit1188 is **0**, temporarily replace
-that one root keyword `IfNot(1)` with `If(0)`. The same native
-ELSE path should now be selected. Neither `Fix.V42` nor any other
-progress bit, actor state, native input, timeout variable, or script
-condition beyond the root keyword is modified.
+**Research hypothesis:** when bit1188 is 0, temporarily evaluating
+that root node as `If` instead of `IfNot` would choose the same
+native ELSE branch as the validated NOMOVIES route, without changing
+the progress bit. This is still hypothetical.
 
-## Safeguards in the isolated candidate
+## Critical ownership finding
 
-- Separate compile-time `RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO=ON`;
-  requires research probes; mutually exclusive with
-  `RAYMAN2FIX_LEARN10_NOMOVIES_PROTO=ON`. The default build
-  contains neither script mutation nor story-bit mutation.
-- Separate runtime environment opt-in (exact value `1`):
-  `RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTOTYPE`, logging and
-  `SkipCinematics=1` must also be enabled.
-- First visit only, original bit1188 must be known **off**, director
-  behaviour must match original behaviour 3, and the two original
-  behaviour-3 rules and native cleanup must match the strict approved
-  script fingerprints.
-- Check exact root keyword value `1`, depth `1`, type `0`;
-  node must be aligned and already writable. No `VirtualProtect`
-  and no modifications of game executable, asset files, INI or saves.
-- Make **one** atomic 32-bit CAS from keyword `1` to `0`,
-  never a blind write. Revalidate and restore with CAS `0` to
-  `1` when native director leaves b3, when story1091 indicates
-  handover, at an observed 5,000 ms timeout or on level change.
-  Refuse stale/mismatched script-node pointers; no writes to an
-  unrelated or changed node.
-- Log `phase=armed`, `phase=restored`, `phase=restore-pending`
-  and `phase=handover-verification`, including read-only bit1188.
-  Never label a failed read as a successful restore.
-- C++ policy tests check exact keyword, context, negative cases,
-  read-only original progress flag requirement, timing and tick
-  rollover. CI compiles the separate Windows x86 variant and
-  verifies that the original bit-writing prototype is *absent*.
-  No artifact is uploaded to avoid presenting this as user-ready.
+The upstream [`AI_tdstMind` and `AI_tdstAIModel`
+structures](https://github.com/raytools/ACP_Ray2/blob/master/src/AI/AI.h)
+show `Mind -> AIModel -> ScriptAI -> Comport -> Rules -> Nodes`.
+`AIModel` is reached by a pointer from the actor's mind; it is
+not proven to be privately allocated per actor. Thus **patching the
+original node array may change a SHARED model** also used by another
+actor, including future actors.
 
-## Why it is still a draft
+A snapshot with one current user of the model does NOT establish
+exclusive ownership across all loaded/unloaded resources or future
+spawns. Atomically writing a shared node still changes it globally,
+and restoring after 5 seconds of renderer callbacks is NOT an
+independent watchdog.
 
-**Script-node modification is not automatically safe.** Further
-analysis must establish whether other actors share the rule, whether
-the engine caches an evaluated branch and whether all lifecycle
-paths leave the original script node intact. The 5,000 ms timeout is
-callback-driven, not a watchdog. An interruption could leave a
-transient IF keyword in memory until callbacks resume, although the
-persistable progress array is never directly changed by this
-candidate. It is not yet established that runtime script bytes can
-never affect an internal save.
+**Safety decision:** `kLearn10SharedScriptWritePermitted=false`
+is a hard, compile-time guard. The script-gate opt-in build can
+read the live script/AI model, but refuses before any write with
+`phase=blocked reason=shared-AIModel-ownership-unproven`.
+The original `IfNot -> If` and restore code remains a *disabled
+research hypothesis* only. CI rejects any Windows x86 candidate
+binary containing its `phase=armed` marker.
 
-The candidate must remain separate from PR #31. No player test,
-manual save test or merger is requested until these questions are
-resolved through static analysis and independent reviewer checks.
+## Read-only AI model alias survey
+
+The separate header `learn10_model_alias.hpp` traverses two known
+runtime roots (dynamic/inactive worlds) with bounded graph traversal.
+It follows only checked pointer chains through:
+`SuperObject -> EngineObject -> Brain -> Mind -> AIModel`.
+
+- Detects multiple current actors referencing the same AIModel.
+- Refuses a complete result on cycles, duplicate nodes, broken parent
+  links, unreadable actors or a missing director.
+- Reports actor counts, alias counts and whether one current actor
+  is observed; **the result never grants permission to write**.
+- Does not print or transmit raw addresses, model identity or save
+  contents. No writing to game memory or files.
+- Pure C++17 synthetic fixtures cover unique-now, shared,
+  incomplete, cycle, invalid parent, bad target and bounds.
+- Optional research runtime opt-in:
+  `RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTOTYPE=1`, with
+  `[Debug] Log=1` and `[Features] SkipCinematics=1`.
+  This only logs the census and `phase=blocked`, not a skip.
+
+## Next independent approaches
+
+Two possibilities merit investigation **without modifying the
+shared original script buffer**:
+
+1. **Interpreter-scoped conditional override:** locate the verified
+   approved-CD interpreter callsite and let only the identified
+   director's root `IfNot` condition select its native ELSE branch.
+   Validate function signature, timing, actor identity, and safe
+   restore. The upstream ACP_Ray2 API exposes
+   `AI_fn_p_stEvalKeyWord`, `AI_fn_p_stEvalCondition` and
+   `AI_fn_p_stEvalTree`, but its offsets are from another reference
+   executable and must **not** be used for the CD without a signature
+   match. No interpreter hook exists in this branch yet.
+2. **Per-actor copy-on-write AI model:** clone only the required
+   script/behaviour structure and redirect the identified actor's
+   private reference. Requires proving engine allocation/lifetime,
+   safe restoration of pointers and freedom from shared aliases.
+   Copying only one pointer or using a shallow clone is insufficient.
+
+The existing script opcode shape, native physical Enter handling and
+native one-second timing guard should be preserved in either approach.
+Avoid synthetic keyboard input, direct V96/var110 changes and forced
+director behaviour transitions: earlier forced exits corrupted the scene.
+
+## CI and release boundaries
+
+`RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO` is an isolated research
+compile-time option, mutually exclusive with
+`RAYMAN2FIX_LEARN10_NOMOVIES_PROTO`, and requires
+`RAYMAN2FIX_RESEARCH_PROBES=ON`.
+
+CTest runs the root-keyword policy tests plus the new ownership
+census fixtures on Linux and Windows. The separate x86 Windows
+candidate is compiled **without uploading an artifact** and must
+contain the read-only survey + blocked markers but not the live
+script-arm or prior story-bit mutation markers. Normal build outputs
+remain unaffected.
+
+This branch provides a safer **research instrument**, not a verified
+new skip. PR #31 remains the only user-validated native skip, still
+opt-in and isolated. No user save test or further early-Enter tests
+are requested.
