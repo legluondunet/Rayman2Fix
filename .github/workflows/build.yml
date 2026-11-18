@@ -616,15 +616,18 @@ jobs:
           data=Path('build/Release/fix.dll').read_bytes()
           for marker in (
               b'RUNTIME-LEARN10-SCRIPT-GATE: enabled=1',
-              b'RUNTIME-LEARN10-SCRIPT-GATE: phase=armed',
-              b'RUNTIME-LEARN10-SCRIPT-GATE: phase=restored',
-              b'RUNTIME-LEARN10-SCRIPT-GATE: phase=handover-verification',
+              b'RUNTIME-LEARN10-SCRIPT-GATE: phase=model-alias-census',
+              b'phase=blocked reason=shared-AIModel-ownership-unproven',
           ):
               if marker not in data:
-                  raise SystemExit(f'Missing script-gate candidate marker: {marker!r}')
-          if b'RUNTIME-LEARN10-PROTOTYPE: enabled=1' in data:
-              raise SystemExit('Unsafe: both experimental skip methods compiled together')
-          print('Experimental script-only candidate compiled, no old bit-write path: PASS')
+                  raise SystemExit(f'Missing read-only model alias marker: {marker!r}')
+          for forbidden in (
+              b'RUNTIME-LEARN10-PROTOTYPE: enabled=1',
+              b'RUNTIME-LEARN10-SCRIPT-GATE: phase=armed',
+          ):
+              if forbidden in data:
+                  raise SystemExit(f'Unsafe live script- or story-bit mutation marker: {forbidden!r}')
+          print('Experimental script-gate currently blocked; read-only AIModel census only: PASS')
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Script gate runtime marker check failed' }
           # No artifact until this approach passes an independent memory-safety review.
