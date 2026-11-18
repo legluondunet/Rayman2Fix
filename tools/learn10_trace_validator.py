@@ -51,6 +51,9 @@ def audit(text: str) -> dict:
     enabled = _all(lines, PROTOTYPE + " enabled=1")
     arm = _all(lines, PROTOTYPE + " phase=armed ")
     edge = _all(lines, PROTOTYPE + " phase=physical-enter-edge ")
+    post_rollback = _all(
+        lines, PROTOTYPE + " phase=physical-enter-after-rollback "
+    )
     restore = _all(lines, PROTOTYPE + " phase=restored ")
     pending = _all(lines, PROTOTYPE + " phase=restore-pending ")
     errors = _all(lines, PROTOTYPE + " phase=error ")
@@ -68,7 +71,10 @@ def audit(text: str) -> dict:
         return {
             "status": "NOT_APPLICABLE",
             "handover_ms": None, "armed_ms": None,
-            "enter_edges": len(edge), "exposure_ms": None,
+            "enter_edges": len(edge),
+            "post_rollback_enter_edges": len(post_rollback),
+            "first_enter_since_arm_ms": None,
+            "exposure_ms": None,
             "failures": failures,
             "missing": ["Dedicated NOMOVIES prototype not enabled"],
             "warnings": warnings,
@@ -103,6 +109,24 @@ def audit(text: str) -> dict:
     armed_ms = _integer(arm[0][1], "t") if arm else None
     handover_ms = _integer(handover[1], "t") if handover else None
     exposure_ms = _integer(restore[0][1], "armed_duration_ms") if restore else None
+    first_enter_since_arm_ms = (
+        _integer(edge[0][1], "since_arm_ms") if edge else None
+    )
+    if first_enter_since_arm_ms is None and edge and armed_ms is not None:
+        first_enter_t = _integer(edge[0][1], "t")
+        if first_enter_t is not None:
+            first_enter_since_arm_ms = first_enter_t - armed_ms
+    if first_enter_since_arm_ms is not None and first_enter_since_arm_ms < 1000:
+        warnings.append(
+            "Physical Enter occurred less than 1000ms after bit1188 arm; "
+            "this is a timing proxy, NOT proof of the native V93 timer"
+        )
+    if post_rollback:
+        warnings.append(
+            f"{len(post_rollback)} physical Enter edge(s) detected after "
+            "NOMOVIES rollback: the prototype's native skip gate was no "
+            "longer enabled"
+        )
 
     if arm and restore and restore[0][0] < arm[0][0]:
         failures.append("Flag restored before it was armed (invalid event order)")
@@ -162,6 +186,8 @@ def audit(text: str) -> dict:
         "handover_ms": handover_ms,
         "armed_ms": armed_ms,
         "enter_edges": len(edge),
+        "post_rollback_enter_edges": len(post_rollback),
+        "first_enter_since_arm_ms": first_enter_since_arm_ms,
         "exposure_ms": exposure_ms,
         "failures": failures, "missing": missing, "warnings": warnings,
         "visual_verified": False, "saves_verified": False,
@@ -183,7 +209,10 @@ def main(argv: list[str] | None = None) -> int:
         print("Learn_10 NOMOVIES audit:", report["status"])
         print("Handover:", report["handover_ms"], "ms")
         print("Armed at:", report["armed_ms"], "ms")
-        print("Physical Enter edges:", report["enter_edges"])
+        print("Physical Enter edges while armed:", report["enter_edges"])
+        print("Physical Enter edges after rollback:",
+              report["post_rollback_enter_edges"])
+        print("First Enter after arming:", report["first_enter_since_arm_ms"], "ms")
         print("Flag exposure:", report["exposure_ms"], "ms")
         for kind in ("failures", "missing", "warnings"):
             for message in report[kind]:
