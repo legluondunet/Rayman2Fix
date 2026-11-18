@@ -325,3 +325,63 @@ story bit 1188, or that a saved state can later be reloaded correctly.
 For that, an independently validated Rayman 2 save parser and real
 save/reload tests are still required. Keep PR #31 experimental until
 those checks and Wine gameplay parity are complete.
+
+
+## Isolated two-session Wine save/reload verification
+
+The owner confirmed native skip, visual transition, camera and controls
+under Windows and Wine. The Wine session also confirmed in-memory
+rollback of story bit 1188. However, its before/after inventory showed
+normal-looking but **unexplained writes** in
+`game/data/SaveGame/HiddenSlot/`. These alone cannot prove or
+disprove persistence contamination.
+
+The next script, `tools/rayman2fix_test_wine_save_reload.sh`,
+runs **two interactive game sessions** from the folder containing the
+**experimental** `Rayman2Fix.exe`, and downloads
+`learn10_save_audit.py` into that same folder.
+
+From a completely **disposable** installation and a separately
+configured test Wine prefix (the script does not create a prefix):
+
+```sh
+curl -fsSL \
+  "https://raw.githubusercontent.com/legluondunet/Rayman2Fix/experiment/learn10-native-nomovies/tools/rayman2fix_test_wine_save_reload.sh" \
+  -o rayman2fix_test_wine_save_reload.sh \
+  && chmod +x rayman2fix_test_wine_save_reload.sh \
+  && ./rayman2fix_test_wine_save_reload.sh
+```
+
+All input, downloads, generated reports and the final archive live
+beside the installer executable; no `/tmp` is used. The script does
+**not** overwrite or restore any game saves.
+
+1. **Before**: copy raw saves (including a found `Data/Options` folder)
+   and write a SHA-256/mtime inventory.
+2. **Session 1**: launch Wine with the NOMOVIES prototype explicitly
+   enabled; perform the skip using a real Enter press **after about
+   one second**. Make a normal game save if the game offers one, then
+   quit. Fail closed unless the runtime log records opt-in and
+   `handover-verification status=pass`.
+3. **After session 1**: copy raw saves again, compare with baseline.
+4. **Session 2**: launch Wine with
+   `RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE` explicitly **unset**,
+   reload the disposable save if one exists, verify progress, camera
+   and controls, then quit.
+5. **After session 2**: copy saves again, compare to session 1, preserve
+   both runtime logs, and pack all evidence into
+   `rayman2-save-reload-YYYYMMDD-HHMMSS-diagnostics.tar.gz`.
+
+This archive contains **real game saves**, possibly including a chosen
+slot name. Treat it as private diagnostic material; inspect before
+sharing publicly.
+
+If the game never created a visible reloadable slot, the second
+session is **not** proof of save/reload safety even when it starts
+normally. Hash comparisons, including `UNCHANGED`, are insufficient
+to prove the bit 1188 was never serialized. Any bit-level save
+interpretation must be independently validated against this exact
+Rayman 2 PC edition before certification. The legacy published
+Rayman 2 PC save format containing 45 32-bit global-array words
+does not directly match the observed 70-byte `HiddenSlot/General.sav`
+and must not be applied blindly.
