@@ -4158,13 +4158,22 @@ r2fix::Learn10ModelAliasCensus learn10_script_gate_census() {
     if (!module || !g_observed_director_superobject) return bad;
     std::uint32_t dynamic=0,inactive=0;
     std::uint32_t actor=0,brain=0,mind=0,model=0;
+    std::uint32_t intelligence=0,script=0,behaviours=0;
     const auto owner=g_observed_director_superobject;
+    // Cross-check the director's specific AIModel chain against the
+    // already fingerprinted live behaviours AND intelligence pointer.
+    // A model alias count is meaningless if this identity changed.
     if (!read_u32(module+0x100fd0u,dynamic) || !dynamic ||
         !read_u32(module+0x100fc4u,inactive) || !inactive ||
         !read_u32(owner+4u,actor) || !actor ||
         !read_u32(std::uintptr_t(actor)+0x0cu,brain) || !brain ||
         !read_u32(std::uintptr_t(brain),mind) || !mind ||
-        !read_u32(std::uintptr_t(mind),model) || !model)
+        !read_u32(std::uintptr_t(mind),model) || !model ||
+        !read_u32(std::uintptr_t(mind)+4u,intelligence) ||
+        std::uintptr_t(intelligence)!=g_observed_director_intelligence ||
+        !read_u32(std::uintptr_t(model),script) || !script ||
+        !read_u32(std::uintptr_t(script),behaviours) ||
+        std::uintptr_t(behaviours)!=g_observed_director_behaviours)
         return bad;
     return r2fix::survey_learn10_model_aliases(
         dynamic,inactive,owner,model,
