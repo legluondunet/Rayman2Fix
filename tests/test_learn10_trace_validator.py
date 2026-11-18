@@ -116,7 +116,7 @@ class TraceValidationTests(unittest.TestCase):
             "RUNTIME-LEARN10-PROTOTYPE: phase=native-input-snapshot "
             "t=3078ms enter_count=1 director_b3=1 V93=66 V93_valid=1 "
             "V119=0 V119_valid=1 V95=1200 V95_valid=1 "
-            "V96=0 V96_valid=1\\n"
+            "V96=0 V96_valid=1\n"
             "RUNTIME-INTRO: director behaviour transition t=3078ms",
         )
         report = audit(trace)
@@ -134,7 +134,7 @@ class TraceValidationTests(unittest.TestCase):
             "RUNTIME-LEARN10-PROTOTYPE: phase=native-input-snapshot "
             "t=3078ms enter_count=1 director_b3=0 V93=0 V93_valid=0 "
             "V119=0 V119_valid=0 V95=0 V95_valid=0 "
-            "V96=0 V96_valid=0\\n"
+            "V96=0 V96_valid=0\n"
             "RUNTIME-INTRO: director behaviour transition t=3078ms",
         )
         report = audit(trace)
