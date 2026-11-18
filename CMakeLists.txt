@@ -69,6 +69,14 @@ option(RAYMAN2FIX_RESEARCH_PROBES
   "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
 option(RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
   "Build isolated, opt-in experiment using the native Learn_10 NOMOVIES branch" OFF)
+option(RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+  "Build separate research-only native Learn_10 IFNOT-to-IF experiment" OFF)
+if(RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO AND RAYMAN2FIX_LEARN10_NOMOVIES_PROTO)
+  message(FATAL_ERROR "Choose one Learn_10 experiment: never combine script-gate and NOMOVIES story writes")
+endif()
+if(RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO AND NOT RAYMAN2FIX_RESEARCH_PROBES)
+  message(FATAL_ERROR "Script-gate experiment requires RAYMAN2FIX_RESEARCH_PROBES=ON")
+endif()
 if(RAYMAN2FIX_LEARN10_NOMOVIES_PROTO AND NOT RAYMAN2FIX_RESEARCH_PROBES)
   message(FATAL_ERROR "Learn_10 NOMOVIES prototype requires RAYMAN2FIX_RESEARCH_PROBES=ON")
 endif()
@@ -98,6 +106,9 @@ if(WIN32)
   endif()
   if(RAYMAN2FIX_LEARN10_NOMOVIES_PROTO)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_LEARN10_NOMOVIES_PROTO=1)
+  endif()
+  if(RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO=1)
   endif()
   if(RAYMAN2FIX_AUDIO_TRACE)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_AUDIO_TRACE=1)
@@ -192,6 +203,12 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  # Pure synthetic model: IFNOT -> IF only on an exact root keyword.
+  # No actual game memory is patched by this test or normal builds.
+  add_executable(learn10_script_gate_tests tests/learn10_script_gate_tests.cpp)
+  target_include_directories(learn10_script_gate_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME learn10-script-gate-guard COMMAND learn10_script_gate_tests)
+
   add_executable(learn10_nomovies_proto_tests tests/learn10_nomovies_proto_tests.cpp)
   target_include_directories(learn10_nomovies_proto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME learn10-nomovies-proto-guard COMMAND learn10_nomovies_proto_tests)
