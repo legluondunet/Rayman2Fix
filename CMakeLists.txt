@@ -208,6 +208,10 @@ if(BUILD_TESTING)
   add_executable(learn10_script_gate_tests tests/learn10_script_gate_tests.cpp)
   target_include_directories(learn10_script_gate_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME learn10-script-gate-guard COMMAND learn10_script_gate_tests)
+  # Research-only read-only census of actor/model aliases; never grants write permission.
+  add_executable(learn10_model_alias_tests tests/learn10_model_alias_tests.cpp)
+  target_include_directories(learn10_model_alias_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME learn10-model-alias-census COMMAND learn10_model_alias_tests)
 
   add_executable(learn10_nomovies_proto_tests tests/learn10_nomovies_proto_tests.cpp)
   target_include_directories(learn10_nomovies_proto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
