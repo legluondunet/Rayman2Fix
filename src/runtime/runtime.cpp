@@ -7277,9 +7277,14 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     }
 #endif
 #endif // RAYMAN2FIX_AUDIO_HOOKS
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+    if (g_log) log_line("RUNTIME-CONFIG: research_probes=1 "
+        "(opt-in NOMOVIES prototype; experimental in-memory story bit write permitted only after separate runtime authorization)");
+#else
     if (g_log) log_line(kResearchProbes ?
         "RUNTIME-CONFIG: research_probes=1 (read-only experimental trace build)" :
         "RUNTIME-CONFIG: research_probes=0 (standard release instrumentation)");
+#endif
     if(settings->skip_cinematics>1u ||
        settings->remove_dialogue_backgrounds>1u ||
        settings->remove_cinematic_bars>1u)
