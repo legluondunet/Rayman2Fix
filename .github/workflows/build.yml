@@ -565,6 +565,7 @@ jobs:
               b'RUNTIME-LEARN10-PROTOTYPE: enabled=1 route=native-NOMOVIES',
               b'RUNTIME-LEARN10-PROTOTYPE: phase=armed',
               b'RUNTIME-LEARN10-PROTOTYPE: phase=restored',
+              b'armed_duration_ms=%u',
               b'physical-input-needed max_armed_ms=5000',
               b'phase=physical-enter-edge',
               b'max-exposure-5000ms',
@@ -610,6 +611,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_prepare_intro_logo_hd.py'
       - name: Verify Learn_10 safe fallback
         run: python3 -m unittest discover -s tests -p 'test_learn10_readonly.py'
+      - name: Verify Learn_10 NOMOVIES trace auditor (fail closed, synthetic sessions)
+        run: python3 -m unittest discover -s tests -p 'test_learn10_trace_validator.py'
       - name: Verify audio research trace stays out of normal builds
         run: python3 -m unittest discover -s tests -p 'test_audio_trace_guards.py'
       - name: Verify standalone PE32 audio inspector with synthetic fixtures
