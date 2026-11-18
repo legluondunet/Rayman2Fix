@@ -5084,6 +5084,9 @@ void log_native_gate_history(DWORD elapsed) {
 }
 
 void poll_learn_intro_skip() {
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+    learn10_script_gate_poll();
+#endif
 #if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
     // The original NOMOVIES branch is the top-level ELSE of IfNot(1188).
     // The ELSE also has its own original JustPressedBut plus a 1000ms
@@ -5114,6 +5117,18 @@ void poll_learn_intro_skip() {
 #endif
     if (!g_current_level) return;
     if (!r2fix::is_first_playable_level(g_current_level)) {
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+        learn10_script_gate_restore("level-left");
+        if (!g_script_gate_armed) {
+            g_script_gate_attempted=false;
+            g_script_gate_ever_armed=false;
+            g_script_gate_restored=false;
+            g_script_gate_b3=0;
+            g_script_gate_rules=0;
+            g_script_gate_node=0;
+            g_script_gate_enter_edges=0;
+        }
+#endif
 #if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
         // Best-effort restoration also covers native level changes.
         // Never write a stale address if the Fix actor disappeared.
@@ -5195,6 +5210,11 @@ void poll_learn_intro_skip() {
             log_line("RUNTIME-INTRO: learn_10 native NOMOVIES test enabled (experimental; story bit1188 may be toggled)");
         else
 #endif
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+        if (!handed_over && g_script_gate_opted_in)
+            log_line("RUNTIME-INTRO: learn_10 experimental script keyword route enabled (progress bit1188 remains read-only)");
+        else
+#endif
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
             : "RUNTIME-INTRO: learn_10 skip disabled after visual regression; natural scene unchanged");
@@ -5246,6 +5266,12 @@ void poll_learn_intro_skip() {
     else
         learn10_proto_try_arm(handed_over,elapsed);
 #endif
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+    if (handed_over)
+        learn10_script_gate_restore("story1091-handover");
+    else
+        learn10_script_gate_arm(handed_over,elapsed);
+#endif
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
         g_learn_handover_start = GetTickCount();
@@ -5264,6 +5290,9 @@ void poll_learn_intro_skip() {
         }
 #else
         log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
+#endif
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+        learn10_script_gate_handover_verification();
 #endif
         bool nomovies=false;
         const bool known=game_story_bit(g_progress_words,
@@ -7574,6 +7603,16 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         "RUNTIME-LEARN10-PROTOTYPE: enabled=0 "
         "set env RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE=1 "
         "and Features.SkipCinematics=1 to opt in");
+#endif
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+    wchar_t enable_script_gate[8]{};
+    const DWORD script_gate_length=GetEnvironmentVariableW(
+        L"RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTOTYPE",enable_script_gate,8);
+    g_script_gate_opted_in=g_log && settings->skip_cinematics==1u &&
+        script_gate_length==1 && enable_script_gate[0]==L'1';
+    log_line(g_script_gate_opted_in ?
+        "RUNTIME-LEARN10-SCRIPT-GATE: enabled=1 native-else-input-gate=1 story_bit1188_readonly=1 script_keyword_inversion=1 experimental=1" :
+        "RUNTIME-LEARN10-SCRIPT-GATE: enabled=0 opt-in via RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTOTYPE=1");
 #endif
     if(settings->music_in_pause_menu>1u)return 5;
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
