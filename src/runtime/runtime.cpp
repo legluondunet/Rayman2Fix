@@ -25,6 +25,7 @@
 #endif
 #if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
 #include "rayman2fix/learn10_script_gate.hpp"
+#include "rayman2fix/learn10_model_alias.hpp"
 #endif
 #include "rayman2fix/game_window_icon.hpp"
 #include "rayman2fix/render_poll_gate.hpp"
@@ -234,6 +235,9 @@ bool g_learn_nomovies_conditions_logged = false;
 // validated with ReadProcessMemory before every use.
 std::uintptr_t g_observed_director_intelligence = 0;
 std::uintptr_t g_observed_director_behaviours = 0;
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+std::uintptr_t g_observed_director_superobject = 0;
+#endif
 int g_observed_director_index = -1;
 bool g_have_ray_state = false;
 std::uint32_t g_last_ray_custom = 0;
@@ -4142,6 +4146,30 @@ void learn10_script_gate_restore(const char* reason) {
     log_line(msg);
 }
 
+// Survey currently instantiated actors in the known dynamic and inactive
+// worlds, then record alias counts. Even a complete survey is NOT proof
+// that the original AIModel is actor-private: other worlds, pooled actors
+// or future spawns may refer to it. Do not use "unique now" to enable
+// mutation of the original shared script buffer.
+r2fix::Learn10ModelAliasCensus learn10_script_gate_census() {
+    r2fix::Learn10ModelAliasCensus bad{};
+    bad.complete=false;
+    const auto module=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    if (!module || !g_observed_director_superobject) return bad;
+    std::uint32_t dynamic=0,inactive=0;
+    std::uint32_t actor=0,brain=0,mind=0,model=0;
+    const auto owner=g_observed_director_superobject;
+    if (!read_u32(module+0x100fd0u,dynamic) || !dynamic ||
+        !read_u32(module+0x100fc4u,inactive) || !inactive ||
+        !read_u32(owner+4u,actor) || !actor ||
+        !read_u32(std::uintptr_t(actor)+0x0cu,brain) || !brain ||
+        !read_u32(std::uintptr_t(brain),mind) || !mind ||
+        !read_u32(std::uintptr_t(mind),model) || !model)
+        return bad;
+    return r2fix::survey_learn10_model_aliases(
+        dynamic,inactive,owner,model,
+        [](std::uintptr_t p,std::uint32_t& v){return read_u32(p,v);});
+}
 void learn10_script_gate_arm(bool handed_over,DWORD elapsed) {
     if (!g_script_gate_opted_in || g_script_gate_attempted ||
         !g_learn_intro_seen || handed_over ||
@@ -4167,6 +4195,22 @@ void learn10_script_gate_arm(bool handed_over,DWORD elapsed) {
             g_script_gate_opted_in,g_log,first_visit,live,scripts,
             original_flag_off)) {
         log_line("RUNTIME-LEARN10-SCRIPT-GATE: phase=refused reason=script-director-or-story-not-exact");
+        return;
+    }
+    const auto ownership=learn10_script_gate_census();
+    char survey[288]{};
+    std::snprintf(survey,sizeof(survey),
+        "RUNTIME-LEARN10-SCRIPT-GATE: phase=model-alias-census complete=%u director_seen=%u actor_count=%u aliases=%u unreadable_actors=%u unique_snapshot=%u (read-only; does not establish lifetime ownership)",
+        unsigned(ownership.complete),unsigned(ownership.director_seen),
+        ownership.actors_seen,ownership.matching_model_actors,
+        ownership.unreadable_actors,unsigned(ownership.apparently_unique_now()));
+    log_line(survey);
+    // CRITICAL: AIModel owns the behaviour/script arrays and may be
+    // referenced by other actors. A one-frame census cannot authorise a
+    // write to shared model storage. Until per-actor shadow ownership is
+    // implemented AND proven, refuse all live writes unconditionally.
+    if (!r2fix::kLearn10SharedScriptWritePermitted) {
+        log_line("RUNTIME-LEARN10-SCRIPT-GATE: phase=blocked reason=shared-AIModel-ownership-unproven (NO script bytes or story bits changed)");
         return;
     }
     // Do NOT use VirtualProtect: only atomically patch a script node that
@@ -4751,6 +4795,9 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     if (director.matches==1 && director.intelligence && director.behaviours) {
         g_observed_director_intelligence=director.intelligence;
         g_observed_director_behaviours=director.behaviours;
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+        g_observed_director_superobject=director.superobject;
+#endif
         g_observed_director_index=director.counters.current_behaviour_index;
         if (director.counters.current_behaviour_index==3 &&
             !g_learn_nomovies_conditions_logged) {
@@ -5155,6 +5202,9 @@ void poll_learn_intro_skip() {
         g_learn_nomovies_conditions_logged = false;
         g_observed_director_intelligence = 0;
         g_observed_director_behaviours = 0;
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+        g_observed_director_superobject = 0;
+#endif
         g_observed_director_index = -1;
         g_have_ray_state = false;
         g_last_ray_custom = 0;
