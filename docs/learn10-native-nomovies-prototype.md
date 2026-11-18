@@ -223,8 +223,14 @@ tests confirm correct cleanup **without save contamination**.
 ## Two Enter presses in one successful session (18 November 2026)
 
 New Windows log: `Rayman2Fix(20261118-141030).log`, one experimental
-runtime session. The native NOMOVIES flag was armed at **391 ms**.
-Physical Enter #1 occurred at **500 ms** (109 ms after arming) and did
+runtime session. This older build **logs** NOMOVIES `phase=armed t=266ms`,
+but the timestamp was sampled *before* the large compiled-script probe.
+The later monotonic counter reports the first physical Enter at **500 ms**
+as only **109 ms after arming** (effective activation near 391 ms,
+inferred rather than explicitly timestamped). The updated prototype
+logs the current monotonic arm time as `t` plus `sampled_intro_ms`
+to expose the diagnostic delay. This does not change the gameplay.
+Physical Enter #1 at **500 ms** did
 not cause a transition. Enter #2 occurred at **3,531 ms** (3,140 ms
 after arming). The original director changed behaviour **3 -> 7**
 at **3,547 ms** (16 ms later), then **7 -> 1** at **3,562 ms**.

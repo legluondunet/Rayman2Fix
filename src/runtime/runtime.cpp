@@ -3896,6 +3896,11 @@ void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
     }
     g_learn10_proto_words=g_progress_words;
     g_learn10_proto_armed_at=GetTickCount();
+    // The supplied elapsed value was captured before the potentially
+    // expensive native script probe and diagnostic printing. Use the
+    // current monotonic tick for the actual bit-arming timestamp.
+    const DWORD actual_arm_elapsed=g_learn_intro_start ?
+        DWORD(g_learn10_proto_armed_at-g_learn_intro_start):elapsed;
     g_learn10_proto_enter_down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
     g_learn10_proto_enter_edges=0;
     g_learn10_proto_post_rollback_enter_edges=0;
@@ -3914,10 +3919,11 @@ void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
     char msg[236]{};
     std::snprintf(msg,sizeof(msg),
         "RUNTIME-LEARN10-PROTOTYPE: phase=armed t=%ums "
+        "sampled_intro_ms=%u "
         "nomovies_bit1188=1 original=0 director=3 "
         "native-original-alternative=verified "
         "physical-input-needed max_armed_ms=5000",
-        unsigned(elapsed));
+        unsigned(actual_arm_elapsed),unsigned(elapsed));
     log_line(msg);
 }
 void learn10_proto_try_restore(const char* reason) {
