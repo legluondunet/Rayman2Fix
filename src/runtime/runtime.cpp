@@ -3918,6 +3918,10 @@ void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
 }
 void learn10_proto_try_restore(const char* reason) {
     if (!g_learn10_proto_armed) return;
+    // Record the true wall-clock exposure of the flag, including any
+    // period where the renderer stopped delivering our existing poll.
+    const unsigned armed_duration_ms=unsigned(DWORD(
+        GetTickCount()-g_learn10_proto_armed_at));
     const auto words=find_story_words();
     if (!words || words!=g_learn10_proto_words) {
         log_line("RUNTIME-LEARN10-PROTOTYPE: phase=restore-pending "
@@ -3935,8 +3939,13 @@ void learn10_proto_try_restore(const char* reason) {
             g_learn10_proto_restored=true;
             g_learn10_proto_armed_at=0;
             g_learn10_proto_words=0;
-            log_line("RUNTIME-LEARN10-PROTOTYPE: phase=restored "
-                     "state=already-clear (no game memory changed)");
+            char msg[220]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-LEARN10-PROTOTYPE: phase=restored "
+                "reason=%s state=already-clear armed_duration_ms=%u "
+                "(no game memory changed)",
+                reason,armed_duration_ms);
+            log_line(msg);
             return;
         }
         if (r2fix::plan_learn10_nomovies_restore(before,replacement) &&
@@ -3948,8 +3957,9 @@ void learn10_proto_try_restore(const char* reason) {
             char msg[220]{};
             std::snprintf(msg,sizeof(msg),
                 "RUNTIME-LEARN10-PROTOTYPE: phase=restored "
-                "reason=%s nomovies_bit1188=0 other_progress_bits=preserved enter_edges=%u",
-                reason,unsigned(g_learn10_proto_enter_edges));
+                "reason=%s nomovies_bit1188=0 other_progress_bits=preserved enter_edges=%u armed_duration_ms=%u",
+                reason,unsigned(g_learn10_proto_enter_edges),
+                armed_duration_ms);
             log_line(msg);
             return;
         }
