@@ -23,6 +23,9 @@
 #if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
 #include "rayman2fix/learn10_nomovies_proto.hpp"
 #endif
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+#include "rayman2fix/learn10_script_gate.hpp"
+#endif
 #include "rayman2fix/game_window_icon.hpp"
 #include "rayman2fix/render_poll_gate.hpp"
 #include <mutex>
@@ -55,6 +58,15 @@
 #endif
 #ifndef RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
 #define RAYMAN2FIX_LEARN10_NOMOVIES_PROTO 0
+#endif
+#ifndef RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+#define RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO 0
+#endif
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO && !RAYMAN2FIX_RESEARCH_PROBES
+#error Learn_10 script-gate prototype needs separate research build
+#endif
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO && RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+#error Learn_10 script-gate and progress-bit prototypes are mutually exclusive
 #endif
 #if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO && !RAYMAN2FIX_RESEARCH_PROBES
 #error Learn_10 experimental NOMOVIES path requires separate research build
@@ -262,6 +274,20 @@ unsigned g_learn10_proto_gate_samples = 0;
 // Verified scalar storage locations, not script opcodes or actor pointers.
 ObservedDirectorByte g_learn10_proto_v93{};
 ObservedDirectorByte g_learn10_proto_v119{};
+#endif
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+// Separate research route: in-memory script keyword only; no story writes.
+bool g_script_gate_opted_in = false;
+bool g_script_gate_attempted = false;
+bool g_script_gate_armed = false;
+bool g_script_gate_ever_armed = false;
+bool g_script_gate_restored = false;
+bool g_script_gate_enter_down = false;
+unsigned g_script_gate_enter_edges = 0;
+DWORD g_script_gate_armed_at = 0;
+std::uintptr_t g_script_gate_b3 = 0;
+std::uintptr_t g_script_gate_rules = 0;
+std::uintptr_t g_script_gate_node = 0;
 #endif
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
@@ -3775,8 +3801,9 @@ bool game_story_bit(std::uintptr_t words, unsigned bit, bool& value) {
     return true;
 }
 
-#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
-// The test route toggles only one native story-array flag, on explicit
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO || RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+// Shared checked 32-bit memory primitives for isolated prototypes.
+// The NOMOVIES test route toggles only one native story-array flag, on explicit
 // opt-in. No behaviour pointers, V96, script opcodes, F158, camera, or
 // synthetic input are touched. Never enable in a normal build.
 bool learn10_proto_writable_story_word(std::uintptr_t address) {
@@ -3809,7 +3836,7 @@ bool learn10_proto_compare_exchange(std::uintptr_t address,
     return actual==old_bits;
 }
 // Both ORIGINAL behaviour-3 rules and their nesting must match the
-// approved disc before the prototype temporarily enables NOMOVIES.
+// approved disc before either candidate adjusts a native gate.
 // A matching branch is a prerequisite only, not proof of safe gameplay.
 bool learn10_proto_original_scripts_match(std::uintptr_t behaviour_table) {
     if (!behaviour_table || behaviour_table<0x10000u ||
@@ -3846,6 +3873,8 @@ bool learn10_proto_original_scripts_match(std::uintptr_t behaviour_table) {
         std::uintptr_t(rules)+8u,reader32,reader8,8192u,156u,249u);
     return r2fix::inspect_learn10_early_exit(early_rule).matched();
 }
+#endif // shared C++ script verification and atomic helper
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
 void learn10_proto_try_restore(const char* reason);
 void learn10_proto_try_arm(bool handed_over,DWORD elapsed) {
     if (!g_learn10_proto_opted_in || g_learn10_proto_attempted ||
