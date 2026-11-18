@@ -4525,6 +4525,32 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
                 int(v93),unsigned(ok93),k93,int(v119),unsigned(ok119),k119);
             log_line(conditions);
         }
+#if RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
+        // Additional bounded, READ-ONLY snapshots from the verified
+        // director during the armed experiment. A too-early Enter might
+        // be rejected by IsTimeElapsed(V93,1000), or by a native latch:
+        // observe V119/V93, do not presume which condition failed.
+        if (g_learn10_proto_ever_armed &&
+            director.counters.current_behaviour_index==3 &&
+            t>=1000u && g_learn10_proto_gate_samples<6u) {
+            ++g_learn10_proto_gate_samples;
+            unsigned k93=0,k119=0;
+            std::int32_t v93=0,v119=0;
+            const bool ok93=read_director_phase_integer(
+                director.superobject,93,k93,v93);
+            const bool ok119=read_director_phase_integer(
+                director.superobject,119,k119,v119);
+            char gate[225]{};
+            std::snprintf(gate,sizeof(gate),
+                "RUNTIME-LEARN10-PROTOTYPE: phase=native-gate-snapshot "
+                "t=%ums V93=%d(valid=%u,type=%u) "
+                "V119=%d(valid=%u,type=%u) "
+                "(timer handle/latch candidate; read-only)",
+                unsigned(t),int(v93),unsigned(ok93),k93,
+                int(v119),unsigned(ok119),k119);
+            log_line(gate);
+        }
+#endif
         // Run the one-time script probe only after the normal intro's
         // behaviour 3 is live; diagnostic is skipped if never observed.
         if (!g_learn_script_probe_done &&
