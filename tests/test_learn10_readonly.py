@@ -119,6 +119,18 @@ class Learn10SafeFallback(unittest.TestCase):
         self.assertIn('g_learn10_proto_enter_edges=0;',source)
         self.assertNotIn('release Enter then press Enter once',source)
         self.assertIn('other_progress_bits=preserved',source)
+        # The experimental memory write must never be described as a
+        # passive trace or a natural no-skip handover in its own build.
+        self.assertIn('g_learn10_proto_ever_armed=true;',source)
+        self.assertIn('g_learn10_proto_restored=true;',source)
+        self.assertIn('g_learn10_proto_restored=false;',source)
+        self.assertIn('RUNTIME-LEARN10-PROTOTYPE: phase=handover elapsed_ms=',source)
+        self.assertIn('still_armed=%u enter_edges=%u',source)
+        self.assertIn('readback after experimental rollback',source)
+        self.assertIn('before prototype arm',source)
+        self.assertIn('opt-in NOMOVIES prototype; experimental in-memory story bit',source)
+        self.assertIn('native NOMOVIES test enabled',source)
+        self.assertIn('learn10_proto_try_restore("story1091-handover")',source)
         self.assertNotIn('WriteProcessMemory(',source)
         self.assertNotIn('AI_fn_ucChangeComportIntell',source)
 
