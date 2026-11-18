@@ -115,6 +115,38 @@ it was rolled back, whether it remained armed, and the number of
 physical Enter edges. All of these are **observations of in-memory
 state**, not proof that every saved file is uncontaminated.
 
+## Offline automated audit (no save-file access)
+
+A standalone log auditor is included in the experimental branch:
+tools/learn10_trace_validator.py. It requires Python 3 (standard
+library only), and can run on Linux or Windows. For Windows without
+Python, simply upload the non-cumulative log for analysis instead.
+
+For example:
+
+    python3 tools/learn10_trace_validator.py "Rayman2Fix(20261117-192631).log"
+    python3 tools/learn10_trace_validator.py --json "Rayman2Fix(20261117-192631).log"
+
+Results:
+- CANDIDATE, exit 0: fast native handover, Enter edge, bit 1188 verified
+  clear on handover, director=1, Rayman not suspended and no rollback
+  errors detected in the log
+- INCOMPLETE, exit 3: essential input or handover evidence missing, or
+  the level reached a normal-duration handover (not a fast skip)
+- UNSAFE, exit 2: observed rollback error, bit still set at handover,
+  incompatible event order, duplicated sessions or exposure >5 seconds
+- NOT_APPLICABLE, exit 4: this is not an enabled NOMOVIES prototype log
+
+The auditor works on logs from both the original experimental
+prototype and the newer build with explicit phase=handover-verification.
+For older logs, missing armed_duration_ms and handover-verification
+are reported as warnings, not silently fabricated as passes.
+
+Even CANDIDATE is **not a final safety certificate**: it cannot see
+the game picture, feel controls, detect unlogged frame stalls, certify
+Wine compatibility, or inspect whether bit 1188 was written to a save
+file. Run the test only with truly isolated, disposable saves.
+
 ## Evidence in the non-cumulative runtime log
 
 - `RUNTIME-LEARN10-PROTOTYPE: enabled=1`: compile-time and environment
