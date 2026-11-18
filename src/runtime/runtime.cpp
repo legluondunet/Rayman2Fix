@@ -4079,6 +4079,185 @@ void learn10_proto_trace_physical_enter(DWORD elapsed) {
 }
 #endif // RAYMAN2FIX_LEARN10_NOMOVIES_PROTO
 
+#if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+// Separate experiment: change ONLY the original root keyword of native
+// Learn_10 director b3 rule 1, from IfNot(1) to If(0). With bit1188=0,
+// this selects the exact same native ELSE branch as the previous trial.
+// NEVER modify the progress array, director variables or native input.
+// May affect other actors if the script is shared: isolated prototype only.
+bool learn10_script_gate_node_identity() {
+    if (!g_script_gate_b3 || !g_script_gate_rules || !g_script_gate_node)
+        return false;
+    std::uint32_t rules=0,node=0;
+    return read_u32(g_script_gate_b3,rules) &&
+           std::uintptr_t(rules)==g_script_gate_rules &&
+           read_u32(g_script_gate_rules+4u,node) &&
+           std::uintptr_t(node)==g_script_gate_node;
+}
+
+void learn10_script_gate_restore(const char* reason) {
+    if (!g_script_gate_armed) return;
+    const unsigned exposure=unsigned(DWORD(GetTickCount()-g_script_gate_armed_at));
+    if (!learn10_script_gate_node_identity()) {
+        log_line("RUNTIME-LEARN10-SCRIPT-GATE: phase=restore-pending reason=node-identity-changed (no stale writes)");
+        return;
+    }
+    std::uint32_t before=0,next=0;
+    std::uint8_t depth=0,type=0;
+    if (!read_u32(g_script_gate_node,before) ||
+        !read_u8(g_script_gate_node+6u,depth) ||
+        !read_u8(g_script_gate_node+7u,type)) {
+        log_line("RUNTIME-LEARN10-SCRIPT-GATE: phase=restore-pending reason=node-unreadable");
+        return;
+    }
+    if (before==r2fix::kLearn10ScriptIfNot &&
+        depth==r2fix::kLearn10ScriptRootDepth &&
+        type==r2fix::kLearn10ScriptKeywordType) {
+        g_script_gate_armed=false;
+        g_script_gate_restored=true;
+        char msg[224]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-LEARN10-SCRIPT-GATE: phase=restored reason=%s already-original=1 exposure_ms=%u",
+            reason,exposure);
+        log_line(msg);
+        return;
+    }
+    if (!r2fix::plan_learn10_script_gate_restore(before,depth,type,next) ||
+        !learn10_proto_compare_exchange(g_script_gate_node,before,next)) {
+        log_line("RUNTIME-LEARN10-SCRIPT-GATE: phase=restore-pending reason=node-changed-or-cas-failed");
+        return;
+    }
+    std::uint32_t after=0;
+    if (!read_u32(g_script_gate_node,after) ||
+        after!=r2fix::kLearn10ScriptIfNot) {
+        log_line("RUNTIME-LEARN10-SCRIPT-GATE: phase=restore-pending reason=readback-failed");
+        return;
+    }
+    g_script_gate_armed=false;
+    g_script_gate_restored=true;
+    char msg[224]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-LEARN10-SCRIPT-GATE: phase=restored reason=%s root_keyword=IfNot story_words_untouched=1 exposure_ms=%u",
+        reason,exposure);
+    log_line(msg);
+}
+
+void learn10_script_gate_arm(bool handed_over,DWORD elapsed) {
+    if (!g_script_gate_opted_in || g_script_gate_attempted ||
+        !g_learn_intro_seen || handed_over ||
+        elapsed>r2fix::kLearn10ScriptLatestStartMs ||
+        !g_learn_script_probe_done || !g_progress_words ||
+        !g_observed_director_intelligence ||
+        !g_observed_director_behaviours ||
+        g_observed_director_index!=3)
+        return;
+    g_script_gate_attempted=true; // fail closed: only one attempt
+    std::uint32_t behaviour=0;
+    const auto b3=g_observed_director_behaviours+3u*12u;
+    const bool live=read_u32(g_observed_director_intelligence+8u,behaviour) &&
+        std::uintptr_t(behaviour)==b3;
+    bool progress_handover=false,nomovies=false;
+    const bool first_visit=game_story_bit(g_progress_words,kLearnHandoverBit,progress_handover)
+        && !progress_handover;
+    const bool original_flag_off=game_story_bit(g_progress_words,kNoMoviesCheatBit,nomovies)
+        && !nomovies;
+    const bool scripts=live &&
+        learn10_proto_original_scripts_match(g_observed_director_behaviours);
+    if (!r2fix::may_try_learn10_script_gate(
+            g_script_gate_opted_in,g_log,first_visit,live,scripts,
+            original_flag_off)) {
+        log_line("RUNTIME-LEARN10-SCRIPT-GATE: phase=refused reason=script-director-or-story-not-exact");
+        return;
+    }
+    // Do NOT use VirtualProtect: only atomically patch a script node that
+    // is already writable, aligned and checked by VirtualQuery.
+    std::uint32_t rules=0,node=0,before=0,next=0;
+    std::uint8_t depth=0,type=0;
+    if (!read_u32(b3,rules) || !rules ||
+        !read_u32(std::uintptr_t(rules)+4u,node) || !node ||
+        !read_u32(node,before) || !read_u8(std::uintptr_t(node)+6u,depth) ||
+        !read_u8(std::uintptr_t(node)+7u,type) ||
+        !r2fix::plan_learn10_script_gate_arm(before,depth,type,next) ||
+        !learn10_proto_compare_exchange(node,before,next)) {
+        log_line("RUNTIME-LEARN10-SCRIPT-GATE: phase=refused reason=node-not-writable-or-not-original");
+        return;
+    }
+    g_script_gate_b3=b3;
+    g_script_gate_rules=rules;
+    g_script_gate_node=node;
+    g_script_gate_armed_at=GetTickCount();
+    g_script_gate_enter_down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
+    g_script_gate_enter_edges=0;
+    g_script_gate_armed=true;
+    g_script_gate_ever_armed=true;
+    g_script_gate_restored=false;
+    std::uint32_t observed=0;
+    if (!read_u32(node,observed) || observed!=r2fix::kLearn10ScriptIf) {
+        log_line("RUNTIME-LEARN10-SCRIPT-GATE: phase=error reason=write-verification-failed");
+        learn10_script_gate_restore("verification-failed");
+        return;
+    }
+    char msg[236]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-LEARN10-SCRIPT-GATE: phase=armed t=%ums root_keyword=If from=IfNot story_bit1188=0 max_armed_ms=5000 physical_input_required=1",
+        unsigned(DWORD(g_script_gate_armed_at-g_learn_intro_start)));
+    log_line(msg);
+}
+
+void learn10_script_gate_poll() {
+    if (g_script_gate_ever_armed && g_learn_intro_seen && !g_learn_handover) {
+        const bool down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
+        if (down && !g_script_gate_enter_down &&
+            g_script_gate_enter_edges<8u) {
+            ++g_script_gate_enter_edges;
+            char msg[192]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-LEARN10-SCRIPT-GATE: phase=physical-enter t=%ums count=%u script_gate_armed=%u",
+                unsigned(DWORD(GetTickCount()-g_learn_intro_start)),
+                g_script_gate_enter_edges,unsigned(g_script_gate_armed));
+            log_line(msg);
+        }
+        g_script_gate_enter_down=down;
+    }
+    if (!g_script_gate_armed) return;
+    bool left_b3=false;
+    std::uint32_t active=0;
+    if (g_observed_director_intelligence &&
+        g_observed_director_behaviours &&
+        read_u32(g_observed_director_intelligence+8u,active)) {
+        const auto table=g_observed_director_behaviours;
+        const auto pointer=std::uintptr_t(active);
+        if (pointer>=table && pointer<table+6u*12u &&
+            (pointer-table)%12u==0u &&
+            pointer!=table+3u*12u)
+            left_b3=true;
+    }
+    if (r2fix::restore_learn10_script_gate_due(
+            GetTickCount(),g_script_gate_armed_at,left_b3))
+        learn10_script_gate_restore(left_b3?
+            "director-left-b3":"max-exposure-5000ms");
+}
+
+void learn10_script_gate_handover_verification() {
+    if (!g_script_gate_ever_armed) return;
+    bool nomovies=false;
+    const bool known=game_story_bit(g_progress_words,kNoMoviesCheatBit,nomovies);
+    std::uint32_t node_word=0;
+    const bool node_valid=learn10_script_gate_node_identity() &&
+        read_u32(g_script_gate_node,node_word);
+    const bool clean=known && !nomovies && g_script_gate_restored &&
+        !g_script_gate_armed && node_valid &&
+        node_word==r2fix::kLearn10ScriptIfNot;
+    char msg[256]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-LEARN10-SCRIPT-GATE: phase=handover-verification status=%s bit1188=%u bit_known=%u script_keyword_restored=%u enter_edges=%u",
+        clean?"pass":"FAIL",unsigned(nomovies),unsigned(known),
+        unsigned(node_valid && node_word==r2fix::kLearn10ScriptIfNot),
+        g_script_gate_enter_edges);
+    log_line(msg);
+}
+#endif // RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
+
 // Read-only samples of the genuine game handover. The previous experimental
 // behaviour-3->1 shortcut corrupted graphics despite story bit 1091 changing.
 // No native scene function is called and no game state is changed here.
