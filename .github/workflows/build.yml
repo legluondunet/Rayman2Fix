@@ -568,6 +568,8 @@ jobs:
               b'armed_duration_ms=%u',
               b'physical-input-needed max_armed_ms=5000',
               b'phase=physical-enter-edge',
+              b'phase=physical-enter-after-rollback',
+              b'phase=native-gate-snapshot',
               b'max-exposure-5000ms',
               b'RUNTIME-INTRO: native-early-exit-shape',
           ):
