@@ -269,3 +269,59 @@ No game input or timer is modified, no key is synthesized, no native
 script is called, and the NOMOVIES exposure stays capped at 5 seconds.
 The existing 14:10 log predates these additional snapshots; a new
 disposable Windows/Wine session is needed to collect them.
+
+## Decision and save-file verification (18 November 2026)
+
+The owner has explicitly accepted waiting approximately **one second**
+before pressing Enter in Learn_10. The native timing gate is retained.
+**No further investigation of earlier key presses or key buffering.**
+Windows gameplay/visual behaviour has been confirmed by the owner with
+the opt-in prototype. Wine and persistent save safety remain unverified.
+
+The optional `tools/learn10_save_audit.py` compares file metadata and
+SHA-256 hashes in the known PC save folders `Data/SaveGame` and
+`Menu/SaveGame`, also under Rayman2Fix's `game/` directory. The
+script reads game saves but never changes them. It only writes the
+requested JSON reports outside the SaveGame directories.
+
+For an isolated **Wine** installation, from the repository checkout
+(the script itself can reside somewhere else from the game):
+
+```sh
+python3 tools/learn10_save_audit.py snapshot "/path/to/Rayman2Fix" before-saves.json
+cd "/path/to/Rayman2Fix"
+RAYMAN2FIX_LEARN10_NOMOVIES_PROTOTYPE=1 wine Rayman2Fix.exe
+cd -
+python3 tools/learn10_save_audit.py compare "/path/to/Rayman2Fix" before-saves.json after-saves.json
+```
+
+Windows with Python installed:
+
+```powershell
+py -3 tools/learn10_save_audit.py snapshot "C:\path\to\Rayman2Fix" before-saves.json
+# Launch the isolated opt-in prototype from its own installation folder
+py -3 tools/learn10_save_audit.py compare "C:\path\to\Rayman2Fix" before-saves.json after-saves.json
+```
+
+If the game and repository checkout are in separate locations, run the
+script via its absolute path. The command takes the **root of the copied
+installation** as an argument, not the current working directory.
+Use a disposable copy and isolated Wine prefix or test-only Windows
+profile. Never test against personal saves.
+
+Possible comparison outcomes:
+
+- `UNCHANGED`: no observed differences in size, hash or modification
+  timestamp of inventoried files.
+- `CHANGED`: lists files created, removed or modified. This may be
+  ordinary game-save activity, **not** proof of contamination.
+- `INCOMPLETE`: neither known folder exists or unsafe/unknown files
+  prevented a complete scan; do not infer safety.
+- An outright error refuses malformed baselines or report paths inside
+  save folders.
+
+**Limit:** no file-level comparison proves that the game did not serialize
+story bit 1188, or that a saved state can later be reloaded correctly.
+For that, an independently validated Rayman 2 save parser and real
+save/reload tests are still required. Keep PR #31 experimental until
+those checks and Wine gameplay parity are complete.
