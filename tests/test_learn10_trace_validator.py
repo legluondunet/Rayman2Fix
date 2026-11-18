@@ -63,6 +63,25 @@ class TraceValidationTests(unittest.TestCase):
         self.assertEqual(result["exposure_ms"], 2828)
         self.assertFalse(result["saves_verified"])
 
+    def test_early_enter_is_warning_not_timer_proof(self):
+        text = sample().replace("t=3078ms", "t=843ms")
+        result = audit(text)
+        self.assertEqual(result["status"], "CANDIDATE")
+        self.assertEqual(result["first_enter_since_arm_ms"], 843-281)
+        self.assertTrue(any("timing proxy" in w for w in result["warnings"]))
+
+    def test_enter_after_rollback_reported_without_rearming(self):
+        text = sample().replace(
+            "RUNTIME-INTRO: director behaviour transition t=3109ms",
+            "RUNTIME-LEARN10-PROTOTYPE: "
+            "phase=physical-enter-after-rollback t=6100ms count=1\\n"
+            "RUNTIME-INTRO: director behaviour transition t=3109ms",
+        )
+        result = audit(text)
+        self.assertEqual(result["post_rollback_enter_edges"], 1)
+        self.assertTrue(any("after" in w and "rollback" in w
+                            for w in result["warnings"]))
+
     def test_failure_if_handover_bit_is_not_clear(self):
         bad = sample().replace(
             "nomovies-flag at-handover known=1 enabled=0",
