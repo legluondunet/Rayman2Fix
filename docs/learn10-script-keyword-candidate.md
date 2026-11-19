@@ -215,3 +215,41 @@ The synthetic tests inject two isolated relative-CALL encodings targeting
 the two close-together reference evaluator VAs and validate the
 reported counts and source RVAs. No game image or byte payload is
 included in the repository or the CI workflow.
+
+## Direct executable disassembly — confirmed (19 November 2026)
+
+Two copies of the owner's **already-approved unprotected** `Rayman2.exe`
+were found in the private file library. Both are 1,468,928 bytes and
+match SHA-256 `9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`.
+The exact PE32 binary was examined read-only with GNU objdump, without
+copying commercial game bytes into GitHub.
+
+| Function / native structure | Verified VA | Static findings |
+| --- | --- | --- |
+| `AI_fn_p_stEvalKeyWord` | `0x480800` | Three stack arguments; reads the keyword from the root script node, resolves a handler through `0x487D50`, passes actor, following node and result pointer, then cleans 12 argument bytes |
+| `AI_fn_p_stEvalCondition` | `0x480830` | Separate condition dispatcher; normalizes boolean result in output parameter |
+| `AI_fn_p_stEvalTree` | `0x480B90` | Dispatches by node type, with three stack arguments |
+| Keyword resolver | `0x487D50` | Retrieves a handler from the keyword table at `0x4A5E80` |
+| **If / IfNot handler** | **`0x489250`** | **Keyword 0 (If) and keyword 1 (IfNot) BOTH use this SAME handler**; the handler branches by original keyword and negates the condition on the IfNot branch around `0x4892DF` |
+| Script skip cache | `0x489190` | Can write a computed skip offset into the original script node; native traversal is not purely read-only |
+
+**Consequences:** Swapping pointers in the global keyword dispatch table
+would do nothing for If versus IfNot: their handler pointers are identical.
+Patching the root node would still affect a potentially shared AI model.
+A safe solution, if possible, requires an **actor- and exact-node-scoped
+interpretation of one condition**, with no shared script modification,
+progress-bit toggle, or global handler change. No such interception has
+been implemented.
+
+The offline PE32 preflight now checks six SHA256 machine-code windows,
+the distinct 16-byte IfNot inversion sequence and both shared-handler
+table entries **only for the exact approved full-file SHA**. A recognized
+binary yields `DISPATCHER_STATICALLY_IDENTIFIED_NO_HOOK`; exit code 3
+and `allows_hook=false` are intentionally unchanged. The source's
+three-argument stack shape is observed, but no detour, trampoline,
+reentrancy, stack ownership, hook lifetime, or per-actor context has
+been validated in-game.
+
+**No original EXE, dump, raw game code or executable artifact was
+published.** CI tests remain synthetic. PR #31 remains the only
+user-validated native skip; PR #32 remains research-only.

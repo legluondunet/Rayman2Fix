@@ -34,6 +34,21 @@ KNOWN_ANCHORS = {
 # Keyword and condition reference VAs are only 0x30 bytes apart.
 # Keep samples inside the nearest *candidate* entrypoint interval; never
 # treat their spans as verified function bounds.
+# Directly examined in the owner's approved, full-SHA-pinned retail CD EXE.
+# SHA256 of 32-byte entry windows; no commercial instruction bytes shipped.
+APPROVED_MACHINE_CODE = {
+    "eval_keyword": (0x480800, "06b557bc9b653073cc98265528bac45ab613235ed00e24dc5a90352c6d410ff7"),
+    "eval_condition": (0x480830, "872da6ebfd32c76a5c4b2529607f08f54fd7d2ed1bef74ef3611b4e908fb0539"),
+    "eval_tree": (0x480B90, "da65e3383273899b2abc7bf2498bbc5298977e6f689c8da0b4cbdfa83d34951d"),
+    "keyword_resolver": (0x487D50, "523ae9b5979dd7ad3ad7139ddb094abde9e9cd58df804ff04cda92673d7356f0"),
+    "keyword_shared_handler": (0x489250, "42cc9c7fd1f36c4f4c8868045aa862a19c283fcce61928f1aa272771247c0edd"),
+    "keyword_skip_cache": (0x489190, "68aca120dde9407959d36b609aa3569de69b2fe828260bfdf22d87311c12c2af"),
+}
+APPROVED_KEYWORD_TABLE_FILE_OFFSET = 0xA5E80  # approved .data mapping
+APPROVED_SHARED_IF_HANDLER = 0x489250
+APPROVED_IFNOT_INVERSION_VA = 0x4892DF
+APPROVED_IFNOT_SHA256_16 = "10d54295e422dc0e0006ceb7b22d94bb91b7ce5094dc7d9724117318c6de16cc"
+
 WINDOW = 32
 MAX_FILE_SIZE = 64 * 1024 * 1024
 
@@ -151,6 +166,22 @@ def inspect_pe32(data: bytes) -> dict:
             if name is not None:
                 patterns[name].append(source_va - IMAGE_BASE)
 
+    # Only the EXACT owner-approved full-file SHA may claim that its
+    # dispatcher and shared If/IfNot handler were statically identified.
+    # This is never approval for a detour, patch or runtime call.
+    confirmed_cd = (len(data) == APPROVED_SIZE and
+                    hashlib.sha256(data).hexdigest() == APPROVED_SHA256)
+    if confirmed_cd:
+        for name, (va, expected_digest) in APPROVED_MACHINE_CODE.items():
+            if hashlib.sha256(read_exec(va, 32)).hexdigest() != expected_digest:
+                raise PreflightError("approved-code-fingerprint-mismatch-" + name)
+        if hashlib.sha256(read_exec(APPROVED_IFNOT_INVERSION_VA, 16)).hexdigest() != APPROVED_IFNOT_SHA256_16:
+            raise PreflightError("approved-IFNOT-handler-mismatch")
+        # Image and section layout already authenticated by the full hash.
+        k0,k1 = struct.unpack_from("<II", data, APPROVED_KEYWORD_TABLE_FILE_OFFSET)
+        if (k0,k1) != (APPROVED_SHARED_IF_HANDLER, APPROVED_SHARED_IF_HANDLER):
+            raise PreflightError("approved-If-IfNot-dispatch-table-mismatch")
+
     candidates = {}
     for name, va in REFERENCE_AI_FUNCTIONS.items():
         sample = read_exec(va, WINDOW)
@@ -159,7 +190,7 @@ def inspect_pe32(data: bytes) -> dict:
             "rva": f"0x{va - IMAGE_BASE:06X}",
             "sample_size": WINDOW,
             "sample_sha256": hashlib.sha256(sample).hexdigest(),
-            "machine_code_reviewed": False,
+            "machine_code_reviewed": confirmed_cd,
             "call_abi_verified": False,
             # Heuristic byte patterns, not a disassembly or proven callers.
             "raw_e8_rel32_pattern_count": len(patterns[name]),
@@ -172,14 +203,21 @@ def inspect_pe32(data: bytes) -> dict:
         raise PreflightError("identical-evaluator-candidates")
 
     return {
-        "status": "CANDIDATE_NOT_VERIFIED",
+        "status": ("DISPATCHER_STATICALLY_IDENTIFIED_NO_HOOK" if confirmed_cd
+                   else "CANDIDATE_NOT_VERIFIED"),
         "image_base": f"0x{image_base:08X}",
         "pe_timestamp": f"0x{timestamp:08X}",
         "known_control_anchors": anchors,
         "candidate_functions": candidates,
+        "approved_cd_static_disassembly": confirmed_cd,
+        "If_IfNot_share_same_native_handler": confirmed_cd,
+        "shared_handler_va": ("0x00489250" if confirmed_cd else None),
+        "cdecl_three_argument_shape_observed": confirmed_cd,
+        "runtime_detour_abi_or_reentrancy_proven": False,
         "writes_to_game": False,
         "allows_hook": False,
-        "reason": "code bytes and ABI of these evaluator entries still need independent verification",
+        "reason": ("keyword dispatcher, shared handler and inversion confirmed statically; scoped runtime detour remains unverified"
+                   if confirmed_cd else "candidate bytes and ABI not independently verified on this fixture"),
     }
 
 

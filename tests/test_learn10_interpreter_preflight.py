@@ -61,6 +61,9 @@ class ApprovedPe32InterpreterPreflightTests(unittest.TestCase):
                          {"screen_to_vertex": "matched", "superimposed_proc": "matched"})
         self.assertFalse(out["allows_hook"])
         self.assertFalse(out["writes_to_game"])
+        self.assertFalse(out["approved_cd_static_disassembly"])
+        self.assertFalse(out["If_IfNot_share_same_native_handler"])
+        self.assertFalse(out["runtime_detour_abi_or_reentrancy_proven"])
         self.assertEqual(set(out["candidate_functions"]), set(module.REFERENCE_AI_FUNCTIONS))
         for c in out["candidate_functions"].values():
             self.assertEqual(len(c["sample_sha256"]), 64)
@@ -121,6 +124,17 @@ class ApprovedPe32InterpreterPreflightTests(unittest.TestCase):
                 status = module.main(["tool", str(p)])
             self.assertEqual(status, 2)
             self.assertIn("unapproved-file-sha256", stdout.getvalue())
+
+    def test_verified_metadata_never_authorizes_hook(self):
+        self.assertEqual(module.APPROVED_SHARED_IF_HANDLER, 0x489250)
+        self.assertEqual(module.APPROVED_KEYWORD_TABLE_FILE_OFFSET, 0xA5E80)
+        self.assertEqual(module.APPROVED_IFNOT_INVERSION_VA, 0x4892DF)
+        self.assertEqual(len(module.APPROVED_IFNOT_SHA256_16), 64)
+        self.assertEqual(len(module.APPROVED_MACHINE_CODE), 6)
+        for va, digest in module.APPROVED_MACHINE_CODE.values():
+            self.assertGreaterEqual(va, 0x400000)
+            self.assertEqual(len(digest), 64)
+        self.assertFalse(module.inspect_pe32(bytes(fake_image()))["allows_hook"])
 
     def test_hash_and_anchor_constants_match_project_sources(self):
         launcher = (ROOT / "src/launcher/auto_flow.cpp").read_text(encoding="utf-8")
