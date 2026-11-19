@@ -129,3 +129,70 @@ This branch provides a safer **research instrument**, not a verified
 new skip. PR #31 remains the only user-validated native skip, still
 opt-in and isolated. No user save test or further early-Enter tests
 are requested.
+
+
+## Exact-hash offline preflight for native evaluator addresses (19 Nov 2026)
+
+A new **read-only** tool,
+[tools/learn10_interpreter_preflight.py](../tools/learn10_interpreter_preflight.py),
+can inspect the independently approved, owner-supplied unprotected
+`rayman2.exe` **without launching the game** or writing to the EXE.
+It uses only Python's standard library and writes a JSON report to
+stdout. It refuses unknown files, links, non-x86 or non-PE32 images,
+bad section bounds, wrong PE timestamp and mismatched known code anchors.
+
+The only admitted executable is the project's existing **approved** PC
+unprotected build (1,468,928 bytes; exact SHA-256
+`9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`),
+already hash-pinned in `src/launcher/auto_flow.cpp` and
+`src/launcher/game_launch.cpp`. PE timestamp `0x3807B68B` comes
+from the already approved runtime.
+
+Source comparison yielded two exact, independently grounded reference
+matches with [raytools/ACP_Ray2](https://github.com/raytools/ACP_Ray2):
+
+- `GAM_fn_vAskToChangeLevel = VA 0x4054D0`, same as Rayman2Fix's
+  approved `kRequestLevelRva = 0x54D0`.
+- Dynamic/inactive world roots `VA 0x500FD0`/`0x500FC4`
+  match the approved world-census addresses.
+
+The same upstream [`AI.c`](https://github.com/raytools/ACP_Ray2/blob/master/src/AI/AI.c)
+provides **candidate only** (not CD-validated) evaluator VAs:
+
+| Reference symbol | VA | RVA |
+| --- | --- | --- |
+| `AI_fn_p_stEvalKeyWord` | `0x480800` | `0x80800` |
+| `AI_fn_p_stEvalCondition` | `0x480830` | `0x80830` |
+| `AI_fn_p_stEvalTree` | `0x480B90` | `0x80B90` |
+
+The preflight confirms two **separately verified CD anchors** before
+sampling these candidate VAs from **executable PE sections only**:
+`kNativeScreenToVertexRva=0x22940` and
+`kSuperimposedProcRva=0x710C0`. Output includes only the
+SHA-256 of each candidate's first **64 bytes**, never their content.
+It deliberately returns **exit code 3**
+(`CANDIDATE_NOT_VERIFIED`) even if the approved EXE and all
+known anchors match: neither the evaluator's **machine-code semantics**
+nor its **calling convention** has been inspected in that exact binary.
+
+Optional researcher command (only when a *local* owner-approved EXE
+is already available; **do not ask the user for a test now**):
+
+```sh
+python3 tools/learn10_interpreter_preflight.py /path/to/approved/unprotected/rayman2.exe
+```
+
+Synthetic PE32 fixtures and rejection tests run under GitHub Actions:
+`python3 -m unittest discover -s tests -p 'test_learn10_interpreter_preflight.py'`.
+No commercial binary enters CI or the repository, no hook has been
+added, and `kLearn10SharedScriptWritePermitted=false` remains
+unchanged. This diagnostic cannot authorize an interpreter detour,
+even if a candidate VA maps to executable bytes.
+
+**Next research requirement:** inspect the disassembly of the
+approved evaluator candidate at the exact VA/RVA, validate the
+`__cdecl` signature with three parameters, identify which branch is
+evaluated and whether a strictly actor-scoped non-mutating override is
+possible without disrupting engine recursion, reentrancy, timing,
+other script nodes, and original return semantics. Do not substitute
+the address taken from ACP_Ray2 for this verification.
