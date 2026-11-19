@@ -218,7 +218,7 @@ bool configured_skip_cinematics(const fs::path& ini) {
     return read_ini_flag(ini,"Features","SkipCinematics","1");
 }
 bool configured_skip_learn10(const fs::path& ini) {
-    return read_ini_flag(ini,"Features","SkipLearn10","0");
+    return !read_ini_flag(ini,"Debug","DisableLearn10Skip","0");
 }
 bool configured_remove_dialogue_backgrounds(const fs::path& ini) {
     return read_ini_flag(ini,"Features","RemoveDialogueBackgrounds","1");
@@ -265,7 +265,7 @@ std::uint32_t configured_fps_limit(const fs::path& ini) {
 void ensure_rayman2fix_ini_options(const fs::path& ini) {
     const auto raw=lines_of(ini);
     std::string current;
-    bool graphics=false,features=false,aspect=false,force=false,skip=false,learn10=false;
+    bool graphics=false,features=false,aspect=false,force=false,skip=false;
     bool dialogue=false,cinematic=false,legacy=false,music=false,old_early_theme=false;
     bool obsolete_resolution=false;
     for(const auto& text:raw) {
@@ -285,7 +285,6 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(current=="GRAPHICS" && key=="RESOLUTION")obsolete_resolution=true;
         if(current=="GRAPHICS" && key=="ASPECTRATIO")aspect=true;
         if(current=="FEATURES" && key=="SKIPCINEMATICS")skip=true;
-        if(current=="FEATURES" && key=="SKIPLEARN10")learn10=true;
         if(current=="FEATURES" && key=="REMOVEDIALOGUEBACKGROUNDS")dialogue=true;
         if(current=="FEATURES" && key=="REMOVECINEMATICBARS")cinematic=true;
         if(current=="FEATURES" && key=="MUSICINPAUSEMENU")music=true;
@@ -304,11 +303,11 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     if(aspect)(void)configured_aspect_ratio(ini);
     const std::string migrated_aspect=(!aspect && force &&
         read_ini_flag(ini,"Graphics","Force4x3")) ? "4:3" : "Auto";
-    if(aspect && !force && skip && learn10 && dialogue && cinematic && music &&
+    if(aspect && !force && skip && dialogue && cinematic && music &&
        !old_early_theme && !legacy && !obsolete_resolution)return;
     std::vector<std::string> output;
     std::string active;
-    bool added_aspect=false,added_skip=false,added_learn10=false,added_dialogue=false,added_cinematic=false,added_music=false;
+    bool added_aspect=false,added_skip=false,added_dialogue=false,added_cinematic=false,added_music=false;
     const auto inject=[&]() {
         if(active=="GRAPHICS" && !aspect && !force && !added_aspect) {
             output.emplace_back("; Auto = monitor aspect ratio; 4:3 = centered classic picture");
@@ -316,14 +315,9 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
             added_aspect=true;
         }
         if(active=="FEATURES" && !skip && !added_skip) {
-            output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20");
+            output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 and guarded F248 for learn_10");
             output.emplace_back("SkipCinematics=1");
             added_skip=true;
-        }
-        if(active=="FEATURES" && !learn10 && !added_learn10) {
-            output.emplace_back("; 1 = native Learn_10 skip via guarded F248 (requires SkipCinematics=1; default 0)");
-            output.emplace_back("SkipLearn10=0");
-            added_learn10=true;
         }
         if(active=="FEATURES" && !dialogue && !added_dialogue) {
             output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
@@ -370,11 +364,13 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
             }
         }
         if(active=="FEATURES" && (key=="REMOVEBLACKFRAMES" ||
+                                   key=="SKIPLEARN10" ||
                                    key=="EARLYTHEMEMUSICEXPERIMENTAL"))
             continue; // retired toggles; MusicInPauseMenu owns both audio paths
         // Remove only our generated comments; retain custom user annotations.
         if(active=="FEATURES" &&
            (t=="; Learn_10 skipping remains disabled (unsafe)" ||
+            t=="; 1 = native Learn_10 skip via guarded F248 (requires SkipCinematics=1; default 0)" ||
             t=="; Experimental: attempt ESC music while Theme handoff is pending" ||
             t=="; Default 0; requires MusicInPauseMenu=1 and Debug Log=1"))
             continue;
@@ -396,10 +392,8 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(!output.empty() && !output.back().empty())
             output.emplace_back();
         output.emplace_back("[Features]");
-        output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20");
+        output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 and guarded F248 for learn_10");
         output.emplace_back("SkipCinematics=1");
-        output.emplace_back("; 1 = native Learn_10 skip via guarded F248 (requires SkipCinematics=1; default 0)");
-        output.emplace_back("SkipLearn10=0");
         output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
         output.emplace_back("RemoveDialogueBackgrounds=1");
         output.emplace_back("; 1 = experimental removal of game-drawn cinematic letterbox bars");
