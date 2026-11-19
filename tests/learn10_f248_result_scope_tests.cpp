@@ -17,9 +17,9 @@ int main() {
     s.exact_script=s.live_learn10=s.first_visit=true;
     s.nomovies_bit_known_off=s.handover_incomplete=true;
     s.root_is_ifnot=s.function_node_is_type3=s.function_result_known=true;
-    CHECK(learn10_f248_enabled_for_ini(1,1));
-    CHECK(!learn10_f248_enabled_for_ini(1,0)); // default OFF
-    CHECK(!learn10_f248_enabled_for_ini(0,1)); // jail_20 feature OFF
+    CHECK(learn10_f248_enabled_for_ini(1,1)); // default: no debug override
+    CHECK(!learn10_f248_enabled_for_ini(1,0)); // DisableLearn10Skip=1
+    CHECK(!learn10_f248_enabled_for_ini(0,1)); // SkipCinematics=0
     CHECK(!learn10_f248_enabled_for_ini(0,0));
     CHECK(!learn10_f248_enabled_for_ini(2,1));
     CHECK(!learn10_f248_enabled_for_ini(1,2));
