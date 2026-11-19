@@ -24,7 +24,12 @@ class BuiltinF248Guards(unittest.TestCase):
 
     def test_no_special_env_or_log_gate(self):
         self.assertNotIn("RAYMAN2FIX_LEARN10_F248_PROTOTYPE",self.runtime)
-        self.assertNotIn("GetEnvironmentVariableW", self.runtime[self.runtime.index("DWORD WINAPI Rayman2Fix_Initialize"):self.runtime.index("DWORD WINAPI Rayman2Fix_Initialize")+1350])
+        # Other, unrelated experimental audio controls may legitimately
+        # read environment variables; only the F248 block must not.
+        start=self.runtime.index("g_f248_enabled.store(")
+        f248_config=self.runtime[start:start+650]
+        self.assertNotIn("GetEnvironmentVariableW",f248_config)
+        self.assertNotIn("g_log &&",f248_config)
         self.assertIn("learn10_f248_enabled_for_ini(settings->skip_cinematics)",self.runtime)
         self.assertNotRegex(self.policy,r"logging\s*=")
         self.assertNotIn("s.logging",self.policy)
