@@ -267,7 +267,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     std::string current;
     bool graphics=false,features=false,aspect=false,force=false,skip=false;
     bool dialogue=false,cinematic=false,legacy=false,music=false,old_early_theme=false,old_skip_learn10=false;
-    bool obsolete_resolution=false;
+    bool obsolete_resolution=false,obsolete_skip_comments=false;
     for(const auto& text:raw) {
         std::string next;
         if(section(text,next)) {
@@ -277,6 +277,10 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
             continue;
         }
         const auto t=trim(text);
+        if(t=="; 1 = Space/Enter/Esc skip for jail_20 only" ||
+           t=="; Learn_10 skipping remains disabled (unsafe)" ||
+           t=="; 1 = native Learn_10 skip via guarded F248 (requires SkipCinematics=1; default 0)")
+            obsolete_skip_comments=true;
         if(t.empty() || t.front()==';' || t.front()=='#')continue;
         const auto p=t.find('=');
         if(p==std::string::npos)continue;
@@ -305,7 +309,8 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     const std::string migrated_aspect=(!aspect && force &&
         read_ini_flag(ini,"Graphics","Force4x3")) ? "4:3" : "Auto";
     if(aspect && !force && skip && dialogue && cinematic && music &&
-       !old_early_theme && !old_skip_learn10 && !legacy && !obsolete_resolution)return;
+       !old_early_theme && !old_skip_learn10 && !legacy &&
+       !obsolete_resolution && !obsolete_skip_comments)return;
     std::vector<std::string> output;
     std::string active;
     bool added_aspect=false,added_skip=false,added_dialogue=false,added_cinematic=false,added_music=false;
@@ -368,6 +373,11 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
                                    key=="SKIPLEARN10" ||
                                    key=="EARLYTHEMEMUSICEXPERIMENTAL"))
             continue; // retired toggles; MusicInPauseMenu owns audio; F248 owns Learn_10
+        // Update our old public-feature description when upgrading an INI.
+        if(active=="FEATURES" && t=="; 1 = Space/Enter/Esc skip for jail_20 only") {
+            output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 and guarded F248 for learn_10");
+            continue;
+        }
         // Remove only our generated comments; retain custom user annotations.
         if(active=="FEATURES" &&
            (t=="; Learn_10 skipping remains disabled (unsafe)" ||
