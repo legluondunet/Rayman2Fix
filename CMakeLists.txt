@@ -71,7 +71,7 @@ option(RAYMAN2FIX_LEARN10_F248_PROTO
   "Build isolated, explicitly enabled native Learn_10 F248 temporary-result hook" OFF)
 if(RAYMAN2FIX_LEARN10_F248_PROTO AND NOT RAYMAN2FIX_RESEARCH_PROBES)
   message(FATAL_ERROR "Learn_10 F248 candidate requires research probes")
-endif
+endif()
 option(RAYMAN2FIX_AUDIO_TRACE
   "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
 option(RAYMAN2FIX_ESC_MUSIC_PROTO
