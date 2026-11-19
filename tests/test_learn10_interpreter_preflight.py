@@ -59,7 +59,7 @@ class ApprovedPe32InterpreterPreflightTests(unittest.TestCase):
         self.assertEqual(set(out["candidate_functions"]), set(module.REFERENCE_AI_FUNCTIONS))
         for c in out["candidate_functions"].values():
             self.assertEqual(len(c["sample_sha256"]), 64)
-            self.assertEqual(c["sample_size"], 64)
+            self.assertEqual(c["sample_size"], 32)
             self.assertFalse(c["machine_code_reviewed"])
             self.assertFalse(c["call_abi_verified"])
 
