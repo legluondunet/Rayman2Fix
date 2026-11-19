@@ -7297,8 +7297,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
                                             settings->skip_learn10),
         std::memory_order_release);
     log_line(g_f248_enabled.load(std::memory_order_acquire)?
-        "RUNTIME-LEARN10-F248: enabled=1 source=Features.SkipLearn10 route=native-F248-temp-result exact-director-only=1 story_bit1188_readonly=1" :
-        "RUNTIME-LEARN10-F248: enabled=0 source=Features.SkipLearn10 (natural scene unchanged)");
+        "RUNTIME-LEARN10-F248: enabled=1 source=Features.SkipCinematics+Debug.DisableLearn10Skip route=native-F248-temp-result exact-director-only=1 story_bit1188_readonly=1" :
+        "RUNTIME-LEARN10-F248: enabled=0 source=Features.SkipCinematics+Debug.DisableLearn10Skip (natural scene unchanged)");
 #endif
     if(settings->music_in_pause_menu>1u)return 5;
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
