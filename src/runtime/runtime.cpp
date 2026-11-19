@@ -20,6 +20,9 @@
 #include "rayman2fix/scene_script_probe.hpp"
 #include "rayman2fix/intro_gate_timeline.hpp"
 #include "rayman2fix/intro_integer_reader.hpp"
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+#include "rayman2fix/learn10_f248_result_scope.hpp"
+#endif
 #include "rayman2fix/game_window_icon.hpp"
 #include "rayman2fix/render_poll_gate.hpp"
 #include <mutex>
@@ -49,6 +52,12 @@
 #endif
 #ifndef RAYMAN2FIX_RESEARCH_PROBES
 #define RAYMAN2FIX_RESEARCH_PROBES 0
+#endif
+#ifndef RAYMAN2FIX_LEARN10_F248_PROTO
+#define RAYMAN2FIX_LEARN10_F248_PROTO 0
+#endif
+#if RAYMAN2FIX_LEARN10_F248_PROTO && !RAYMAN2FIX_RESEARCH_PROBES
+#error Learn_10 F248 candidate requires research build
 #endif
 #ifndef RAYMAN2FIX_AUDIO_TRACE
 #define RAYMAN2FIX_AUDIO_TRACE 0
@@ -213,6 +222,9 @@ bool g_learn_nomovies_conditions_logged = false;
 // validated with ReadProcessMemory before every use.
 std::uintptr_t g_observed_director_intelligence = 0;
 std::uintptr_t g_observed_director_behaviours = 0;
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+std::uintptr_t g_observed_director_superobject = 0;
+#endif
 int g_observed_director_index = -1;
 bool g_have_ray_state = false;
 std::uint32_t g_last_ray_custom = 0;
@@ -235,6 +247,31 @@ ObservedDirectorByte g_director_var95{};
 ObservedDirectorByte g_director_var96{};
 r2fix::IntroGateTimeline<48> g_director_gate_history{};
 bool g_director_gate_history_reported = false;
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+// Explicitly separate experimental F248 return-value interception. The ONLY
+// shared native change is one atomic function-table slot; no story/script data
+// is modified. All script-scoped data is published before armed=true.
+using F248Function = void* (__cdecl*)(void*,void*,void*);
+std::atomic<F248Function> g_f248_original{nullptr};
+std::atomic<bool> g_f248_slot_installed{false};
+std::atomic<bool> g_f248_opted_in{false};
+std::atomic<bool> g_f248_armed{false};
+std::atomic<bool> g_f248_ever_armed{false};
+std::atomic<std::uintptr_t> g_f248_so{0};
+std::atomic<std::uintptr_t> g_f248_intel{0};
+std::atomic<std::uintptr_t> g_f248_b3{0};
+std::atomic<std::uintptr_t> g_f248_rules{0};
+std::atomic<std::uintptr_t> g_f248_root{0};
+std::atomic<std::uintptr_t> g_f248_words{0};
+std::atomic<DWORD> g_f248_armed_at{0};
+std::atomic<unsigned> g_f248_calls{0};
+std::atomic<unsigned> g_f248_matches{0};
+std::atomic<unsigned> g_f248_overrides{0};
+std::atomic<unsigned> g_f248_foreign_thread{0};
+bool g_f248_attempted=false;
+bool g_f248_enter_was_down=false;
+unsigned g_f248_enter_edges=0;
+#endif
 std::uintptr_t g_progress_words = 0;
 float g_aspect = 4.0f / 3.0f;
 bool g_installed = false;
@@ -3747,6 +3784,60 @@ bool game_story_bit(std::uintptr_t words, unsigned bit, bool& value) {
     return true;
 }
 
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+bool learn10_f248_writable_slot(std::uintptr_t address) {
+    if (!address || (address & (alignof(LONG)-1u)) != 0u)
+        return false;
+    MEMORY_BASIC_INFORMATION mem{};
+    if (!VirtualQuery(reinterpret_cast<const void*>(address),&mem,sizeof(mem)) ||
+        mem.State!=MEM_COMMIT || (mem.Protect&(PAGE_GUARD|PAGE_NOACCESS)))
+        return false;
+    const DWORD protection=mem.Protect&0xffu;
+    if (protection!=PAGE_READWRITE && protection!=PAGE_WRITECOPY &&
+        protection!=PAGE_EXECUTE_READWRITE &&
+        protection!=PAGE_EXECUTE_WRITECOPY) return false;
+    const auto first=reinterpret_cast<std::uintptr_t>(mem.BaseAddress);
+    const auto length=static_cast<std::uintptr_t>(mem.RegionSize);
+    return address>=first && length>=sizeof(LONG) &&
+           (address-first)<=length-sizeof(LONG);
+}
+bool learn10_f248_original_scripts_match(std::uintptr_t behaviour_table) {
+    if (!behaviour_table || behaviour_table<0x10000u ||
+        behaviour_table>0xFFFFFFFFu-5u*12u) return false;
+    const auto b3=behaviour_table+3u*12u;
+    std::uint32_t rules=0;
+    std::uint8_t count=0;
+    if (!read_u32(b3,rules) || !rules ||
+        !read_u8(b3+8u,count) || count!=6) return false;
+    const auto reader32=[](std::uintptr_t addr,std::uint32_t& value){
+        return read_u32(addr,value);
+    };
+    const auto reader8=[](std::uintptr_t addr,std::uint8_t& value){
+        return read_u8(addr,value);
+    };
+    const auto input_rule=r2fix::observe_scene_script(
+        std::uintptr_t(rules)+4u,reader32,reader8,1024u,100u,265u);
+    const auto button=r2fix::inspect_learn10_nomovies_buttons(input_rule);
+    if (!r2fix::inspect_learn10_nomovies_gate(input_rule).matched() ||
+        !r2fix::inspect_learn10_nomovies_alternative(input_rule).matched() ||
+        !button.known() || !button.same_operand ||
+        !button.first_opaque || !button.second_opaque)
+        return false;
+    const auto exit_rule=r2fix::observe_scene_script(
+        std::uintptr_t(rules)+8u,reader32,reader8,8192u,870u,1100u);
+    if (exit_rule.phase104_predicates!=1u ||
+        exit_rule.phase104_first_node!=158u ||
+        exit_rule.phase110_predicates!=1u ||
+        exit_rule.phase110_first_node!=317u ||
+        !r2fix::inspect_learn10_native_exit(
+            exit_rule,behaviour_table,6u).matched())
+        return false;
+    const auto early_rule=r2fix::observe_scene_script(
+        std::uintptr_t(rules)+8u,reader32,reader8,8192u,156u,249u);
+    return r2fix::inspect_learn10_early_exit(early_rule).matched();
+}
+#endif
+
 // Read-only samples of the genuine game handover. The previous experimental
 // behaviour-3->1 shortcut corrupted graphics despite story bit 1091 changing.
 // No native scene function is called and no game state is changed here.
@@ -4239,6 +4330,9 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     if (director.matches==1 && director.intelligence && director.behaviours) {
         g_observed_director_intelligence=director.intelligence;
         g_observed_director_behaviours=director.behaviours;
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+        g_observed_director_superobject=director.superobject;
+#endif
         g_observed_director_index=director.counters.current_behaviour_index;
         if (director.counters.current_behaviour_index==3 &&
             !g_learn_nomovies_conditions_logged) {
@@ -4474,6 +4568,264 @@ void trace_native_exit_gates(DWORD elapsed) {
 // Flush at least one second *after* natural handover: printing dozens
 // of lines while the renderer is handing Rayman control back would itself
 // perturb frame scheduling. No reads from freed director pointers.
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+// The verified native F248 function-entry table at VA=0x4A5C20 is
+// already writable game .data, unlike the original machine code. Change
+// ONLY that pointer using a 32-bit compare/exchange; never touch Fix.V42,
+// AIModel scripts, F248 machine code, or native input.
+constexpr std::uintptr_t kF248TableSlotRva = 0x0A5C20u;
+constexpr std::uintptr_t kF248OriginalRva = 0x07A8E0u;
+constexpr BYTE kF248OriginalPrefix[16]={
+    0x83,0xEC,0x10,0x8B,0x44,0x24,0x18,0x53,
+    0x55,0x56,0x8B,0x48,0xF8,0x57,0x89,0x4C
+};
+thread_local bool g_f248_reentrant=false;
+
+// As in the approved native Fn table, this has three cdecl parameters,
+// returning the pointer to the next script node. All nonmatching calls
+// invoke the unchanged original function and pass the result verbatim.
+void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output) {
+    const auto original=g_f248_original.load(std::memory_order_acquire);
+    if (!original) return nullptr; // impossible after a successful slot CAS
+    if (g_f248_reentrant) return original(superobject,first_child,output);
+    g_f248_reentrant=true;
+    void* next=original(superobject,first_child,output);
+    if (!g_f248_armed.load(std::memory_order_acquire)) {
+        g_f248_reentrant=false;
+        return next;
+    }
+    g_f248_calls.fetch_add(1u,std::memory_order_relaxed);
+    const DWORD camera_thread=g_game_camera_thread_id.load(std::memory_order_acquire);
+    if (!camera_thread || camera_thread!=GetCurrentThreadId()) {
+        g_f248_foreign_thread.fetch_add(1u,std::memory_order_relaxed);
+        g_f248_reentrant=false;
+        return next;
+    }
+    const auto node=reinterpret_cast<std::uintptr_t>(first_child);
+    const auto root=g_f248_root.load(std::memory_order_acquire);
+    const auto actor=g_f248_so.load(std::memory_order_acquire);
+    const auto intel=g_f248_intel.load(std::memory_order_acquire);
+    const auto b3=g_f248_b3.load(std::memory_order_acquire);
+    const auto rules=g_f248_rules.load(std::memory_order_acquire);
+    const auto words=g_f248_words.load(std::memory_order_acquire);
+    if (!node || node<0x10020u || node!=root+16u ||
+        reinterpret_cast<std::uintptr_t>(superobject)!=actor ||
+        !root || !actor || !intel || !b3 || !rules || !words || !output) {
+        g_f248_reentrant=false;
+        return next;
+    }
+    // All ordinary F248 calls have ALREADY forwarded to the native
+    // handler. Only inspect the exact function child of the approved
+    // director's b3/rule1 K1 root. No general keyword interception.
+    std::uint32_t root_keyword=0,func_id=0,active_b=0,live_root=0;
+    std::uint32_t result_value=0,result_type=0;
+    std::uint8_t root_depth=0,root_type=0,func_type=0;
+    bool nomovies=false,handed_over=false;
+    const bool valid =
+        read_u32(root,root_keyword) && root_keyword==1u &&
+        read_u8(root+6u,root_depth) && root_depth==1u &&
+        read_u8(root+7u,root_type) && root_type==0u &&
+        read_u32(root+8u,func_id) && func_id==248u &&
+        read_u8(root+15u,func_type) && func_type==3u &&
+        read_u32(intel+8u,active_b) && std::uintptr_t(active_b)==b3 &&
+        read_u32(rules+4u,live_root) && std::uintptr_t(live_root)==root &&
+        game_story_bit(words,kNoMoviesCheatBit,nomovies) && !nomovies &&
+        game_story_bit(words,kLearnHandoverBit,handed_over) && !handed_over &&
+        read_u32(reinterpret_cast<std::uintptr_t>(output),result_value) &&
+        read_u32(reinterpret_cast<std::uintptr_t>(output)+12u,result_type);
+    if (!valid) {
+        g_f248_reentrant=false;
+        return next;
+    }
+    r2fix::Learn10F248Sample sample{};
+    sample.actor_so=reinterpret_cast<std::uintptr_t>(superobject);
+    sample.expected_director_so=actor;
+    sample.intelligence=intel;
+    sample.expected_intelligence=intel;
+    sample.behaviour=std::uintptr_t(active_b);
+    sample.expected_behaviour_b3=b3;
+    sample.root_node=root;
+    sample.function_node=node-8u;
+    sample.function_id=func_id;
+    sample.output_type=result_type;
+    sample.output_value=result_value;
+    sample.elapsed_ms=DWORD(GetTickCount()-g_f248_armed_at.load(std::memory_order_acquire));
+    sample.approved_cd=true; // code/table checked exactly before installing
+    sample.explicitly_opted_in=g_f248_opted_in.load(std::memory_order_acquire);
+    sample.logging=g_log;
+    sample.exact_script=true; // fingerprinted on this exact b3/rule1 during arm
+    sample.live_learn10=g_f248_armed.load(std::memory_order_acquire);
+    sample.first_visit=true; // story1091 was read as false above
+    sample.nomovies_bit_known_off=true; // story1188 read as false above
+    sample.handover_incomplete=true;
+    sample.root_is_ifnot=true; // K1 root just checked above
+    sample.function_node_is_type3=true;
+    sample.function_result_known=true; // original F248 result, not a guess
+    if (r2fix::kLearn10F248RuntimeHookAllowed &&
+        r2fix::research_learn10_f248_scope_matches(sample)) {
+        g_f248_matches.fetch_add(1u,std::memory_order_relaxed);
+        // Writable ephemeral AI_tdstGetSetParam value produced by the
+        // original handler. Never modify a game progress/story word.
+        const LONG prior=InterlockedCompareExchange(
+            reinterpret_cast<volatile LONG*>(output),LONG(1),LONG(0));
+        if (prior==0)
+            g_f248_overrides.fetch_add(1u,std::memory_order_relaxed);
+    }
+    g_f248_reentrant=false;
+    return next;
+}
+
+bool learn10_f248_install_slot() {
+    if (!r2fix::kLearn10F248RuntimeHookAllowed ||
+        g_f248_slot_installed.load(std::memory_order_acquire)) return false;
+    const auto base=g_approved_exe_base.load(std::memory_order_acquire);
+    if (!base || base!=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)))
+        return false;
+    auto* slot=reinterpret_cast<PVOID volatile*>(base+kF248TableSlotRva);
+    const auto native=reinterpret_cast<PVOID>(base+kF248OriginalRva);
+    if (!learn10_f248_writable_slot(
+            reinterpret_cast<std::uintptr_t>(slot)) ||
+        std::memcmp(reinterpret_cast<const void*>(native),
+                    kF248OriginalPrefix,sizeof(kF248OriginalPrefix))!=0)
+        return false;
+    std::uint32_t current=0;
+    if (!read_u32(reinterpret_cast<std::uintptr_t>(slot),current) ||
+        std::uintptr_t(current)!=reinterpret_cast<std::uintptr_t>(native))
+        return false;
+    g_f248_original.store(
+        reinterpret_cast<F248Function>(native),std::memory_order_release);
+    if (InterlockedCompareExchangePointer(
+            slot,reinterpret_cast<PVOID>(&learn10_f248_hook),native)!=native)
+        return false;
+    g_f248_slot_installed.store(true,std::memory_order_release);
+    log_line("RUNTIME-LEARN10-F248: phase=hook-installed table_slot_rva=0x0A5C20 native_original_rva=0x07A8E0 story_bit1188_readonly=1 script_bytes_untouched=1");
+    return true;
+}
+
+void learn10_f248_disarm(const char* reason) {
+    if (!g_f248_slot_installed.load(std::memory_order_acquire)) return;
+    g_f248_armed.store(false,std::memory_order_release);
+    const auto base=g_approved_exe_base.load(std::memory_order_acquire);
+    auto* slot=reinterpret_cast<PVOID volatile*>(base+kF248TableSlotRva);
+    const auto native=reinterpret_cast<PVOID>(base+kF248OriginalRva);
+    const auto hook=reinterpret_cast<PVOID>(&learn10_f248_hook);
+    const bool safe=base && learn10_f248_writable_slot(
+        reinterpret_cast<std::uintptr_t>(slot));
+    const bool restored=safe &&
+        InterlockedCompareExchangePointer(slot,native,hook)==hook;
+    if(restored)
+        g_f248_slot_installed.store(false,std::memory_order_release);
+    char line[256]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-LEARN10-F248: phase=disarmed reason=%s slot_restored=%u calls=%u matches=%u overrides=%u foreign_thread=%u enter_edges=%u story_bit1188_never_written=1",
+        reason,unsigned(restored),
+        g_f248_calls.load(std::memory_order_relaxed),
+        g_f248_matches.load(std::memory_order_relaxed),
+        g_f248_overrides.load(std::memory_order_relaxed),
+        g_f248_foreign_thread.load(std::memory_order_relaxed),
+        g_f248_enter_edges);
+    log_line(line);
+    if(!restored)
+        log_line("RUNTIME-LEARN10-F248: WARNING callback slot restoration failed; overrides disabled");
+}
+
+void learn10_f248_try_arm(bool handed_over,DWORD elapsed) {
+    if (!g_f248_opted_in.load(std::memory_order_acquire) ||
+        g_f248_attempted || !g_learn_intro_seen || handed_over ||
+        elapsed>3000u || !g_learn_script_probe_done ||
+        !g_progress_words || !g_observed_director_superobject ||
+        !g_observed_director_behaviours || !g_observed_director_intelligence ||
+        g_observed_director_index!=3)
+        return;
+    g_f248_attempted=true; // fail closed; no retry after unknown script
+    bool original_nomovies=false,first_visit_handover=false;
+    std::uint32_t active_b=0,rules=0,root=0,keyword=0,fn=0;
+    std::uint8_t depth=0,type=0,fn_type=0;
+    const auto b3=g_observed_director_behaviours+3u*12u;
+    const bool ready=
+        g_game_camera_thread_id.load(std::memory_order_acquire)==GetCurrentThreadId() &&
+        game_story_bit(g_progress_words,kNoMoviesCheatBit,original_nomovies) &&
+        !original_nomovies &&
+        game_story_bit(g_progress_words,kLearnHandoverBit,first_visit_handover) &&
+        !first_visit_handover &&
+        read_u32(g_observed_director_intelligence+8u,active_b) &&
+        std::uintptr_t(active_b)==b3 &&
+        learn10_f248_original_scripts_match(g_observed_director_behaviours) &&
+        read_u32(b3,rules) && rules &&
+        read_u32(std::uintptr_t(rules)+4u,root) && root &&
+        read_u32(root,keyword) && keyword==1u &&
+        read_u8(std::uintptr_t(root)+6u,depth) && depth==1u &&
+        read_u8(std::uintptr_t(root)+7u,type) && type==0u &&
+        read_u32(std::uintptr_t(root)+8u,fn) && fn==248u &&
+        read_u8(std::uintptr_t(root)+15u,fn_type) && fn_type==3u;
+    if (!ready) {
+        log_line("RUNTIME-LEARN10-F248: phase=refused reason=not-first-visit-b3-or-approved-original-script");
+        return;
+    }
+    // Publish all exact per-actor pointers before hooking the global
+    // native function table; other calls are always forwarded unchanged.
+    g_f248_so.store(g_observed_director_superobject,std::memory_order_release);
+    g_f248_intel.store(g_observed_director_intelligence,std::memory_order_release);
+    g_f248_b3.store(b3,std::memory_order_release);
+    g_f248_rules.store(rules,std::memory_order_release);
+    g_f248_root.store(root,std::memory_order_release);
+    g_f248_words.store(g_progress_words,std::memory_order_release);
+    g_f248_armed_at.store(GetTickCount(),std::memory_order_release);
+    g_f248_calls.store(0,std::memory_order_release);
+    g_f248_matches.store(0,std::memory_order_release);
+    g_f248_overrides.store(0,std::memory_order_release);
+    g_f248_foreign_thread.store(0,std::memory_order_release);
+    g_f248_enter_was_down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
+    g_f248_enter_edges=0;
+    if (!learn10_f248_install_slot()) {
+        log_line("RUNTIME-LEARN10-F248: phase=refused reason=unapproved-or-unwritable-native-F248-slot");
+        return;
+    }
+    g_f248_armed.store(true,std::memory_order_release);
+    g_f248_ever_armed.store(true,std::memory_order_release);
+    char line[220]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-LEARN10-F248: phase=armed t=%ums director=3 native=F248 temporary_output_0_to_1=1 story_bit1188_readonly=1 max_active_ms=5000",
+        unsigned(DWORD(GetTickCount()-g_learn_intro_start)));
+    log_line(line);
+}
+
+void learn10_f248_poll() {
+    if (!g_f248_slot_installed.load(std::memory_order_acquire)) return;
+    if (!g_f248_armed.load(std::memory_order_acquire)) {
+        learn10_f248_disarm("not-armed");
+        return;
+    }
+    const bool down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
+    if(down && !g_f248_enter_was_down) ++g_f248_enter_edges;
+    g_f248_enter_was_down=down;
+    const auto intel=g_f248_intel.load(std::memory_order_acquire);
+    std::uint32_t behaviour=0;
+    bool left=false;
+    if(intel && read_u32(intel+8u,behaviour) &&
+       std::uintptr_t(behaviour)!=g_f248_b3.load(std::memory_order_acquire))
+        left=true;
+    const DWORD age=DWORD(GetTickCount()-g_f248_armed_at.load(std::memory_order_acquire));
+    if(left || age>=5000u)
+        learn10_f248_disarm(left?"director-left-b3":"max-active-5000ms");
+}
+
+void learn10_f248_handover() {
+    if (!g_f248_ever_armed.load(std::memory_order_acquire))return;
+    bool nomovies=false;
+    const bool known=game_story_bit(g_progress_words,kNoMoviesCheatBit,nomovies);
+    char msg[220]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-LEARN10-F248: phase=handover-verification status=%s known=%u bit1188=%u overrides=%u slot_restored=%u (temporary-output-only; gameplay still needs test)",
+        (known&&!nomovies&&!g_f248_slot_installed.load(std::memory_order_acquire)&&
+         g_f248_overrides.load(std::memory_order_acquire)>0)?"pass":"INCONCLUSIVE",
+        unsigned(known),unsigned(nomovies),
+        g_f248_overrides.load(std::memory_order_acquire),
+        unsigned(!g_f248_slot_installed.load(std::memory_order_acquire)));
+    log_line(msg);
+}
+#endif // RAYMAN2FIX_LEARN10_F248_PROTO
+
 void log_native_gate_history(DWORD elapsed) {
     if (!g_log || g_director_gate_history_reported) return;
     g_director_gate_history_reported=true;
@@ -4500,8 +4852,16 @@ void log_native_gate_history(DWORD elapsed) {
 }
 
 void poll_learn_intro_skip() {
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+    learn10_f248_poll();
+#endif
     if (!g_current_level) return;
     if (!r2fix::is_first_playable_level(g_current_level)) {
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+        learn10_f248_disarm("level-left");
+        g_f248_attempted=false;
+        g_f248_ever_armed.store(false,std::memory_order_release);
+#endif
         g_progress_words = 0;
         g_learn_logged = false;
         g_learn_intro_seen = false;
@@ -4514,6 +4874,9 @@ void poll_learn_intro_skip() {
         g_learn_nomovies_conditions_logged = false;
         g_observed_director_intelligence = 0;
         g_observed_director_behaviours = 0;
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+        g_observed_director_superobject = 0;
+#endif
         g_observed_director_index = -1;
         g_have_ray_state = false;
         g_last_ray_custom = 0;
@@ -4557,6 +4920,11 @@ void poll_learn_intro_skip() {
         g_learn_logged = true;
         g_learn_intro_seen = !handed_over;
         g_learn_intro_start = GetTickCount();
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+        if (!handed_over && g_f248_opted_in.load(std::memory_order_acquire))
+            log_line("RUNTIME-INTRO: learn_10 F248 temporary-result prototype enabled; progress bit1188 read-only");
+        else
+#endif
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
             : "RUNTIME-INTRO: learn_10 skip disabled after visual regression; natural scene unchanged");
@@ -4598,10 +4966,24 @@ void poll_learn_intro_skip() {
             }
         }
     }
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+    if (handed_over)
+        learn10_f248_disarm("story1091-handover");
+    else
+        learn10_f248_try_arm(handed_over,elapsed);
+#endif
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
         g_learn_handover_start = GetTickCount();
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+        if(g_f248_ever_armed.load(std::memory_order_acquire))
+            log_line("RUNTIME-INTRO: learn_10 F248 native handover observed (story bit1091; temporary-result route)");
+        else
+            log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit1091; F248 not armed)");
+        learn10_f248_handover();
+#else
         log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
+#endif
         bool nomovies=false;
         const bool known=game_story_bit(g_progress_words,
                                        kNoMoviesCheatBit,nomovies);
@@ -6873,6 +7255,17 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+    wchar_t f248_optin[8]{};
+    const DWORD f248_optin_size=GetEnvironmentVariableW(
+        L"RAYMAN2FIX_LEARN10_F248_PROTOTYPE",f248_optin,8);
+    g_f248_opted_in.store(g_log && settings->skip_cinematics==1u &&
+        f248_optin_size==1 && f248_optin[0]==L'1',
+        std::memory_order_release);
+    log_line(g_f248_opted_in.load(std::memory_order_acquire)?
+        "RUNTIME-LEARN10-F248: enabled=1 route=native-F248-temp-result exact-director-only=1 story_bit1188_readonly=1 experimental=1" :
+        "RUNTIME-LEARN10-F248: enabled=0 set env RAYMAN2FIX_LEARN10_F248_PROTOTYPE=1 and Features.SkipCinematics=1 to opt in");
+#endif
     if(settings->music_in_pause_menu>1u)return 5;
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
 #if RAYMAN2FIX_ESC_MUSIC_PROTO

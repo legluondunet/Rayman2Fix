@@ -67,6 +67,11 @@ target_compile_definitions(Rayman2Fix PRIVATE
 # No additional user-facing INI option is needed.
 option(RAYMAN2FIX_RESEARCH_PROBES
   "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
+option(RAYMAN2FIX_LEARN10_F248_PROTO
+  "Build isolated, explicitly enabled native Learn_10 F248 temporary-result hook" OFF)
+if(RAYMAN2FIX_LEARN10_F248_PROTO AND NOT RAYMAN2FIX_RESEARCH_PROBES)
+  message(FATAL_ERROR "Learn_10 F248 candidate requires research probes")
+endif
 option(RAYMAN2FIX_AUDIO_TRACE
   "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
 option(RAYMAN2FIX_ESC_MUSIC_PROTO
@@ -90,6 +95,9 @@ if(WIN32)
     RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}")
   if(RAYMAN2FIX_RESEARCH_PROBES)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
+  endif()
+  if(RAYMAN2FIX_LEARN10_F248_PROTO)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_LEARN10_F248_PROTO=1)
   endif()
   if(RAYMAN2FIX_AUDIO_TRACE)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_AUDIO_TRACE=1)
@@ -338,6 +346,10 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME native-render-callback-fallback-gate
     COMMAND render_poll_gate_tests)
+
+  add_executable(learn10_f248_result_scope_tests tests/learn10_f248_result_scope_tests.cpp)
+  target_include_directories(learn10_f248_result_scope_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME learn10-f248-result-scope COMMAND learn10_f248_result_scope_tests)
 
   add_executable(scene_script_probe_tests tests/scene_script_probe_tests.cpp)
   target_include_directories(scene_script_probe_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
