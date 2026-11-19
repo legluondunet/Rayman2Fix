@@ -2,22 +2,26 @@
 
 The native third-cinematic skip is now compiled in the **ordinary**
 Windows x86 `Rayman2Fix.exe`. No separate research build, environment
-variable, debug logging or new INI option is needed.
+variable or debug logging is needed. The separate `SkipLearn10` INI toggle
+is explicitly OFF by default.
 
 ## User configuration
 
 ```ini
 [Features]
 SkipCinematics=1
+; Set SkipLearn10 to 1 to enable the guarded F248 skip
+SkipLearn10=0
 
 [Debug]
 Log=0
 ```
 
-`SkipCinematics=1` enables both the original `jail_20` input skip and
-the guarded, native `learn_10` F248 skip. With `SkipCinematics=0`,
-the F248 function pointer is **not installed** and the native cinematic
-runs unmodified. `Log=0` or `Log=1` does not affect either skip.
+`SkipCinematics=1` keeps the original `jail_20` input skip enabled by
+default. The guarded native `learn_10` F248 skip additionally requires
+`SkipLearn10=1`. Its default `0` leaves the third cinematic unchanged.
+`SkipCinematics=0` also blocks F248 even if `SkipLearn10=1`.
+`Log=0` or `Log=1` does not affect either skip.
 
 ## Native conditions preserved
 
@@ -37,8 +41,9 @@ or level exit. Other F248 calls are forwarded to the native function.
 
 PR #34 passed Linux and Windows x86 CI and was user-validated on
 Wine-staging 11.19, including visual transition, camera and controls.
-This PR switches on the feature in standard packaging; it includes
-tests for `SkipCinematics=0` and `SkipCinematics=1`, and verifies
+This PR compiles the feature into standard packaging while leaving it
+inactive until users enable `SkipLearn10=1`. It tests both INI switches
+and verifies
 that `Log=0` no longer prevents director identification.
 
 Normal Windows gameplay was not separately tested at the user's
