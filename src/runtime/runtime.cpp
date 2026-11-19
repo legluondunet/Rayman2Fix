@@ -4953,12 +4953,12 @@ void poll_learn_intro_skip() {
         g_learn_intro_start = GetTickCount();
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
         if (!handed_over && g_f248_enabled.load(std::memory_order_acquire))
-            log_line("RUNTIME-INTRO: learn_10 F248 temporary-result prototype enabled; progress bit1188 read-only");
+            log_line("RUNTIME-INTRO: learn_10 F248 native skip enabled; progress bit1188 read-only");
         else
 #endif
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
-            : "RUNTIME-INTRO: learn_10 skip disabled after visual regression; natural scene unchanged");
+            : "RUNTIME-INTRO: learn_10 skip disabled by configuration; natural scene unchanged");
         if (g_learn_intro_seen)
             g_learn_first_valid_seen=log_natural_intro_snapshot("opening",0);
     }
@@ -5174,10 +5174,10 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     proto_pending_voice_observe_tick();
 #endif
 #endif
-#if RAYMAN2FIX_RESEARCH_PROBES
-    // This is exclusively the disabled Learn_10 research observer.
-    // Never invoke it from an ordinary release callback, regardless
-    // of whether 3D camera or GLI fallback drove the scheduler.
+#if RAYMAN2FIX_LEARN10_F248_FEATURE || RAYMAN2FIX_RESEARCH_PROBES
+    // Standard F248 uses the same camera-thread render scheduler as
+    // the validated research build. SkipCinematics=0 cannot arm F248.
+    // Diagnostics remain gated by Debug.Log, not feature activation.
     poll_learn_intro_skip();
 #endif
     if(first_fallback && g_log) {
