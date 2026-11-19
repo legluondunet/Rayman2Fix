@@ -21,6 +21,8 @@ class BuiltinF248Guards(unittest.TestCase):
         self.assertNotIn("option(RAYMAN2FIX_LEARN10_F248_PROTO",self.cmake)
         self.assertNotIn("RAYMAN2FIX_LEARN10_F248_PROTO",self.runtime)
         self.assertIn("RUNTIME-LEARN10-F248: phase=armed",self.runtime)
+        self.assertIn("#if RAYMAN2FIX_LEARN10_F248_FEATURE || RAYMAN2FIX_RESEARCH_PROBES",self.runtime)
+        self.assertIn("poll_learn_intro_skip();",self.runtime)
 
     def test_no_special_env_or_log_gate(self):
         self.assertNotIn("RAYMAN2FIX_LEARN10_F248_PROTOTYPE",self.runtime)
