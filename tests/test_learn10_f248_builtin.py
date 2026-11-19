@@ -29,7 +29,7 @@ class BuiltinF248Guards(unittest.TestCase):
         # Other, unrelated experimental audio controls may legitimately
         # read environment variables; only the F248 block must not.
         start=self.runtime.index("g_f248_enabled.store(")
-        f248_config=self.runtime[start:start+650]
+        f248_config=self.runtime[start:self.runtime.index("#endif",start)]
         self.assertNotIn("GetEnvironmentVariableW",f248_config)
         self.assertNotIn("g_log &&",f248_config)
         self.assertIn("learn10_f248_enabled_for_ini(settings->skip_cinematics)",self.runtime)
