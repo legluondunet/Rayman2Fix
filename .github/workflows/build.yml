@@ -647,6 +647,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_learn10_readonly.py'
       - name: Guard shared AIModel script writes in experimental Learn_10 runtime
         run: python3 -m unittest discover -s tests -p 'test_learn10_script_gate_static.py'
+      - name: Verify approved Rayman2 interpreter PE32 preflight with synthetic fixtures
+        run: python3 -m unittest discover -s tests -p 'test_learn10_interpreter_preflight.py'
       - name: Verify Learn_10 NOMOVIES trace auditor (fail closed, synthetic sessions)
         run: python3 -m unittest discover -s tests -p 'test_learn10_trace_validator.py'
       - name: Verify Learn_10 read-only save inventory (synthetic fixtures)
