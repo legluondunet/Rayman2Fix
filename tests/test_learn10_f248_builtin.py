@@ -15,6 +15,9 @@ class BuiltinF248Guards(unittest.TestCase):
         cls.cmake=(ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
         cls.policy=(ROOT / "include/rayman2fix/learn10_f248_result_scope.hpp").read_text(encoding="utf-8")
         cls.workflow=(ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        cls.config=(ROOT / "src/launcher/game_config.cpp").read_text(encoding="utf-8")
+        cls.launch=(ROOT / "src/launcher/game_launch.cpp").read_text(encoding="utf-8")
+        cls.inject=(ROOT / "src/launcher/runtime_inject.cpp").read_text(encoding="utf-8")
 
     def test_normal_build_bundles_feature_unconditionally(self):
         self.assertIn("RAYMAN2FIX_LEARN10_F248_FEATURE=1",self.cmake)
@@ -32,16 +35,26 @@ class BuiltinF248Guards(unittest.TestCase):
         f248_config=self.runtime[start:self.runtime.index("#endif",start)]
         self.assertNotIn("GetEnvironmentVariableW",f248_config)
         self.assertNotIn("g_log &&",f248_config)
-        self.assertIn("learn10_f248_enabled_for_ini(settings->skip_cinematics)",self.runtime)
+        self.assertIn("settings->skip_learn10",self.runtime)
+        self.assertIn("learn10_f248_enabled_for_ini(settings->skip_cinematics,",self.runtime)
         self.assertNotRegex(self.policy,r"logging\s*=")
         self.assertNotIn("s.logging",self.policy)
 
     def test_disabled_user_setting_prohibits_slot_installation(self):
-        self.assertIn("return skip_cinematics == 1u;",self.policy)
+        self.assertIn("return skip_cinematics == 1u && skip_learn10 == 1u;",self.policy)
         self.assertIn("!g_f248_enabled.load(std::memory_order_acquire)",self.runtime)
         self.assertIn("if (!g_f248_enabled.load(std::memory_order_acquire) ||",self.runtime)
         self.assertIn("learn10_f248_scope_matches(sample)",self.runtime)
         self.assertNotIn("kLearn10F248RuntimeHookAllowed",self.runtime)
+
+    def test_separate_default_off_ini_opt_in_is_forwarded(self):
+        self.assertIn('read_ini_flag(ini,"Features","SkipCinematics","1")',self.config)
+        self.assertIn('read_ini_flag(ini,"Features","SkipLearn10","0")',self.config)
+        self.assertIn('output.emplace_back("SkipLearn10=0")',self.config)
+        self.assertIn('configured_skip_learn10(startup.ini_path())',self.launch)
+        self.assertIn('display.skip_learn10, display.remove_dialogue_backgrounds',self.launch)
+        self.assertIn('skip_learn10 ? 1u : 0u',self.inject)
+        self.assertIn('settings->skip_learn10>1u',self.runtime)
 
     def test_log_off_still_collects_director_identity(self):
         self.assertIn("observe_learn10_f248_director_without_log",self.runtime)
