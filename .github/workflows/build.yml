@@ -139,16 +139,15 @@ jobs:
           $initial = (Get-Content $ini | Where-Object {
             $_.Trim() -and !$_.Trim().StartsWith(';')
           })
-          if ($initial.Count -ne 11 -or $initial[0] -ne '[Debug]' -or
+          if ($initial.Count -ne 10 -or $initial[0] -ne '[Debug]' -or
               $initial[1] -ne 'Log=1' -or $initial[2] -ne '[Graphics]' -or
               $initial[3] -ne 'FPSLimit=60' -or
               $initial[4] -ne 'AspectRatio=Auto' -or
               $initial[5] -ne '[Features]' -or
               $initial[6] -ne 'SkipCinematics=1' -or
-              $initial[7] -ne 'SkipLearn10=0' -or
-              $initial[8] -ne 'RemoveDialogueBackgrounds=1' -or
-              $initial[9] -ne 'RemoveCinematicBars=1' -or
-              $initial[10] -ne 'MusicInPauseMenu=1') {
+              $initial[7] -ne 'RemoveDialogueBackgrounds=1' -or
+              $initial[8] -ne 'RemoveCinematicBars=1' -or
+              $initial[9] -ne 'MusicInPauseMenu=1') {
             throw "Bootstrap INI must enable the four feature defaults and retain separate 4:3/dialogue/cinematic options"
           }
           # Win32 CRLF and UTF-8 BOM parsing plus both-log opt-out.
@@ -379,7 +378,7 @@ jobs:
           if b'RUNTIME-AUDIO-TRACE: enabled=1' in binary:
               raise SystemExit('Normal DLL unexpectedly contains experimental audio tracer')
           for needle in (
-              b'RUNTIME-LEARN10-F248: enabled=1 source=Features.SkipLearn10',
+              b'RUNTIME-LEARN10-F248: enabled=1 source=Features.SkipCinematics+Debug.DisableLearn10Skip',
               b'RUNTIME-LEARN10-F248: phase=hook-installed',
               b'RUNTIME-LEARN10-F248: phase=armed',
               b'RUNTIME-LEARN10-F248: phase=disarmed',
@@ -567,7 +566,7 @@ jobs:
           test -f build/Rayman2Fix_installer.log
           test ! -e build/Rayman2Fix.log
           grep -q 'SYS-INFO: END' build/Rayman2Fix_installer.log
-          test "$(grep -v '^;' build/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nFPSLimit=60\nAspectRatio=Auto\n[Features]\nSkipCinematics=1\nSkipLearn10=0\nRemoveDialogueBackgrounds=1\nRemoveCinematicBars=1\nMusicInPauseMenu=1')" || exit 1
+          test "$(grep -v '^;' build/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nFPSLimit=60\nAspectRatio=Auto\n[Features]\nSkipCinematics=1\nRemoveDialogueBackgrounds=1\nRemoveCinematicBars=1\nMusicInPauseMenu=1')" || exit 1
           printf 'old game log\n' > build/Rayman2Fix.log
           printf '[Debug]\r\nLog=0\r\n' > build/Rayman2Fix.ini
           result=0
