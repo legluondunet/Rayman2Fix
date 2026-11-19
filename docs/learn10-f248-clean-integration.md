@@ -1,27 +1,42 @@
 # Learn_10 F248 native skip — standard integration
 
-The native third-cinematic skip is now compiled in the **ordinary**
-Windows x86 `Rayman2Fix.exe`. No separate research build, environment
-variable or debug logging is needed. The separate `SkipLearn10` INI toggle
-is explicitly OFF by default.
+The third-cinematic skip is compiled into the **ordinary** Windows x86
+`Rayman2Fix.exe`. It uses the same `SkipCinematics` option as
+`jail_20`. Both skips are **enabled by default**. No research build,
+environment variable or debug logging is required.
 
-## User configuration
+## Standard INI (generated)
 
 ```ini
 [Features]
 SkipCinematics=1
-; Set SkipLearn10 to 1 to enable the guarded F248 skip
-SkipLearn10=0
 
 [Debug]
 Log=0
 ```
 
-`SkipCinematics=1` keeps the original `jail_20` input skip enabled by
-default. The guarded native `learn_10` F248 skip additionally requires
-`SkipLearn10=1`. Its default `0` leaves the third cinematic unchanged.
-`SkipCinematics=0` also blocks F248 even if `SkipLearn10=1`.
-`Log=0` or `Log=1` does not affect either skip.
+The launcher also generates its other existing Graphics/Features settings.
+`SkipCinematics=1` enables the native `jail_20` input skip and guarded
+`learn_10` F248 skip. `SkipCinematics=0` disables both.
+`Log=0` or `Log=1` does not change this behavior.
+
+## Hidden, optional debugging override (never generated)
+
+To disable **only `learn_10`** when debugging, manually append
+`DisableLearn10Skip=1` to the existing `[Debug]` section:
+
+```ini
+[Debug]
+Log=1
+DisableLearn10Skip=1
+```
+
+`DisableLearn10Skip` is implicitly **0** if absent; it is **not**
+inserted by the launcher into new or existing INI files. Set to 0 or
+remove the line to restore `learn_10` skipping.
+The original `jail_20` skip is unaffected. The old intermediate
+`SkipLearn10` option is retired and cleaned from previously generated
+test INIs. Do not depend on it.
 
 ## Native conditions preserved
 
@@ -29,8 +44,8 @@ The game calls original F248 (`GetBooleanInArray`) first. Only its
 **temporary result**, for the identified director, native behaviour 3,
 exact root `IfNot(F248(Fix.V42, 1188))`, first visit, and original
 integer-0 result, can be changed from 0 to 1. No story progression bit
-or shared AI script node is directly written. The original input and
-one-second timing guard remain native.
+or shared AI script node is directly written. Original input and timing
+guards remain native.
 
 Function-table replacement is guarded by a verified original pointer,
 native code-byte signature, writable memory and compare/exchange.
@@ -41,12 +56,12 @@ or level exit. Other F248 calls are forwarded to the native function.
 
 PR #34 passed Linux and Windows x86 CI and was user-validated on
 Wine-staging 11.19, including visual transition, camera and controls.
-This PR compiles the feature into standard packaging while leaving it
-inactive until users enable `SkipLearn10=1`. It tests both INI switches
-and verifies
-that `Log=0` no longer prevents director identification.
+Standard F248 has also been tested with both `Log=0` and `Log=1`.
+This PR adds regression tests for the two main `SkipCinematics`
+states and the hidden opt-out, including the generated INI's omission
+of the debugging-only setting. CI is required to validate these
+changes; an in-game test of the final branch remains distinct from CI.
 
-Normal Windows gameplay was not separately tested at the user's
-request. Engine-visible exceptional teardown paths remain beyond
-what a compile/test workflow can prove. This is **not a release** until
-the user approves a merge or release.
+Native Windows gameplay and exceptional teardown conditions are
+not fully covered by this verification. The PR remains a draft and is
+not a release without explicit authorization.
