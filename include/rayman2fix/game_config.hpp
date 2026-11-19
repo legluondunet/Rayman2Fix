@@ -29,7 +29,8 @@ bool configured_aspect_ratio_is_4_3(const std::filesystem::path& rayman2fix_ini)
 std::pair<std::uint32_t, std::uint32_t> configured_render_resolution(
     const std::filesystem::path& rayman2fix_ini);
 
-// jail_20 skip defaults to enabled; Learn_10 requires a separate opt-in.
+// SkipCinematics enables both skips by default. A hidden [Debug]
+// DisableLearn10Skip=1 can suppress only the Learn_10 path.
 bool configured_skip_cinematics(const std::filesystem::path& rayman2fix_ini);
 bool configured_skip_learn10(const std::filesystem::path& rayman2fix_ini);
 
