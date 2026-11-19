@@ -29,8 +29,9 @@ bool configured_aspect_ratio_is_4_3(const std::filesystem::path& rayman2fix_ini)
 std::pair<std::uint32_t, std::uint32_t> configured_render_resolution(
     const std::filesystem::path& rayman2fix_ini);
 
-// Only user-triggered jail_20 skip is supported; Learn_10 remains safe.
+// jail_20 skip defaults to enabled; Learn_10 requires a separate opt-in.
 bool configured_skip_cinematics(const std::filesystem::path& rayman2fix_ini);
+bool configured_skip_learn10(const std::filesystem::path& rayman2fix_ini);
 
 // Both GLI filtering features default to enabled (1), but retain independent
 // per-user opt-outs (0). GameFrame 4:3 sidebars are never suppressed.
