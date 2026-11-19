@@ -31,10 +31,11 @@ constexpr std::uint32_t kLearn10F248IntegerResultType=6;
 constexpr std::uint32_t kLearn10F248MaxElapsedMs=5000;
 
 // Read-only classification of an individual evaluator call. A positive
-// match alone never installs a native function-slot hook; SkipCinematics=1
-// is independently required by the installer and the runtime.
-constexpr bool learn10_f248_enabled_for_ini(std::uint32_t skip_cinematics) {
-    return skip_cinematics == 1u;
+// match alone never installs a native function-slot hook: both the jail_20
+// setting and the separate default-off Learn_10 opt-in are required.
+constexpr bool learn10_f248_enabled_for_ini(
+    std::uint32_t skip_cinematics,std::uint32_t skip_learn10) {
+    return skip_cinematics == 1u && skip_learn10 == 1u;
 }
 
 inline bool learn10_f248_scope_matches(const Learn10F248Sample& s) {
