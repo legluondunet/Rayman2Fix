@@ -377,7 +377,21 @@ jobs:
           binary=Path('build/Release/fix.dll').read_bytes()
           if b'RUNTIME-AUDIO-TRACE: enabled=1' in binary:
               raise SystemExit('Normal DLL unexpectedly contains experimental audio tracer')
-          print('Standard DLL excludes audio tracer: PASS')
+          for needle in (
+              b'RUNTIME-LEARN10-F248: enabled=1 source=Features.SkipCinematics',
+              b'RUNTIME-LEARN10-F248: phase=hook-installed',
+              b'RUNTIME-LEARN10-F248: phase=armed',
+              b'RUNTIME-LEARN10-F248: phase=disarmed',
+              b'RUNTIME-LEARN10-F248: phase=handover-verification',
+          ):
+              if needle not in binary: raise SystemExit(f'Normal DLL missing F248: {needle!r}')
+          for obsolete in (
+              b'RAYMAN2FIX_LEARN10_F248_PROTOTYPE',
+              b'RUNTIME-LEARN10-PROTOTYPE: phase=armed',
+              b'RUNTIME-LEARN10-SCRIPT-GATE: phase=armed',
+          ):
+              if obsolete in binary: raise SystemExit(f'Obsolete experiment marker in normal DLL: {obsolete!r}')
+          print('Normal DLL includes native F248 skip; no audio tracer or obsolete experiment: PASS')
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Standard DLL included research probes' }
       - name: Build separate research-only audio trace launcher
@@ -497,53 +511,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Build isolated F248 native temporary-result test launcher
-        shell: pwsh
-        run: |
-          cmake -S . -B build -A Win32 -DBUILD_TESTING=OFF -DRAYMAN2FIX_RESEARCH_PROBES=ON -DRAYMAN2FIX_LEARN10_F248_PROTO=ON -DRAYMAN2FIX_AUDIO_TRACE=OFF -DRAYMAN2FIX_ESC_MUSIC_PROTO=OFF
-          if ($LASTEXITCODE -ne 0) { throw 'F248 configure failed' }
-          cmake --build build --config Release --target Rayman2Fix --parallel
-          if ($LASTEXITCODE -ne 0) { throw 'F248 x86 compile failed' }
-          @'
-          from pathlib import Path
-          dll=Path('build/Release/fix.dll').read_bytes()
-          for key in (b'RUNTIME-LEARN10-F248: phase=hook-installed',
-                      b'RUNTIME-LEARN10-F248: phase=armed',
-                      b'RUNTIME-LEARN10-F248: phase=disarmed',
-                      b'RUNTIME-LEARN10-F248: phase=handover-verification',
-                      b'RAYMAN2FIX_LEARN10_F248_PROTOTYPE'):
-              if key not in dll: raise SystemExit(f'F248 missing marker: {key!r}')
-          if b'RUNTIME-LEARN10-PROTOTYPE: phase=armed' in dll or b'RUNTIME-LEARN10-SCRIPT-GATE: phase=armed' in dll:
-              raise SystemExit('Obsolete story-bit or script-node prototype linked')
-          print('Clean integration F248 runtime verified')
-          '@ | python -
-          if ($LASTEXITCODE -ne 0) { throw 'F248 DLL marker verification failed' }
-          New-Item -ItemType Directory -Force -Path learn10-f248-clean | Out-Null
-          Copy-Item build/Release/Rayman2Fix.exe learn10-f248-clean/Rayman2Fix.exe
-          New-Item -ItemType Directory -Force -Path learn10-f248-clean-smoke | Out-Null
-          Copy-Item learn10-f248-clean/Rayman2Fix.exe learn10-f248-clean-smoke/Rayman2Fix.exe
-          & ./learn10-f248-clean-smoke/Rayman2Fix.exe --verify 2>&1 | Out-Null
-          if ($LASTEXITCODE -ne 2) { throw 'F248 clean smoke must fail safely without CD' }
-          $dll='learn10-f248-clean-smoke/game/fix.dll'
-          if (!(Test-Path $dll) -or
-              (Get-FileHash $dll -Algorithm SHA256).Hash -ne (Get-FileHash build/Release/fix.dll -Algorithm SHA256).Hash) {
-            throw 'Embedded clean F248 DLL not equal to built DLL'
-          }
-          $global:LASTEXITCODE = 0
-      - name: Upload isolated Learn_10 F248 clean integration test
-        uses: actions/upload-artifact@v4
-        with:
-          name: Rayman2Fix-Windows-x86-learn10-F248-clean-TEST
-          path: learn10-f248-clean/
-          if-no-files-found: error
-          retention-days: 14
-
   linux-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Test pinned GameFrame limiter source integration
         run: python3 -m unittest discover -s tests -p 'test_fps_limit_patch.py'
+      - name: Verify production F248 activation gates are independent of Log and environment
+        run: python3 -m unittest discover -s tests -p 'test_learn10_f248_builtin.py'
       - name: Check strict optional external intro logo patch
         run: python3 -m unittest discover -s tests -p 'test_intro_logo_hd_patch.py'
       - name: Verify RayWiki 403 browser-download fallback

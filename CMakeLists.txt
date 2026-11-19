@@ -67,11 +67,6 @@ target_compile_definitions(Rayman2Fix PRIVATE
 # No additional user-facing INI option is needed.
 option(RAYMAN2FIX_RESEARCH_PROBES
   "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
-option(RAYMAN2FIX_LEARN10_F248_PROTO
-  "Build isolated, explicitly enabled native Learn_10 F248 temporary-result hook" OFF)
-if(RAYMAN2FIX_LEARN10_F248_PROTO AND NOT RAYMAN2FIX_RESEARCH_PROBES)
-  message(FATAL_ERROR "Learn_10 F248 candidate requires research probes")
-endif()
 option(RAYMAN2FIX_AUDIO_TRACE
   "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
 option(RAYMAN2FIX_ESC_MUSIC_PROTO
@@ -96,9 +91,9 @@ if(WIN32)
   if(RAYMAN2FIX_RESEARCH_PROBES)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
   endif()
-  if(RAYMAN2FIX_LEARN10_F248_PROTO)
-    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_LEARN10_F248_PROTO=1)
-  endif()
+  # Compile the guarded F248 path in normal builds. Its runtime activation
+  # is controlled solely by [Features] SkipCinematics, not developer flags.
+  target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_LEARN10_F248_FEATURE=1)
   if(RAYMAN2FIX_AUDIO_TRACE)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_AUDIO_TRACE=1)
   endif()

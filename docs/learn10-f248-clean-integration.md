@@ -1,36 +1,47 @@
-# Learn_10 native skip — clean F248 integration candidate
+# Learn_10 F248 native skip — standard integration
 
-The **F248 temporary-result** route is the only experimental Learn_10
-skip brought forward from PR #33 (Wine 11.19 validated by user). The
-old `NOMOVIES` story-bit mutation and `IfNot` script-node rewrite
-are **not copied into this branch**.
+The native third-cinematic skip is now compiled in the **ordinary**
+Windows x86 `Rayman2Fix.exe`. No separate research build, environment
+variable, debug logging or new INI option is needed.
 
-The original game function F248 `GetBooleanInArray` is first called
-unchanged. Only the specifically matched director, behavior 3, root
-`IfNot(F248(Fix.V42,1188))`, first visit, original integer-0 result
-and the trusted game thread can alter the **temporary returned value**
-0 to 1. Original engine input and native handover are preserved.
+## User configuration
 
-- Build default: **disabled**. Opt-in research x86 build uses CMake
-  `-DRAYMAN2FIX_RESEARCH_PROBES=ON -DRAYMAN2FIX_LEARN10_F248_PROTO=ON`.
-- Runtime explicit opt-in: environment
-  `RAYMAN2FIX_LEARN10_F248_PROTOTYPE=1`, INI
-  `[Features] SkipCinematics=1`, and `[Debug] Log=1`.
-- No user-selectable new INI option and no extra launcher command flag.
-- Do not modify story bit 1188 or shared AIModel script nodes.
-- Once armed, the native function-table slot is disarmed on director
-  exit, native handover, observed timeout or level change; if restoration
-  fails, overrides remain disabled and the failure is logged.
+```ini
+[Features]
+SkipCinematics=1
 
-## Verification
+[Debug]
+Log=0
+```
 
-This is a carefully extracted version of the Wine-tested PR #33 code
-on top of main, rather than a merge of the stacked research history.
-An isolated CI executable embeds its matching F248 DLL and is intended
-for Windows/Wine regression testing. The normal executable remains
-unchanged unless research compile flags are explicitly provided.
+`SkipCinematics=1` enables both the original `jail_20` input skip and
+the guarded, native `learn_10` F248 skip. With `SkipCinematics=0`,
+the F248 function pointer is **not installed** and the native cinematic
+runs unmodified. `Log=0` or `Log=1` does not affect either skip.
 
-Even with correct gameplay on Wine, **native Windows testing remains
-pending**, and exceptional teardown/reentrancy conditions require
-review before enabling this for all installations or merging to main.
-No manual save/reload test is requested before a real save slot exists.
+## Native conditions preserved
+
+The game calls original F248 (`GetBooleanInArray`) first. Only its
+**temporary result**, for the identified director, native behaviour 3,
+exact root `IfNot(F248(Fix.V42, 1188))`, first visit, and original
+integer-0 result, can be changed from 0 to 1. No story progression bit
+or shared AI script node is directly written. The original input and
+one-second timing guard remain native.
+
+Function-table replacement is guarded by a verified original pointer,
+native code-byte signature, writable memory and compare/exchange.
+The hook is disarmed at director exit, native handover, observed timeout,
+or level exit. Other F248 calls are forwarded to the native function.
+
+## Validation
+
+PR #34 passed Linux and Windows x86 CI and was user-validated on
+Wine-staging 11.19, including visual transition, camera and controls.
+This PR switches on the feature in standard packaging; it includes
+tests for `SkipCinematics=0` and `SkipCinematics=1`, and verifies
+that `Log=0` no longer prevents director identification.
+
+Normal Windows gameplay was not separately tested at the user's
+request. Engine-visible exceptional teardown paths remain beyond
+what a compile/test workflow can prove. This is **not a release** until
+the user approves a merge or release.
