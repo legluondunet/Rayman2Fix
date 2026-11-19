@@ -633,6 +633,61 @@ jobs:
           # No artifact until this approach passes an independent memory-safety review.
           $global:LASTEXITCODE = 0
 
+      - name: Build isolated Learn_10 F248 temporary-result prototype
+        shell: pwsh
+        run: |
+          # Research-only: no story-bit writes, no shared AIModel script edits.
+          # The executable still needs the exact runtime opt-in and features.
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=OFF -DRAYMAN2FIX_RESEARCH_PROBES=ON -DRAYMAN2FIX_LEARN10_NOMOVIES_PROTO=OFF -DRAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO=OFF -DRAYMAN2FIX_LEARN10_F248_PROTO=ON -DRAYMAN2FIX_AUDIO_TRACE=OFF -DRAYMAN2FIX_ESC_MUSIC_PROTO=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'F248 prototype configuration failed' }
+          cmake --build build --config Release --target Rayman2Fix --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'F248 prototype x86 compile failed' }
+          @'
+          from pathlib import Path
+          data=Path("build/Release/fix.dll").read_bytes()
+          expected = (
+              b"RUNTIME-LEARN10-F248: enabled=1 route=native-F248-temp-result",
+              b"RUNTIME-LEARN10-F248: phase=hook-installed",
+              b"RUNTIME-LEARN10-F248: phase=armed",
+              b"RUNTIME-LEARN10-F248: phase=disarmed",
+              b"RUNTIME-LEARN10-F248: phase=handover-verification",
+              b"RAYMAN2FIX_LEARN10_F248_PROTOTYPE",
+              b"story_bit1188_never_written=1",
+          )
+          for marker in expected:
+              if marker not in data:
+                  raise SystemExit(f"F248 prototype DLL missing marker: {marker!r}")
+          for forbidden in (
+              b"RUNTIME-LEARN10-PROTOTYPE: phase=armed",
+              b"RUNTIME-LEARN10-SCRIPT-GATE: phase=armed",
+          ):
+              if forbidden in data:
+                  raise SystemExit(f"F248 prototype wrongly includes another mutation path: {forbidden!r}")
+          print("F248 runtime marker/exclusivity check: PASS")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'F248 runtime marker check failed' }
+          New-Item -ItemType Directory -Path learn10-f248 -Force | Out-Null
+          Copy-Item build/Release/Rayman2Fix.exe learn10-f248/Rayman2Fix.exe
+          New-Item -ItemType Directory -Path learn10-f248-smoke -Force | Out-Null
+          Copy-Item learn10-f248/Rayman2Fix.exe learn10-f248-smoke/Rayman2Fix.exe
+          & ./learn10-f248-smoke/Rayman2Fix.exe --verify 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 2) { throw 'Standalone F248 bootstrap should fail safely without retail CD' }
+          $embedded='learn10-f248-smoke/game/fix.dll'
+          if (!(Test-Path $embedded) -or
+              (Get-FileHash $embedded -Algorithm SHA256).Hash -ne
+              (Get-FileHash build/Release/fix.dll -Algorithm SHA256).Hash) {
+            throw 'Standalone F248 bootstrap embedded wrong runtime'
+          }
+          $global:LASTEXITCODE = 0
+
+      - name: Upload strictly opt-in Learn_10 F248 temporary-result test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rayman2Fix-Windows-x86-learn10-F248-TEST
+          path: learn10-f248/
+          if-no-files-found: error
+          retention-days: 14
+
   linux-tests:
     runs-on: ubuntu-latest
     steps:
