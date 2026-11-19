@@ -33,6 +33,12 @@ struct SceneScriptProbe {
     unsigned phase110_predicates = 0;
     unsigned phase110_first_node = 0;
     unsigned phase110_first_condition = 0;
+    // A separate, native early-exit predicate (V96 == 104).
+    // This is read-only script structure, NOT permission to write V96 or
+    // jump into the clean-up script. It is distinct from stage pulse 110.
+    unsigned phase104_predicates = 0;
+    unsigned phase104_first_node = 0;
+    unsigned phase104_first_condition = 0;
     std::array<SceneScriptEvent, 128> events{};
     // An optional bounded context window around the native exit branch.
     // No script parameter is dereferenced or returned as a process address.
@@ -90,16 +96,24 @@ SceneScriptProbe observe_scene_script(std::uintptr_t script_slot,
         //  variable(96), int(110), all at the expected expression
         //  nesting depth. A matching expression is NOT proof of a
         //  skippable cinematic; it just identifies relevant script data.
-        if (recent>=2 && type==12 && param==110 &&
+        if (recent>=2 && type==12 && (param==104 || param==110) &&
             previous.type==11 && previous.param==96 &&
             previous.indent==indent &&
             before_previous.type==1 &&
             before_previous.param>=4 && before_previous.param<=7 &&
             unsigned(before_previous.indent)+1==unsigned(indent)) {
-            ++p.phase110_predicates;
-            if (p.phase110_predicates==1) {
-                p.phase110_first_node=before_previous.node;
-                p.phase110_first_condition=before_previous.param;
+            if (param==110) {
+                ++p.phase110_predicates;
+                if (p.phase110_predicates==1) {
+                    p.phase110_first_node=before_previous.node;
+                    p.phase110_first_condition=before_previous.param;
+                }
+            } else {
+                ++p.phase104_predicates;
+                if (p.phase104_predicates==1) {
+                    p.phase104_first_node=before_previous.node;
+                    p.phase104_first_condition=before_previous.param;
+                }
             }
         }
         before_previous=previous;
