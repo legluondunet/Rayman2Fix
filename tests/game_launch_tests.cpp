@@ -1,4 +1,5 @@
 #include "rayman2fix/game_launch.hpp"
+#include "rayman2fix/game_config.hpp"
 #include "rayman2fix/display.hpp"
 #include "rayman2fix/presentation.hpp"
 
@@ -35,6 +36,37 @@ int main(int argc, char** argv) {
     const auto root=launcher_root/"game";
     fs::create_directories(root);
     try {
+        // The single public option enables both skips by default.
+        // The manual [Debug] opt-out disables only Learn_10.
+        const auto ini=launcher_root/"Rayman2Fix.ini";
+        write(ini,"[Debug]\nLog=0\n[Features]\nSkipCinematics=1\n");
+        check(r2fix::configured_skip_cinematics(ini),
+              "public cinematic skip defaults to enabled");
+        check(r2fix::configured_skip_learn10(ini),
+              "Learn_10 skip defaults to enabled without debug override");
+        r2fix::ensure_rayman2fix_ini_options(ini);
+        {
+            std::ifstream stream(ini);
+            const std::string contents(std::istreambuf_iterator<char>{stream},
+                                       std::istreambuf_iterator<char>{});
+            check(contents.find("DisableLearn10Skip")==std::string::npos,
+                  "generated INI must never include hidden Learn_10 opt-out");
+        }
+        write(ini,"[Debug]\nLog=0\nDisableLearn10Skip=1\n"
+                  "[Features]\nSkipCinematics=1\n");
+        r2fix::ensure_rayman2fix_ini_options(ini);
+        check(r2fix::configured_skip_cinematics(ini),
+              "debug opt-out preserves jail_20 skip");
+        check(!r2fix::configured_skip_learn10(ini),
+              "hidden debug option disables only Learn_10");
+        write(ini,"[Debug]\nDisableLearn10Skip=0\n"
+                  "[Features]\nSkipCinematics=1\n");
+        check(r2fix::configured_skip_learn10(ini),
+              "explicit zero restores Learn_10 skip");
+        write(ini,"[Debug]\nDisableLearn10Skip=0\n"
+                  "[Features]\nSkipCinematics=0\n");
+        check(!r2fix::configured_skip_cinematics(ini),
+              "public opt-out disables both cinematic skips");
         const auto preflight = r2fix::check_game_launch(root);
         check(!preflight.allowed, "empty installation must be refused");
         write(root / "rayman2.exe", "untrusted executable");
