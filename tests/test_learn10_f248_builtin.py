@@ -47,14 +47,18 @@ class BuiltinF248Guards(unittest.TestCase):
         self.assertIn("learn10_f248_scope_matches(sample)",self.runtime)
         self.assertNotIn("kLearn10F248RuntimeHookAllowed",self.runtime)
 
-    def test_separate_default_off_ini_opt_in_is_forwarded(self):
+    def test_hidden_default_off_debug_opt_out_is_forwarded(self):
         self.assertIn('read_ini_flag(ini,"Features","SkipCinematics","1")',self.config)
-        self.assertIn('read_ini_flag(ini,"Features","SkipLearn10","0")',self.config)
-        self.assertIn('output.emplace_back("SkipLearn10=0")',self.config)
+        self.assertIn('!read_ini_flag(ini,"Debug","DisableLearn10Skip","0")',self.config)
+        self.assertNotIn('output.emplace_back("SkipLearn10=0")',self.config)
+        self.assertNotIn('output.emplace_back("DisableLearn10Skip=0")',self.config)
+        self.assertNotIn('output.emplace_back("DisableLearn10Skip=1")',self.config)
+        self.assertIn('old_skip_learn10',self.config)
         self.assertIn('configured_skip_learn10(startup.ini_path())',self.launch)
         self.assertIn('display.skip_learn10, display.remove_dialogue_backgrounds',self.launch)
         self.assertIn('skip_learn10 ? 1u : 0u',self.inject)
         self.assertIn('settings->skip_learn10>1u',self.runtime)
+        self.assertIn('Debug.DisableLearn10Skip',self.runtime)
 
     def test_log_off_still_collects_director_identity(self):
         self.assertIn("observe_learn10_f248_director_without_log",self.runtime)
