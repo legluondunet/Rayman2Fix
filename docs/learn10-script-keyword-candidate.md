@@ -169,7 +169,7 @@ The preflight confirms two **separately verified CD anchors** before
 sampling these candidate VAs from **executable PE sections only**:
 `kNativeScreenToVertexRva=0x22940` and
 `kSuperimposedProcRva=0x710C0`. Output includes only the
-SHA-256 of each candidate's first **64 bytes**, never their content.
+SHA-256 of each candidate's first **32 bytes** (shorter than the 0x30-byte separation between two reference entrypoints), never their content.
 It deliberately returns **exit code 3**
 (`CANDIDATE_NOT_VERIFIED`) even if the approved EXE and all
 known anchors match: neither the evaluator's **machine-code semantics**
