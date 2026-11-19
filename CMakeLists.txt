@@ -212,6 +212,10 @@ if(BUILD_TESTING)
   add_executable(learn10_model_alias_tests tests/learn10_model_alias_tests.cpp)
   target_include_directories(learn10_model_alias_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME learn10-model-alias-census COMMAND learn10_model_alias_tests)
+  # Pure read-only F248 evaluator context model; never adds a runtime hook.
+  add_executable(learn10_f248_result_scope_tests tests/learn10_f248_result_scope_tests.cpp)
+  target_include_directories(learn10_f248_result_scope_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME learn10-f248-result-scope COMMAND learn10_f248_result_scope_tests)
 
   add_executable(learn10_nomovies_proto_tests tests/learn10_nomovies_proto_tests.cpp)
   target_include_directories(learn10_nomovies_proto_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

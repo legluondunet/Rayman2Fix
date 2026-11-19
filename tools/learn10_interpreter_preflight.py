@@ -42,11 +42,16 @@ APPROVED_MACHINE_CODE = {
     "eval_tree": (0x480B90, "da65e3383273899b2abc7bf2498bbc5298977e6f689c8da0b4cbdfa83d34951d"),
     "keyword_resolver": (0x487D50, "523ae9b5979dd7ad3ad7139ddb094abde9e9cd58df804ff04cda92673d7356f0"),
     "keyword_shared_handler": (0x489250, "42cc9c7fd1f36c4f4c8868045aa862a19c283fcce61928f1aa272771247c0edd"),
+    "eval_function": (0x480880, "ec60b75b3b555dff687987f1cdb658320e1011ef33e009eb91f6002896979433"),
+    "function_resolver": (0x487820, "7c6838185370da34fc57e230a63322f338c2b1f9fa1ec6b7e793acd93dbbb838"),
+    "F248_handler": (0x47A8E0, "19d2d8deee6fc7a9e98b7740d92fe9ebb280852e2188b66e5a0afc9a94023239"),
     "keyword_skip_cache": (0x489190, "68aca120dde9407959d36b609aa3569de69b2fe828260bfdf22d87311c12c2af"),
 }
 APPROVED_KEYWORD_TABLE_FILE_OFFSET = 0xA5E80  # approved .data mapping
 APPROVED_SHARED_IF_HANDLER = 0x489250
 APPROVED_IFNOT_INVERSION_VA = 0x4892DF
+APPROVED_F248_TABLE_FILE_OFFSET = 0xA5C20
+APPROVED_F248_HANDLER = 0x47A8E0
 APPROVED_IFNOT_SHA256_16 = "10d54295e422dc0e0006ceb7b22d94bb91b7ce5094dc7d9724117318c6de16cc"
 
 WINDOW = 32
@@ -181,6 +186,9 @@ def inspect_pe32(data: bytes) -> dict:
         k0,k1 = struct.unpack_from("<II", data, APPROVED_KEYWORD_TABLE_FILE_OFFSET)
         if (k0,k1) != (APPROVED_SHARED_IF_HANDLER, APPROVED_SHARED_IF_HANDLER):
             raise PreflightError("approved-If-IfNot-dispatch-table-mismatch")
+        (f248_handler,) = struct.unpack_from("<I", data, APPROVED_F248_TABLE_FILE_OFFSET)
+        if f248_handler != APPROVED_F248_HANDLER:
+            raise PreflightError("approved-F248-function-dispatch-mismatch")
 
     candidates = {}
     for name, va in REFERENCE_AI_FUNCTIONS.items():
@@ -211,6 +219,8 @@ def inspect_pe32(data: bytes) -> dict:
         "candidate_functions": candidates,
         "approved_cd_static_disassembly": confirmed_cd,
         "If_IfNot_share_same_native_handler": confirmed_cd,
+        "F248_function_dispatch_verified": confirmed_cd,
+        "F248_native_handler_va": ("0x0047A8E0" if confirmed_cd else None),
         "shared_handler_va": ("0x00489250" if confirmed_cd else None),
         "cdecl_three_argument_shape_observed": confirmed_cd,
         "runtime_detour_abi_or_reentrancy_proven": False,

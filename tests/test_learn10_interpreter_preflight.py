@@ -129,8 +129,10 @@ class ApprovedPe32InterpreterPreflightTests(unittest.TestCase):
         self.assertEqual(module.APPROVED_SHARED_IF_HANDLER, 0x489250)
         self.assertEqual(module.APPROVED_KEYWORD_TABLE_FILE_OFFSET, 0xA5E80)
         self.assertEqual(module.APPROVED_IFNOT_INVERSION_VA, 0x4892DF)
+        self.assertEqual(module.APPROVED_F248_TABLE_FILE_OFFSET, 0xA5C20)
+        self.assertEqual(module.APPROVED_F248_HANDLER, 0x47A8E0)
         self.assertEqual(len(module.APPROVED_IFNOT_SHA256_16), 64)
-        self.assertEqual(len(module.APPROVED_MACHINE_CODE), 6)
+        self.assertEqual(len(module.APPROVED_MACHINE_CODE), 9)
         for va, digest in module.APPROVED_MACHINE_CODE.values():
             self.assertGreaterEqual(va, 0x400000)
             self.assertEqual(len(digest), 64)
