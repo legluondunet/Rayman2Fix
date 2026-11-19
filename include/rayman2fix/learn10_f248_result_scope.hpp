@@ -51,7 +51,12 @@ inline bool research_learn10_f248_scope_matches(const Learn10F248Sample& s) {
            s.output_value==0u;
 }
 
-// No detour, trampoline, or temporary-result write is currently authorized.
+// The candidate is available ONLY in a separately built research DLL;
+// the normal build and standalone model tests always keep the hook disabled.
+#if defined(RAYMAN2FIX_LEARN10_F248_PROTO) && RAYMAN2FIX_LEARN10_F248_PROTO
+constexpr bool kLearn10F248RuntimeHookAllowed=true;
+#else
 constexpr bool kLearn10F248RuntimeHookAllowed=false;
+#endif
 
 } // namespace r2fix
