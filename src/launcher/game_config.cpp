@@ -266,7 +266,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     const auto raw=lines_of(ini);
     std::string current;
     bool graphics=false,features=false,aspect=false,force=false,skip=false;
-    bool dialogue=false,cinematic=false,legacy=false,music=false,old_early_theme=false;
+    bool dialogue=false,cinematic=false,legacy=false,music=false,old_early_theme=false,old_skip_learn10=false;
     bool obsolete_resolution=false;
     for(const auto& text:raw) {
         std::string next;
@@ -285,6 +285,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(current=="GRAPHICS" && key=="RESOLUTION")obsolete_resolution=true;
         if(current=="GRAPHICS" && key=="ASPECTRATIO")aspect=true;
         if(current=="FEATURES" && key=="SKIPCINEMATICS")skip=true;
+        if(current=="FEATURES" && key=="SKIPLEARN10")old_skip_learn10=true;
         if(current=="FEATURES" && key=="REMOVEDIALOGUEBACKGROUNDS")dialogue=true;
         if(current=="FEATURES" && key=="REMOVECINEMATICBARS")cinematic=true;
         if(current=="FEATURES" && key=="MUSICINPAUSEMENU")music=true;
@@ -304,7 +305,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     const std::string migrated_aspect=(!aspect && force &&
         read_ini_flag(ini,"Graphics","Force4x3")) ? "4:3" : "Auto";
     if(aspect && !force && skip && dialogue && cinematic && music &&
-       !old_early_theme && !legacy && !obsolete_resolution)return;
+       !old_early_theme && !old_skip_learn10 && !legacy && !obsolete_resolution)return;
     std::vector<std::string> output;
     std::string active;
     bool added_aspect=false,added_skip=false,added_dialogue=false,added_cinematic=false,added_music=false;
@@ -366,7 +367,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(active=="FEATURES" && (key=="REMOVEBLACKFRAMES" ||
                                    key=="SKIPLEARN10" ||
                                    key=="EARLYTHEMEMUSICEXPERIMENTAL"))
-            continue; // retired toggles; MusicInPauseMenu owns both audio paths
+            continue; // retired toggles; MusicInPauseMenu owns audio; F248 owns Learn_10
         // Remove only our generated comments; retain custom user annotations.
         if(active=="FEATURES" &&
            (t=="; Learn_10 skipping remains disabled (unsafe)" ||
