@@ -31,7 +31,10 @@ KNOWN_ANCHORS = {
     "screen_to_vertex": (0x422940, bytes.fromhex("81 EC D4 00 00 00")),
     "superimposed_proc": (0x4710C0, bytes.fromhex("83 EC 28 8D 44 24 30")),
 }
-WINDOW = 64
+# Keyword and condition reference VAs are only 0x30 bytes apart.
+# Keep samples inside the nearest *candidate* entrypoint interval; never
+# treat their spans as verified function bounds.
+WINDOW = 32
 MAX_FILE_SIZE = 64 * 1024 * 1024
 
 
