@@ -441,6 +441,7 @@ struct RuntimeOptions {
     DWORD remove_dialogue_backgrounds;
     DWORD remove_cinematic_bars;
     DWORD music_in_pause_menu;
+    DWORD skip_learn10;
 };
 
 bool valid_angle(float v) {
@@ -5176,7 +5177,7 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
 #endif
 #if RAYMAN2FIX_LEARN10_F248_FEATURE || RAYMAN2FIX_RESEARCH_PROBES
     // Standard F248 uses the same camera-thread render scheduler as
-    // the validated research build. SkipCinematics=0 cannot arm F248.
+    // the validated research build. Either opt-out prevents F248 armament.
     // Diagnostics remain gated by Debug.Log, not feature activation.
     poll_learn_intro_skip();
 #endif
@@ -7292,11 +7293,12 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_log = settings->logging != 0;
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
     g_f248_enabled.store(
-        r2fix::learn10_f248_enabled_for_ini(settings->skip_cinematics),
+        r2fix::learn10_f248_enabled_for_ini(settings->skip_cinematics,
+                                            settings->skip_learn10),
         std::memory_order_release);
     log_line(g_f248_enabled.load(std::memory_order_acquire)?
-        "RUNTIME-LEARN10-F248: enabled=1 source=Features.SkipCinematics route=native-F248-temp-result exact-director-only=1 story_bit1188_readonly=1" :
-        "RUNTIME-LEARN10-F248: enabled=0 source=Features.SkipCinematics (natural scene unchanged)");
+        "RUNTIME-LEARN10-F248: enabled=1 source=Features.SkipLearn10 route=native-F248-temp-result exact-director-only=1 story_bit1188_readonly=1" :
+        "RUNTIME-LEARN10-F248: enabled=0 source=Features.SkipLearn10 (natural scene unchanged)");
 #endif
     if(settings->music_in_pause_menu>1u)return 5;
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
@@ -7349,7 +7351,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     if (g_log) log_line(kResearchProbes ?
         "RUNTIME-CONFIG: research_probes=1 (read-only experimental trace build)" :
         "RUNTIME-CONFIG: research_probes=0 (standard release instrumentation)");
-    if(settings->skip_cinematics>1u ||
+    if(settings->skip_cinematics>1u || settings->skip_learn10>1u ||
        settings->remove_dialogue_backgrounds>1u ||
        settings->remove_cinematic_bars>1u)
         return 5;
