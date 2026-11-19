@@ -5662,7 +5662,14 @@ void poll_learn_intro_skip() {
             log_line("RUNTIME-INTRO: learn_10 native handover observed without experimental NOMOVIES activation (story bit 1091)");
         }
 #else
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+        if (g_f248_ever_armed.load(std::memory_order_acquire))
+            log_line("RUNTIME-INTRO: learn_10 F248 native handover observed (story bit 1091; temporary-result route, see F248 verification)");
+        else
+            log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091; F248 not armed)");
+#else
         log_line("RUNTIME-INTRO: learn_10 natural handover observed (story bit 1091), no skip requested");
+#endif
 #endif
 #if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
         learn10_script_gate_handover_verification();
