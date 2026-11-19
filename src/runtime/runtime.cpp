@@ -5435,6 +5435,9 @@ void log_native_gate_history(DWORD elapsed) {
 }
 
 void poll_learn_intro_skip() {
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+    learn10_f248_poll();
+#endif
 #if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
     learn10_script_gate_poll();
 #endif
@@ -5468,6 +5471,11 @@ void poll_learn_intro_skip() {
 #endif
     if (!g_current_level) return;
     if (!r2fix::is_first_playable_level(g_current_level)) {
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+        learn10_f248_disarm("level-left");
+        g_f248_attempted=false;
+        g_f248_ever_armed.store(false,std::memory_order_release);
+#endif
 #if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
         learn10_script_gate_restore("level-left");
         if (!g_script_gate_armed) {
@@ -5569,6 +5577,11 @@ void poll_learn_intro_skip() {
             log_line("RUNTIME-INTRO: learn_10 experimental script keyword route enabled (progress bit1188 remains read-only)");
         else
 #endif
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+        if(!handed_over && g_f248_opted_in.load(std::memory_order_acquire))
+            log_line("RUNTIME-INTRO: learn_10 F248 native temporary result prototype enabled; game story array remains read-only");
+        else
+#endif
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
             : "RUNTIME-INTRO: learn_10 skip disabled after visual regression; natural scene unchanged");
@@ -5626,6 +5639,12 @@ void poll_learn_intro_skip() {
     else
         learn10_script_gate_arm(handed_over,elapsed);
 #endif
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+    if (handed_over)
+        learn10_f248_disarm("story1091-handover");
+    else
+        learn10_f248_try_arm(handed_over,elapsed);
+#endif
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
         g_learn_handover_start = GetTickCount();
@@ -5647,6 +5666,9 @@ void poll_learn_intro_skip() {
 #endif
 #if RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTO
         learn10_script_gate_handover_verification();
+#endif
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+        learn10_f248_handover();
 #endif
         bool nomovies=false;
         const bool known=game_story_bit(g_progress_words,
@@ -7967,6 +7989,17 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     log_line(g_script_gate_opted_in ?
         "RUNTIME-LEARN10-SCRIPT-GATE: enabled=1 native-else-input-gate=1 story_bit1188_readonly=1 script_keyword_inversion=1 experimental=1" :
         "RUNTIME-LEARN10-SCRIPT-GATE: enabled=0 opt-in via RAYMAN2FIX_LEARN10_SCRIPT_GATE_PROTOTYPE=1");
+#endif
+#if RAYMAN2FIX_LEARN10_F248_PROTO
+    wchar_t f248_optin[8]{};
+    const DWORD f248_optin_size=GetEnvironmentVariableW(
+        L"RAYMAN2FIX_LEARN10_F248_PROTOTYPE",f248_optin,8);
+    g_f248_opted_in.store(g_log && settings->skip_cinematics==1u &&
+        f248_optin_size==1 && f248_optin[0]==L'1',
+        std::memory_order_release);
+    log_line(g_f248_opted_in.load(std::memory_order_acquire)?
+        "RUNTIME-LEARN10-F248: enabled=1 route=native-F248-temp-result exact-director-only=1 story_bit1188_readonly=1 experimental=1" :
+        "RUNTIME-LEARN10-F248: enabled=0 set env RAYMAN2FIX_LEARN10_F248_PROTOTYPE=1 and Features.SkipCinematics=1 to opt in");
 #endif
     if(settings->music_in_pause_menu>1u)return 5;
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
