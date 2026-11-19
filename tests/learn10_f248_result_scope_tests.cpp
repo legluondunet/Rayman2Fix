@@ -19,6 +19,8 @@ int main() {
     s.root_is_ifnot=s.function_node_is_type3=s.function_result_known=true;
     CHECK(research_learn10_f248_scope_matches(s));
     CHECK(!kLearn10F248RuntimeHookAllowed);
+    CHECK(kLearn10F248FunctionType==3);
+    CHECK(kLearn10F248IntegerResultType==6);
     auto c=s;
     c.actor_so=0x9999; CHECK(!research_learn10_f248_scope_matches(c));
     c=s; c.intelligence=0x6000; CHECK(!research_learn10_f248_scope_matches(c));
