@@ -42,6 +42,11 @@ def fake_image():
     for name, (va, signature) in module.KNOWN_ANCHORS.items():
         off = RAW_OFFSET + (va - module.IMAGE_BASE - TEXT_RVA)
         raw[off:off+len(signature)] = signature
+    # Synthetic direct CALL bytes targeting the two nearby candidates.
+    # This is intentionally only a raw byte-pattern fixture.
+    for call_va, target_va in [(0x431000, 0x480800), (0x431020, 0x480830)]:
+        call_off = RAW_OFFSET + (call_va - module.IMAGE_BASE - TEXT_RVA)
+        struct.pack_into("<Bi", raw, call_off, 0xE8, target_va - (call_va + 5))
     for index, va in enumerate(module.REFERENCE_AI_FUNCTIONS.values()):
         off = RAW_OFFSET + (va - module.IMAGE_BASE - TEXT_RVA)
         raw[off:off+8] = bytes([0x40 + index] * 8)
@@ -62,6 +67,12 @@ class ApprovedPe32InterpreterPreflightTests(unittest.TestCase):
             self.assertEqual(c["sample_size"], 32)
             self.assertFalse(c["machine_code_reviewed"])
             self.assertFalse(c["call_abi_verified"])
+            self.assertFalse(c["patterns_are_verified_calls"])
+        self.assertEqual(out["candidate_functions"]["eval_keyword"]["raw_e8_rel32_pattern_count"], 1)
+        self.assertEqual(out["candidate_functions"]["eval_keyword"]["raw_e8_rel32_site_rvas"], ["0x031000"])
+        self.assertEqual(out["candidate_functions"]["eval_condition"]["raw_e8_rel32_pattern_count"], 1)
+        self.assertEqual(out["candidate_functions"]["eval_condition"]["raw_e8_rel32_site_rvas"], ["0x031020"])
+        self.assertEqual(out["candidate_functions"]["eval_tree"]["raw_e8_rel32_pattern_count"], 0)
 
     def test_machine_and_header_checks_are_fail_closed(self):
         for which, offset, replacement in [

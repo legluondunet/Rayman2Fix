@@ -128,6 +128,29 @@ def inspect_pe32(data: bytes) -> dict:
             raise PreflightError("approved-anchor-mismatch-" + name)
         anchors[name] = "matched"
 
+    # Raw byte-pattern search ONLY: E8 + signed rel32 may occur in the
+    # middle of another instruction, embedded data or jump tables.
+    # These results are NOT decoded x86 callsites and cannot verify the ABI.
+    patterns = {name: [] for name in REFERENCE_AI_FUNCTIONS}
+    target_to_name = {va: name for name, va in REFERENCE_AI_FUNCTIONS.items()}
+    for section_name, section_rva, virtual_size, raw_offset, raw_size, flags in sections:
+        if not (flags & 0x20000000):
+            continue
+        scan_size = min(raw_size, virtual_size)
+        if scan_size < 5:
+            continue
+        # Process the exact on-disk executable section only.
+        for i in range(scan_size - 4):
+            at = raw_offset + i
+            if data[at] != 0xE8:
+                continue
+            displacement = struct.unpack_from("<i", data, at + 1)[0]
+            source_va = IMAGE_BASE + section_rva + i
+            destination_va = (source_va + 5 + displacement) & 0xFFFFFFFF
+            name = target_to_name.get(destination_va)
+            if name is not None:
+                patterns[name].append(source_va - IMAGE_BASE)
+
     candidates = {}
     for name, va in REFERENCE_AI_FUNCTIONS.items():
         sample = read_exec(va, WINDOW)
@@ -138,6 +161,12 @@ def inspect_pe32(data: bytes) -> dict:
             "sample_sha256": hashlib.sha256(sample).hexdigest(),
             "machine_code_reviewed": False,
             "call_abi_verified": False,
+            # Heuristic byte patterns, not a disassembly or proven callers.
+            "raw_e8_rel32_pattern_count": len(patterns[name]),
+            "raw_e8_rel32_site_rvas": [
+                f"0x{rva:06X}" for rva in patterns[name][:20]
+            ],
+            "patterns_are_verified_calls": False,
         }
     if len({x["sample_sha256"] for x in candidates.values()}) != len(candidates):
         raise PreflightError("identical-evaluator-candidates")

@@ -196,3 +196,22 @@ evaluated and whether a strictly actor-scoped non-mutating override is
 possible without disrupting engine recursion, reentrancy, timing,
 other script nodes, and original return semantics. Do not substitute
 the address taken from ACP_Ray2 for this verification.
+
+
+### Read-only E8/rel32 call-pattern inventory
+
+The preflight also scans **only executable PE section bytes** for the
+raw 5-byte byte-pattern `E8 <signed-rel32>` whose computed destination
+equals a reference evaluator VA. Each candidate gets
+`raw_e8_rel32_pattern_count` and up to 20 source RVAs. These outputs
+are **heuristic matches, NOT verified calls**: an `E8` byte may be
+part of another x86 instruction, a constant, or embedded data. A
+missing pattern also does not rule out indirect calls, inlined code,
+or a different implementation. In particular, the preflight
+**cannot infer calling convention or correct interception semantics**
+from byte patterns, and `allows_hook` remains unconditionally false.
+
+The synthetic tests inject two isolated relative-CALL encodings targeting
+the two close-together reference evaluator VAs and validate the
+reported counts and source RVAs. No game image or byte payload is
+included in the repository or the CI workflow.
