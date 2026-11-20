@@ -15,7 +15,42 @@ are deliberately **not hooked** in the unverified CD engine code.
 Never enable both actor-level X squeeze and the existing narrowed
 screen-world viewport X squeeze at once.
 
-## Permanent layout
+## Current installation layout (November 2026)
+
+```text
+Rayman2Fix.exe
+Rayman2Fix.ini
+Rayman2Fix_installer.log
+Rayman2Fix.log
+game/
+    rayman2.exe
+    fix.dll
+    glide2x.dll             # SHA256-pinned GameFrame, same dir as game EXE
+    glide2x.dll.bak         # only when an unknown/older DLL was replaced
+    data/
+    dll/
+mods/textures/logo.rgba    # optional
+docs/README.md
+docs/build-info.txt
+docs/GameFrame-LICENSE-APACHE.txt
+state/                     # receipts, after game installation only
+```
+
+The launcher installs and verifies the bundled renderer directly under
+`game/`; the OS DLL search uses the executable directory without altering
+`PATH`. A known, identical old nested `third_party/gameframe/glide2x.dll`
+may be pruned after verifying the replacement; unknown nested files and
+backups are preserved. The root-level game-data installation and historical
+`rayman2/` directories are **not** migrated.
+
+## Historical layout and original implementation plan (superseded)
+
+The following is retained as historical research. Its former directories
+`Rayman2Fix/` and direct-on-disk runtime naming do not describe the
+current installer. For the active structure use the section above or
+`docs/README.md`.
+
+
 
 ```text
 Rayman2Fix.exe                       launcher / installer / verifier
