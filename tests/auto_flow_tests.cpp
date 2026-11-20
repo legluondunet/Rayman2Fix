@@ -277,6 +277,13 @@ int main() {
               !fs::exists(root / "third_party" / "gameframe" /
                           "GameFrame-LICENSE-APACHE.txt"),
               "GameFrame Apache license remains deployed, under docs/ only");
+        check(fs::is_regular_file(root / "docs" / "LICENSE") &&
+              !fs::exists(root / "LICENSE") &&
+              contents(root / "docs" / "LICENSE").find("GNU GENERAL PUBLIC LICENSE") !=
+                  std::string::npos &&
+              contents(root / "docs" / "LICENSE").find("Version 3, 29 June 2007") !=
+                  std::string::npos,
+              "single EXE deploys full GPLv3 license in docs/ only, separate from GameFrame");
         const auto installed_guide=contents(root / "docs" / "README.md");
         check(installed_guide.find("Installation neuve uniquement") !=
                     std::string::npos &&

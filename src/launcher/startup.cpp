@@ -132,6 +132,28 @@ void ensure_embedded_readme(const fs::path& root) {
     if(!out)throw std::runtime_error("could not write bundled README.md");
 }
 
+// The GPLv3 license text is stored as RCDATA #1106 in the launcher.
+// Place it beside the separate GameFrame Apache license under docs/.
+void ensure_embedded_license(const fs::path& root) {
+    const auto dest=layout::docs(root)/"LICENSE";
+    if(fs::is_symlink(dest) ||
+       (fs::exists(dest) && !fs::is_regular_file(dest)))
+        throw std::runtime_error("unsafe existing LICENSE path");
+    if(fs::exists(dest))return; // Keep existing local documentation unchanged.
+    const HRSRC resource=FindResourceW(nullptr,MAKEINTRESOURCEW(1106),
+                                      MAKEINTRESOURCEW(10));
+    if(!resource)throw std::runtime_error("missing bundled GPLv3 LICENSE");
+    const auto size=SizeofResource(nullptr,resource);
+    const HGLOBAL loaded=LoadResource(nullptr,resource);
+    const auto* bytes=loaded ? static_cast<const char*>(LockResource(loaded)) : nullptr;
+    if(!bytes || !size)throw std::runtime_error("invalid bundled GPLv3 LICENSE");
+    std::ofstream out(dest,std::ios::binary|std::ios::trunc);
+    if(!out)throw std::runtime_error("cannot deploy LICENSE");
+    out.write(bytes,static_cast<std::streamsize>(size));
+    out.close();
+    if(!out)throw std::runtime_error("could not write bundled GPLv3 LICENSE");
+}
+
 // The launcher owns game/fix.dll. Obsolete copies from older launcher builds
 // are not retained: the verified embedded runtime is the only supported one.
 struct RuntimeDeployment {
@@ -279,6 +301,7 @@ void Startup::initialize(bool provision_files) {
         ensure_gameframe_glide(game_dir_);
         prune_obsolete_nested_gameframe(root_);
         ensure_embedded_readme(root_);
+        ensure_embedded_license(root_);
 #endif
     }
 

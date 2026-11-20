@@ -118,12 +118,12 @@ if(WIN32)
     "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc")
   add_dependencies(Rayman2Fix Rayman2FixRuntime)
 
-  # A concise installation guide is embedded for docs/README.md.
-  # GitHub README.md remains at the repo root; do not copy it into the game directory.
-  # Project licensing has not yet been selected (README.md); never invent one.
+  # Bundle the user guide and the GPLv3 license with the single EXE.
+  # The original LICENSE remains at repo root; both are deployed into docs/.
+  # GameFrame keeps its own separate Apache 2.0 notice (RCDATA 1104).
   file(GENERATE
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc"
-    CONTENT "1105 RCDATA \"${CMAKE_CURRENT_SOURCE_DIR}/docs/README.md\"\n")
+    CONTENT "1105 RCDATA \"${CMAKE_CURRENT_SOURCE_DIR}/docs/README.md\"\n1106 RCDATA \"${CMAKE_CURRENT_SOURCE_DIR}/LICENSE\"\n")
   set_source_files_properties(
     "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc"
     PROPERTIES GENERATED TRUE)
