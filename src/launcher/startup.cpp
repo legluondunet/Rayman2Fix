@@ -289,6 +289,7 @@ void Startup::initialize(bool provision_files) {
         if (!ini) throw std::runtime_error("cannot create Rayman2Fix.ini");
         ini << "[Debug]\n"
                "Log=1\n"
+               "; Rayman2Fix: auto-disable logs after first successful verified game run\n"
                "\n"
                "[Graphics]\n"
 
