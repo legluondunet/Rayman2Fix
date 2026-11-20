@@ -9,6 +9,7 @@
 #include "rayman2fix/patch_install.hpp"
 #include "rayman2fix/sha256.hpp"
 #include "rayman2fix/startup.hpp"
+#include "rayman2fix/wine_audio_latency.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -113,6 +114,22 @@ private:
     bool active_ = false;
     DWORD error_ = 0;
 };
+
+// Wine advertises wine_get_version from ntdll; this test must be performed
+// inside the Windows launcher. Never infer Wine from file paths, the OS
+// version, or an inherited PULSE_* variable on native Windows.
+bool wine_runtime_detected() {
+    const HMODULE ntdll=GetModuleHandleW(L"ntdll.dll");
+    return ntdll && GetProcAddress(ntdll,"wine_get_version") != nullptr;
+}
+
+// The user may intentionally set this to 0 or an empty value. In either
+// case do not override it. A failed environment query also fails closed.
+bool pulse_latency_already_present() {
+    SetLastError(ERROR_SUCCESS);
+    const DWORD n=GetEnvironmentVariableW(L"PULSE_LATENCY_MSEC",nullptr,0);
+    return n!=0 || GetLastError()!=ERROR_ENVVAR_NOT_FOUND;
+}
 
 struct Handle {
     HANDLE handle = nullptr;
@@ -225,6 +242,7 @@ ChildProcessResult run_child_process(
     ScopedChildEnvironment fps_limit(L"RAYMAN2FIX_FPS_LIMIT");
     ScopedChildEnvironment glide_probe(L"RAYMAN2FIX_GLIDE_PROBE");
     ScopedChildEnvironment cinematic_probe(L"RAYMAN2FIX_CINEMATIC_PROBE");
+    ScopedChildEnvironment wine_pulse_latency(L"PULSE_LATENCY_MSEC");
     // Windows/Wine resolve the verified game/glide2x.dll from the EXE directory.
     // Do not alter PATH for the child process.
     if (!glide_probe.set(display.log_enabled ? L"1" : L"0"))
@@ -247,17 +265,32 @@ ChildProcessResult run_child_process(
         if (!fps_limit.set(std::to_wstring(display.fps_limit)))
             return {false, 0, fps_limit.error()};
     }
+    // A/B under Wine showed no reproduced crackles when this process-scoped
+    // PulseAudio latency request was 60 ms. Apply only to a verified game,
+    // and ONLY under Wine when the user has not supplied their own value.
+    // Do not mutate the Wine prefix, the host, or native Windows audio.
+    const auto audio_policy = select_wine_audio_latency(
+        display.wine_audio_latency_experiment,
+        wine_runtime_detected(),pulse_latency_already_present());
+    if (audio_policy == WineAudioLatencyAction::request_60ms &&
+        !wine_pulse_latency.set(L"60"))
+        return {false, 0, wine_pulse_latency.error()};
+
     // Win32 CreateProcessW may modify the command-line buffer. A trusted
     // absolute application path is used; there is no shell involved.
     const BOOL created = CreateProcessW(application.c_str(), &commandline[0],
                                         nullptr, nullptr, FALSE, 0, nullptr,
                                         cwd.c_str(), &startup, &raw);
     const DWORD spawn_error = created ? 0 : GetLastError();
+    wine_pulse_latency.restore();
     cinematic_probe.restore();
     glide_probe.restore();
     fps_limit.restore();
     glide_size.restore();
     if (!created) return {false, 0, spawn_error};
+    if (audio_policy == WineAudioLatencyAction::request_60ms)
+        std::cout << "AUDIO-WINE-LATENCY: requested=60ms scope=game-only; "
+                     "experimental PulseAudio latency workaround\n";
     Handle process(raw.hProcess);
     Handle thread(raw.hThread);
     ChildProcessResult result{};
@@ -368,6 +401,9 @@ int launch_verified_game(Startup& startup, bool verify) {
         ? 60u : configured_fps_limit(startup.ini_path());
     display.skip_executable_precheck = !verify;
     display.log_enabled = startup.logging_enabled();
+    // Research-only branch: verify the Wine fix works through the normal
+    // single-executable launcher. Direct unchecked launches remain untouched.
+    display.wine_audio_latency_experiment = verify;
     if (verify) ensure_rayman2_dpi_manifest(root);
     const auto aspect = static_cast<double>(content.first) /
                         static_cast<double>(content.second);
