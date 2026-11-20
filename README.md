@@ -7,6 +7,14 @@
 > is removed during INI migration; an existing MusicInPauseMenu choice
 > is preserved.
 
+## Release status
+
+No public release has been tagged yet. Before publishing, review the
+[release readiness checklist](docs/release-readiness.md), including
+the project license, distribution of the approved EXE replacement,
+and validation on native Windows 11. The standard Windows x86 CI
+artifact is a test build, not a final release.
+
 ## Clean installation layout (no migration)
 
 Rayman2Fix uses a **new clean installation**. Earlier `rayman2/` and
