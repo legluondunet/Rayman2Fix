@@ -246,6 +246,13 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME game-launch-preflight COMMAND game_launch_tests)
 
+  # Pure policy regression coverage on Linux and Windows: Wine-only, only
+  # verified Rayman 2 child, and preserve explicit user env overrides.
+  add_executable(wine_audio_latency_tests tests/wine_audio_latency_tests.cpp)
+  target_include_directories(wine_audio_latency_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME wine-audio-child-latency-policy COMMAND wine_audio_latency_tests)
+
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
   # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
   add_executable(esc_music_shadow_cpp_tests tests/esc_music_shadow_cpp_tests.cpp)
