@@ -60,6 +60,10 @@ class BuiltinF248Guards(unittest.TestCase):
         self.assertIn('settings->skip_learn10>1u',self.runtime)
         self.assertIn('Debug.DisableLearn10Skip',self.runtime)
 
+    def test_legacy_runtime_message_removed(self):
+        self.assertNotIn("Learn_10 skip disabled after visual regression",self.runtime)
+        self.assertIn("Learn_10 F248 controlled separately",self.runtime)
+
     def test_log_off_still_collects_director_identity(self):
         self.assertIn("observe_learn10_f248_director_without_log",self.runtime)
         self.assertIn("sample_natural_director(ray_so)",self.runtime)
