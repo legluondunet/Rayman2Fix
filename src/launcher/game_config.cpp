@@ -492,9 +492,11 @@ bool finish_first_session_logging(const fs::path& ini) {
     const std::string eol = bytes.find("\r\n") != std::string::npos ? "\r\n" : "\n";
     const bool trailing_newline = !bytes.empty() && bytes.back() == '\n';
     std::string updated;
+    bool first_line = true;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         if (i == marker_line) continue;
-        if (!updated.empty()) updated += eol;
+        if (!first_line) updated += eol;
+        first_line = false;
         updated += i == log_line ? "Log=0" : lines[i];
     }
     if (trailing_newline) updated += eol;
