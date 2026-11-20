@@ -32,7 +32,7 @@ static void usage() {
         << "Automatic install searches for exactly one .iso/.cue beside the launcher.\n"
         << "Optional: approved decrypted Rayman2.exe beside launcher replaces the protected EXE.\n"
         << "Installation directory: <launcher>/game/ (game assets and fix.dll)\n"
-        << "Resources: <launcher>/third_party/gameframe/, mods/, docs/, state/\n"
+        << "Resources: <launcher>/game/glide2x.dll, mods/, docs/, state/\n"
         << "Unchecked launch does not verify executable presence, hashes, CD files,\n"
         << "or modify/repair the installation; OS errors are returned as-is.\n"
         << "Options: <launcher>/Rayman2Fix.ini\n"

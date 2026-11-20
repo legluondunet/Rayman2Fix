@@ -125,11 +125,12 @@ void write_receipt(const fs::path& staged, const DiscInfo& info) {
 }
 
 bool bootstrap_fix_file(const std::string& name) {
-    return name=="FIX.DLL" || name=="FIX.DLL.BAK";
+    return name=="FIX.DLL" || name=="FIX.DLL.BAK" ||
+           name=="GLIDE2X.DLL" || name=="GLIDE2X.DLL.BAK";
 }
 
-// Fresh bootstrap game/ must contain only the launcher-owned runtime and
-// optionally its immediately preceding backup, never a legacy installation.
+// Fresh bootstrap game/ may contain only the launcher-owned fix and Glide
+// DLLs and their optional backups, never unrelated game/user files.
 void check_bootstrap_workspace(const fs::path& game_dir) {
     if(fs::exists(layout::state(game_dir.parent_path())) ||
        fs::is_symlink(layout::state(game_dir.parent_path())))
@@ -255,6 +256,27 @@ void copy_bootstrap_files(const fs::path& original, const fs::path& staged) {
     if(!exists_file(source) || fs::exists(dest) || fs::is_symlink(dest))
         throw std::runtime_error("cannot stage verified clean fix.dll");
     fs::copy_file(source,dest);
+#ifdef _WIN32
+    // Linux unit tests do not bundle a Windows Glide binary; the actual
+    // installer runs as a Windows executable on both Windows and Wine.
+    if (!gameframe_glide_ready(original))
+        throw std::runtime_error("cannot stage unverified game-local glide2x.dll");
+    const auto glide=staged/"glide2x.dll";
+    if (fs::exists(glide) || fs::is_symlink(glide))
+        throw std::runtime_error("CD contains a conflicting glide2x.dll");
+    fs::copy_file(original/"glide2x.dll",glide);
+    if (!gameframe_glide_ready(staged))
+        throw std::runtime_error("staged game-local glide2x.dll verification failed");
+    // Keep any previous user DLL preserved by the single .bak rotation.
+    const auto old_backup=original/"glide2x.dll.bak";
+    if (fs::exists(old_backup) || fs::is_symlink(old_backup)) {
+        if (!exists_file(old_backup) ||
+            fs::exists(staged/"glide2x.dll.bak") ||
+            fs::is_symlink(staged/"glide2x.dll.bak"))
+            throw std::runtime_error("unsafe GameFrame backup during game staging");
+        fs::copy_file(old_backup,staged/"glide2x.dll.bak");
+    }
+#endif
 }
 
 void initialize_audio(const fs::path& staged) {
@@ -507,7 +529,7 @@ int run_automatic(Startup& startup, bool install_only) {
                       "applied (original kept as rayman2.exe.bak)" :
                       "not applied (no supported embedded/local delta)") << '\n'
                   << "  GameFrame: "
-                  << (gameframe_glide_ready(layout::gameframe(startup.root())) ? "verified" : "not verified")
+                  << (gameframe_glide_ready(root) ? "verified" : "not verified")
                   << (install_only
                       ? "\n  Game startup: skipped (--install-only)\n"
                       : "\n  Game startup: attempting supported EXE (first real-world test)\n");
