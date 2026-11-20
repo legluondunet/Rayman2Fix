@@ -5136,7 +5136,8 @@ void poll_second_intro_skip() {
          (g_intro_guard.released && down && !g_intro_guard.requested));
     const auto game_base=intro_game_base();
     const int mode=need_mode ? intro_native_engine_mode(game_base) : -1;
-    const bool ready=mode==int(kIntroEnginePlaying);
+    // A queued press must survive Alt-Tab; dispatch only in foreground.
+    const bool ready=foreground && mode==int(kIntroEnginePlaying);
     const bool was_pending=g_intro_guard.pending;
     const bool requested=g_intro_guard.update(g_current_level,down,ready);
     if(in_intro && g_log && !was_pending && g_intro_guard.pending) {
