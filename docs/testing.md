@@ -139,8 +139,10 @@ The one `[Debug] Log=1` option enables two **independent** files beside
   diagnostics. Reset **only before a verified game launch**, so a
   launcher-only invocation cannot erase the previous runtime trace.
 
-`Log=0` suppresses both and removes stale copies. Neither log creates
-rotated backups. Because they write separate files, the installer no
+`Log=0` suppresses both. **Update (20 November 2026, PR #37):**
+existing logs are **not deleted or modified** by subsequent `Log=0`
+invocations; this supersedes the earlier stale-log cleanup policy.
+Neither log creates rotated backups. Because they write separate files, the installer no
 longer pauses its log stream while the game is running. Historical
 `Rayman2Fix(yyyymmdd-hhmmss).log` samples documented below were captured
 **before this split** and included both sources.
