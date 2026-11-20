@@ -26,15 +26,13 @@ game/
   rayman2.exe.bak         (verified protected original)
   rayman2.exe.manifest
   fix.dll                 (one injected Rayman2Fix runtime)
+  glide2x.dll             (SHA256-pinned GameFrame Glide 2)
   ubi.ini
   data/
   dll/
 mods/
   textures/
     logo.rgba             (optional externally supplied HD atlas)
-third_party/
-  gameframe/
-    glide2x.dll           (SHA256-pinned GameFrame Glide 2)
 docs/
   GameFrame-LICENSE-APACHE.txt
   build-info.txt
@@ -44,14 +42,12 @@ state/
   .rayman2fix-exe-patch.tsv  (only after an approved EXE replacement)
 ```
 
-The launcher creates `game/`, `mods/textures/`,
-`third_party/gameframe/` and `docs/` in a new folder. Its embedded
+The launcher creates `game/`, `mods/textures/` and `docs/` in a new folder. Its embedded
 installation guide is deployed at `docs/README.md`, never beside the
 launcher. The GameFrame Apache notice and build metadata also live in
-`docs/`, while the vendor's verified `glide2x.dll` remains in
-`third_party/gameframe/`. `state/` is published with a verified CD installation and is
+`docs/`, while the verified `glide2x.dll` is placed beside `game/rayman2.exe`. `state/` is published with a verified CD installation and is
 reserved for SHA-256 installation receipts, **not documentation**. The original game retains `game/` as its working
-directory. A child-only DLL lookup path points at `third_party/gameframe/`;
+directory. Windows/Wine load `game/glide2x.dll` directly without modifying `PATH`;
 the runtime is injected as `game/fix.dll` by the existing verified
 `LoadLibraryW` route. No bundled WinMM proxy or changes to the on-disk
 `rayman2.exe` imports are required. All logs remain next to the launcher.
@@ -630,7 +626,7 @@ refuses the operation without modifying that folder.
 - The single launcher installs the exact embedded `game/fix.dll`. A foreign
   or outdated runtime is replaced directly, **without preserving**
   `game/fix.dll.bak`; legacy managed runtime backups are discarded. The
-  SHA-256-pinned GameFrame runtime remains under `third_party/gameframe/`.
+  SHA-256-pinned GameFrame runtime is deployed as `game/glide2x.dll`.
   The only maintained mod INI is `Rayman2Fix.ini` at the launcher root.
 - User textures under `mods/textures/` are independent of retail CD
   extraction and are not touched by installer file publication.
@@ -645,10 +641,10 @@ in-game Windows/Wine acceptance test prior to release.
 
 The Windows workflow distributes **one executable**, `Rayman2Fix.exe`.
 Running it in a new folder creates the clean `game/`, `mods/`,
-`third_party/`, `docs/`, `state/` layout documented above. There is **no
+`docs/` layout, with `state/` created only after successful installation. There is **no
 automatic migration** from historical install trees. The game runtime is
 `game/fix.dll`; the pinned renderer is in
-`third_party/gameframe/glide2x.dll`. Third-party or game DLLs are never
+`game/glide2x.dll`. Third-party or game DLLs are never
 renamed to match the project runtime.
 
 **`Rayman2Fix.ini` is the only user-editable configuration file.** Newly
