@@ -289,6 +289,7 @@ void Startup::initialize(bool provision_files) {
         if (!ini) throw std::runtime_error("cannot create Rayman2Fix.ini");
         ini << "[Debug]\n"
                "Log=1\n"
+               "; Rayman2Fix: auto-disable logs after first successful verified game run\n"
                "\n"
                "[Graphics]\n"
 
@@ -413,10 +414,8 @@ void Startup::initialize(bool provision_files) {
     const auto debug = option("Debug", "Log");
     logging_enabled_ = debug != "0";
     if (!logging_enabled_) {
-        // Prevent a stale log from looking like the latest run.
-        std::error_code ignored;
-        fs::remove(log_path_, ignored);
-        fs::remove(runtime_log_path_, ignored);
+        // Silent sessions leave the first installer/runtime diagnostics
+        // untouched for later troubleshooting. No create/truncate/delete.
         return;
     }
     // The installer log is reset each launcher run; an earlier game log is

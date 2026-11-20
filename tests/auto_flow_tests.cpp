@@ -137,6 +137,85 @@ int main() {
                   "old installations are rejected without migration or mutation");
             fs::remove_all(oldroot);
         }
+        // First install enables diagnostics and retains both session logs;
+        // only successful verified game completion consumes this marker.
+        {
+            const auto test_root=root/"first-session-logging";
+            fs::create_directories(test_root);
+            const auto ini=test_root/"Rayman2Fix.ini";
+            const auto install_log=test_root/"Rayman2Fix_installer.log";
+            const auto runtime_log=test_root/"Rayman2Fix.log";
+            {
+                r2fix::Startup first(test_root/"Rayman2Fix.exe");
+                first.initialize();
+                check(contents(ini).find("Log=1")!=std::string::npos &&
+                      contents(ini).find("auto-disable logs after first successful verified game run")!=
+                          std::string::npos,
+                      "fresh installation starts with one-shot Log=1");
+                check(fs::exists(install_log) && !fs::exists(runtime_log),
+                      "installer-only stage writes installer log, not runtime log");
+                // An installation attempt/--install-only must leave the marker
+                // until the *first actual successful verified game session*.
+                const auto before=contents(ini);
+                first.log("INSTALL-ONLY: no game session yet");
+                check(contents(ini)==before,
+                      "installer-only work must not auto-disable first session logs");
+                first.prepare_runtime_log();
+                const auto installer_before=contents(install_log);
+                const auto runtime_before=contents(runtime_log);
+                check(r2fix::finish_first_session_logging(ini),
+                      "successful verified session consumes one-shot logging marker");
+                check(contents(ini).find("Log=0")!=std::string::npos &&
+                      contents(ini).find("auto-disable logs after first successful verified game run")==
+                          std::string::npos,
+                      "first successful game session automatically stores Log=0");
+                check(contents(install_log)==installer_before &&
+                      contents(runtime_log)==runtime_before,
+                      "the two first-session logs remain available after opt-out");
+                const auto completed=contents(ini);
+                check(!r2fix::finish_first_session_logging(ini) &&
+                      contents(ini)==completed,
+                      "automatic opt-out runs only once");
+                // User-set Log=1 without the one-shot marker remains untouched.
+                write(ini, "[Debug]\nLog=1\n[Personal]\nKeep=manual\n");
+                const auto manual=contents(ini);
+                check(!r2fix::finish_first_session_logging(ini) &&
+                      contents(ini)==manual,
+                      "manually reenabled logging is never auto-disabled");
+                write(ini, "[Debug]\nLog=0\n");
+            }
+            // Later invocations must neither rewrite nor erase the original
+            // two first-session diagnostics.
+            const auto retained_installer = contents(install_log);
+            const auto retained_runtime = contents(runtime_log);
+            {
+                r2fix::Startup next(test_root/"Rayman2Fix.exe");
+                next.initialize();
+                next.prepare_runtime_log();
+                next.log("MUST-NOT-APPEND-WHEN-SILENT");
+                check(!next.logging_enabled() &&
+                      contents(install_log)==retained_installer &&
+                      contents(runtime_log)==retained_runtime,
+                      "later Log=0 runs preserve both original logs byte for byte");
+            }
+            // Preserve BOM, CRLF and unrelated options on first-session edit.
+            const std::string bom="\xef\xbb\xbf";
+            write(ini,bom+"[Debug]\r\nLog=1\r\n"
+                      "; Rayman2Fix: auto-disable logs after first successful verified game run\r\n"
+                      "[Personal]\r\nKeep=present\r\n");
+            check(r2fix::finish_first_session_logging(ini) &&
+                  contents(ini)==bom+"[Debug]\r\nLog=0\r\n"
+                                 "[Personal]\r\nKeep=present\r\n",
+                  "first-session opt-out preserves Windows BOM, CRLF and user options");
+            // Never rewrite ambiguous user INIs.
+            const auto ambiguous=bom+"[Debug]\r\nLog=1\r\nLog=1\r\n"
+                "; Rayman2Fix: auto-disable logs after first successful verified game run\r\n";
+            write(ini,ambiguous);
+            check(!r2fix::finish_first_session_logging(ini) &&
+                  contents(ini)==ambiguous,
+                  "duplicated Log keys are left untouched");
+            fs::remove_all(test_root);
+        }
         r2fix::Startup app(root / "Rayman2Fix.exe");
         app.initialize();
         app.log("LAUNCH-PRETEST: launcher active");

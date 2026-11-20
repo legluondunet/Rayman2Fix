@@ -43,6 +43,11 @@ bool configured_music_in_pause_menu(const std::filesystem::path& rayman2fix_ini)
 // Add missing new options to existing INIs without discarding user settings.
 void ensure_rayman2fix_ini_options(const std::filesystem::path& rayman2fix_ini);
 
+// Convert only a launcher-generated first-run Log=1 marker to Log=0 after
+// the first successful verified game session. Returns false for user-managed
+// INIs and subsequent launches. Preserves the rest of the INI.
+bool finish_first_session_logging(const std::filesystem::path& rayman2fix_ini);
+
 // 60 FPS by default; 0 means unlimited, otherwise accept 15..240 FPS.
 std::uint32_t configured_fps_limit(
     const std::filesystem::path& rayman2fix_ini);

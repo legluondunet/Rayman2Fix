@@ -450,6 +450,80 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     }
 }
 
+
+bool finish_first_session_logging(const fs::path& ini) {
+    // This marker appears only in INIs that *this launcher* created for
+    // first-run diagnostics. Never switch a manually enabled Log=1 to 0.
+    static const std::string marker =
+        "; Rayman2Fix: auto-disable logs after first successful verified game run";
+    const auto lines = lines_of(ini);
+    std::string active;
+    std::size_t log_line = lines.size(), marker_line = lines.size();
+    std::size_t log_count = 0, marker_count = 0;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        std::string next;
+        if (section(lines[i], next)) { active = next; continue; }
+        const std::string t = trim(lines[i]);
+        if (t == marker) {
+            ++marker_count;
+            marker_line = i;
+        }
+        if (active != "DEBUG" || t.empty() || t.front() == ';' ||
+            t.front() == '#') continue;
+        const auto eq = t.find('=');
+        if (eq != std::string::npos && upper(trim(t.substr(0,eq))) == "LOG") {
+            ++log_count;
+            log_line = i;
+        }
+    }
+    if (!marker_count) return false;
+    // Only a single, untouched Log=1 immediately followed by the exact
+    // installer marker is eligible. Any ambiguity leaves the INI unchanged.
+    if (marker_count != 1 || log_count != 1 ||
+        log_line == lines.size() || marker_line != log_line + 1 ||
+        trim(lines[log_line]) != "Log=1") return false;
+
+    std::ifstream in(ini, std::ios::binary);
+    if (!in) throw std::runtime_error("cannot read first-session INI");
+    const std::string bytes((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+    if (in.bad()) throw std::runtime_error("cannot finish reading first-session INI");
+    in.close();
+    const std::string eol = bytes.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+    const bool trailing_newline = !bytes.empty() && bytes.back() == '\n';
+    std::string updated;
+    bool first_line = true;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        if (i == marker_line) continue;
+        if (!first_line) updated += eol;
+        first_line = false;
+        updated += i == log_line ? "Log=0" : lines[i];
+    }
+    if (trailing_newline) updated += eol;
+
+    fs::path pending = ini; pending += ".rayman2fix-new";
+    fs::path previous = ini; previous += ".rayman2fix-previous";
+    if (fs::exists(pending) || fs::is_symlink(pending) ||
+        fs::exists(previous) || fs::is_symlink(previous))
+        throw std::runtime_error("unresolved first-session INI staging");
+    try {
+        std::ofstream out(pending, std::ios::binary | std::ios::trunc);
+        if (!out) throw std::runtime_error("cannot stage first-session INI");
+        out.write(updated.data(), static_cast<std::streamsize>(updated.size()));
+        out.close();
+        if (!out) throw std::runtime_error("cannot write first-session INI");
+        fs::rename(ini, previous);
+        try { fs::rename(pending, ini); }
+        catch (...) { fs::rename(previous, ini); throw; }
+        fs::remove(previous);
+    } catch (...) {
+        std::error_code ignored;
+        fs::remove(pending, ignored);
+        throw;
+    }
+    return true;
+}
+
 void synchronize_rayman2_ubi_ini(const fs::path& game_dir, Startup& startup) {
     const auto [w,h] = desktop_resolution();
     const fs::path target = game_dir / "ubi.ini";
