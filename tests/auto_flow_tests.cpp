@@ -173,12 +173,17 @@ int main() {
               "bootstrap creates a textures folder for replacement images");
         check(fs::is_directory(root / "docs"),
               "bootstrap creates a separate docs/ folder");
+        check(!fs::exists(root / "third_party"),
+              "new renderer layout must not create a third_party/ folder");
         check(fs::is_regular_file(root / "docs" / "build-info.txt") &&
               !fs::exists(root / "build-info.txt"),
               "installer writes build identity exclusively to docs/");
         check(!fs::exists(root / "state"),
               "state/ is reserved for verified installation receipts");
 #ifdef _WIN32
+        check(fs::is_regular_file(root / "game" / "glide2x.dll") &&
+              !fs::exists(root / "third_party"),
+              "single EXE installs Glide into game/ beside rayman2.exe");
         check(fs::is_regular_file(root / "docs" / "README.md") &&
               !fs::exists(root / "README.md"),
               "single EXE deploys documentation only inside docs/");
