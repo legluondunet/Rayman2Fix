@@ -7,6 +7,9 @@ namespace r2fix {
 // are embedded into the launcher as RCDATA #1103 and #1104.
 // Unknown or mismatched glide2x.dll files are backed up before replacement.
 void ensure_gameframe_glide(const std::filesystem::path& game_dir);
+// Remove only the old *verified* nested DLL after game/glide2x.dll is active.
+// Preserve unknown files and legacy backups; do not follow symlinks.
+void prune_obsolete_nested_gameframe(const std::filesystem::path& launcher_root);
 
 // Cryptographic integrity check against the SHA-256 baked into the launcher.
 // Returns false when this is a developer build with no bundled GameFrame.
