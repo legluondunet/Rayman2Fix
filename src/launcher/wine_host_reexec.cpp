@@ -97,7 +97,7 @@ std::optional<int> maybe_reexec_with_wine_host_audio(
     // translation. The *second* launcher proceeds with original setup,
     // verification, FOV/runtime injection, logging and process supervision.
     std::vector<std::string> args = {
-        "env", "PULSE_LATENCY_MSEC=60",
+        "/usr/bin/env", "PULSE_LATENCY_MSEC=60",
         unix_loader.name, unix_launcher.name,
         "--wine-audio-host-ready"
     };
