@@ -71,6 +71,15 @@ state/
 - **`state/` : reçus d'installation et d'intégrité SHA-256 uniquement.**
   Ne pas les supprimer : ils sont indispensables à la vérification normale.
 - `Rayman2Fix.ini` : unique fichier de configuration utilisateur du correctif.
+  Lors d'une installation neuve, `[Debug] Log=1` permet de recueillir
+  `Rayman2Fix_installer.log` puis `Rayman2Fix.log` pendant le premier
+  lancement **vérifié et terminé normalement**. Après cette première
+  session, l'installateur remplace automatiquement `Log=1` par `Log=0`.
+  `--install-only`, `--verify` et les échecs de démarrage ne déclenchent
+  pas ce changement. Un `Log=1` réactivé manuellement reste activé.
+  Les deux premiers journaux restent lisibles jusqu'au prochain lancement :
+  avec `Log=0`, les anciens journaux sont retirés pour éviter toute
+  confusion avec une session récente.
   La résolution de sortie suit automatiquement celle de l'écran principal ;
   il n'existe plus d'option `Resolution`. Le FOV 3D s'adapte au format
   de l'affichage, sans modifier le mode Glide interne 1024×768 en 4:3.
