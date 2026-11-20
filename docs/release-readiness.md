@@ -7,13 +7,18 @@ La branche `main` contient les PR #35 (saut F248), #36 (Glide dans
 
 ## Chantier prioritaire A — corriger les craquements audio
 
-- [ ] Reproduire séparément les craquements de musique, effets sonores
-  et transitions (démarrage, jeu, ESC, reprise et Alt+Tab). Noter
-  si les symptômes diffèrent entre Wine 11.19 et Windows natif.
-- [ ] Établir un **témoin** en `[Features] MusicInPauseMenu=0`,
-  puis comparer à `=1` sans désactiver durablement la fonction.
-  Ne pas présumer que les défauts proviennent des hooks du menu ESC :
-  l'audio ordinaire du jeu et sa chaîne native sont une cause possible distincte.
+- [x] **Périmètre confirmé par le mainteneur (20 novembre 2026) :**
+  craquements audibles **partout**, en jeu normal, pendant les cinématiques
+  et dans le menu Échap. Le problème n'est pas limité à l'ouverture du menu.
+- [ ] Qualifier d'abord un passage de **jeu normal** sans transition,
+  puis les cinématiques et le menu Échap. Distinguer musique et effets,
+  craquements continus et intermittents, et comparer Wine à Windows natif.
+- [ ] Faire un test de contrôle temporaire avec `MusicInPauseMenu=0`,
+  sans désactiver durablement la fonction. L'absence de son dans le menu
+  n'est **pas** une preuve de disparition des craquements. Surveiller les
+  craquements en jeu normal et dans les cinématiques pour isoler le correctif.
+- [ ] Rechercher la cause **dans la chaîne audio générale** en premier,
+  et non dans les seuls hooks de la musique du menu Échap.
 - [ ] Analyser sans modifier le flux audio les paramètres du jeu
   (`snd_cpa.ini`), les pilotes `WAVMWbvr.dll` / `APMMXbvr.dll`,
   les décodages ADPCM, les transitions SXD, la cadence et les
