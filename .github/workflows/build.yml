@@ -166,9 +166,10 @@ jobs:
           [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=1`r`n", [Text.UTF8Encoding]::new($true))
           & ./build/Release/Rayman2Fix.exe
           if ($LASTEXITCODE -ne 2 -or !(Test-Path build/Release/Rayman2Fix_installer.log) -or
-              (Test-Path build/Release/Rayman2Fix.log) -or
+              !(Test-Path build/Release/Rayman2Fix.log) -or
+              [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path build/Release/Rayman2Fix.log))) -ne $runtimeBefore -or
               !(Select-String -Path build/Release/Rayman2Fix_installer.log -Pattern 'CONFIG: Debug.Log=1')) {
-            throw "Log=1 must create installer log without launching game"
+            throw "Log=1 must create installer log and preserve previous runtime log without a new game session"
           }
           # PowerShell propagates the last nonzero native exit code even
           # after all expected-error assertions have passed.
