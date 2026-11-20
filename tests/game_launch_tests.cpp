@@ -117,12 +117,34 @@ int main(int argc, char** argv) {
         const auto child = fs::absolute(fs::path(argv[0])).parent_path() /
                            "test_child_process.exe";
         check(fs::exists(child), "test child executable not built");
-        const auto result = r2fix::run_child_process(child, root);
+        r2fix::ChildDisplayOptions native_audio_probe{};
+        native_audio_probe.wine_audio_latency_experiment = true;
+        const auto result = r2fix::run_child_process(child, root, native_audio_probe);
         check(result.started && result.error_code == 0 &&
               result.exit_code == 17,
               "child process launched and nonzero exit status captured");
         check(fs::exists(root / "child-working-directory.txt"),
               "child inherited explicit game working directory");
+        {
+            // Native Windows must pass an existing Unix/PulseAudio variable
+            // unchanged (or leave it absent), even with experimental policy.
+            const DWORD wanted=GetEnvironmentVariableW(
+                L"PULSE_LATENCY_MSEC",nullptr,0);
+            std::wstring original;
+            if(wanted && wanted<=32768) {
+                original.resize(wanted,L'\0');
+                const DWORD copied=GetEnvironmentVariableW(
+                    L"PULSE_LATENCY_MSEC",original.data(),wanted);
+                check(copied<wanted,"cannot read parent Pulse latency environment");
+                original.resize(copied);
+            }
+            std::wifstream trace(root/"child-pulse-latency.txt");
+            check(static_cast<bool>(trace),"native child Pulse env probe missing");
+            std::wstring inherited;
+            std::getline(trace,inherited);
+            check(inherited==original,
+                  "native Windows child must inherit unmodified Pulse latency");
+        }
 
         {
             std::wifstream probe(root/"child-dll-search-path.txt");
