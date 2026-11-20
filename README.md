@@ -7,13 +7,18 @@
 > is removed during INI migration; an existing MusicInPauseMenu choice
 > is preserved.
 
-## Release status
+## Project license and current priorities
 
-No public release has been tagged yet. Before publishing, review the
-[release readiness checklist](docs/release-readiness.md), including
-the project license, distribution of the approved EXE replacement,
-and validation on native Windows 11. The standard Windows x86 CI
-artifact is a test build, not a final release.
+Rayman2Fix is licensed under **GNU GPL version 3 only**
+(`SPDX-License-Identifier: GPL-3.0-only`; see [LICENSE](LICENSE)).
+The bundled GameFrame renderer retains its **separate Apache 2.0 license**.
+The single Windows launcher installs both notices under `docs/`.
+
+**No immediate release is planned.** Before revisiting publication, the
+two main engineering priorities are correcting audio crackling and
+integrating SDL3 controller support without changing keyboard controls.
+Track these in the [work-in-progress roadmap](docs/release-readiness.md).
+The standard Windows x86 CI artifact is a test build, not a final release.
 
 ## Clean installation layout (no migration)
 
@@ -42,6 +47,7 @@ mods/
   textures/
     logo.rgba             (optional externally supplied HD atlas)
 docs/
+  LICENSE                  (GNU GPLv3 project license)
   GameFrame-LICENSE-APACHE.txt
   build-info.txt
   README.md              (user guide bundled by the launcher)
@@ -1043,7 +1049,8 @@ Some CD executables use obsolete SafeDisc protection; compatibility must be
 verified separately from ISO extraction. Support will be claimed only after
 testing the corresponding edition on Windows and Wine/Proton.
 
-Rayman2Fix's own project license is **to be selected before release**.
-Third-party components will retain their respective notices and licenses.
+Rayman2Fix is released as source under **GNU GPL version 3 only**
+(`GPL-3.0-only`). Its bundled user-facing `docs/LICENSE` contains the
+full GPLv3 text. GameFrame keeps its own Apache 2.0 license and notice.
 
 Prepared by legluondunet, assisted by ChatGPT (OpenAI).
