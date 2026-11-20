@@ -20,7 +20,7 @@
 #include "rayman2fix/scene_script_probe.hpp"
 #include "rayman2fix/intro_gate_timeline.hpp"
 #include "rayman2fix/intro_integer_reader.hpp"
-#if RAYMAN2FIX_LEARN10_F248_PROTO
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
 #include "rayman2fix/learn10_f248_result_scope.hpp"
 #endif
 #include "rayman2fix/game_window_icon.hpp"
@@ -53,11 +53,8 @@
 #ifndef RAYMAN2FIX_RESEARCH_PROBES
 #define RAYMAN2FIX_RESEARCH_PROBES 0
 #endif
-#ifndef RAYMAN2FIX_LEARN10_F248_PROTO
-#define RAYMAN2FIX_LEARN10_F248_PROTO 0
-#endif
-#if RAYMAN2FIX_LEARN10_F248_PROTO && !RAYMAN2FIX_RESEARCH_PROBES
-#error Learn_10 F248 candidate requires research build
+#ifndef RAYMAN2FIX_LEARN10_F248_FEATURE
+#define RAYMAN2FIX_LEARN10_F248_FEATURE 0
 #endif
 #ifndef RAYMAN2FIX_AUDIO_TRACE
 #define RAYMAN2FIX_AUDIO_TRACE 0
@@ -222,7 +219,7 @@ bool g_learn_nomovies_conditions_logged = false;
 // validated with ReadProcessMemory before every use.
 std::uintptr_t g_observed_director_intelligence = 0;
 std::uintptr_t g_observed_director_behaviours = 0;
-#if RAYMAN2FIX_LEARN10_F248_PROTO
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
 std::uintptr_t g_observed_director_superobject = 0;
 #endif
 int g_observed_director_index = -1;
@@ -247,14 +244,14 @@ ObservedDirectorByte g_director_var95{};
 ObservedDirectorByte g_director_var96{};
 r2fix::IntroGateTimeline<48> g_director_gate_history{};
 bool g_director_gate_history_reported = false;
-#if RAYMAN2FIX_LEARN10_F248_PROTO
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
 // Explicitly separate experimental F248 return-value interception. The ONLY
 // shared native change is one atomic function-table slot; no story/script data
 // is modified. All script-scoped data is published before armed=true.
 using F248Function = void* (__cdecl*)(void*,void*,void*);
 std::atomic<F248Function> g_f248_original{nullptr};
 std::atomic<bool> g_f248_slot_installed{false};
-std::atomic<bool> g_f248_opted_in{false};
+std::atomic<bool> g_f248_enabled{false};
 std::atomic<bool> g_f248_armed{false};
 std::atomic<bool> g_f248_ever_armed{false};
 std::atomic<std::uintptr_t> g_f248_so{0};
@@ -444,6 +441,7 @@ struct RuntimeOptions {
     DWORD remove_dialogue_backgrounds;
     DWORD remove_cinematic_bars;
     DWORD music_in_pause_menu;
+    DWORD skip_learn10;
 };
 
 bool valid_angle(float v) {
@@ -3784,7 +3782,7 @@ bool game_story_bit(std::uintptr_t words, unsigned bit, bool& value) {
     return true;
 }
 
-#if RAYMAN2FIX_LEARN10_F248_PROTO
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
 bool learn10_f248_writable_slot(std::uintptr_t address) {
     if (!address || (address & (alignof(LONG)-1u)) != 0u)
         return false;
@@ -4330,7 +4328,7 @@ bool log_natural_intro_snapshot(const char* stage, DWORD t) {
     if (director.matches==1 && director.intelligence && director.behaviours) {
         g_observed_director_intelligence=director.intelligence;
         g_observed_director_behaviours=director.behaviours;
-#if RAYMAN2FIX_LEARN10_F248_PROTO
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
         g_observed_director_superobject=director.superobject;
 #endif
         g_observed_director_index=director.counters.current_behaviour_index;
@@ -4568,7 +4566,7 @@ void trace_native_exit_gates(DWORD elapsed) {
 // Flush at least one second *after* natural handover: printing dozens
 // of lines while the renderer is handing Rayman control back would itself
 // perturb frame scheduling. No reads from freed director pointers.
-#if RAYMAN2FIX_LEARN10_F248_PROTO
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
 // The verified native F248 function-entry table at VA=0x4A5C20 is
 // already writable game .data, unlike the original machine code. Change
 // ONLY that pointer using a 32-bit compare/exchange; never touch Fix.V42,
@@ -4651,8 +4649,7 @@ void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output
     sample.output_value=result_value;
     sample.elapsed_ms=DWORD(GetTickCount()-g_f248_armed_at.load(std::memory_order_acquire));
     sample.approved_cd=true; // code/table checked exactly before installing
-    sample.explicitly_opted_in=g_f248_opted_in.load(std::memory_order_acquire);
-    sample.logging=g_log;
+    sample.skip_cinematics_enabled=g_f248_enabled.load(std::memory_order_acquire);
     sample.exact_script=true; // fingerprinted on this exact b3/rule1 during arm
     sample.live_learn10=g_f248_armed.load(std::memory_order_acquire);
     sample.first_visit=true; // story1091 was read as false above
@@ -4661,8 +4658,8 @@ void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output
     sample.root_is_ifnot=true; // K1 root just checked above
     sample.function_node_is_type3=true;
     sample.function_result_known=true; // original F248 result, not a guess
-    if (r2fix::kLearn10F248RuntimeHookAllowed &&
-        r2fix::research_learn10_f248_scope_matches(sample)) {
+    if (g_f248_enabled.load(std::memory_order_acquire) &&
+        r2fix::learn10_f248_scope_matches(sample)) {
         g_f248_matches.fetch_add(1u,std::memory_order_relaxed);
         // Writable ephemeral AI_tdstGetSetParam value produced by the
         // original handler. Never modify a game progress/story word.
@@ -4676,7 +4673,7 @@ void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output
 }
 
 bool learn10_f248_install_slot() {
-    if (!r2fix::kLearn10F248RuntimeHookAllowed ||
+    if (!g_f248_enabled.load(std::memory_order_acquire) ||
         g_f248_slot_installed.load(std::memory_order_acquire)) return false;
     const auto base=g_approved_exe_base.load(std::memory_order_acquire);
     if (!base || base!=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)))
@@ -4730,7 +4727,7 @@ void learn10_f248_disarm(const char* reason) {
 }
 
 void learn10_f248_try_arm(bool handed_over,DWORD elapsed) {
-    if (!g_f248_opted_in.load(std::memory_order_acquire) ||
+    if (!g_f248_enabled.load(std::memory_order_acquire) ||
         g_f248_attempted || !g_learn_intro_seen || handed_over ||
         elapsed>3000u || !g_learn_script_probe_done ||
         !g_progress_words || !g_observed_director_superobject ||
@@ -4816,7 +4813,7 @@ void learn10_f248_handover() {
     const bool known=game_story_bit(g_progress_words,kNoMoviesCheatBit,nomovies);
     char msg[220]{};
     std::snprintf(msg,sizeof(msg),
-        "RUNTIME-LEARN10-F248: phase=handover-verification status=%s known=%u bit1188=%u overrides=%u slot_restored=%u (temporary-output-only; gameplay still needs test)",
+        "RUNTIME-LEARN10-F248: phase=handover-verification status=%s known=%u bit1188=%u overrides=%u slot_restored=%u (temporary-output-only)",
         (known&&!nomovies&&!g_f248_slot_installed.load(std::memory_order_acquire)&&
          g_f248_overrides.load(std::memory_order_acquire)>0)?"pass":"INCONCLUSIVE",
         unsigned(known),unsigned(nomovies),
@@ -4824,7 +4821,7 @@ void learn10_f248_handover() {
         unsigned(!g_f248_slot_installed.load(std::memory_order_acquire)));
     log_line(msg);
 }
-#endif // RAYMAN2FIX_LEARN10_F248_PROTO
+#endif // RAYMAN2FIX_LEARN10_F248_FEATURE
 
 void log_native_gate_history(DWORD elapsed) {
     if (!g_log || g_director_gate_history_reported) return;
@@ -4851,13 +4848,48 @@ void log_native_gate_history(DWORD elapsed) {
     }
 }
 
+// Director identification must not depend on Debug.Log. The normal
+// diagnostic snapshot returns early when logging is disabled, so use
+// the same bounded, read-only scene recognizer to obtain the strictly
+// checked F248 director pointers without logging any frame data.
+// No actor/script memory changes occur here.
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+void observe_learn10_f248_director_without_log(DWORD elapsed) {
+    if (g_log || !g_f248_enabled.load(std::memory_order_acquire) ||
+        !g_learn_intro_seen || g_f248_attempted || g_learn_script_probe_done ||
+        elapsed>3000u || !g_current_level ||
+        !r2fix::is_first_playable_level(g_current_level) ||
+        g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())
+        return;
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    std::uint32_t ray_so=0;
+    if (!base || !read_u32(base+kRaymanSuperObjectRva,ray_so) || !ray_so)
+        return;
+    const auto director=sample_natural_director(ray_so);
+    if (director.matches!=1 || !director.superobject ||
+        !director.intelligence || !director.behaviours ||
+        director.counters.current_behaviour_index!=3)
+        return;
+    g_observed_director_superobject=director.superobject;
+    g_observed_director_intelligence=director.intelligence;
+    g_observed_director_behaviours=director.behaviours;
+    g_observed_director_index=director.counters.current_behaviour_index;
+    g_learn_script_probe_done=true;
+}
+#endif
+
 void poll_learn_intro_skip() {
-#if RAYMAN2FIX_LEARN10_F248_PROTO
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
     learn10_f248_poll();
 #endif
-    if (!g_current_level) return;
+    if (!g_current_level) {
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+        learn10_f248_disarm("no-active-level");
+#endif
+        return;
+    }
     if (!r2fix::is_first_playable_level(g_current_level)) {
-#if RAYMAN2FIX_LEARN10_F248_PROTO
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
         learn10_f248_disarm("level-left");
         g_f248_attempted=false;
         g_f248_ever_armed.store(false,std::memory_order_release);
@@ -4874,7 +4906,7 @@ void poll_learn_intro_skip() {
         g_learn_nomovies_conditions_logged = false;
         g_observed_director_intelligence = 0;
         g_observed_director_behaviours = 0;
-#if RAYMAN2FIX_LEARN10_F248_PROTO
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
         g_observed_director_superobject = 0;
 #endif
         g_observed_director_index = -1;
@@ -4920,20 +4952,24 @@ void poll_learn_intro_skip() {
         g_learn_logged = true;
         g_learn_intro_seen = !handed_over;
         g_learn_intro_start = GetTickCount();
-#if RAYMAN2FIX_LEARN10_F248_PROTO
-        if (!handed_over && g_f248_opted_in.load(std::memory_order_acquire))
-            log_line("RUNTIME-INTRO: learn_10 F248 temporary-result prototype enabled; progress bit1188 read-only");
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+        if (!handed_over && g_f248_enabled.load(std::memory_order_acquire))
+            log_line("RUNTIME-INTRO: learn_10 F248 native skip enabled; progress bit1188 read-only");
         else
 #endif
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
-            : "RUNTIME-INTRO: learn_10 skip disabled after visual regression; natural scene unchanged");
+            : "RUNTIME-INTRO: learn_10 skip disabled by configuration; natural scene unchanged");
         if (g_learn_intro_seen)
             g_learn_first_valid_seen=log_natural_intro_snapshot("opening",0);
     }
     // Sample state changes whenever the callback actually runs; no timer
     // or secondary thread is created. A handover may take 25-40+ seconds.
     const DWORD elapsed=DWORD(GetTickCount()-g_learn_intro_start);
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+    if (!handed_over)
+        observe_learn10_f248_director_without_log(elapsed);
+#endif
     if (g_learn_intro_seen && !g_learn_handover && g_log) {
         trace_natural_intro_changes(elapsed);
         // The native exit can remove the director between frames. Stop
@@ -4966,7 +5002,7 @@ void poll_learn_intro_skip() {
             }
         }
     }
-#if RAYMAN2FIX_LEARN10_F248_PROTO
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
     if (handed_over)
         learn10_f248_disarm("story1091-handover");
     else
@@ -4975,7 +5011,7 @@ void poll_learn_intro_skip() {
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
         g_learn_handover_start = GetTickCount();
-#if RAYMAN2FIX_LEARN10_F248_PROTO
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
         if(g_f248_ever_armed.load(std::memory_order_acquire))
             log_line("RUNTIME-INTRO: learn_10 F248 native handover observed (story bit1091; temporary-result route)");
         else
@@ -5139,10 +5175,10 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     proto_pending_voice_observe_tick();
 #endif
 #endif
-#if RAYMAN2FIX_RESEARCH_PROBES
-    // This is exclusively the disabled Learn_10 research observer.
-    // Never invoke it from an ordinary release callback, regardless
-    // of whether 3D camera or GLI fallback drove the scheduler.
+#if RAYMAN2FIX_LEARN10_F248_FEATURE || RAYMAN2FIX_RESEARCH_PROBES
+    // Standard F248 uses the same camera-thread render scheduler as
+    // the validated research build. Either opt-out prevents F248 armament.
+    // Diagnostics remain gated by Debug.Log, not feature activation.
     poll_learn_intro_skip();
 #endif
     if(first_fallback && g_log) {
@@ -6498,7 +6534,7 @@ void initialize_native_intro_skip() {
     g_request_intro_level.store(
         reinterpret_cast<RequestLevel>(const_cast<void*>(request)),
         std::memory_order_release);
-    log_line("RUNTIME-INTRO: native Jail_20 skip armed; Learn_10 skip disabled after visual regression");
+    log_line("RUNTIME-INTRO: native Jail_20 skip armed; Learn_10 F248 controlled separately by Features.SkipCinematics and Debug.DisableLearn10Skip");
 }
 
 // Three game-side GLI driver callback slots, verified only for the SHA256-locked
@@ -7255,16 +7291,14 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     g_hud_scale = r2fix::hud_4_3_scale(settings->output_width,
                                       settings->output_height);
     g_log = settings->logging != 0;
-#if RAYMAN2FIX_LEARN10_F248_PROTO
-    wchar_t f248_optin[8]{};
-    const DWORD f248_optin_size=GetEnvironmentVariableW(
-        L"RAYMAN2FIX_LEARN10_F248_PROTOTYPE",f248_optin,8);
-    g_f248_opted_in.store(g_log && settings->skip_cinematics==1u &&
-        f248_optin_size==1 && f248_optin[0]==L'1',
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+    g_f248_enabled.store(
+        r2fix::learn10_f248_enabled_for_ini(settings->skip_cinematics,
+                                            settings->skip_learn10),
         std::memory_order_release);
-    log_line(g_f248_opted_in.load(std::memory_order_acquire)?
-        "RUNTIME-LEARN10-F248: enabled=1 route=native-F248-temp-result exact-director-only=1 story_bit1188_readonly=1 experimental=1" :
-        "RUNTIME-LEARN10-F248: enabled=0 set env RAYMAN2FIX_LEARN10_F248_PROTOTYPE=1 and Features.SkipCinematics=1 to opt in");
+    log_line(g_f248_enabled.load(std::memory_order_acquire)?
+        "RUNTIME-LEARN10-F248: enabled=1 source=Features.SkipCinematics+Debug.DisableLearn10Skip route=native-F248-temp-result exact-director-only=1 story_bit1188_readonly=1" :
+        "RUNTIME-LEARN10-F248: enabled=0 source=Features.SkipCinematics+Debug.DisableLearn10Skip (natural scene unchanged)");
 #endif
     if(settings->music_in_pause_menu>1u)return 5;
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
@@ -7317,7 +7351,7 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     if (g_log) log_line(kResearchProbes ?
         "RUNTIME-CONFIG: research_probes=1 (read-only experimental trace build)" :
         "RUNTIME-CONFIG: research_probes=0 (standard release instrumentation)");
-    if(settings->skip_cinematics>1u ||
+    if(settings->skip_cinematics>1u || settings->skip_learn10>1u ||
        settings->remove_dialogue_backgrounds>1u ||
        settings->remove_cinematic_bars>1u)
         return 5;

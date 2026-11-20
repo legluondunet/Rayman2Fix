@@ -267,7 +267,7 @@ ChildProcessResult run_child_process(
             reinterpret_cast<std::uintptr_t>(process.handle),
             raw.dwProcessId, working_directory / "fix.dll",
             display.output_width, display.output_height, display.log_enabled,
-            display.skip_cinematics, display.remove_dialogue_backgrounds,
+            display.skip_cinematics, display.skip_learn10, display.remove_dialogue_backgrounds,
             display.remove_cinematic_bars, display.music_in_pause_menu);
     }
 
@@ -355,6 +355,8 @@ int launch_verified_game(Startup& startup, bool verify) {
     display.output_height = content.second;
     display.skip_cinematics = !unchecked_without_ini &&
         configured_skip_cinematics(startup.ini_path());
+    display.skip_learn10 = !unchecked_without_ini &&
+        configured_skip_learn10(startup.ini_path());
     display.remove_dialogue_backgrounds = !unchecked_without_ini &&
         configured_remove_dialogue_backgrounds(startup.ini_path());
     display.remove_cinematic_bars = !unchecked_without_ini &&

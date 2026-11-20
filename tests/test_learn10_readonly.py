@@ -1,4 +1,4 @@
-"""Regressions for the disabled unsafe Learn_10 cinematic shortcut."""
+"""Regressions excluding legacy unsafe Learn_10 shortcuts, while allowing guarded F248."""
 from pathlib import Path
 import unittest
 
@@ -21,12 +21,12 @@ class Learn10SafeFallback(unittest.TestCase):
             "GetAsyncKeyState(", "g_request_intro_level",
         ):
             self.assertNotIn(dangerous, block)
-        self.assertIn("skip disabled after visual regression",block)
-        # The research observer is source-retained but MUST NOT be
-        # executed for ordinary release builds. This test is intentionally
-        # structural so the same safety policy applies on Linux CI.
+        self.assertIn("skip disabled by configuration",block)
+        # Full research diagnostics remain gated, while the new safe-scoped
+        # F248 poll is legitimately enabled in standard release callbacks.
+        # This test remains structural so Linux CI can catch regressions.
         self.assertIn("#define RAYMAN2FIX_RESEARCH_PROBES 0", source)
-        self.assertIn("#if RAYMAN2FIX_RESEARCH_PROBES\n    // This is exclusively the disabled Learn_10 research observer.", source)
+        self.assertIn("#if RAYMAN2FIX_LEARN10_F248_FEATURE || RAYMAN2FIX_RESEARCH_PROBES", source)
         self.assertIn("#if RAYMAN2FIX_RESEARCH_PROBES\n        // Read-only hook at VA 0x4710C0", source)
         self.assertIn("if(kResearchProbes && first && frame_relative_reports<4)", source)
         self.assertIn("if (!kResearchProbes) return;", source)

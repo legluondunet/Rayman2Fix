@@ -98,7 +98,8 @@ bool remote_call(HANDLE process, void* routine, void* parameter,
 }
 struct Init {
     DWORD size, magic, width, height, logging, skip_cinematics,
-          remove_dialogue_backgrounds, remove_cinematic_bars, music_in_pause_menu;
+          remove_dialogue_backgrounds, remove_cinematic_bars, music_in_pause_menu,
+          skip_learn10;
 };
 #endif
 } // namespace
@@ -106,7 +107,7 @@ struct Init {
 FovHookResult initialize_game_fov(
     std::uintptr_t process_handle, unsigned long pid,
     const fs::path& dll, std::uint32_t width, std::uint32_t height,
-    bool log_enabled, bool skip_cinematics, bool remove_dialogue_backgrounds,
+    bool log_enabled, bool skip_cinematics, bool skip_learn10, bool remove_dialogue_backgrounds,
     bool remove_cinematic_bars, bool music_in_pause_menu) {
     FovHookResult result{};
 #ifdef _WIN32
@@ -168,7 +169,7 @@ FovHookResult initialize_game_fov(
                        log_enabled ? 1u : 0u, skip_cinematics ? 1u : 0u,
                        remove_dialogue_backgrounds ? 1u : 0u,
                        remove_cinematic_bars ? 1u : 0u,
-                       music_in_pause_menu ? 1u : 0u};
+                       music_in_pause_menu ? 1u : 0u, skip_learn10 ? 1u : 0u};
     RemoteData arguments(process, &options, sizeof(options));
     if (!arguments.memory) {
         result.win32_error = GetLastError();
@@ -190,6 +191,7 @@ FovHookResult initialize_game_fov(
     (void)height;
     (void)log_enabled;
     (void)skip_cinematics;
+    (void)skip_learn10;
     (void)remove_dialogue_backgrounds;
     (void)remove_cinematic_bars;
     (void)music_in_pause_menu;

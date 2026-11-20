@@ -36,7 +36,8 @@ struct ChildDisplayOptions {
     std::uint32_t output_width = 0;
     std::uint32_t output_height = 0;
     bool enable_fov = false;
-    bool skip_cinematics = false; // opt-in jail_20 key skip
+    bool skip_cinematics = false; // jail_20 key skip (INI default 1)
+    bool skip_learn10 = false; // default enabled from INI; hidden debug opt-out
     bool remove_dialogue_backgrounds = false; // verified dialogue frame filter
     bool remove_cinematic_bars = false; // experimental GLI letterbox filter
     bool music_in_pause_menu = false; // opt-in native Theme/SXD ESC compensation

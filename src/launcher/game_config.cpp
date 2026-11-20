@@ -217,6 +217,9 @@ bool configured_aspect_ratio_is_4_3(const fs::path& ini) {
 bool configured_skip_cinematics(const fs::path& ini) {
     return read_ini_flag(ini,"Features","SkipCinematics","1");
 }
+bool configured_skip_learn10(const fs::path& ini) {
+    return !read_ini_flag(ini,"Debug","DisableLearn10Skip","0");
+}
 bool configured_remove_dialogue_backgrounds(const fs::path& ini) {
     return read_ini_flag(ini,"Features","RemoveDialogueBackgrounds","1");
 }
@@ -263,8 +266,8 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     const auto raw=lines_of(ini);
     std::string current;
     bool graphics=false,features=false,aspect=false,force=false,skip=false;
-    bool dialogue=false,cinematic=false,legacy=false,music=false,old_early_theme=false;
-    bool obsolete_resolution=false;
+    bool dialogue=false,cinematic=false,legacy=false,music=false,old_early_theme=false,old_skip_learn10=false;
+    bool obsolete_resolution=false,obsolete_skip_comments=false;
     for(const auto& text:raw) {
         std::string next;
         if(section(text,next)) {
@@ -274,6 +277,12 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
             continue;
         }
         const auto t=trim(text);
+        if(t=="; 1 = Space/Enter/Esc skip for jail_20 only" ||
+           t=="; 1 = allow Space/Enter/Esc to skip jail_20 only" ||
+           t=="; Learn_10 skipping remains disabled (unsafe)" ||
+           t=="; Learn_10 skip remains disabled (unsafe)" ||
+           t=="; 1 = native Learn_10 skip via guarded F248 (requires SkipCinematics=1; default 0)")
+            obsolete_skip_comments=true;
         if(t.empty() || t.front()==';' || t.front()=='#')continue;
         const auto p=t.find('=');
         if(p==std::string::npos)continue;
@@ -282,6 +291,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(current=="GRAPHICS" && key=="RESOLUTION")obsolete_resolution=true;
         if(current=="GRAPHICS" && key=="ASPECTRATIO")aspect=true;
         if(current=="FEATURES" && key=="SKIPCINEMATICS")skip=true;
+        if(current=="FEATURES" && key=="SKIPLEARN10")old_skip_learn10=true;
         if(current=="FEATURES" && key=="REMOVEDIALOGUEBACKGROUNDS")dialogue=true;
         if(current=="FEATURES" && key=="REMOVECINEMATICBARS")cinematic=true;
         if(current=="FEATURES" && key=="MUSICINPAUSEMENU")music=true;
@@ -301,7 +311,8 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
     const std::string migrated_aspect=(!aspect && force &&
         read_ini_flag(ini,"Graphics","Force4x3")) ? "4:3" : "Auto";
     if(aspect && !force && skip && dialogue && cinematic && music &&
-       !old_early_theme && !legacy && !obsolete_resolution)return;
+       !old_early_theme && !old_skip_learn10 && !legacy &&
+       !obsolete_resolution && !obsolete_skip_comments)return;
     std::vector<std::string> output;
     std::string active;
     bool added_aspect=false,added_skip=false,added_dialogue=false,added_cinematic=false,added_music=false;
@@ -312,8 +323,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
             added_aspect=true;
         }
         if(active=="FEATURES" && !skip && !added_skip) {
-            output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 only");
-            output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
+            output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 and guarded F248 for learn_10");
             output.emplace_back("SkipCinematics=1");
             added_skip=true;
         }
@@ -362,11 +372,22 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
             }
         }
         if(active=="FEATURES" && (key=="REMOVEBLACKFRAMES" ||
+                                   key=="SKIPLEARN10" ||
                                    key=="EARLYTHEMEMUSICEXPERIMENTAL"))
-            continue; // retired toggles; MusicInPauseMenu owns both audio paths
+            continue; // retired toggles; MusicInPauseMenu owns audio; F248 owns Learn_10
+        // Update our old public-feature description when upgrading an INI.
+        if(active=="FEATURES" &&
+           (t=="; 1 = Space/Enter/Esc skip for jail_20 only" ||
+            t=="; 1 = allow Space/Enter/Esc to skip jail_20 only")) {
+            output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 and guarded F248 for learn_10");
+            continue;
+        }
         // Remove only our generated comments; retain custom user annotations.
         if(active=="FEATURES" &&
-           (t=="; Experimental: attempt ESC music while Theme handoff is pending" ||
+           (t=="; Learn_10 skipping remains disabled (unsafe)" ||
+            t=="; Learn_10 skip remains disabled (unsafe)" ||
+            t=="; 1 = native Learn_10 skip via guarded F248 (requires SkipCinematics=1; default 0)" ||
+            t=="; Experimental: attempt ESC music while Theme handoff is pending" ||
             t=="; Default 0; requires MusicInPauseMenu=1 and Debug Log=1"))
             continue;
         if(t=="; GameFrame Force4x3 sidebars remain unchanged") {
@@ -387,8 +408,7 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         if(!output.empty() && !output.back().empty())
             output.emplace_back();
         output.emplace_back("[Features]");
-        output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 only");
-        output.emplace_back("; Learn_10 skipping remains disabled (unsafe)");
+        output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 and guarded F248 for learn_10");
         output.emplace_back("SkipCinematics=1");
         output.emplace_back("; 1 = hide native backdrop rectangles behind in-game dialogue");
         output.emplace_back("RemoveDialogueBackgrounds=1");

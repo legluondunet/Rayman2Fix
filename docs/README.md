@@ -86,8 +86,11 @@ state/
   `Rayman2Fix_inspect.log`.
 - `Rayman2Fix.exe --help` : consulter les commandes disponibles.
 - `[Features] SkipCinematics=1` (défaut) : autoriser Espace/Entrée/Échap
-  à passer uniquement la deuxième introduction (`jail_20`). `learn_10` ne
-  peut toujours pas être passé de cette façon.
+  à passer `jail_20` et la cinématique `learn_10` (saut natif F248 protégé).
+  La première introduction `jail_10` et les autres cinématiques restent inchangées.
+  Pour le débogage uniquement, ajouter manuellement `[Debug] DisableLearn10Skip=1`
+  pour désactiver le saut de `learn_10` sans toucher à celui de `jail_20`.
+  Cette option cachée n'est jamais générée par l'installateur.
 - `[Features] RemoveDialogueBackgrounds=1` (défaut) : masquer les fonds
   natifs noirs derrière les dialogues.
 - `[Features] RemoveCinematicBars=1` (défaut) : essayer de retirer les
