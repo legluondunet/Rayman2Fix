@@ -74,9 +74,15 @@ int main(int argc, char** argv) {
             check(static_cast<bool>(probe),"child PATH probe missing");
             std::wstring actual;
             std::getline(probe,actual);
-            const auto expected=fs::absolute(launcher_root/"third_party"/"gameframe").wstring();
-            check(actual==expected || actual.rfind(expected+L";",0)==0,
-                  "game child must search third_party/gameframe before inherited PATH");
+            const DWORD bytes=GetEnvironmentVariableW(L"PATH",nullptr,0);
+            std::wstring expected(bytes,L'\0');
+            if(bytes) {
+                const DWORD n=GetEnvironmentVariableW(L"PATH",expected.data(),bytes);
+                check(n<bytes,"PATH capture before comparing child environment");
+                expected.resize(n);
+            }
+            check(actual==expected,
+                  "game child must inherit PATH unchanged; game-local Glide needs no override");
         }
         r2fix::configure_launcher_dpi_awareness();
         r2fix::ChildDisplayOptions options;
