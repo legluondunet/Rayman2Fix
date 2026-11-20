@@ -1049,7 +1049,7 @@ Some CD executables use obsolete SafeDisc protection; compatibility must be
 verified separately from ISO extraction. Support will be claimed only after
 testing the corresponding edition on Windows and Wine/Proton.
 
-Rayman2Fix is released as source under **GNU GPL version 3 only**
+Rayman2Fix source code is licensed under **GNU GPL version 3 only**
 (`GPL-3.0-only`). Its bundled user-facing `docs/LICENSE` contains the
 full GPLv3 text. GameFrame keeps its own Apache 2.0 license and notice.
 
