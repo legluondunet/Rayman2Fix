@@ -52,6 +52,29 @@ int main(int argc, char** argv) {
             check(contents.find("DisableLearn10Skip")==std::string::npos,
                   "generated INI must never include hidden Learn_10 opt-out");
         }
+        // Regression: upgrade the exact legacy comments seen in a 2026 Wine INI.
+        // Keep the public setting and never expose the hidden debug override.
+        write(ini,"[Debug]\nLog=1\n"
+                  "[Graphics]\nFPSLimit=60\nAspectRatio=Auto\n"
+                  "[Features]\n"
+                  "; 1 = allow Space/Enter/Esc to skip jail_20 only\n"
+                  "; Learn_10 skip remains disabled (unsafe)\n"
+                  "SkipCinematics=1\n"
+                  "RemoveDialogueBackgrounds=1\n"
+                  "RemoveCinematicBars=1\n"
+                  "MusicInPauseMenu=1\n");
+        r2fix::ensure_rayman2fix_ini_options(ini);
+        {
+            std::ifstream stream(ini);
+            const std::string contents(std::istreambuf_iterator<char>{stream},
+                                       std::istreambuf_iterator<char>{});
+            check(contents.find("jail_20 and guarded F248 for learn_10")!=std::string::npos,
+                  "legacy cinematic comment must describe both skips");
+            check(contents.find("Learn_10 skip remains disabled")==std::string::npos,
+                  "obsolete Learn_10-disabled comment must be retired");
+            check(contents.find("DisableLearn10Skip")==std::string::npos,
+                  "upgrade must keep debug override invisible");
+        }
         write(ini,"[Debug]\nLog=0\nDisableLearn10Skip=1\n"
                   "[Features]\nSkipCinematics=1\n");
         r2fix::ensure_rayman2fix_ini_options(ini);
