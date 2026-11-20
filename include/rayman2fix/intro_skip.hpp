@@ -26,26 +26,30 @@ struct IntroSkipGuard {
     bool inside = false;
     bool released = false;
     bool requested = false;
+    // A fresh press can be queued while the engine is still loading.
+    // Once Playing is observed, exactly ONE native change is issued.
+    bool pending = false;
 
-    bool update(const char* level, bool any_skip_key_down) {
+    // engine_ready must come from the original engine's Playing state,
+    // not a guessed wall-clock delay. Default preserves existing tests.
+    bool update(const char* level, bool any_skip_key_down,
+                bool engine_ready = true) {
         if (!is_second_intro(level)) {
-            inside = false;
-            released = false;
-            requested = false;
+            inside = released = requested = pending = false;
             return false;
         }
         if (!inside) {
             inside = true;
-            released = false;
-            requested = false;
+            released = requested = pending = false;
             return false;
         }
-        if (!any_skip_key_down) {
-            released = true;
-            return false;
-        }
-        if (released && !requested) {
+        if (!any_skip_key_down) released = true;
+        if (released && any_skip_key_down && !requested) {
             requested = true;
+            pending = true;
+        }
+        if (pending && engine_ready) {
+            pending = false;
             return true;
         }
         return false;
