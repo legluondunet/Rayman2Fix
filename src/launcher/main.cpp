@@ -3,6 +3,7 @@
 #include "rayman2fix/display.hpp"
 #include "rayman2fix/game_launch.hpp"
 #include "rayman2fix/startup.hpp"
+#include "rayman2fix/wine_host_reexec.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -91,11 +92,17 @@ static int cli(int argc, const fs::path* args) {
     try {
         std::string command;
         bool verbose = false;
+        bool wine_audio_host_ready = false;  // internal single-reexec guard
         std::vector<fs::path> media;
         for (int i=1; i<argc; ++i) {
             const std::string argument = args[i].string();
             if (argument == "--verbose" && !verbose) {
                 verbose = true;
+                continue;
+            }
+            if (argument == "--wine-audio-host-ready" &&
+                !wine_audio_host_ready) {
+                wine_audio_host_ready = true;
                 continue;
             }
             if (command.empty() &&
@@ -133,6 +140,16 @@ static int cli(int argc, const fs::path* args) {
         if (command == "--help" || command == "-h") {usage();return 0;}
         if (command == "--version") {
             std::cout << "Rayman2Fix 0.1.0-bootstrap\n";return 0;
+        }
+
+        // Only the ordinary no-argument flow needs Wine audio.
+        // Reexec BEFORE Startup.initialize so no installer logs, receipts
+        // or any of the game's files are touched by the parent instance.
+        // The guarded child continues through the exact same normal flow.
+        if (const auto child_exit = r2fix::maybe_reexec_with_wine_host_audio(
+                r2fix::Startup::executable_path(args[0]),
+                command.empty(),wine_audio_host_ready,verbose)) {
+            return *child_exit;
         }
 
         r2fix::configure_launcher_dpi_awareness();
