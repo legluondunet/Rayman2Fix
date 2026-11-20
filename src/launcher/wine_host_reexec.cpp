@@ -125,3 +125,5 @@ std::optional<int> maybe_reexec_with_wine_host_audio(
 #endif
     return std::nullopt;
 }
+
+} // namespace r2fix
