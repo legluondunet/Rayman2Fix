@@ -169,6 +169,13 @@ int main() {
               "and no lines from an earlier game");
         check(fs::exists(root / "Rayman2Fix.ini"),
               "bootstrap initialization must create INI when absent");
+        check(contents(root/"Rayman2Fix.ini").find(
+                  "jail_20 and guarded F248 for learn_10") != std::string::npos &&
+              contents(root/"Rayman2Fix.ini").find(
+                  "Learn_10 skip remains disabled") == std::string::npos &&
+              contents(root/"Rayman2Fix.ini").find(
+                  "DisableLearn10Skip") == std::string::npos,
+              "fresh default INI documents both skips without exposing debug override");
         check(fs::is_directory(root / "mods" / "textures"),
               "bootstrap creates a textures folder for replacement images");
         check(fs::is_directory(root / "docs"),

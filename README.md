@@ -238,8 +238,13 @@ HUD snapshots, are disabled in release builds. They previously observed
 the engine on the render thread and are not needed by the validated
 widescreen or 4:3 fixes. For a local research build only, configure
 CMake with `-DRAYMAN2FIX_RESEARCH_PROBES=ON`; this is a **build-time**
-switch, not an INI setting. The unsafe `Learn_10` cinematic skip remains
-disabled in both modes. The independently controlled `jail_20` skip remains available.
+switch, not an INI setting. The guarded native F248 `learn_10` skip is now
+compiled into standard builds, activated by the same default-on
+`[Features] SkipCinematics=1` setting as `jail_20`.
+Its native director checks, temporary result substitution and restoration
+do not depend on `Log`, research instrumentation or environment variables.
+For debugging only, manually set `[Debug] DisableLearn10Skip=1` to disable
+`learn_10` alone (this hidden option is never added to generated INIs).
 
 ## Second introduction skip (enabled by default)
 
@@ -253,25 +258,27 @@ the native transition to `learn_10`. The first cinematic (`jail_10`),
 the menu and later cutscenes are not affected. Holding Enter while entering
 the cutscene will not trigger a skip until the key is released and pressed again.
 The game uses its own deferred level-change request, with no save operation;
-full in-game transition still needs validation under Windows and Wine.
+the handover was validated by the user under Wine-staging 11.19 in November 2026.
 `RUNTIME-INTRO:` lines in the one-file log identify activation and requests.
 
-## Learn_10 opening cinematic (skip disabled after visual regression)
+## Learn_10 introduction: historical rejected experiments
 
-The first playable level's original cutscene is **not skippable with
-Rayman2Fix at present**. The experimental jump directly from the
-director's native behaviour 3 to behaviour 1 was found unsafe during a
-Wine gameplay test: story bit 1091 changed, but the graphics became
-corrupted. That handover is **not** sufficient to restore the camera,
+**Historical research, superseded by the guarded native F248 approach
+documented in [the current integration note](docs/learn10-f248-clean-integration.md).**
+Earlier versions could not safely skip this intro: the experimental jump
+directly from the director's native behaviour 3 to behaviour 1 was found
+unsafe during a Wine gameplay test: story bit 1091 changed, but the graphics
+became corrupted. That handover is **not** sufficient to restore the camera,
 Rayman and all scene state. The previous `NOMOVIES` and stand-in
 waypoint attempts were ineffective. Do not re-enable any of them without
 a complete, gameplay-tested restoration path.
 
-**Safety rollback:** The runtime never requests a native director
-transition, edits the scene's story bits, moves Rayman, writes camera
-matrices or changes saves to bypass this introduction. All original
-`Learn_10` scripts run normally. Enter is not intercepted by this
-feature.
+**Historical safety rollback:** The abandoned experiments did not
+request a native director transition, edit story bits, move Rayman,
+change camera matrices or saves. The current native F248 implementation
+uses guarded temporary result substitution and restores the original
+hook when leaving the target director; it does not re-enable the
+rejected behaviour-switch prototype.
 
 With `[Debug] Log=1`, the runtime takes **read-only** samples at
 the start, 0.25, 1, 2.5, 5, 10 and 20 seconds, then more densely
@@ -661,8 +668,7 @@ FPSLimit=60
 AspectRatio=Auto
 
 [Features]
-; 1 = allow Space/Enter/Esc to skip jail_20 only
-; Learn_10 skip remains disabled (unsafe)
+; 1 = Space/Enter/Esc skip for jail_20 and guarded F248 for learn_10
 SkipCinematics=1
 ; 1 = hide native rectangles behind in-game dialogue
 RemoveDialogueBackgrounds=1
@@ -691,11 +697,13 @@ no additional rectangles, exclusive fullscreen, monitor mode change,
 or per-level rules are required. Original 4:3 FOV is used in 4:3 mode,
 and the native UI is not squeezed.
 
-`SkipCinematics=1` in `[Features]` enables the existing
-**deliberate keypress** skip of second introduction `jail_20` only.
-It does **not** skip the first cinematic `jail_10`, the unsafe
-`learn_10` sequence, or later game cutscenes. With
-`SkipCinematics=0`, the second intro also behaves normally.
+`SkipCinematics=1` in `[Features]` enables the
+**deliberate keypress** skips of `jail_20` and guarded native F248
+for `learn_10` (both enabled by default). The first cinematic
+`jail_10` and later game cutscenes are unaffected. With
+`SkipCinematics=0`, both skips are disabled. An undocumented
+`[Debug] DisableLearn10Skip=1` manually disables only the latter
+for diagnostics; it is never generated automatically.
 
 `RemoveDialogueBackgrounds=1` in `[Features]` removes the wide,
 black native GLI frame rectangles behind in-level dialogue. This path
