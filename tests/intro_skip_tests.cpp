@@ -42,6 +42,33 @@ int main() {
     CHECK(!guard.update("jail_20", false));
     CHECK(guard.update("jail_20", true));
 
+    // A fresh key press during native level initialization is retained.
+    // Releasing the key or losing focus must not lose the queued request.
+    r2fix::IntroSkipGuard queued;
+    CHECK(!queued.update("jail_10", true, false));
+    CHECK(!queued.update("jail_20", true, false));
+    CHECK(!queued.update("jail_20", true, true));  // held from prior level
+    CHECK(!queued.update("jail_20", false, false)); // first key release
+    CHECK(!queued.update("jail_20", true, false));  // press while loading
+    CHECK(queued.requested && queued.pending);
+    CHECK(!queued.update("jail_20", false, false)); // focus lost
+    CHECK(queued.update("jail_20", false, true));   // engine now Playing
+    CHECK(!queued.pending);
+    CHECK(!queued.update("jail_20", true, true));   // no duplicate
+    CHECK(!queued.update("jail_20", false, true));
+    CHECK(!queued.update("jail_20", true, true));   // second press ignored
+    CHECK(!queued.update("learn_10", true, true));  // reset on exit
+    CHECK(!queued.requested && !queued.pending);
+
+    // If the level changes while waiting for readiness, cancel the request.
+    r2fix::IntroSkipGuard cancelled;
+    CHECK(!cancelled.update("jail_20", false, false));
+    CHECK(!cancelled.update("jail_20", false, false));
+    CHECK(!cancelled.update("jail_20", true, false));
+    CHECK(cancelled.pending);
+    CHECK(!cancelled.update("other_10", false, true));
+    CHECK(!cancelled.pending && !cancelled.requested);
+
     // Learn_10 is a playable level; only a pending *intro* can be skipped.
     CHECK(r2fix::is_first_playable_level("Learn_10"));
     CHECK(r2fix::is_first_playable_level("learn_10"));
