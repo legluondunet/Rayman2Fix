@@ -41,6 +41,22 @@ int main() {
         }
         Sleep(15);
     }
+    // Native Windows control: the launcher must not invent or modify the
+    // Unix/PulseAudio setting, even when experimental Wine policy is enabled.
+    const DWORD pulse_needed=GetEnvironmentVariableW(
+        L"PULSE_LATENCY_MSEC",nullptr,0);
+    std::wstring pulse_value;
+    if(pulse_needed && pulse_needed<=32768) {
+        pulse_value.resize(pulse_needed,L'\0');
+        const DWORD copied=GetEnvironmentVariableW(
+            L"PULSE_LATENCY_MSEC",pulse_value.data(),pulse_needed);
+        if(copied>=pulse_needed)return 28;
+        pulse_value.resize(copied);
+    }
+    std::wofstream pulse_report(root/"child-pulse-latency.txt");
+    pulse_report << pulse_value;
+    pulse_report.close();
+    if(!pulse_report)return 29;
     wchar_t buffer[128]{};
     GetEnvironmentVariableW(L"GLIDE_SIZE", buffer, 128);
     wchar_t frame_limit[64]{};
