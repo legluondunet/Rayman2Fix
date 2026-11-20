@@ -43,6 +43,7 @@ struct ChildDisplayOptions {
     bool music_in_pause_menu = false; // opt-in native Theme/SXD ESC compensation
     std::uint32_t fps_limit = 60; // 0 = unlimited; applies to Glide grBufferSwap
     bool log_enabled = true;
+    bool wine_audio_latency_experiment = false; // verified Rayman 2 only, no native Windows change
     bool skip_executable_precheck = false; // only explicit --launch-no-verify
 };
 
