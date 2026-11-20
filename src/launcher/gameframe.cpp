@@ -181,8 +181,8 @@ void ensure_gameframe_glide(const fs::path& game_dir) {
     // the release ZIP still contains only the Rayman2Fix.exe launcher.
     write_and_replace(game_dir / "glide2x.dll", glide, expected);
     // Keep legal notices with the other installed documentation, not DLLs.
-    // The renderer directory is <root>/third_party/gameframe.
-    const fs::path docs=layout::docs(game_dir.parent_path().parent_path());
+    // The renderer is installed beside rayman2.exe under <root>/game/.
+    const fs::path docs=layout::docs(game_dir.parent_path());
     if(fs::is_symlink(docs) ||
        (fs::exists(docs) && !fs::is_directory(docs)))
         throw std::runtime_error("unsafe docs/ directory for GameFrame notice");
@@ -196,6 +196,29 @@ void ensure_gameframe_glide(const fs::path& game_dir) {
         throw std::runtime_error("GameFrame post-install SHA256 verification failed");
 #else
     (void)game_dir;
+#endif
+}
+void prune_obsolete_nested_gameframe(const fs::path& launcher_root) {
+#ifdef _WIN32
+    const auto game_dir=layout::game(launcher_root);
+    const auto old_dir=layout::legacy_gameframe(launcher_root);
+    const auto parent=old_dir.parent_path();
+    // No action until the new in-game DLL is verified and active.
+    if (!gameframe_glide_ready(game_dir) ||
+        !fs::is_directory(old_dir) || fs::is_symlink(old_dir) ||
+        fs::is_symlink(parent)) return;
+    // Delete *only* the same SHA256-pinned binary we just installed.
+    // Do not remove or overwrite old .bak files, other builds or user files.
+    if (!gameframe_glide_ready(old_dir)) return;
+    std::error_code ignored;
+    fs::remove(old_dir / "glide2x.dll", ignored);
+    if (ignored) return;
+    ignored.clear();
+    fs::remove(old_dir, ignored); // only succeeds when directory is empty
+    ignored.clear();
+    fs::remove(parent, ignored); // only succeeds when directory is empty
+#else
+    (void)launcher_root;
 #endif
 }
 } // namespace r2fix
