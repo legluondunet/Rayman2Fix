@@ -46,6 +46,7 @@ mods/
     textures/
         logo.rgba           (facultatif, fourni par l'utilisateur)
 docs/
+    LICENSE                   (licence GNU GPLv3 du projet)
     GameFrame-LICENSE-APACHE.txt
     build-info.txt
     README.md
@@ -68,9 +69,9 @@ state/
 - `game/glide2x.dll` : GameFrame intégré au lanceur, installé et vérifié
   à côté de l’exécutable du jeu. Une DLL différente est conservée en
   `game/glide2x.dll.bak` avant remplacement ; aucun ajout au `PATH` n’est requis.
-- **`docs/` : documentation, notice Apache de GameFrame et `build-info.txt`.**
-  La licence propre à Rayman2Fix n'est pas encore sélectionnée ; elle devra
-  être définie et distribuée avant la première release publique.
+- **`docs/` : documentation, licence GNU GPLv3 du projet, notice Apache 2.0
+  de GameFrame et `build-info.txt`.** Le lanceur extrait automatiquement
+  `docs/LICENSE` et `docs/GameFrame-LICENSE-APACHE.txt` séparément.
 - **`state/` : reçus d'installation et d'intégrité SHA-256 uniquement.**
   Ne pas les supprimer : ils sont indispensables à la vérification normale.
 - `Rayman2Fix.ini` : unique fichier de configuration utilisateur du correctif.
@@ -130,5 +131,6 @@ composants libres au premier démarrage. Il ne distribue ni les données du
 jeu ni un exécutable commercial déchiffré. Pour l'édition CD actuellement
 prise en charge, il faut encore fournir localement un exécutable
 déchiffré approuvé ou un delta de patch approuvé déjà intégré au lanceur.
-La licence propre au projet reste à sélectionner avant la première release ;
-la notice Apache 2.0 de GameFrame est fournie séparément.
+Rayman2Fix est placé sous licence GNU GPL version 3 uniquement
+(`GPL-3.0-only`) ; le texte intégral est installé dans `docs/LICENSE`.
+La licence Apache 2.0 de GameFrame est fournie séparément.
