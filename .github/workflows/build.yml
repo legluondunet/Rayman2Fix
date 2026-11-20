@@ -234,7 +234,7 @@ jobs:
           & ./package-smoke/Rayman2Fix.exe
           if ($LASTEXITCODE -ne 2) { throw 'No-media bootstrap must fail safely' }
           if (!(Test-Path package-smoke/mods/textures) -or
-              !(Test-Path package-smoke/third_party/gameframe) -or
+              (Test-Path package-smoke/third_party) -or
               !(Test-Path package-smoke/docs/README.md) -or
               (Test-Path package-smoke/README.md)) {
             throw 'New clean directories or docs/README.md missing, or old root README created'
@@ -311,12 +311,12 @@ jobs:
             throw 'Expected runtime deployment log: unchanged backups_removed=0'
           }
           Write-Host 'Single authoritative game/fix.dll replacement, no backup: PASS'
-          if (!(Test-Path package-smoke/third_party/gameframe/glide2x.dll) -or
+          if (!(Test-Path package-smoke/game/glide2x.dll) -or
               !(Test-Path package-smoke/docs/GameFrame-LICENSE-APACHE.txt) -or
-              (Test-Path package-smoke/third_party/gameframe/GameFrame-LICENSE-APACHE.txt)) {
+              (Test-Path package-smoke/game/GameFrame-LICENSE-APACHE.txt)) {
             throw 'Single EXE failed to unpack GameFrame Glide or Apache license'
           }
-          $glide = (Get-FileHash package-smoke/third_party/gameframe/glide2x.dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          $glide = (Get-FileHash package-smoke/game/glide2x.dll -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($glide -cne $env:RAYMAN2FIX_GAMEFRAME_SHA256) {
             throw "GameFrame embedded payload SHA256 mismatch: $glide"
           }
@@ -325,25 +325,45 @@ jobs:
           if ($sourceLicense -ne $localLicense) {
             throw 'Embedded Apache 2.0 license is not from pinned GameFrame source'
           }
-          Write-Host "Standalone EXE deploys pinned x86 GameFrame: $glide"
+          Write-Host "Standalone EXE deploys pinned game-local x86 GameFrame: $glide"
+          # Remove only a verified nested GameFrame DLL left by prior builds.
+          $oldFrameDir = 'package-smoke/third_party/gameframe'
+          New-Item -ItemType Directory -Path $oldFrameDir -Force | Out-Null
+          Copy-Item package-smoke/game/glide2x.dll "$oldFrameDir/glide2x.dll"
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or (Test-Path "$oldFrameDir/glide2x.dll") -or
+              (Test-Path package-smoke/third_party) -or
+              (Get-FileHash package-smoke/game/glide2x.dll -Algorithm SHA256).Hash.ToLowerInvariant() -cne $glide) {
+            throw 'Known old GameFrame must be pruned after verified game-local deployment'
+          }
+          # Unrecognized nested binaries belong to the user and stay untouched.
+          New-Item -ItemType Directory -Path $oldFrameDir -Force | Out-Null
+          Set-Content -Path "$oldFrameDir/glide2x.dll" -Value 'unrecognized-legacy-glide'
+          & ./package-smoke/Rayman2Fix.exe
+          if ($LASTEXITCODE -ne 2 -or
+              !(Test-Path "$oldFrameDir/glide2x.dll") -or
+              (Get-Content "$oldFrameDir/glide2x.dll" -Raw).Trim() -ne 'unrecognized-legacy-glide') {
+            throw 'Unknown old nested DLL must not be removed or overwritten'
+          }
+          Remove-Item package-smoke/third_party -Recurse -Force
           # Existing, unknown Glide DLL must be backed up, not lost, while
           # the pinned GameFrame DLL is reinstalled from the same EXE.
           [IO.File]::WriteAllText(
-            (Resolve-Path 'package-smoke/third_party/gameframe/glide2x.dll'),
+            (Resolve-Path 'package-smoke/game/glide2x.dll'),
             'unknown-legacy-glide', [Text.Encoding]::ASCII)
           & ./package-smoke/Rayman2Fix.exe
           if ($LASTEXITCODE -ne 2) { throw 'Existing Glide upgrade failed unexpectedly' }
-          $backup = 'package-smoke/third_party/gameframe/glide2x.dll.bak'
+          $backup = 'package-smoke/game/glide2x.dll.bak'
           if (!(Test-Path $backup) -or
               (Get-Content -Raw $backup) -ne 'unknown-legacy-glide') {
             throw 'Unknown old Glide DLL must be preserved under .bak'
           }
-          $replacement = (Get-FileHash package-smoke/third_party/gameframe/glide2x.dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          $replacement = (Get-FileHash package-smoke/game/glide2x.dll -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($replacement -cne $glide) {
             throw 'GameFrame Glide replacement did not match the bundled SHA256'
           }
           # Repeated replacement rotates one managed backup (no migration).
-          $glideDest = 'package-smoke/third_party/gameframe/glide2x.dll'
+          $glideDest = 'package-smoke/game/glide2x.dll'
           [IO.File]::WriteAllText(
             (Resolve-Path $glideDest), 'second-unknown-glide', [Text.Encoding]::ASCII)
           & ./package-smoke/Rayman2Fix.exe

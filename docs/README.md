@@ -33,6 +33,8 @@ game/
     rayman2.exe
     rayman2.exe.bak         (si correctif approuvé appliqué)
     fix.dll
+    glide2x.dll             (GameFrame Glide 2, vérifié par SHA-256)
+    glide2x.dll.bak         (ancienne DLL différente, si remplacement)
     rayman2.exe.manifest
     ubi.ini
     data/
@@ -40,9 +42,6 @@ game/
 mods/
     textures/
         logo.rgba           (facultatif, fourni par l'utilisateur)
-third_party/
-    gameframe/
-        glide2x.dll
 docs/
     GameFrame-LICENSE-APACHE.txt
     build-info.txt
@@ -63,7 +62,9 @@ state/
   `mods/textures/logo.rgba`. `header-valid` vérifie seulement le format du
   fichier : seul un message `RUNTIME-GLIDE: INTRO-LOGO-HD: tile=...`
   dans le journal du jeu confirme le remplacement effectif d'une texture.
-- `third_party/` : bibliothèques tierces vérifiées (GameFrame).
+- `game/glide2x.dll` : GameFrame intégré au lanceur, installé et vérifié
+  à côté de l’exécutable du jeu. Une DLL différente est conservée en
+  `game/glide2x.dll.bak` avant remplacement ; aucun ajout au `PATH` n’est requis.
 - **`docs/` : documentation, notice Apache de GameFrame et `build-info.txt`.**
   La licence propre à Rayman2Fix n'est pas encore sélectionnée ; elle sera
   publiée dans `docs/` lorsqu'elle aura été définie.
@@ -99,7 +100,7 @@ Ces quatre options sont activées pour une installation neuve. Une valeur
 `0` déjà présente dans un INI existant reste respectée.
 
 Le chargement du runtime `game/fix.dll` utilise l'injection validée ; la
-bibliothèque GameFrame est recherchée dans `third_party/gameframe/`.
+bibliothèque GameFrame est chargée depuis `game/glide2x.dll`.
 Aucune DLL de substitution `winmm.dll` n'est distribuée par Rayman2Fix.
 
 ## Documentation complète

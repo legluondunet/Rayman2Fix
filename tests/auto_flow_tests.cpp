@@ -1,6 +1,6 @@
 #include "rayman2fix/auto_flow.hpp"
 #include "rayman2fix/game_config.hpp"
-#include "rayman2fix/game_config.hpp"
+#include "rayman2fix/gameframe.hpp"
 #include "rayman2fix/sha256.hpp"
 #include "rayman2fix/startup.hpp"
 
@@ -173,12 +173,17 @@ int main() {
               "bootstrap creates a textures folder for replacement images");
         check(fs::is_directory(root / "docs"),
               "bootstrap creates a separate docs/ folder");
+        check(!fs::exists(root / "third_party"),
+              "new renderer layout must not create a third_party/ folder");
         check(fs::is_regular_file(root / "docs" / "build-info.txt") &&
               !fs::exists(root / "build-info.txt"),
               "installer writes build identity exclusively to docs/");
         check(!fs::exists(root / "state"),
               "state/ is reserved for verified installation receipts");
 #ifdef _WIN32
+        check(fs::is_regular_file(root / "game" / "glide2x.dll") &&
+              !fs::exists(root / "third_party"),
+              "single EXE installs Glide into game/ beside rayman2.exe");
         check(fs::is_regular_file(root / "docs" / "README.md") &&
               !fs::exists(root / "README.md"),
               "single EXE deploys documentation only inside docs/");
@@ -457,6 +462,11 @@ int main() {
         check(!fs::exists(root / "game" / "rayman2.exe"),
               "missing media must not mark game installed");
 
+#ifdef _WIN32
+        // An unknown renderer backed up during bootstrap must survive the
+        // atomic CD/game publication instead of being lost with game.bootstrap-backup.
+        write(root/"game"/"glide2x.dll.bak","PRESERVE-OLD-GLIDE");
+#endif
         const auto bytes = test_disc();
         {
             std::ofstream out(root / "Rayman2.iso", std::ios::binary);
@@ -480,6 +490,12 @@ int main() {
               "CD assets install but nonfunctional game runtime must not launch");
         const auto game = root / "game";
         check(fs::exists(game / "rayman2.exe"), "auto mode installs game in rayman2");
+#ifdef _WIN32
+        check(r2fix::gameframe_glide_ready(game),
+              "published ISO game contains the verified local GameFrame DLL");
+        check(contents(game/"glide2x.dll.bak")=="PRESERVE-OLD-GLIDE",
+              "atomic CD installation preserves the user's Glide backup");
+#endif
         check(!fs::exists(game / "DiscContent"), "no intermediate DiscContent layout");
         check(contents(game / "rayman2.exe") == "GAME", "retail exe copied unchanged");
         check(!fs::exists(game / "winmm.dll"),

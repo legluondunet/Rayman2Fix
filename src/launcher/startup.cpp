@@ -263,12 +263,10 @@ void Startup::initialize(bool provision_files) {
                 throw std::runtime_error(
                     "old Rayman2Fix installation detected; use a separate clean folder (no migration)");
         }
-        const auto glide = layout::gameframe(root_);
         const auto mods = layout::mods(root_);
-        const auto third = root_/"third_party";
         const auto textures = mods/"textures";
         const auto docs=layout::docs(root_);
-        for (const auto& entry : {game_dir_,third,glide,mods,textures,docs}) {
+        for (const auto& entry : {game_dir_,mods,textures,docs}) {
             if (fs::is_symlink(entry) ||
                 (fs::exists(entry) && !fs::is_directory(entry)))
                 throw std::runtime_error("unsafe clean Rayman2Fix layout directory");
@@ -278,7 +276,8 @@ void Startup::initialize(bool provision_files) {
         const auto runtime = ensure_embedded_runtime(game_dir_);
         runtime_deployment_status = runtime.status;
         runtime_backups_removed = runtime.backups_removed;
-        ensure_gameframe_glide(glide);
+        ensure_gameframe_glide(game_dir_);
+        prune_obsolete_nested_gameframe(root_);
         ensure_embedded_readme(root_);
 #endif
     }
@@ -348,7 +347,7 @@ void Startup::initialize(bool provision_files) {
             std::string("Project=Rayman2Fix\nVersion=")+RAYMAN2FIX_VERSION+
             "\nCommit="+RAYMAN2FIX_BUILD_COMMIT+
             "\nLayout=clean-v1\nRuntime=game/fix.dll\n"+
-            "GameFrame=third_party/gameframe/glide2x.dll\n";
+            "GameFrame=game/glide2x.dll\n";
         std::string prior;
         if(fs::exists(dest)) {
             std::ifstream old(dest,std::ios::binary);
@@ -427,7 +426,7 @@ void Startup::initialize(bool provision_files) {
     if (!log_stream_) throw std::runtime_error("cannot create Rayman2Fix_installer.log");
     log(std::string("Rayman2Fix ") + RAYMAN2FIX_VERSION + "-bootstrap commit=" + RAYMAN2FIX_BUILD_COMMIT);
     log(std::string("START: local_time=") + when);
-    log("LAYOUT: launcher=Rayman2Fix.exe game=game/ runtime=game/fix.dll config=Rayman2Fix.ini renderer=third_party/gameframe/ mods=mods/ docs=docs/ state=state/ logs=launcher_directory");
+    log("LAYOUT: launcher=Rayman2Fix.exe game=game/ runtime=game/fix.dll config=Rayman2Fix.ini renderer=game/glide2x.dll mods=mods/ docs=docs/ state=state/ logs=launcher_directory");
     log("CONFIG: Debug.Log=" +
         std::string(debug == "1" ? "1" : "invalid or missing (default 1)"));
     log("CONFIG: Graphics.Output=primary desktop (automatic)");
@@ -454,7 +453,7 @@ void Startup::initialize(bool provision_files) {
         log("RUNTIME-DEPLOY: status=" + runtime_deployment_status +
             " backups_removed=" + std::to_string(runtime_backups_removed) +
             " backup_created=0");
-        if (gameframe_glide_ready(layout::gameframe(root_)))
+        if (gameframe_glide_ready(game_dir_))
             log("RENDERER: GameFrame glide2x.dll=verified sha256=" +
                 gameframe_glide_expected_sha256() +
                 " upstream=f195a074a63cc150673c38becdec696163b0b3d1");

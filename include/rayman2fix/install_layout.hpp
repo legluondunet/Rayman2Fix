@@ -14,8 +14,8 @@ inline fs::path mods(const fs::path& launcher_root) {
 inline fs::path docs(const fs::path& launcher_root) {
     return launcher_root / "docs";
 }
-inline fs::path gameframe(const fs::path& launcher_root) {
-    return launcher_root / "third_party" / "gameframe";
+inline fs::path legacy_gameframe(const fs::path& launcher_root) {
+    return launcher_root / "third_party" / "gameframe"; // old renderer location only
 }
 inline fs::path state(const fs::path& launcher_root) {
     return launcher_root / "state";

@@ -537,7 +537,7 @@ font or HUD box changes were added. Visual verification is still needed.
 Build the Windows x86 `Rayman2Fix.exe`, which embeds the project's
 `game/fix.dll` runtime. The workflow archive contains **only one EXE**:
 the root INI and logs, the `game/` runtime, `mods/`, `docs/`, `state/`
-(only after a verified CD install), and `third_party/gameframe/` are
+(only after a verified CD install), and `game/glide2x.dll` are
 provisioned by that executable. It embeds the SHA-256-verified GameFrame
 `glide2x.dll`; its Apache 2.0 notice belongs in `docs/`.
 Run `ctest` on Windows and Linux for synthetic ISO/CUE and automatic CD
@@ -550,7 +550,7 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
 - Launch **`Rayman2Fix.exe` without arguments** in a new, empty directory,
   without CD image. It creates root `Rayman2Fix.ini` (default `Log=1`,
   `FPSLimit=60`, `AspectRatio=Auto` and four enabled features), the
-  installer log, `game/fix.dll`, `mods/textures/`, `third_party/gameframe/`
+  installer log, `game/fix.dll`, `game/glide2x.dll`, `mods/textures/`
   and `docs/`, then reports the missing CD cleanly. It must **not**
   create `state/` without a verified installation. `--init` is unsupported.
 - Place exactly one supported `.iso` or `.cue` beside the launcher. The
@@ -606,7 +606,7 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
   limiter is attached to `grBufferSwap` **on the producer/game thread**,
   not only the asynchronous GL swap thread.
 - Test a standalone workflow `Rayman2Fix.exe`: verify extracted
-  `game/fix.dll` and `third_party/gameframe/glide2x.dll` SHA-256
+  `game/fix.dll` and `game/glide2x.dll` SHA-256
   against the build outputs, and `docs/GameFrame-LICENSE-APACHE.txt`
   against the pinned source. The archive must not contain DLL, INI,
   receipt, documentation or log sidecars.
@@ -620,7 +620,7 @@ Synthetic tests MUST never depend on distribution of Rayman 2 assets.
   `RUNTIME-DEPLOY: status=installed|replaced|unchanged backups_removed=N backup_created=0`,
   as applicable. On a previously installed game, `status=unchanged`
   does **not** prove a replacement occurred during that invocation.
-- Replace the installed `glide2x.dll` with an unknown file, rerun the
+- Replace `game/glide2x.dll` with an unknown file, rerun the
   launcher, verify the old file is preserved as `glide2x.dll.bak` and
   the pinned DLL is restored. A third launch must be idempotent.
 - Verify SDL3 is NOT a prerequisite and does not produce a missing-runtime
