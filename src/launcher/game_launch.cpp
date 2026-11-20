@@ -449,6 +449,13 @@ int launch_verified_game(Startup& startup, bool verify) {
                   << "; see Rayman2Fix_installer.log and Rayman2Fix.log.\n";
         return 1;
     }
+    // Only the first *successful, verified* game session consumes the
+    // launcher-generated logging marker. An install-only, verification,
+    // launch failure or direct unchecked launch must never consume it.
+    // Keep the two completed logs available until the next invocation.
+    if (verify && finish_first_session_logging(startup.ini_path()))
+        startup.log("LOG-AUTO: first verified game session complete; "
+                    "[Debug] Log=0 for subsequent runs; current logs preserved");
     std::cout << "Rayman 2 exited normally.\n";
     return 0;
 }
