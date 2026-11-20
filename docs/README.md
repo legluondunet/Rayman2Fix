@@ -13,8 +13,11 @@ Cet exécutable ne contient ni les fichiers commerciaux du jeu, ni son exécutab
 3. Placer l'exécutable déchiffré `Rayman2.exe` approuvé à côté du lanceur,
    si aucun correctif binaire approuvé n'est déjà intégré au lanceur.
    L'installateur vérifie sa taille et son empreinte SHA-256.
-4. Exécuter `Rayman2Fix.exe --install-only` pour installer et vérifier, sans
-   lancer le jeu, puis `Rayman2Fix.exe` pour jouer.
+4. Exécuter simplement **`Rayman2Fix.exe`** : le lanceur installe les
+   fichiers du CD, vérifie leur intégrité, applique le remplacement approuvé
+   de l'exécutable si disponible, puis démarre le jeu automatiquement.
+   L'option `--install-only` est facultative : elle sert uniquement à
+   installer ou vérifier **sans lancer le jeu**.
 
 Le lanceur refuse les versions inconnues de l'exécutable ou un support CD
 non reconnu. Il conserve l'original protégé dans `game/rayman2.exe.bak`
@@ -26,8 +29,8 @@ ses sauvegardes n'est effectuée automatiquement.
 ```text
 Rayman2Fix.exe
 Rayman2Fix.ini
-Rayman2Fix_installer.log    (si [Debug] Log=1)
-Rayman2Fix.log              (journal du jeu, si activé)
+Rayman2Fix_installer.log    (créé à l'installation ; conservé ensuite)
+Rayman2Fix.log              (créé au premier lancement ; conservé ensuite)
 Rayman2Fix_inspect.log      (lors de --inspect)
 game/
     rayman2.exe
@@ -66,8 +69,8 @@ state/
   à côté de l’exécutable du jeu. Une DLL différente est conservée en
   `game/glide2x.dll.bak` avant remplacement ; aucun ajout au `PATH` n’est requis.
 - **`docs/` : documentation, notice Apache de GameFrame et `build-info.txt`.**
-  La licence propre à Rayman2Fix n'est pas encore sélectionnée ; elle sera
-  publiée dans `docs/` lorsqu'elle aura été définie.
+  La licence propre à Rayman2Fix n'est pas encore sélectionnée ; elle devra
+  être définie et distribuée avant la première release publique.
 - **`state/` : reçus d'installation et d'intégrité SHA-256 uniquement.**
   Ne pas les supprimer : ils sont indispensables à la vérification normale.
 - `Rayman2Fix.ini` : unique fichier de configuration utilisateur du correctif.
@@ -122,7 +125,10 @@ Aucune DLL de substitution `winmm.dll` n'est distribuée par Rayman2Fix.
 La documentation de développement, les recherches et les protocoles d'essai
 sont publiés dans le [répertoire docs du dépôt officiel](https://github.com/legluondunet/Rayman2Fix/tree/main/docs).
 
-L'exécutable est distribué en **un seul fichier**, puis extrait les fichiers
-autorisés de Rayman2Fix au premier démarrage. La licence du projet lui-même
-n'a pas encore été sélectionnée ; la notice Apache 2.0 du composant GameFrame
-est conservée séparément avec cette dépendance.
+Le lanceur est distribué en **un seul fichier** et installe lui-même ses
+composants libres au premier démarrage. Il ne distribue ni les données du
+jeu ni un exécutable commercial déchiffré. Pour l'édition CD actuellement
+prise en charge, il faut encore fournir localement un exécutable
+déchiffré approuvé ou un delta de patch approuvé déjà intégré au lanceur.
+La licence propre au projet reste à sélectionner avant la première release ;
+la notice Apache 2.0 de GameFrame est fournie séparément.
