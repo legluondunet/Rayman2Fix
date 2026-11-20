@@ -6534,7 +6534,7 @@ void initialize_native_intro_skip() {
     g_request_intro_level.store(
         reinterpret_cast<RequestLevel>(const_cast<void*>(request)),
         std::memory_order_release);
-    log_line("RUNTIME-INTRO: native Jail_20 skip armed; Learn_10 skip disabled after visual regression");
+    log_line("RUNTIME-INTRO: native Jail_20 skip armed; Learn_10 F248 controlled separately by Features.SkipCinematics and Debug.DisableLearn10Skip");
 }
 
 // Three game-side GLI driver callback slots, verified only for the SHA256-locked
