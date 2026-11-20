@@ -278,7 +278,9 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
         }
         const auto t=trim(text);
         if(t=="; 1 = Space/Enter/Esc skip for jail_20 only" ||
+           t=="; 1 = allow Space/Enter/Esc to skip jail_20 only" ||
            t=="; Learn_10 skipping remains disabled (unsafe)" ||
+           t=="; Learn_10 skip remains disabled (unsafe)" ||
            t=="; 1 = native Learn_10 skip via guarded F248 (requires SkipCinematics=1; default 0)")
             obsolete_skip_comments=true;
         if(t.empty() || t.front()==';' || t.front()=='#')continue;
@@ -374,13 +376,16 @@ void ensure_rayman2fix_ini_options(const fs::path& ini) {
                                    key=="EARLYTHEMEMUSICEXPERIMENTAL"))
             continue; // retired toggles; MusicInPauseMenu owns audio; F248 owns Learn_10
         // Update our old public-feature description when upgrading an INI.
-        if(active=="FEATURES" && t=="; 1 = Space/Enter/Esc skip for jail_20 only") {
+        if(active=="FEATURES" &&
+           (t=="; 1 = Space/Enter/Esc skip for jail_20 only" ||
+            t=="; 1 = allow Space/Enter/Esc to skip jail_20 only")) {
             output.emplace_back("; 1 = Space/Enter/Esc skip for jail_20 and guarded F248 for learn_10");
             continue;
         }
         // Remove only our generated comments; retain custom user annotations.
         if(active=="FEATURES" &&
            (t=="; Learn_10 skipping remains disabled (unsafe)" ||
+            t=="; Learn_10 skip remains disabled (unsafe)" ||
             t=="; 1 = native Learn_10 skip via guarded F248 (requires SkipCinematics=1; default 0)" ||
             t=="; Experimental: attempt ESC music while Theme handoff is pending" ||
             t=="; Default 0; requires MusicInPauseMenu=1 and Debug Log=1"))
