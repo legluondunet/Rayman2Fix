@@ -77,9 +77,11 @@ state/
   session, l'installateur remplace automatiquement `Log=1` par `Log=0`.
   `--install-only`, `--verify` et les échecs de démarrage ne déclenchent
   pas ce changement. Un `Log=1` réactivé manuellement reste activé.
-  Les deux premiers journaux restent lisibles jusqu'au prochain lancement :
-  avec `Log=0`, les anciens journaux sont retirés pour éviter toute
-  confusion avec une session récente.
+  **Les deux premiers journaux sont conservés**, y compris lors des
+  lancements suivants avec `Log=0`. Ces lancements ne créent, ne modifient
+  et ne suppriment aucun journal. Pour de nouveaux diagnostics, réactiver
+  manuellement `Log=1` (les journaux seront alors remplacés à chaque
+  nouvelle session correspondante, et non cumulés).
   La résolution de sortie suit automatiquement celle de l'écran principal ;
   il n'existe plus d'option `Resolution`. Le FOV 3D s'adapte au format
   de l'affichage, sans modifier le mode Glide interne 1024×768 en 4:3.

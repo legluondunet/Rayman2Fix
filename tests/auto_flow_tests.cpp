@@ -184,12 +184,19 @@ int main() {
                       "manually reenabled logging is never auto-disabled");
                 write(ini, "[Debug]\nLog=0\n");
             }
+            // Later invocations must neither rewrite nor erase the original
+            // two first-session diagnostics.
+            const auto retained_installer = contents(install_log);
+            const auto retained_runtime = contents(runtime_log);
             {
                 r2fix::Startup next(test_root/"Rayman2Fix.exe");
                 next.initialize();
+                next.prepare_runtime_log();
+                next.log("MUST-NOT-APPEND-WHEN-SILENT");
                 check(!next.logging_enabled() &&
-                      !fs::exists(install_log) && !fs::exists(runtime_log),
-                      "later Log=0 runs do not generate logs and clean stale logs");
+                      contents(install_log)==retained_installer &&
+                      contents(runtime_log)==retained_runtime,
+                      "later Log=0 runs preserve both original logs byte for byte");
             }
             // Preserve BOM, CRLF and unrelated options on first-session edit.
             const std::string bom="\xef\xbb\xbf";

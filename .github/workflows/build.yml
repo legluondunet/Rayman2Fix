@@ -151,12 +151,17 @@ jobs:
             throw "Bootstrap INI must enable the four feature defaults and retain separate 4:3/dialogue/cinematic options"
           }
           # Win32 CRLF and UTF-8 BOM parsing plus both-log opt-out.
+          # Opt-out must keep the first two logs byte-for-byte unchanged.
           [IO.File]::WriteAllText('build/Release/Rayman2Fix.log', 'old runtime', [Text.Encoding]::ASCII)
+          $installerBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path build/Release/Rayman2Fix_installer.log)))
+          $runtimeBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path build/Release/Rayman2Fix.log)))
           [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=0`r`n", [Text.UTF8Encoding]::new($true))
           & ./build/Release/Rayman2Fix.exe
-          if ($LASTEXITCODE -ne 2 -or (Test-Path build/Release/Rayman2Fix_installer.log) -or
-              (Test-Path build/Release/Rayman2Fix.log)) {
-            throw "Log=0 must remove BOTH log files"
+          if ($LASTEXITCODE -ne 2 -or !(Test-Path build/Release/Rayman2Fix_installer.log) -or
+              !(Test-Path build/Release/Rayman2Fix.log) -or
+              [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path build/Release/Rayman2Fix_installer.log))) -ne $installerBefore -or
+              [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path build/Release/Rayman2Fix.log))) -ne $runtimeBefore) {
+            throw "Log=0 must preserve BOTH log files unchanged"
           }
           [IO.File]::WriteAllText((Resolve-Path $ini), "[Debug]`r`nLog=1`r`n", [Text.UTF8Encoding]::new($true))
           & ./build/Release/Rayman2Fix.exe
@@ -588,15 +593,18 @@ jobs:
           grep -q 'SYS-INFO: END' build/Rayman2Fix_installer.log
           test "$(grep -v '^;' build/Rayman2Fix.ini | sed '/^$/d')" = "$(printf '[Debug]\nLog=1\n[Graphics]\nFPSLimit=60\nAspectRatio=Auto\n[Features]\nSkipCinematics=1\nRemoveDialogueBackgrounds=1\nRemoveCinematicBars=1\nMusicInPauseMenu=1')" || exit 1
           printf 'old game log\n' > build/Rayman2Fix.log
+          cp build/Rayman2Fix.log build/expected_runtime.log
+          cp build/Rayman2Fix_installer.log build/expected_installer.log
           printf '[Debug]\r\nLog=0\r\n' > build/Rayman2Fix.ini
           result=0
           ./build/rayman2fix_cli || result=$?
           test "$result" -eq 2
-          test ! -e build/Rayman2Fix.log
-          test ! -e build/Rayman2Fix_installer.log
+          cmp -s build/Rayman2Fix.log build/expected_runtime.log
+          cmp -s build/Rayman2Fix_installer.log build/expected_installer.log
           printf '[Debug]\r\nLog=1\r\n' > build/Rayman2Fix.ini
           result=0
           ./build/rayman2fix_cli || result=$?
           test "$result" -eq 2
-          test ! -e build/Rayman2Fix.log
+          test -f build/Rayman2Fix.log
+          cmp -s build/Rayman2Fix.log build/expected_runtime.log
           grep -q 'CONFIG: Debug.Log=1' build/Rayman2Fix_installer.log

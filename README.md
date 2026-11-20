@@ -231,7 +231,7 @@ replaces `Rayman2Fix_inspect.log`, and each actual game launch resets
 `Rayman2Fix.log` before the injected runtime appends its current-session
 events. Commands that do not launch the game preserve the previous runtime
 log for diagnosis, without adding new game events. `[Debug] Log=0`
-removes both installer and runtime logs.
+leaves both existing logs untouched: no creation, truncation or deletion.
 
 **First verified game session:** a newly generated INI starts with
 `[Debug] Log=1` and an internal one-shot comment. This captures the
@@ -240,8 +240,8 @@ a verified game exits successfully does the launcher atomically change
 `Log=1` to `Log=0` and remove the one-shot comment, preserving all
 other INI settings. An `--install-only`, `--verify`, missing media,
 failed launch or unchecked launch cannot consume that marker.
-The first two logs remain available at the end of that session;
-the following `Log=0` invocation removes the old files as usual.
+The first two logs remain available indefinitely through later
+`Log=0` invocations; they are never automatically deleted.
 For troubleshooting, manually switch `Log=1` back on: it remains
 enabled, without the one-shot marker.
 The exhaustive reverse-engineering probes for the original `Learn_10`
@@ -791,8 +791,9 @@ does not erase new geometry or modify Glide state.
 These are maximum frame rates, not guaranteed measured FPS: actual performance
 may be lower. Very high limits may affect classic-game timing and require
 in-game testing; 60 is the default setting to validate on real hardware.
-`Log=0` suppresses both installer and game/runtime diagnostics and removes
-both stale log files. With `Log=1`, the installer log is reset at each
+`Log=0` suppresses both installer and game/runtime diagnostics **without
+creating, modifying or deleting either existing log**. With `Log=1`,
+the installer log is reset at each
 launcher invocation; the runtime log is reset only when a verified game
 is about to launch. Launcher-only commands or a missing-CD error do not
 erase the previous runtime trace. Both logs are beside `Rayman2Fix.exe`,
