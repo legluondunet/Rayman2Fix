@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstring>
 #include "rayman2fix/native_graphics_text_storage.hpp"
+using r2fix::switch_stable_menu_labels;
 using Row=std::array<char,56>;
 using Bank=std::array<Row,6>;
 static void put(Row& row,const char* src) {
