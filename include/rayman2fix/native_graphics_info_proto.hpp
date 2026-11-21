@@ -7,6 +7,9 @@ void start_native_graphics_info_proto(GraphicsInfoLogger logger,
 // Safe read-only state for diagnostic sprite callbacks. The caller
 // must never change rendering or keyboard behavior based on this alone.
 bool graphics_info_is_visible() noexcept;
+// Verified AI-selected row, 1..4, only while the information panel is
+// active. Zero outside; diagnostic only, never an input-routing authority.
+unsigned graphics_info_current_row() noexcept;
 // Only called for the verified native game glyph producer, before 4:3
 // horizontal centering. Returns false without altering coordinates
 // outside the validated Resolution page.
