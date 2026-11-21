@@ -301,6 +301,14 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME native-graphics-info-prototype-scope
     COMMAND native_graphics_info_policy_tests)
+  # Pure native-JFFTXT glyph placement contract: stable 4:3 canvas and
+  # intentional exclusion of the original brightness control.
+  add_executable(graphics_menu_glyph_layout_tests
+    tests/graphics_menu_glyph_layout_tests.cpp)
+  target_include_directories(graphics_menu_glyph_layout_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-native-glyph-layout
+    COMMAND graphics_menu_glyph_layout_tests)
 
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
   # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
