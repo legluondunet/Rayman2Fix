@@ -30,7 +30,6 @@
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
 #include "rayman2fix/native_graphics_info_proto.hpp"
-#include "rayman2fix/graphics_menu_cursor_probe.hpp"
 #endif
 #endif
 #include <mutex>
@@ -6756,89 +6755,6 @@ void probe_cinematic_uv_source(const r2fix::HudVertex* quad,
     log_line(msg);
 }
 
-#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
-// Passive experiment for the owner's screenshot where the native Murfy-
-// style butterfly crosses the GPU/OUTPUT labels. The previous native
-// screen-image diagnostic identified only the brightness slider.
-// Observe the separate driver callbacks, without touching any vertex,
-// material, actor, input event or the original callback.
-std::atomic<bool> g_video_info_unrouted_seen[3]{};
-std::array<std::array<std::array<std::atomic<std::uint32_t>,6>,4>,3>
-    g_video_info_unrouted_raw_by_row{};
-std::array<std::atomic<unsigned>,3> g_video_info_invalid_geometry{};
-void probe_video_info_unrouted_cursor(const r2fix::HudVertex* quad,
-                                     unsigned kind,const void* caller) {
-    if(!quad || kind>=3u || !g_log ||
-       !r2fix::graphics_info_is_visible())return;
-    const unsigned native_row=r2fix::graphics_info_current_row();
-    if(native_row<1u || native_row>4u)return;
-    const char* names[3]={"plain","uv","colored"};
-    if(!g_video_info_unrouted_seen[kind].exchange(
-           true,std::memory_order_relaxed)) {
-        char event[170]{};
-        std::snprintf(event,sizeof(event),
-             "RUNTIME-GRAPHICS-CURSOR: route=%s observed=1 identity=unverified read-only=1",
-             names[kind]);
-        log_line(event);
-    }
-    // Do not assume the legacy cursor is axis-aligned or uses the
-    // same layout as native text. Record a small, fixed number of
-    // unfiltered VALID quads per menu row and sprite route. This is
-    // observational evidence only. Preserve every original callback.
-    r2fix::ScreenQuadGeometry b{};
-    if(!r2fix::inspect_screen_quad_geometry(quad,b)) {
-        const unsigned count=g_video_info_invalid_geometry[kind]
-            .fetch_add(1u,std::memory_order_relaxed);
-        if(count==0u) {
-            char line[150]{};
-            std::snprintf(line,sizeof(line),
-                "RUNTIME-GRAPHICS-CURSOR: route=%s first-quad-invalid=1 unmodified=1",
-                names[kind]);
-            log_line(line);
-        }
-        return;
-    }
-    const auto quantize=[](float val)->std::uint32_t {
-        const float limited=std::max(-2048.0f,std::min(4096.0f,val));
-        const int q=static_cast<int>((limited+2048.0f)/32.0f);
-        return static_cast<std::uint32_t>(q<0?0:(q>255?255:q));
-    };
-    const std::uint32_t sample_key=1u+
-        quantize((b.left+b.right)*0.5f)+
-        (quantize((b.top+b.bottom)*0.5f)<<8u)+
-        (quantize(b.right-b.left)<<16u)+
-        (quantize(b.bottom-b.top)<<24u);
-    auto& slots=g_video_info_unrouted_raw_by_row[kind][native_row-1u];
-    unsigned ordinal=0;
-    bool recorded=false;
-    for(auto& slot:slots) {
-        ++ordinal;
-        auto seen=slot.load(std::memory_order_relaxed);
-        if(seen==sample_key)return;
-        if(seen!=0u)continue;
-        if(!slot.compare_exchange_strong(seen,sample_key,
-                     std::memory_order_relaxed))continue;
-        recorded=true;break;
-    }
-    if(!recorded)return;
-    std::uint32_t call_rva=0;
-    const bool source_is_game=r2fix::executable_callsite_rva(
-        reinterpret_cast<std::uintptr_t>(caller),
-        g_approved_exe_base.load(std::memory_order_acquire),
-        g_approved_exe_size.load(std::memory_order_acquire),call_rva);
-    const bool geometry_candidate=r2fix::may_be_graphics_menu_cursor(
-        {b.left,b.right,b.top,b.bottom});
-    char event[340]{};
-    std::snprintf(event,sizeof(event),
-        "RUNTIME-GRAPHICS-CURSOR-RAW: row=%u route=%s sample=%u candidate=%u caller_rva=0x%08X game_source=%u x=%.1f..%.1f y=%.1f..%.1f rz=%.4f..%.4f (read-only; not sprite identity)",
-        native_row,names[kind],ordinal,unsigned(geometry_candidate),
-        source_is_game?unsigned(call_rva):0u,unsigned(source_is_game),
-        double(b.left),double(b.right),double(b.top),double(b.bottom),
-        double(b.min_reciprocal_z),double(b.max_reciprocal_z));
-    log_line(event);
-}
-#endif
-
 // Read-only: sample sprites which bypass GLI_vDraw2DSpriteWithPercent.
 // The native 2D font/panel quads are already verified at driver level.
 // The unknown UV path may have reciprocal-Z=0; do NOT auto-scale it.
@@ -7028,9 +6944,6 @@ void __cdecl hud_plain_sprite(r2fix::HudVertex* quad, float z, void* globals) {
         return;
     }
     probe_unrouted_lower_sprite(quad,0,_ReturnAddress());
-#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
-    probe_video_info_unrouted_cursor(quad,0,_ReturnAddress());
-#endif
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, z, globals);
         return;
@@ -7056,9 +6969,6 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
     }
     probe_cinematic_uv_source(quad,_ReturnAddress());
     probe_unrouted_lower_sprite(quad,1,_ReturnAddress());
-#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
-    probe_video_info_unrouted_cursor(quad,1,_ReturnAddress());
-#endif
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, uv, z, globals);
         return;
@@ -7084,9 +6994,6 @@ void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
         return;
     }
     probe_unrouted_lower_sprite(quad,2,_ReturnAddress());
-#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
-    probe_video_info_unrouted_cursor(quad,2,_ReturnAddress());
-#endif
     if (g_hud_scale >= 1.0f || !r2fix::is_screen_sprite_quad(quad)) {
         original(quad, colors, z, globals);
         return;
