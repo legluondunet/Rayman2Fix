@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <numeric>
+#include <cmath>
 #include <cwchar>
 #include "rayman2fix/graphics_menu_target.hpp"
 #include "rayman2fix/graphics_menu_glyph_layout.hpp"
@@ -54,6 +55,7 @@ std::atomic<bool> g_started{false};
 std::atomic<bool> g_protected{false};
 std::atomic<bool> g_layout_active{false};
 std::atomic<unsigned> g_reflowed_glyphs{0};
+std::array<std::atomic<std::uint32_t>,16> g_image_quad_samples{};
 std::atomic<unsigned> g_output_w{0};
 std::atomic<unsigned> g_output_h{0};
 std::array<std::atomic<std::uintptr_t>,4> g_select_children{};
@@ -581,6 +583,35 @@ DWORD WINAPI worker(void*) {
     return 0;
 }
 } // namespace
+void observe_native_graphics_info_screen_image(float xmin,float ymin,
+                                               float xmax,float ymax) noexcept {
+    if(!g_layout_active.load(std::memory_order_acquire) || !g_logger ||
+       !std::isfinite(xmin) || !std::isfinite(xmax) ||
+       !std::isfinite(ymin) || !std::isfinite(ymax) ||
+       xmin<0.0f || xmax>100.0f || ymin<15.0f || ymax>80.0f ||
+       xmax-xmin<1.0f || xmax-xmin>30.0f ||
+       ymax-ymin<1.0f || ymax-ymin>30.0f)return;
+    // Quantize shape to 2% bands; identical native quads report once.
+    // Do not log texture names, addresses, or raw material pointers.
+    const auto q=[](float x)->std::uint32_t {
+        return std::uint32_t(x*0.5f+0.5f)+1u;
+    };
+    const std::uint32_t key=q(xmin)|(q(xmax)<<8)|
+                            (q(ymin)<<16)|(q(ymax)<<24);
+    for(auto& slot:g_image_quad_samples) {
+        std::uint32_t seen=slot.load(std::memory_order_relaxed);
+        if(seen==key)return;
+        if(seen!=0u)continue;
+        if(!slot.compare_exchange_strong(seen,key,
+             std::memory_order_relaxed))continue;
+        char line[215]{};
+        std::snprintf(line,sizeof(line),
+           "RUNTIME-GRAPHICS-IMAGE: possible-native-cursor sample x=%.2f..%.2f y=%.2f..%.2f (read-only; not verified cursor identity)",
+           double(xmin),double(xmax),double(ymin),double(ymax));
+        g_logger(line);
+        return;
+    }
+}
 bool remap_native_graphics_info_glyph(float& xmin,float& ymin,
                                       float& xmax,float& ymax) noexcept {
     if(!g_layout_active.load(std::memory_order_acquire))return false;
