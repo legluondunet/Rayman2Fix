@@ -8,9 +8,9 @@ constexpr MenuScopeCandidate classify_menu_scope(
     int normal, int reflex,
     bool v17_valid, int v17, bool v51_valid, int v51) noexcept {
     if(!verified_model || !verified_mind || !menu_level ||
-       !v17_valid || !v51_valid || v51!=0)
+       !v17_valid || !v51_valid || (v51!=0 && v51!=1))
         return MenuScopeCandidate::unknown;
-    if(normal==5 && reflex==0 && v17>=1 && v17<=3)
+    if(normal==5 && reflex==0 && v17>=1 && v17<=4)
         return MenuScopeCandidate::video_choices;
     if(normal==18 && reflex==5 && v17==5)
         return MenuScopeCandidate::brightness;
