@@ -19,5 +19,21 @@ int main() {
     // Explicit logging on a trace-only build enables both observers.
     check(menu_controller_worker_required(true,false));
     check(menu_passive_diagnostics_required(true));
+    using r2fix::menu_controller_worker_continue;
+    using r2fix::menu_controller_scan_allowed;
+    // The trace-only observer stops at the configured time/report cap.
+    check(menu_controller_worker_continue(false,899,20,900,160));
+    check(!menu_controller_worker_continue(false,900,20,900,160));
+    check(!menu_controller_worker_continue(false,50,160,900,160));
+    // A user can return to MENU long after three minutes or 160 logs.
+    check(menu_controller_worker_continue(true,900,160,900,160));
+    check(menu_controller_worker_continue(true,100000,100000,900,160));
+    // In the persistent variant, memory scans must occur ONLY in MENU.
+    check(menu_controller_scan_allowed(true,true,0,18));
+    check(!menu_controller_scan_allowed(true,false,0,18));
+    check(!menu_controller_scan_allowed(true,true,18,18));
+    // The legacy bounded observer still accepts its previous scope.
+    check(menu_controller_scan_allowed(false,false,0,18));
+    check(!menu_controller_scan_allowed(false,true,18,18));
     return 0;
 }
