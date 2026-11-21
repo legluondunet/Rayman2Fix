@@ -444,6 +444,8 @@ DWORD WINAPI worker(void*) {
     DWORD next_report=began+5000u;
     DWORD next_retry=began;
     bool reported_text_issue=false;
+    bool was_visible=false;
+    unsigned last_latch=~0u;
     // Keep the guard active while the process lives. Revert script hooks
     // when the original Menu level is unloaded; never silently expose
     // the original clickable settings after a diagnostic timeout.
@@ -453,6 +455,9 @@ DWORD WINAPI worker(void*) {
         if(!in_menu) {
             if(guarded) {
                 g_protected.store(false,std::memory_order_release);
+                g_layout_active.store(false,std::memory_order_release);
+                was_visible=false;
+                last_latch=~0u;
                 restore_text();
                 restore_callbacks();
                 guarded=false;
@@ -504,11 +509,26 @@ DWORD WINAPI worker(void*) {
                     }
                     g_layout_active.store(g_language_table!=0,
                                           std::memory_order_release);
+                    if(g_language_table &&
+                       (!was_visible || last_latch!=vars.activate)) {
+                        char event[180]{};
+                        std::snprintf(event,sizeof(event),
+                            "RUNTIME-GRAPHICS-INFO: status=video-page-visible row=%d latch=%u return_visit=%u controls=guarded",
+                            int(vars.selection),unsigned(vars.activate),
+                            unsigned(was_visible));
+                        g_logger(event);
+                        was_visible=true;
+                        last_latch=vars.activate;
+                    }
                 } else {
                     // Restore text atomically when leaving the verified
                     // video-choice state. The native brightness command
                     // and other options remain in their own original UI.
                     g_layout_active.store(false,std::memory_order_release);
+                    if(was_visible && g_language_table)
+                        g_logger("RUNTIME-GRAPHICS-INFO: status=video-page-exit text-restored=1");
+                    was_visible=false;
+                    last_latch=~0u;
                     if(g_language_table)restore_text();
                 }
             }
