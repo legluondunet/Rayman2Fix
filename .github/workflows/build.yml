@@ -634,6 +634,8 @@ jobs:
         run: ctest --test-dir build --output-on-failure
       - name: Validate masked SNA menu inventory parser using synthetic data
         run: python3 -m unittest discover -s tests -p 'test_sna_menu_inventory.py'
+      - name: Validate offline cursor actor graph and DAT relocation parser (synthetic only)
+        run: python3 -m unittest discover -s tests -p 'test_menu_cursor_offline.py'
       - name: Verify menu text handles using synthetic SNA/RTB/DSB
         run: python3 -m unittest discover -s tests -p 'test_menu_texts.py'
       - name: Verify Linux bootstrap workspace
