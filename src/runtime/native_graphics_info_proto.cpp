@@ -623,6 +623,9 @@ void observe_native_graphics_info_non_glyph(unsigned route,
         return;
     }
 }
+bool graphics_info_is_visible() noexcept {
+    return g_layout_active.load(std::memory_order_acquire);
+}
 bool remap_native_graphics_info_glyph(float& xmin,float& ymin,
                                       float& xmax,float& ymax) noexcept {
     if(!g_layout_active.load(std::memory_order_acquire))return false;
