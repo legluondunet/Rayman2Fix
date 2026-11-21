@@ -58,6 +58,9 @@ std::atomic<unsigned> g_output_h{0};
 std::array<std::atomic<std::uintptr_t>,4> g_select_children{};
 std::atomic<std::uintptr_t> g_save_child{0};
 std::array<std::array<char,56>,6> g_rows{};
+std::array<std::array<char,56>,6> g_information_rows{};
+std::array<std::array<char,56>,6> g_original_rows{};
+bool g_information_mode=false;
 std::array<std::uintptr_t,6> g_old_text{};
 std::uintptr_t g_language_table=0;
 GraphicsInfoLogger g_logger=nullptr;
@@ -370,7 +373,10 @@ void build_texts() noexcept {
     unsigned x=gcd?render_w/gcd:0u,y=gcd?render_h/gcd:0u;
     // Exact conventional 16:10 is labeled 16:10, not reduced 8:5.
     if(x==8u && y==5u){x=16u;y=10u;}
-    std::snprintf(g_rows[0].data(),g_rows[0].size(),"VIDEO INFORMATION");
+    // The original VIDEO heading remains in the scene. The original
+    // RESOLUTION label shares a text row with a native video choice;
+    // repeating a second information title collides with D3D9.
+    std::snprintf(g_rows[0].data(),g_rows[0].size()," ");
     char line[100]{};
     std::snprintf(line,sizeof(line),"%ux%u %u:%u",render_w,render_h,x,y);
     text_row(1,"OUTPUT:",line);
@@ -380,6 +386,19 @@ void build_texts() noexcept {
     text_row(4,"BPP:",line);
     std::snprintf(g_rows[5].data(),g_rows[5].size(),
                   "GLIDE: 1024x768x16");
+    g_information_rows=g_rows;
+    g_information_mode=true;
+}
+// Original native menu entities may cache char* from localization. Rather
+// than changing the six pointer slots on every visit, keep their target
+// buffers stable throughout the MENU level and swap only their contents
+// between the exact original localized labels and the information view.
+void show_information_rows(bool visible) noexcept {
+    if(!g_language_table || g_information_mode==visible)return;
+    const auto& source=visible?g_information_rows:g_original_rows;
+    for(unsigned i=0;i<6;++i)
+        std::memcpy(g_rows[i].data(),source[i].data(),g_rows[i].size());
+    g_information_mode=visible;
 }
 bool original_text_valid(std::uintptr_t p) noexcept {
     char s[72]{};
@@ -401,7 +420,17 @@ bool patch_text_table() noexcept {
         if(!writable_slot(slot) || !read32(slot,p) ||
            !menu_safe_ptr(p) || !original_text_valid(p))return false;
         originals[i]=p;
+        char original[72]{};
+        if(!read_bytes(p,original,sizeof(original)))return false;
+        std::snprintf(g_original_rows[i].data(),g_original_rows[i].size(),
+                      "%s",original);
     }
+    // On a new MENU load, the previous session may have restored original
+    // content. Prepare information BEFORE publishing these stable slots.
+    for(unsigned i=0;i<6;++i)
+        std::memcpy(g_rows[i].data(),g_information_rows[i].data(),
+                    g_rows[i].size());
+    g_information_mode=true;
     unsigned patched=0;
     for(unsigned i=0;i<6;++i) {
         const auto slot=table+(379u+i)*4u;
@@ -435,6 +464,7 @@ void restore_text() noexcept {
                 static_cast<void*>(g_rows[i].data()));
     }
     g_language_table=0;
+    g_information_mode=false;
 }
 DWORD WINAPI worker(void*) {
     build_texts();
@@ -500,13 +530,14 @@ DWORD WINAPI worker(void*) {
                 if(video_page) {
                     if(!g_language_table) {
                         if(patch_text_table()) {
-                            g_logger("RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched scope=video-choice-only");
+                            g_logger("RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched scope=video-choice-only pointer-lifetime=menu-level");
                         } else if(!reported_text_issue &&
                                  DWORD(now-began)>7000u) {
                             reported_text_issue=true;
                             g_logger("RUNTIME-GRAPHICS-INFO: status=text-table-unverified no-replacement");
                         }
                     }
+                    if(g_language_table)show_information_rows(true);
                     g_layout_active.store(g_language_table!=0,
                                           std::memory_order_release);
                     if(g_language_table &&
@@ -521,15 +552,15 @@ DWORD WINAPI worker(void*) {
                         last_latch=vars.activate;
                     }
                 } else {
-                    // Restore text atomically when leaving the verified
-                    // video-choice state. The native brightness command
-                    // and other options remain in their own original UI.
+                    // The native UI caches string pointers. Restore the
+                    // exact original localized LABEL CONTENT inside stable
+                    // buffers here; restore the pointers only at MENU unload.
                     g_layout_active.store(false,std::memory_order_release);
                     if(was_visible && g_language_table)
-                        g_logger("RUNTIME-GRAPHICS-INFO: status=video-page-exit text-restored=1");
+                        g_logger("RUNTIME-GRAPHICS-INFO: status=video-page-exit original-label-content-restored=1 pointers-stable=1");
                     was_visible=false;
                     last_latch=~0u;
-                    if(g_language_table)restore_text();
+                    if(g_language_table)show_information_rows(false);
                 }
             }
         }
@@ -539,7 +570,7 @@ DWORD WINAPI worker(void*) {
                 char line[240]{};
                 std::snprintf(line,sizeof(line),
                    "RUNTIME-GRAPHICS-INFO: status=active native_labels=%u video_actions_blocked=%u saves_blocked=%u original_video_calls_forwarded=%u reflowed_glyphs=%u",
-                   unsigned(g_language_table!=0),
+                   unsigned(g_layout_active.load(std::memory_order_acquire)),
                    g_select_suppressed.load(std::memory_order_relaxed),
                    g_save_suppressed.load(std::memory_order_relaxed),
                    g_other_forwarded.load(std::memory_order_relaxed),
