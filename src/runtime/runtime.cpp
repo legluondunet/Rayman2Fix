@@ -25,6 +25,9 @@
 #endif
 #include "rayman2fix/game_window_icon.hpp"
 #include "rayman2fix/render_poll_gate.hpp"
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+#include "rayman2fix/graphics_menu_trace.hpp"
+#endif
 #include <mutex>
 #if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
 #include "rayman2fix/esc_music_wine_prototype.hpp"
@@ -7507,6 +7510,11 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         initialize_native_intro_skip();
         install_native_frame_flip_hook();
         start_hud_monitor();
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+        // Read-only observer lives solely in the dedicated research build.
+        // It never runs within the audio/render critical paths.
+        if(g_log) r2fix::start_graphics_menu_trace(&log_line);
+#endif
         // Apply game EXE icon in its own process, independently of ESC audio.
         r2fix::start_game_window_icon_worker(&log_line);
     }

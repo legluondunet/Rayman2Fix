@@ -70,6 +70,8 @@ option(RAYMAN2FIX_RESEARCH_PROBES
   "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
 option(RAYMAN2FIX_AUDIO_TRACE
   "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
+option(RAYMAN2FIX_GRAPHICS_MENU_TRACE
+  "Build separate passive native Resolution menu diagnostics (no mode hooks)" OFF)
 option(RAYMAN2FIX_ESC_MUSIC_PROTO
   "Build explicit opt-in, experimental native ESC music compensation for Wine testing" OFF)
 if(RAYMAN2FIX_ESC_MUSIC_PROTO AND NOT RAYMAN2FIX_AUDIO_TRACE)
@@ -85,6 +87,12 @@ if(WIN32)
     src/runtime/runtime.cpp
     src/runtime/game_window_icon.cpp)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME fix)
+  if(RAYMAN2FIX_GRAPHICS_MENU_TRACE)
+    target_sources(Rayman2FixRuntime PRIVATE
+      src/runtime/graphics_menu_trace.cpp)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE
+      RAYMAN2FIX_GRAPHICS_MENU_TRACE=1)
+  endif()
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
     RAYMAN2FIX_ESC_MUSIC_FEATURE=1

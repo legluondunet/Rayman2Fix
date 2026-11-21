@@ -537,6 +537,45 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Build isolated Resolution menu research launcher
+        if: github.event_name == 'pull_request' && github.head_ref == 'research/native-resolution-menu-state'
+        shell: pwsh
+        run: |
+          # The normal artifact is already uploaded. Reuse pinned GameFrame
+          # while explicitly disabling both audio research variants.
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=OFF -DRAYMAN2FIX_AUDIO_TRACE=OFF -DRAYMAN2FIX_ESC_MUSIC_PROTO=OFF -DRAYMAN2FIX_GRAPHICS_MENU_TRACE=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics trace configure failed' }
+          cmake --build build --config Release --target Rayman2Fix --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics trace build failed' }
+          @'
+          from pathlib import Path
+          dll=Path('build/Release/fix.dll').read_bytes()
+          assert b'RUNTIME-VIDEO-MENU-TRACE: enabled=1 read-only=1' in dll, 'Missing native graphics trace marker'
+          assert b'RUNTIME-AUDIO-TRACE: enabled=1' not in dll, 'Unexpected research audio tracer'
+          print('Isolated native graphics menu tracer: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics trace instrumentation missing' }
+          New-Item -Path resolution-trace -ItemType Directory -Force | Out-Null
+          Copy-Item build/Release/Rayman2Fix.exe resolution-trace/Rayman2Fix.exe
+          New-Item -Path resolution-trace-smoke -ItemType Directory -Force | Out-Null
+          Copy-Item resolution-trace/Rayman2Fix.exe resolution-trace-smoke/Rayman2Fix.exe
+          & ./resolution-trace-smoke/Rayman2Fix.exe --verify 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 2) { throw 'No-media graphics tracer must fail safely' }
+          $deployed='resolution-trace-smoke/game/fix.dll'
+          if (!(Test-Path $deployed)) { throw 'Embedded graphics tracer DLL was not deployed' }
+          if ((Get-FileHash $deployed -Algorithm SHA256).Hash -ne (Get-FileHash build/Release/fix.dll -Algorithm SHA256).Hash) {
+            throw 'Embedded graphics tracer DLL differs from built runtime'
+          }
+          $global:LASTEXITCODE = 0
+      - name: Upload opt-in Resolution menu research build
+        if: github.event_name == 'pull_request' && github.head_ref == 'research/native-resolution-menu-state'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rayman2Fix-Windows-x86-resolution-menu-trace
+          path: resolution-trace/
+          if-no-files-found: error
+          retention-days: 14
+
   linux-tests:
     runs-on: ubuntu-latest
     steps:
