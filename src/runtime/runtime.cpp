@@ -25,6 +25,13 @@
 #endif
 #include "rayman2fix/game_window_icon.hpp"
 #include "rayman2fix/render_poll_gate.hpp"
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+#include "rayman2fix/graphics_menu_trace.hpp"
+#include "rayman2fix/graphics_menu_controller_trace.hpp"
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+#include "rayman2fix/native_graphics_info_proto.hpp"
+#endif
+#endif
 #include <mutex>
 #if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
 #include "rayman2fix/esc_music_wine_prototype.hpp"
@@ -32,6 +39,7 @@
 #include "rayman2fix/esc_early_theme.hpp"
 #endif
 #include <atomic>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -5745,6 +5753,17 @@ void __cdecl native_2d_percent_sprite(void* viewport,
             double(ymin),double(ymax));
         log_line(sample);
     }
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    // Experimental Resolution page only: position existing native font
+    // glyph quads into a regular 4:3-safe information grid. Non-glyph
+    // producers (including the brightness bar) remain untouched.
+    if(producer==Native2DProducer::Glyph) {
+        r2fix::remap_native_graphics_info_glyph(xmin,ymin,xmax,ymax);
+    } else {
+        r2fix::observe_native_graphics_info_non_glyph(
+            static_cast<unsigned>(producer),xmin,ymin,xmax,ymax);
+    }
+#endif
     float left=0.0f,right=0.0f;
     if(g_hud_scale>=0.9999f ||
        !r2fix::center_native_2d_percent(
@@ -7495,8 +7514,14 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         needs_native_render_events=needs_native_render_events ||
             g_proto_enabled.load(std::memory_order_acquire);
 #endif
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+        constexpr bool needs_graphics_info_glyph_hook=true;
+#else
+        constexpr bool needs_graphics_info_glyph_hook=false;
+#endif
         if(g_hud_scale<0.9999f || g_remove_dialogue_backgrounds ||
-           g_remove_cinematic_bars || needs_native_render_events)
+           g_remove_cinematic_bars || needs_native_render_events ||
+           needs_graphics_info_glyph_hook)
             install_native_2d_percent_hook();
 #if RAYMAN2FIX_RESEARCH_PROBES
         // Read-only hook at VA 0x4710C0 is not part of the actual fix.
@@ -7507,6 +7532,18 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         initialize_native_intro_skip();
         install_native_frame_flip_hook();
         start_hud_monitor();
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+        // Read-only observer lives solely in the dedicated research build.
+        // It never runs within the audio/render critical paths.
+        if(g_log) {
+            r2fix::start_menu_ai_controller_trace(&log_line);
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+            r2fix::start_native_graphics_info_proto(&log_line,
+                settings->output_width,settings->output_height);
+#endif
+            r2fix::start_graphics_menu_trace(&log_line);
+        }
+#endif
         // Apply game EXE icon in its own process, independently of ESC audio.
         r2fix::start_game_window_icon_worker(&log_line);
     }

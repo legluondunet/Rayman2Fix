@@ -421,6 +421,7 @@ jobs:
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Standard DLL included research probes' }
       - name: Build separate research-only audio trace launcher
+        if: github.event_name != 'pull_request' || github.head_ref != 'research/native-resolution-menu-state'
         shell: pwsh
         run: |
           # Reuse the pinned already-built GameFrame resources. No original
@@ -442,6 +443,7 @@ jobs:
           if (!(Test-Path audio-trace/Rayman2Fix.exe)) { throw 'Audio trace launcher not produced' }
           $global:LASTEXITCODE = 0
       - name: Verify the research EXE deploys the exact corrected DLL
+        if: github.event_name != 'pull_request' || github.head_ref != 'research/native-resolution-menu-state'
         shell: pwsh
         run: |
           # Checking the DLL on disk before packaging is not enough:
@@ -476,6 +478,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Embedded corrected audio trace marker check failed' }
           $global:LASTEXITCODE = 0
       - name: Upload optional sound-pause research build
+        if: github.event_name != 'pull_request' || github.head_ref != 'research/native-resolution-menu-state'
         uses: actions/upload-artifact@v4
         with:
           name: Rayman2Fix-Windows-x86-audio-trace
@@ -484,6 +487,7 @@ jobs:
           retention-days: 30
 
       - name: Build separately gated ESC music Wine prototype
+        if: github.event_name != 'pull_request' || github.head_ref != 'research/native-resolution-menu-state'
         shell: pwsh
         run: |
           # This is not a user-facing release. The output contains only our
@@ -510,6 +514,7 @@ jobs:
           Copy-Item build/Release/Rayman2Fix.exe esc-prototype/Rayman2Fix.exe
           $global:LASTEXITCODE = 0
       - name: Verify ESC prototype EXE contains the exact new injected DLL
+        if: github.event_name != 'pull_request' || github.head_ref != 'research/native-resolution-menu-state'
         shell: pwsh
         run: |
           New-Item -Path esc-prototype-smoke -ItemType Directory -Force | Out-Null
@@ -530,10 +535,60 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Prototype DLL marker missing after deployment' }
           $global:LASTEXITCODE = 0
       - name: Upload opt-in experimental ESC music launcher
+        if: github.event_name != 'pull_request' || github.head_ref != 'research/native-resolution-menu-state'
         uses: actions/upload-artifact@v4
         with:
           name: Rayman2Fix-Windows-x86-esc-music-prototype
           path: esc-prototype/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build isolated Resolution menu research launcher
+        if: github.event_name == 'pull_request' && github.head_ref == 'research/native-resolution-menu-state'
+        shell: pwsh
+        run: |
+          # The normal artifact is already uploaded. Reuse pinned GameFrame
+          # while explicitly disabling both audio research variants.
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=OFF -DRAYMAN2FIX_AUDIO_TRACE=OFF -DRAYMAN2FIX_ESC_MUSIC_PROTO=OFF -DRAYMAN2FIX_GRAPHICS_MENU_TRACE=ON -DRAYMAN2FIX_GRAPHICS_INFO_PROTO=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics trace configure failed' }
+          cmake --build build --config Release --target Rayman2Fix --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics trace build failed' }
+          @'
+          from pathlib import Path
+          dll=Path('build/Release/fix.dll').read_bytes()
+          assert b'RUNTIME-VIDEO-MENU-TRACE: enabled=1 read-only=1' in dll, 'Missing native graphics trace marker'
+          assert b'RUNTIME-MENU-AI: status=started read-only=1' in dll, 'Missing passive AI controller diagnostic'
+          assert b'RUNTIME-GRAPHICS-INFO: status=started experimental=1' in dll, 'Missing native graphics information prototype'
+          assert b'RUNTIME-GRAPHICS-INFO: status=commands-guarded' in dll, 'Missing bounded video action guards'
+          assert b'RUNTIME-MENU-CURSOR-REFS: anchor-revalidated=' in dll, 'Missing cursor name-reference scan'
+          assert b'RUNTIME-MENU-CURSOR-REF-LAYOUT: relative-sites=' in dll, 'Missing candidate reference layout probe'
+          assert b'RUNTIME-MENU-CURSOR-REF-CLASS: inline_minus12=' in dll, 'Missing inline self-reference classification'
+          assert b'RUNTIME-GRAPHICS-INFO: status=preflight-refused reason=%s' in dll, 'Missing safe diagnostic for refused callbacks'
+          assert b'v17_valid=%u v17=%d' in dll, 'Missing verified native selection scalar probe'
+          assert b'scope=%s level_hint=%s' in dll, 'Missing conservative video/brightness scope diagnostics'
+          assert b'RUNTIME-MENU-TEXT: status=installed' not in dll, 'Obsolete native text detour must not be included'
+          assert b'RUNTIME-AUDIO-TRACE: enabled=1' not in dll, 'Unexpected research audio tracer'
+          print('Isolated native graphics menu tracer: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics trace instrumentation missing' }
+          New-Item -Path resolution-trace -ItemType Directory -Force | Out-Null
+          Copy-Item build/Release/Rayman2Fix.exe resolution-trace/Rayman2Fix.exe
+          New-Item -Path resolution-trace-smoke -ItemType Directory -Force | Out-Null
+          Copy-Item resolution-trace/Rayman2Fix.exe resolution-trace-smoke/Rayman2Fix.exe
+          & ./resolution-trace-smoke/Rayman2Fix.exe --verify 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 2) { throw 'No-media graphics tracer must fail safely' }
+          $deployed='resolution-trace-smoke/game/fix.dll'
+          if (!(Test-Path $deployed)) { throw 'Embedded graphics tracer DLL was not deployed' }
+          if ((Get-FileHash $deployed -Algorithm SHA256).Hash -ne (Get-FileHash build/Release/fix.dll -Algorithm SHA256).Hash) {
+            throw 'Embedded graphics tracer DLL differs from built runtime'
+          }
+          $global:LASTEXITCODE = 0
+      - name: Upload opt-in Resolution menu research build
+        if: github.event_name == 'pull_request' && github.head_ref == 'research/native-resolution-menu-state'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rayman2Fix-Windows-x86-native-graphics-menu-prototype
+          path: resolution-trace/
           if-no-files-found: error
           retention-days: 14
 
@@ -583,6 +638,12 @@ jobs:
         run: cmake --build build --parallel
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Validate masked SNA menu inventory parser using synthetic data
+        run: python3 -m unittest discover -s tests -p 'test_sna_menu_inventory.py'
+      - name: Validate offline cursor actor graph and DAT relocation parser (synthetic only)
+        run: python3 -m unittest discover -s tests -p 'test_menu_cursor_offline.py'
+      - name: Verify menu text handles using synthetic SNA/RTB/DSB
+        run: python3 -m unittest discover -s tests -p 'test_menu_texts.py'
       - name: Verify Linux bootstrap workspace
         run: |
           result=0

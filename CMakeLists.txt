@@ -70,8 +70,15 @@ option(RAYMAN2FIX_RESEARCH_PROBES
   "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
 option(RAYMAN2FIX_AUDIO_TRACE
   "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
+option(RAYMAN2FIX_GRAPHICS_INFO_PROTO
+  "Build experimental native in-menu graphics information and exact video-action guards" OFF)
+option(RAYMAN2FIX_GRAPHICS_MENU_TRACE
+  "Build separate passive native Resolution menu diagnostics (no mode hooks)" OFF)
 option(RAYMAN2FIX_ESC_MUSIC_PROTO
   "Build explicit opt-in, experimental native ESC music compensation for Wine testing" OFF)
+if(RAYMAN2FIX_GRAPHICS_INFO_PROTO AND NOT RAYMAN2FIX_GRAPHICS_MENU_TRACE)
+  message(FATAL_ERROR "Native graphics info prototype requires graphics menu trace")
+endif()
 if(RAYMAN2FIX_ESC_MUSIC_PROTO AND NOT RAYMAN2FIX_AUDIO_TRACE)
   message(FATAL_ERROR "ESC audio prototype requires RAYMAN2FIX_AUDIO_TRACE=ON")
 endif()
@@ -85,6 +92,18 @@ if(WIN32)
     src/runtime/runtime.cpp
     src/runtime/game_window_icon.cpp)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME fix)
+  if(RAYMAN2FIX_GRAPHICS_MENU_TRACE)
+    target_sources(Rayman2FixRuntime PRIVATE
+      src/runtime/graphics_menu_trace.cpp
+      src/runtime/graphics_menu_controller_trace.cpp)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE
+      RAYMAN2FIX_GRAPHICS_MENU_TRACE=1)
+  endif()
+  if(RAYMAN2FIX_GRAPHICS_INFO_PROTO)
+    target_sources(Rayman2FixRuntime PRIVATE src/runtime/native_graphics_info_proto.cpp)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE
+      RAYMAN2FIX_GRAPHICS_INFO_PROTO=1)
+  endif()
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
     RAYMAN2FIX_ESC_MUSIC_FEATURE=1
@@ -259,6 +278,55 @@ if(BUILD_TESTING)
   target_include_directories(graphics_menu_info_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME graphics-menu-readonly-info-model COMMAND graphics_menu_info_tests)
+  # Guard against confusing original CD (0x117000) with the authenticated
+  # expanded/deprotected game image (0x1D7000), without shipping game bytes.
+  add_executable(graphics_menu_target_tests tests/graphics_menu_target_tests.cpp)
+  target_include_directories(graphics_menu_target_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-deprotected-pe-fingerprint
+    COMMAND graphics_menu_target_tests)
+  add_executable(menu_text_probe_tests tests/menu_text_probe_tests.cpp)
+  target_include_directories(menu_text_probe_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME menu-text-handle-scoping COMMAND menu_text_probe_tests)
+  add_executable(graphics_menu_controller_tests
+    tests/graphics_menu_controller_model_tests.cpp)
+  target_include_directories(graphics_menu_controller_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-controller-relocation-and-state
+    COMMAND graphics_menu_controller_tests)
+  add_executable(native_graphics_info_policy_tests
+    tests/native_graphics_info_policy_tests.cpp)
+  target_include_directories(native_graphics_info_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-graphics-info-prototype-scope
+    COMMAND native_graphics_info_policy_tests)
+  add_executable(native_graphics_text_storage_tests
+    tests/native_graphics_text_storage_tests.cpp)
+  target_include_directories(native_graphics_text_storage_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-stable-text-pointer-lifetime
+    COMMAND native_graphics_text_storage_tests)
+  add_executable(graphics_menu_cursor_actor_anchor_tests
+    tests/graphics_menu_cursor_actor_anchor_tests.cpp)
+  target_include_directories(graphics_menu_cursor_actor_anchor_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-cursor-actor-name-fingerprint
+    COMMAND graphics_menu_cursor_actor_anchor_tests)
+  add_executable(graphics_menu_cursor_reference_tests
+    tests/graphics_menu_cursor_reference_tests.cpp)
+  target_include_directories(graphics_menu_cursor_reference_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-cursor-ptr-value-candidates
+    COMMAND graphics_menu_cursor_reference_tests)
+  # Pure native-JFFTXT glyph placement contract: stable 4:3 canvas and
+  # intentional exclusion of the original brightness control.
+  add_executable(graphics_menu_glyph_layout_tests
+    tests/graphics_menu_glyph_layout_tests.cpp)
+  target_include_directories(graphics_menu_glyph_layout_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-native-glyph-layout
+    COMMAND graphics_menu_glyph_layout_tests)
 
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
   # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
