@@ -15,6 +15,7 @@
 #include "rayman2fix/graphics_menu_screen_candidate.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
 #include "rayman2fix/graphics_menu_target.hpp"
+#include "rayman2fix/graphics_menu_cursor_actor_anchor.hpp"
 
 #if !defined(_M_IX86)
 #error Menu controller trace requires Windows x86
@@ -164,6 +165,65 @@ ScanResult locate_controller() noexcept {
     }
     return out;
 }
+// The owner's Menu.sna inventory identifies a dedicated
+// YAM_CurseurMenu_I1 / ARG_CurseurMenu scene actor. Scan for the exact
+// four co-located name-table markers after the independently verified
+// AI controller is found. The live name table may be relocated: no
+// absolute pointer, rendering callback or actor visibility is assumed.
+// This is ONE bounded, read-only pass in the research build only.
+struct CursorNameScan {
+    unsigned matches=0, unreadable=0, scanned_mib=0;
+};
+CursorNameScan locate_cursor_name_anchor() noexcept {
+    CursorNameScan out{};
+    std::array<BYTE,kChunk+kMenuCursorActorAnchorWindow> bytes{};
+    SYSTEM_INFO system{};
+    GetSystemInfo(&system);
+    const auto last=std::min<std::uintptr_t>(
+       reinterpret_cast<std::uintptr_t>(system.lpMaximumApplicationAddress),
+       0x7FFF0000u);
+    std::uintptr_t current=0x10000u;
+    unsigned processed=0;
+    while(current<last && processed<kMemoryBudget &&
+          out.matches<2u) {
+        MEMORY_BASIC_INFORMATION region{};
+        if(!VirtualQuery(reinterpret_cast<const void*>(current),
+                         &region,sizeof(region)) ||
+           !region.RegionSize)break;
+        const auto begin=reinterpret_cast<std::uintptr_t>(region.BaseAddress);
+        const auto end=std::min(last,
+            begin+static_cast<std::uintptr_t>(region.RegionSize));
+        if(end<=current)break;
+        current=end;
+        if(region.State!=MEM_COMMIT || region.Type!=MEM_PRIVATE ||
+           !readable_writable(region.Protect))continue;
+        for(auto at=begin;at<end && processed<kMemoryBudget &&
+            out.matches<2u;) {
+            const auto length=static_cast<SIZE_T>(
+                std::min<std::uintptr_t>(
+                    kChunk+kMenuCursorActorAnchorWindow,end-at));
+            SIZE_T copied=0;
+            const BOOL ok=ReadProcessMemory(GetCurrentProcess(),
+                  reinterpret_cast<const void*>(at),
+                  bytes.data(),length,&copied);
+            if(ok && copied>=kMenuCursorActorAnchorWindow) {
+                for(std::size_t j=0;j<kChunk &&
+                    j+kMenuCursorActorAnchorWindow<=copied;++j) {
+                    if(bytes[j]!='Y')continue;
+                    if(!verified_menu_cursor_name_anchor(
+                           bytes.data()+j,copied-j))continue;
+                    ++out.matches;
+                    if(out.matches>=2u)break; // ambiguous: fail closed
+                }
+            } else ++out.unreadable;
+            const auto advance=std::min<std::uintptr_t>(kChunk,end-at);
+            at+=advance;
+            processed+=static_cast<unsigned>(advance);
+        }
+    }
+    out.scanned_mib=(processed+1024u*1024u-1u)/(1024u*1024u);
+    return out;
+}
 const char* native_level_hint() noexcept {
     const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     char level[30]{};
@@ -213,6 +273,16 @@ DWORD WINAPI worker(void*) {
                    tries,native_level_hint(),scanned.scanned_mib);
                 g_logger(line);
                 ++reports;
+                // This name-table evidence does NOT prove which GLI
+                // callback renders the butterfly, so never use it to
+                // suppress geometry or bypass native selection.
+                const auto cursor_names=locate_cursor_name_anchor();
+                char cursor_line[245]{};
+                std::snprintf(cursor_line,sizeof(cursor_line),
+                    "RUNTIME-MENU-CURSOR-ACTOR: name-table-matches=%u scanned_mib=%u unreadable_chunks=%u verified-actor-renderer=0 mutation=0 (one-shot read-only)",
+                    cursor_names.matches,cursor_names.scanned_mib,
+                    cursor_names.unreadable);
+                g_logger(cursor_line);
             } else if(tries==1u || tries==kMaxScans ||
                       scanned.matches>1u || (tries%4u)==0u) {
                 char line[240]{};
