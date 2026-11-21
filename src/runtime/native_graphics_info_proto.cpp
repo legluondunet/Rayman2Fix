@@ -58,6 +58,17 @@ GraphicsInfoLogger g_logger=nullptr;
 std::atomic<unsigned> g_select_suppressed{0};
 std::atomic<unsigned> g_save_suppressed{0};
 std::atomic<unsigned> g_other_forwarded{0};
+std::atomic<unsigned> g_preflight_reported{0};
+bool rejected(const char* reason) noexcept {
+    if(g_logger && g_preflight_reported.fetch_add(1,std::memory_order_relaxed)<8u) {
+        char message[180]{};
+        std::snprintf(message,sizeof(message),
+           "RUNTIME-GRAPHICS-INFO: status=preflight-refused reason=%s unchanged=1",
+           reason);
+        g_logger(message);
+    }
+    return false;
+}
 
 std::uintptr_t exe_base() noexcept {
     return reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
@@ -84,12 +95,20 @@ bool is_native_menu() noexcept {
        (name[3]=='U'||name[3]=='u');
 }
 bool writable_slot(std::uintptr_t p) noexcept {
+    // Image .data and stack memory may be copy-on-write under Wine and
+    // Windows. Use the same page policy as the established F248 slot hook.
+    if(!p || (p&(alignof(LONG)-1u))!=0u)return false;
     MEMORY_BASIC_INFORMATION m{};
-    if(!p || !VirtualQuery(reinterpret_cast<void*>(p),&m,sizeof(m)) ||
+    if(VirtualQuery(reinterpret_cast<const void*>(p),&m,sizeof(m))!=sizeof(m) ||
        m.State!=MEM_COMMIT || (m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))
         return false;
     const DWORD flags=m.Protect&0xffu;
-    return flags==PAGE_READWRITE || flags==PAGE_EXECUTE_READWRITE;
+    if(flags!=PAGE_READWRITE && flags!=PAGE_WRITECOPY &&
+       flags!=PAGE_EXECUTE_READWRITE && flags!=PAGE_EXECUTE_WRITECOPY)
+        return false;
+    const auto begin=reinterpret_cast<std::uintptr_t>(m.BaseAddress);
+    const auto size=static_cast<std::uintptr_t>(m.RegionSize);
+    return p>=begin && size>=sizeof(LONG) && p-begin<=size-sizeof(LONG);
 }
 bool approved() noexcept {
     const auto base=exe_base();
@@ -119,10 +138,11 @@ bool original_script_children(const MenuAiModel& model,
         return true;
     };
     std::uintptr_t normal5=0,normal19=0;
-    if(!model.valid() ||
-       !script(model.normal_entries,5,3,normal5) ||
-       !script(model.normal_entries,19,2,normal19))
-        return false;
+    if(!model.valid())return rejected("model-invalid");
+    if(!script(model.normal_entries,5,3,normal5))
+        return rejected("normal5-script-unavailable");
+    if(!script(model.normal_entries,19,2,normal19))
+        return rejected("normal19-script-unavailable");
     // Compare both type byte and native command identifier per SNA node.
     const auto node=[&](std::uintptr_t where,std::uint32_t command,
                         std::uint8_t type)->bool {
@@ -132,11 +152,14 @@ bool original_script_children(const MenuAiModel& model,
     };
     const unsigned offsets[]{0x140u,0x190u,0x1E0u};
     for(unsigned i=0;i<3;++i) {
-        if(!node(normal5+offsets[i],356u,4u))return false;
+        if(!node(normal5+offsets[i],356u,4u))
+            return rejected("normal5-select-script-mismatch");
         select[i]=normal5+offsets[i]+8u;
     }
-    if(!node(normal19+0x48u,356u,4u) ||
-       !node(normal5+0xD60u,261u,3u))return false;
+    if(!node(normal19+0x48u,356u,4u))
+        return rejected("normal19-select-script-mismatch");
+    if(!node(normal5+0xD60u,261u,3u))
+        return rejected("normal5-save-script-mismatch");
     select[3]=normal19+0x48u+8u;
     save=normal5+0xD60u+8u;
     return true;
@@ -150,6 +173,14 @@ void* __cdecl protected_select(void* actor,void* child) {
         const auto ptr=reinterpret_cast<std::uintptr_t>(child);
         for(const auto& expected:g_select_children) {
             if(expected.load(std::memory_order_relaxed)==ptr && ptr) {
+                MenuAiModel live_model{}; MenuAiState live_state{};
+                if(!get_verified_menu_controller(live_model,live_state))
+                    break;
+                const bool belongs_to_normal5=(&expected==&g_select_children[0] ||
+                    &expected==&g_select_children[1] || &expected==&g_select_children[2]);
+                if((belongs_to_normal5 && live_state.normal!=5) ||
+                   (!belongs_to_normal5 && live_state.normal!=19))
+                    break;
                 std::uint8_t temporary[16]{};
                 g_select_suppressed.fetch_add(1,std::memory_order_relaxed);
                 return g_eval(actor,child,temporary);
@@ -165,8 +196,11 @@ void* __cdecl protected_select(void* actor,void* child) {
 void* __cdecl protected_save(void* actor,void* child,void* result) {
     const auto ptr=reinterpret_cast<std::uintptr_t>(child);
     const auto out=reinterpret_cast<std::uintptr_t>(result);
+    MenuAiModel live_model{}; MenuAiState live_state{};
     if(g_protected.load(std::memory_order_acquire) && is_native_menu() &&
        ptr && ptr==g_save_child.load(std::memory_order_relaxed) &&
+       get_verified_menu_controller(live_model,live_state) &&
+       live_state.normal==5 &&
        writable_slot(out) && writable_slot(out+12u)) {
         InterlockedExchange(reinterpret_cast<volatile LONG*>(out),1);
         InterlockedExchange(reinterpret_cast<volatile LONG*>(out+12u),6);
@@ -199,22 +233,29 @@ void restore_callbacks() noexcept {
 }
 bool install_callbacks(const MenuAiModel& model) noexcept {
     const auto base=exe_base();
-    if(!approved() || !base)return false;
+    if(!approved() || !base)return rejected("executable-not-approved");
     BYTE proc[sizeof(kProcSignature)]{},fn[sizeof(kSaveSignature)]{},
          evaluator[sizeof(kEvalSignature)]{};
     if(!read_bytes(base+kProcSelectRva,proc,sizeof(proc)) ||
-       !read_bytes(base+kFuncSaveRva,fn,sizeof(fn)) ||
-       !read_bytes(base+kScriptEvalRva,evaluator,sizeof(evaluator)) ||
-       std::memcmp(proc,kProcSignature,sizeof(proc)) ||
-       std::memcmp(fn,kSaveSignature,sizeof(fn)) ||
+       std::memcmp(proc,kProcSignature,sizeof(proc)))
+        return rejected("select-procedure-opcodes");
+    if(!read_bytes(base+kFuncSaveRva,fn,sizeof(fn)) ||
+       std::memcmp(fn,kSaveSignature,sizeof(fn)))
+        return rejected("save-function-opcodes");
+    if(!read_bytes(base+kScriptEvalRva,evaluator,sizeof(evaluator)) ||
        std::memcmp(evaluator,kEvalSignature,sizeof(evaluator)))
-        return false;
+        return rejected("script-evaluator-opcodes");
     std::uint32_t native_proc=0,native_fn=0;
     if(!read32(base+kProcSelectSlot,native_proc) ||
-       !read32(base+kFuncSaveSlot,native_fn) ||
-       native_proc!=base+kProcSelectRva ||
+       native_proc!=base+kProcSelectRva)
+        return rejected("select-slot-target");
+    if(!read32(base+kFuncSaveSlot,native_fn) ||
        native_fn!=base+kFuncSaveRva)
-        return false;
+        return rejected("save-slot-target");
+    if(!writable_slot(base+kProcSelectSlot))
+        return rejected("select-slot-protection");
+    if(!writable_slot(base+kFuncSaveSlot))
+        return rejected("save-slot-protection");
     std::array<std::uintptr_t,4> children{};
     std::uintptr_t save=0;
     if(!original_script_children(model,children,save))return false;
@@ -226,12 +267,13 @@ bool install_callbacks(const MenuAiModel& model) noexcept {
     g_eval=reinterpret_cast<Evaluate>(base+kScriptEvalRva);
     if(!swap_slot(base+kProcSelectSlot,base+kProcSelectRva,
                   reinterpret_cast<void*>(&protected_select)))
-        return false;
+        return rejected("select-slot-compare-exchange");
     if(!swap_slot(base+kFuncSaveSlot,base+kFuncSaveRva,
                   reinterpret_cast<void*>(&protected_save))) {
         restore_callbacks();
-        return false;
+        return rejected("save-slot-compare-exchange");
     }
+    g_preflight_reported.store(0,std::memory_order_relaxed);
     return true;
 }
 } // namespace
@@ -409,7 +451,7 @@ DWORD WINAPI worker(void*) {
                         guarded=true;
                         g_logger("RUNTIME-GRAPHICS-INFO: status=commands-guarded native-select-id=356 native-save-id=261 brightness-id=357-unmodified");
                     } else if(attempts==1 || attempts%5u==0)
-                        g_logger("RUNTIME-GRAPHICS-INFO: status=callbacks-unavailable original-menu-retained");
+                        g_logger("RUNTIME-GRAPHICS-INFO: status=callbacks-unavailable original-menu-retained preflight-log=1");
                 }
             }
             if(guarded && !g_language_table) {

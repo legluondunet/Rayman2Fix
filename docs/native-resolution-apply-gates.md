@@ -92,3 +92,47 @@ A first *functional* research build should:
 **Nothing in the current PR implements this user-facing screen or
 blocks these procedures yet.** The current implementation consists of
 offline structural research and read-only diagnostic prototypes only.
+
+## First real UI prototype under Wine: safe refusal, 21 November 2026
+
+The owner tested GitHub Actions artifact `14709068179` from commit
+`70c59546ff5b2cde9e1ce863598a1414e5abea7f` and supplied
+`Rayman2Fix(20261121-134743).log` (38,793 bytes / 226 lines,
+SHA-256 `1608f675df84355048c4dbf87c55ef57362bd81106628b3b1ed734e379d0a2f3`).
+
+The research module started, the script-verified native Menu controller
+was found on scan 2 (normal 5/reflex 0 V17=1/2/3, reflex 5 brightness),
+but the hook did **not** install: there are six
+`status=callbacks-unavailable original-menu-retained` lines,
+no `status=commands-guarded` and no `status=native-text-installed`.
+Engine mode stayed 1024x768x16. The runtime log lacks the launcher's
+exit code and cannot prove clean process termination.
+
+**Exact static executable verification:**
+the previously owner-supplied approved PE32 executable `Rayman2.exe`
+(size 1,468,928; SHA-256
+`9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`)
+contains selector slot RVA `0xA4F00` → VA `0x46FE00`, save-function
+slot RVA `0xA5C88` → VA `0x47AC70`. The first 15 bytes at the
+two functions and the evaluator at VA `0x480B90` match the prototype
+byte checks exactly. These facts do **not** prove the same pointers and
+memory protections in a running Wine process.
+
+The first prototype incorrectly allowed only PAGE_READWRITE and
+PAGE_EXECUTE_READWRITE in `writable_slot`; the project's tested
+F248 slot policy also permits PAGE_WRITECOPY and
+PAGE_EXECUTE_WRITECOPY. This is a likely but **unconfirmed** reason
+for refusing the callback under Wine.
+
+The follow-up prototype accepts the same four writable memory protection
+classes, verifies the 4-byte slot fits fully in the queried committed
+memory region, and logs a **specific reason** for failed preflight
+(e.g. `select-slot-protection`, `normal5-save-script-mismatch`,
+`save-slot-target`). Intercepts additionally revalidate the current
+model and active behavior on demand. If validation still fails,
+both original dispatch entries and original native text remain unchanged.
+
+**Do not ask the user to activate any resolution entry yet.**
+First require the specific `commands-guarded` and
+`native-text-installed` markers and a screenshot confirming the
+native presentation. The only allowed first test is navigation.
