@@ -54,6 +54,7 @@ Evaluate g_eval=nullptr;
 std::atomic<bool> g_started{false};
 std::atomic<bool> g_protected{false};
 std::atomic<bool> g_layout_active{false};
+std::atomic<unsigned> g_selected_video_row{0};
 std::atomic<unsigned> g_reflowed_glyphs{0};
 // 3 non-glyph routes, up to 8 distinct geometries per route.
 std::array<std::array<std::atomic<std::uint32_t>,8>,3> g_image_quad_samples{};
@@ -491,6 +492,7 @@ DWORD WINAPI worker(void*) {
             if(guarded) {
                 g_protected.store(false,std::memory_order_release);
                 g_layout_active.store(false,std::memory_order_release);
+                g_selected_video_row.store(0,std::memory_order_release);
                 was_visible=false;
                 last_latch=~0u;
                 restore_text();
@@ -547,6 +549,9 @@ DWORD WINAPI worker(void*) {
                     vars.activate_valid,vars.activate);
                 if(video_page) {
                     if(g_language_table)show_information_rows(true);
+                    g_selected_video_row.store(
+                        g_language_table?static_cast<unsigned>(vars.selection):0u,
+                        std::memory_order_release);
                     g_layout_active.store(g_language_table!=0,
                                           std::memory_order_release);
                     if(g_language_table &&
@@ -565,6 +570,7 @@ DWORD WINAPI worker(void*) {
                     // exact original localized LABEL CONTENT inside stable
                     // buffers here; restore the pointers only at MENU unload.
                     g_layout_active.store(false,std::memory_order_release);
+                    g_selected_video_row.store(0,std::memory_order_release);
                     if(was_visible && g_language_table)
                         g_logger("RUNTIME-GRAPHICS-INFO: status=video-page-exit original-label-content-restored=1 pointers-stable=1");
                     was_visible=false;
@@ -632,6 +638,11 @@ void observe_native_graphics_info_non_glyph(unsigned route,
 }
 bool graphics_info_is_visible() noexcept {
     return g_layout_active.load(std::memory_order_acquire);
+}
+unsigned graphics_info_current_row() noexcept {
+    if(!graphics_info_is_visible())return 0;
+    const auto selected=g_selected_video_row.load(std::memory_order_acquire);
+    return selected>=1u && selected<=4u ? selected : 0u;
 }
 bool remap_native_graphics_info_glyph(float& xmin,float& ymin,
                                       float& xmax,float& ymax) noexcept {
