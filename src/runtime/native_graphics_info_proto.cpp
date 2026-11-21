@@ -429,10 +429,13 @@ bool patch_text_table() noexcept {
         std::snprintf(g_original_rows[i].data(),g_original_rows[i].size(),
                       "%s",original);
     }
-    // On a new MENU load, the previous session may have restored original
-    // content. Prepare information BEFORE publishing these stable slots.
-    switch_stable_menu_labels(g_rows,g_information_rows);
-    g_information_mode=true;
+    // Install stable localization pointers as soon as the verified menu
+    // controller is available, BEFORE the first Video page is entered.
+    // Stage genuine original strings, not graphics details: other Options
+    // pages and the luminosity control must remain visually untouched.
+    // Only the verified video behavior may call show_information_rows(true).
+    switch_stable_menu_labels(g_rows,g_original_rows);
+    g_information_mode=false;
     unsigned patched=0;
     for(unsigned i=0;i<6;++i) {
         const auto slot=table+(379u+i)*4u;
@@ -514,6 +517,19 @@ DWORD WINAPI worker(void*) {
                 }
             }
             if(guarded) {
+                // The game's UI may cache localization char* before its
+                // Video behavior activates. Publish stable pointers early
+                // with ORIGINAL CONTENT. Delaying this until normal=5
+                // caused occasional first-entry original labels.
+                if(!g_language_table) {
+                    if(patch_text_table()) {
+                        g_logger("RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched pointer-lifetime=menu-level staged=original");
+                    } else if(!reported_text_issue &&
+                              DWORD(now-began)>7000u) {
+                        reported_text_issue=true;
+                        g_logger("RUNTIME-GRAPHICS-INFO: status=text-table-unverified no-replacement");
+                    }
+                }
                 MenuAiModel current_model{};MenuAiState current{};
                 // The original text handles are global to MENU. Do not
                 // replace them in Options, Brightness or unrelated pages.
@@ -530,15 +546,6 @@ DWORD WINAPI worker(void*) {
                     vars.selection_valid,vars.selection,
                     vars.activate_valid,vars.activate);
                 if(video_page) {
-                    if(!g_language_table) {
-                        if(patch_text_table()) {
-                            g_logger("RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched scope=video-choice-only pointer-lifetime=menu-level");
-                        } else if(!reported_text_issue &&
-                                 DWORD(now-began)>7000u) {
-                            reported_text_issue=true;
-                            g_logger("RUNTIME-GRAPHICS-INFO: status=text-table-unverified no-replacement");
-                        }
-                    }
                     if(g_language_table)show_information_rows(true);
                     g_layout_active.store(g_language_table!=0,
                                           std::memory_order_release);
