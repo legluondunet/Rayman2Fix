@@ -9,9 +9,9 @@ void start_native_graphics_info_proto(GraphicsInfoLogger logger,
 // outside the validated Resolution page.
 bool remap_native_graphics_info_glyph(float& xmin,float& ymin,
                                       float& xmax,float& ymax) noexcept;
-// Read-only, bounded geometry evidence for the native screen-image/cursor
-// producer while the video information page is active. This does not
-// suppress or move the image.
-void observe_native_graphics_info_screen_image(float xmin,float ymin,
-                                               float xmax,float ymax) noexcept;
+// Read-only, bounded geometry evidence for each non-glyph producer in
+// the verified video information page: screen image, frame and other.
+// route values match Native2DProducer (1,2,3). Never draws or hides.
+void observe_native_graphics_info_non_glyph(unsigned route,
+    float xmin,float ymin,float xmax,float ymax) noexcept;
 }
