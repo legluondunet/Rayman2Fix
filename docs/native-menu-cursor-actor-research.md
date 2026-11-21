@@ -358,3 +358,61 @@ named-actor → family/state chain to identify the actual animation
 or geometric object owner, then isolate the resolution information
 presentation from native highlight and selection UI. Do not ship
 a visibility toggle based solely on name ownership.
+
+
+## Autonomous session: bounded state→shared data chain and object-list negative finding
+
+A subsequent autonomous investigation used the *same four previously
+hash-verified user-owned CD resources*. It did **not** change game
+files, the launcher runtime, the video-selection guards or the
+brightness script, and did not require new Wine tests.
+
+The Menu instance's named Perso is now tied to its verified
+`Perso3dData` and shared Fix state/family. A newly bounded
+`linked_external_graphics_block` validation follows a chain of
+relocated 32-bit pointers from that state into shared Fix module
+`13/0`. The chain is verified using **exact source and target
+module IDs** from RTB at every step, with six nodes total and
+fail-closed checks for cycles, reversed addresses, missing relocation
+records, and unexpected root layout. Specific approved-CD results:
+
+| Subject | State field | First shared 13/0 root | Last verified node |
+|---|---|---|---|
+| Named `YAM_CurseurMenu_I1` instance | `0x001B5D14+0x30` | `0x0229FE34` | `0x022A0918` |
+| Separate `YAM_GenMenu_I1` instance | `0x001B62B0+0x44` | `0x022A21FC` | `0x022A3088` |
+
+The first pointer at both roots targets `root+0x18` as an
+additional structural check. Importantly, **these are typed data
+links, not proof that module 13/0 is the rendering driver, nor proof
+that a particular mesh is the visible butterfly**. We deliberately
+do not attach a guessed structure name to these addresses.
+
+A second offline comparison examined both `Perso3dData` instance
+object-list pointer slots (`+0x0C` and `+0x10`) for each of
+the 26 RTB-verified Menu Persos. **9** have equal, typed
+non-null list pointers; **17** have two zero fields without
+relocations. The named Cursor and GenMenu instances are among
+those without *direct instance object-list pointers*.
+This does **not** mean the named cursor actor cannot affect
+rendering: it could animate or drive other game objects, effects,
+or menu drawing via scripts. It does mean a naïve assumption that
+the named cursor Perso directly owns the butterfly mesh is
+unsupported.
+
+Both findings were added to the read-only
+`tools/research_menu_cursor_fix_links.py` output. Synthetic,
+asset-free tests in `tests/test_menu_cursor_fix_links.py` cover
+the typed chain, distinct root checks, missing or forged relocation
+records, zeroed list fields with forbidden relocation metadata,
+and non-null typed list pairs.
+
+**Engineering decision:** do not add any live SuperObject
+`Invisible` toggle, input interception, global sprite suppression,
+or text-renderer callback based on this evidence alone. Next
+reasonable proof is `name-linked Perso → current brain/script or
+visual state → concrete drawing owner`; alternatively design an
+independent information panel that does not reuse the native
+resolution-choice animation and cursor. Keep the current brightness
+control intact. Group any future actual UI change into one
+meaningful Wine/Windows verification instead of serial diagnostic
+builds.
