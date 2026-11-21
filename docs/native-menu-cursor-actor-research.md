@@ -87,3 +87,60 @@ Pure asset-free C++17 test:
 name offsets, null terminators and fail-closed malformed layouts.
 The normal release and `main` remain unchanged. The research
 variant never changes actor state or rendering.
+
+
+## Wine #1522: one verified co-located name table (21 November 2026)
+
+The owner supplied `Rayman2Fix(20261121-161102).log` from runtime
+`e847a59f`. At ~5 seconds after process start, the controller was
+found with 27 normal and 7 reflex behavior entries, as on earlier runs.
+The new one-shot scan returned:
+
+```text
+RUNTIME-MENU-CURSOR-ACTOR: exact-name-hits=3 name-table-matches=1 scanned_mib=110 unreadable_chunks=0 verified-actor-renderer=0 mutation=0
+```
+
+This is **positive evidence** that the expected four-name layout is
+present in one contiguous region of readable/writable private game
+memory. The three exact single-name hits by themselves are NOT three
+cursor actors. We still have no evidence that the matched string region
+owns the 3D mesh or screen-space visual known as the menu butterfly.
+
+The next stage must remain read-only, with no cursor hiding, pointer
+patching, input suppression or vertex modifications. Previous
+`RUNTIME-GRAPHICS-CURSOR-RAW` captures did not identify the cursor.
+The video guards remained installed in this navigation-only test;
+`video_actions_blocked=0`, `saves_blocked=0`,
+`original_video_calls_forwarded=0`, and the internal mode remained
+`1024x768x16`. The log confirms repeated `normal=5/reflex=0`
+information-page visits and `normal=18/reflex=5` brightness transitions
+with original labels restored.
+
+### Follow-up: candidate pointer values, NOT a linked actor
+
+With exactly one matching name layout, the new research code rechecks
+the same 2,300-byte name fingerprint before performing **one bounded**
+scan of committed writable/private x86 memory. It counts 4-byte aligned
+values exactly equal to one of four potential targets:
+
+- Cursor name address: relative +0 from the identified anchor
+- `ARG_CurseurMenu` address: relative +92
+- `YAM_GenMenu_I1` address: relative +2260 (negative control/comparison)
+- Tentative module-4 payload base: relative −444, derived from the
+  SNA decoded payload offsets 701 and 257
+
+The new `RUNTIME-MENU-CURSOR-REFS` log gives total occurrences and
+counts with the *reference site* within ±64 KiB of the anchor. The
+scan does not dereference any matched candidate or log memory
+addresses. Exact 32-bit values are suggestive but do not determine
+field types, whether they are valid pointers, or ownership by a
+`SuperObject` / `Perso`. Zero references would not disprove an actor:
+the engine may use inline names, nonwritable memory, transformed
+handles, or typed relocations that never directly reference these
+strings. Only evidence of a validated actor-to-renderer chain could
+justify an eventual visibility change, with restoration outside the
+information-only page.
+
+The normal `main` release remains untouched. Test is
+`graphics-menu-cursor-ptr-value-candidates`, independent of game
+assets and active in Release builds.
