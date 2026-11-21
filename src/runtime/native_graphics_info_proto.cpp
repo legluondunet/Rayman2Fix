@@ -55,7 +55,9 @@ std::atomic<bool> g_started{false};
 std::atomic<bool> g_protected{false};
 std::atomic<bool> g_layout_active{false};
 std::atomic<unsigned> g_reflowed_glyphs{0};
-std::array<std::atomic<std::uint32_t>,16> g_image_quad_samples{};
+// 3 non-glyph routes, up to 8 distinct geometries per route.
+std::array<std::array<std::atomic<std::uint32_t>,8>,3> g_image_quad_samples{};
+std::array<std::atomic<unsigned>,3> g_image_route_seen{};
 std::atomic<unsigned> g_output_w{0};
 std::atomic<unsigned> g_output_h{0};
 std::array<std::atomic<std::uintptr_t>,4> g_select_children{};
@@ -567,14 +569,17 @@ DWORD WINAPI worker(void*) {
         if(static_cast<LONG>(now-next_report)>=0) {
             next_report=now+5000u;
             if(guarded) {
-                char line[240]{};
+                char line[320]{};
                 std::snprintf(line,sizeof(line),
-                   "RUNTIME-GRAPHICS-INFO: status=active native_labels=%u video_actions_blocked=%u saves_blocked=%u original_video_calls_forwarded=%u reflowed_glyphs=%u",
+                   "RUNTIME-GRAPHICS-INFO: status=active native_labels=%u video_actions_blocked=%u saves_blocked=%u original_video_calls_forwarded=%u reflowed_glyphs=%u observed_non_glyph_routes=%u,%u,%u",
                    unsigned(g_layout_active.load(std::memory_order_acquire)),
                    g_select_suppressed.load(std::memory_order_relaxed),
                    g_save_suppressed.load(std::memory_order_relaxed),
                    g_other_forwarded.load(std::memory_order_relaxed),
-                   g_reflowed_glyphs.load(std::memory_order_relaxed));
+                   g_reflowed_glyphs.load(std::memory_order_relaxed),
+                   g_image_route_seen[0].load(std::memory_order_relaxed),
+                   g_image_route_seen[1].load(std::memory_order_relaxed),
+                   g_image_route_seen[2].load(std::memory_order_relaxed));
                 g_logger(line);
             }
         }
@@ -583,31 +588,37 @@ DWORD WINAPI worker(void*) {
     return 0;
 }
 } // namespace
-void observe_native_graphics_info_screen_image(float xmin,float ymin,
-                                               float xmax,float ymax) noexcept {
-    if(!g_layout_active.load(std::memory_order_acquire) || !g_logger ||
-       !std::isfinite(xmin) || !std::isfinite(xmax) ||
+void observe_native_graphics_info_non_glyph(unsigned route,
+    float xmin,float ymin,float xmax,float ymax) noexcept {
+    if(route<1u || route>3u ||
+       !g_layout_active.load(std::memory_order_acquire) || !g_logger)return;
+    const unsigned idx=route-1u;
+    g_image_route_seen[idx].fetch_add(1u,std::memory_order_relaxed);
+    if(!std::isfinite(xmin) || !std::isfinite(xmax) ||
        !std::isfinite(ymin) || !std::isfinite(ymax) ||
-       xmin<0.0f || xmax>100.0f || ymin<15.0f || ymax>80.0f ||
-       xmax-xmin<1.0f || xmax-xmin>30.0f ||
-       ymax-ymin<1.0f || ymax-ymin>30.0f)return;
-    // Quantize shape to 2% bands; identical native quads report once.
-    // Do not log texture names, addresses, or raw material pointers.
-    const auto q=[](float x)->std::uint32_t {
-        return std::uint32_t(x*0.5f+0.5f)+1u;
+       xmin< -5.0f || xmax>110.0f || ymin< -5.0f || ymax>95.0f ||
+       xmax-xmin<0.5f || xmax-xmin>40.0f ||
+       ymax-ymin<0.5f || ymax-ymin>40.0f)return;
+    // Quantize to stable 2% geometry buckets and cap each route to 8
+    // unique observations. No material identities, raw pointers, or
+    // unbounded per-frame logs; never change the original quads.
+    const auto q=[](float value)->std::uint32_t {
+        const int rounded=int(value*0.5f+5.5f);
+        return std::uint32_t(rounded<0?0:(rounded>255?255:rounded));
     };
     const std::uint32_t key=q(xmin)|(q(xmax)<<8)|
                             (q(ymin)<<16)|(q(ymax)<<24);
-    for(auto& slot:g_image_quad_samples) {
-        std::uint32_t seen=slot.load(std::memory_order_relaxed);
-        if(seen==key)return;
-        if(seen!=0u)continue;
-        if(!slot.compare_exchange_strong(seen,key,
-             std::memory_order_relaxed))continue;
-        char line[215]{};
+    static constexpr const char* names[]{"screen-image","frame","other"};
+    for(auto& slot:g_image_quad_samples[idx]) {
+        std::uint32_t observed=slot.load(std::memory_order_relaxed);
+        if(observed==key)return;
+        if(observed!=0u)continue;
+        if(!slot.compare_exchange_strong(observed,key,
+              std::memory_order_relaxed))continue;
+        char line[230]{};
         std::snprintf(line,sizeof(line),
-           "RUNTIME-GRAPHICS-IMAGE: possible-native-cursor sample x=%.2f..%.2f y=%.2f..%.2f (read-only; not verified cursor identity)",
-           double(xmin),double(xmax),double(ymin),double(ymax));
+            "RUNTIME-GRAPHICS-QUAD: route=%s x=%.2f..%.2f y=%.2f..%.2f candidate=unverified read-only=1",
+            names[idx],double(xmin),double(xmax),double(ymin),double(ymax));
         g_logger(line);
         return;
     }
