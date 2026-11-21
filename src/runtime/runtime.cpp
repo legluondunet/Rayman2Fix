@@ -28,6 +28,9 @@
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
 #include "rayman2fix/graphics_menu_trace.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+#include "rayman2fix/native_graphics_info_proto.hpp"
+#endif
 #endif
 #include <mutex>
 #if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
@@ -7516,6 +7519,9 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         // It never runs within the audio/render critical paths.
         if(g_log) {
             r2fix::start_menu_ai_controller_trace(&log_line);
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+            r2fix::start_native_graphics_info_proto(&log_line);
+#endif
             r2fix::start_graphics_menu_trace(&log_line);
         }
 #endif

@@ -30,6 +30,8 @@ constexpr unsigned kMaxReports=160u;
 constexpr unsigned kScanPeriodMs=5000u;
 std::atomic<bool> g_started{false};
 MenuAiLogger g_logger=nullptr;
+std::atomic<std::uintptr_t> g_verified_mind{0};
+std::atomic<std::uintptr_t> g_verified_model{0};
 
 bool read32(std::uintptr_t address,std::uint32_t& out) noexcept {
     if(!menu_safe_ptr(address))return false;
@@ -203,6 +205,8 @@ DWORD WINAPI worker(void*) {
             if(scanned.matches==1u && scanned.mind.valid()) {
                 model=scanned.model;
                 mind=scanned.mind;
+                g_verified_mind.store(mind.mind,std::memory_order_release);
+                g_verified_model.store(model.model,std::memory_order_release);
                 char line[245]{};
                 std::snprintf(line,sizeof(line),
                    "RUNTIME-MENU-AI: status=controller-found scan=%u models=1 mind=validated normal_behaviors=27 reflex_behaviors=7 level_hint=%s scanned_mib=%u (read-only)",
@@ -223,6 +227,7 @@ DWORD WINAPI worker(void*) {
         if(model.valid() && mind.valid()) {
             MenuAiState current{};
             if(!check_mind(model,mind.mind,current)) {
+                g_verified_model.store(0,std::memory_order_release);
                 g_logger("RUNTIME-MENU-AI: status=controller-inaccessible; stop sampling without reusing stale pointers");
                 ++reports;
                 break;
@@ -274,6 +279,18 @@ DWORD WINAPI worker(void*) {
     return 0;
 }
 } // namespace
+bool get_verified_menu_controller(MenuAiModel& model,
+                                  MenuAiState& state) noexcept {
+    model={}; state={};
+    const auto address=g_verified_model.load(std::memory_order_acquire);
+    const auto mind=g_verified_mind.load(std::memory_order_acquire);
+    if(!address || !mind || !check_model(address,model) ||
+       !check_mind(model,mind,state)) {
+        model={}; state={};
+        return false;
+    }
+    return true;
+}
 void start_menu_ai_controller_trace(MenuAiLogger logger) noexcept {
     if(!logger || g_started.exchange(true,std::memory_order_acq_rel))return;
     if(!approved_exe()) {

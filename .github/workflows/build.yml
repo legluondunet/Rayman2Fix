@@ -543,7 +543,7 @@ jobs:
         run: |
           # The normal artifact is already uploaded. Reuse pinned GameFrame
           # while explicitly disabling both audio research variants.
-          cmake -S . -B build -A Win32 -DBUILD_TESTING=OFF -DRAYMAN2FIX_AUDIO_TRACE=OFF -DRAYMAN2FIX_ESC_MUSIC_PROTO=OFF -DRAYMAN2FIX_GRAPHICS_MENU_TRACE=ON
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=OFF -DRAYMAN2FIX_AUDIO_TRACE=OFF -DRAYMAN2FIX_ESC_MUSIC_PROTO=OFF -DRAYMAN2FIX_GRAPHICS_MENU_TRACE=ON -DRAYMAN2FIX_GRAPHICS_INFO_PROTO=ON
           if ($LASTEXITCODE -ne 0) { throw 'Graphics trace configure failed' }
           cmake --build build --config Release --target Rayman2Fix --parallel
           if ($LASTEXITCODE -ne 0) { throw 'Graphics trace build failed' }
@@ -552,6 +552,8 @@ jobs:
           dll=Path('build/Release/fix.dll').read_bytes()
           assert b'RUNTIME-VIDEO-MENU-TRACE: enabled=1 read-only=1' in dll, 'Missing native graphics trace marker'
           assert b'RUNTIME-MENU-AI: status=started read-only=1' in dll, 'Missing passive AI controller diagnostic'
+          assert b'RUNTIME-GRAPHICS-INFO: status=started experimental=1' in dll, 'Missing native graphics information prototype'
+          assert b'RUNTIME-GRAPHICS-INFO: status=commands-guarded' in dll, 'Missing bounded video action guards'
           assert b'v17_valid=%u v17=%d' in dll, 'Missing verified native selection scalar probe'
           assert b'scope=%s level_hint=%s' in dll, 'Missing conservative video/brightness scope diagnostics'
           assert b'RUNTIME-MENU-TEXT: status=installed' not in dll, 'Obsolete native text detour must not be included'
@@ -575,7 +577,7 @@ jobs:
         if: github.event_name == 'pull_request' && github.head_ref == 'research/native-resolution-menu-state'
         uses: actions/upload-artifact@v4
         with:
-          name: Rayman2Fix-Windows-x86-resolution-menu-trace
+          name: Rayman2Fix-Windows-x86-native-graphics-menu-prototype
           path: resolution-trace/
           if-no-files-found: error
           retention-days: 14

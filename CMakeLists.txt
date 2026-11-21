@@ -70,10 +70,15 @@ option(RAYMAN2FIX_RESEARCH_PROBES
   "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
 option(RAYMAN2FIX_AUDIO_TRACE
   "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
+option(RAYMAN2FIX_GRAPHICS_INFO_PROTO
+  "Build experimental native in-menu graphics information and exact video-action guards" OFF)
 option(RAYMAN2FIX_GRAPHICS_MENU_TRACE
   "Build separate passive native Resolution menu diagnostics (no mode hooks)" OFF)
 option(RAYMAN2FIX_ESC_MUSIC_PROTO
   "Build explicit opt-in, experimental native ESC music compensation for Wine testing" OFF)
+if(RAYMAN2FIX_GRAPHICS_INFO_PROTO AND NOT RAYMAN2FIX_GRAPHICS_MENU_TRACE)
+  message(FATAL_ERROR "Native graphics info prototype requires graphics menu trace")
+endif()
 if(RAYMAN2FIX_ESC_MUSIC_PROTO AND NOT RAYMAN2FIX_AUDIO_TRACE)
   message(FATAL_ERROR "ESC audio prototype requires RAYMAN2FIX_AUDIO_TRACE=ON")
 endif()
@@ -93,6 +98,11 @@ if(WIN32)
       src/runtime/graphics_menu_controller_trace.cpp)
     target_compile_definitions(Rayman2FixRuntime PRIVATE
       RAYMAN2FIX_GRAPHICS_MENU_TRACE=1)
+  endif()
+  if(RAYMAN2FIX_GRAPHICS_INFO_PROTO)
+    target_sources(Rayman2FixRuntime PRIVATE src/runtime/native_graphics_info_proto.cpp)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE
+      RAYMAN2FIX_GRAPHICS_INFO_PROTO=1)
   endif()
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
@@ -285,6 +295,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME graphics-menu-controller-relocation-and-state
     COMMAND graphics_menu_controller_tests)
+  add_executable(native_graphics_info_policy_tests
+    tests/native_graphics_info_policy_tests.cpp)
+  target_include_directories(native_graphics_info_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-graphics-info-prototype-scope
+    COMMAND native_graphics_info_policy_tests)
 
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
   # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
