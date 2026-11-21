@@ -23,4 +23,28 @@ constexpr bool menu_cursor_reference_site_near_anchor(
     return anchor>=65536u && site>=anchor-65536u &&
            site>=0x10000u && site<=anchor+65536u;
 }
+// Report only signed OFFSET from the verified name-table anchor;
+// never expose raw process addresses. This does not make the source
+// of a pointer value an actor/renderer. Return false when not nearby.
+inline bool menu_cursor_relative_reference_offset(
+    std::uintptr_t reference_site,std::uintptr_t name_anchor,
+    int& offset) noexcept {
+    if(!menu_cursor_reference_site_near_anchor(
+           reference_site,name_anchor))return false;
+    offset=static_cast<int>(
+       static_cast<std::int64_t>(reference_site)-
+       static_cast<std::int64_t>(name_anchor));
+    return true;
+}
+// Test whether all 4 nearby reference sites fit inside one 256-byte
+// region. This is merely a possible pointer table, not typed evidence.
+constexpr bool menu_cursor_reference_offsets_clustered(
+    const int (&offsets)[4],unsigned limit=256u) noexcept {
+    int low=offsets[0],high=offsets[0];
+    for(unsigned i=1;i<4;++i) {
+        if(offsets[i]<low)low=offsets[i];
+        if(offsets[i]>high)high=offsets[i];
+    }
+    return static_cast<unsigned>(high-low)<=limit;
+}
 } // namespace r2fix
