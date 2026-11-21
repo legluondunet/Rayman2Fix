@@ -40,6 +40,7 @@
 #include "rayman2fix/esc_early_theme.hpp"
 #endif
 #include <atomic>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
