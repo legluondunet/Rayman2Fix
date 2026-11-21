@@ -551,6 +551,7 @@ jobs:
           from pathlib import Path
           dll=Path('build/Release/fix.dll').read_bytes()
           assert b'RUNTIME-VIDEO-MENU-TRACE: enabled=1 read-only=1' in dll, 'Missing native graphics trace marker'
+          assert b'RUNTIME-MENU-TEXT: status=installed va=0x494C70' in dll, 'Missing native menu text diagnostic marker'
           assert b'RUNTIME-AUDIO-TRACE: enabled=1' not in dll, 'Unexpected research audio tracer'
           print('Isolated native graphics menu tracer: PASS')
           '@ | python -

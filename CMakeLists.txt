@@ -89,7 +89,8 @@ if(WIN32)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME fix)
   if(RAYMAN2FIX_GRAPHICS_MENU_TRACE)
     target_sources(Rayman2FixRuntime PRIVATE
-      src/runtime/graphics_menu_trace.cpp)
+      src/runtime/graphics_menu_trace.cpp
+      src/runtime/graphics_menu_text_trace.cpp)
     target_compile_definitions(Rayman2FixRuntime PRIVATE
       RAYMAN2FIX_GRAPHICS_MENU_TRACE=1)
   endif()
@@ -274,6 +275,10 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME graphics-menu-deprotected-pe-fingerprint
     COMMAND graphics_menu_target_tests)
+  add_executable(menu_text_probe_tests tests/menu_text_probe_tests.cpp)
+  target_include_directories(menu_text_probe_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME menu-text-handle-scoping COMMAND menu_text_probe_tests)
 
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
   # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
