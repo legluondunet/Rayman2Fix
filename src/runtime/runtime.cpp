@@ -147,6 +147,12 @@ constexpr uintptr_t kScreenCameraSlotRva=0x10054C; // VA 0x50054C
 // These addresses apply ONLY to the single hash-verified retail executable.
 constexpr uintptr_t kLevelNameRva = 0x100381; // VA 0x500381, char[30]
 constexpr uintptr_t kRequestLevelRva = 0x54D0; // VA 0x4054D0
+// Original ACP GAM_tdstEngineStructure: engine mode precedes the current
+// level name at 0x500381, followed by the 30-byte next-level name.
+// ModePlaying=9. Use ONLY with the existing hash-approved retail executable.
+constexpr uintptr_t kIntroEngineModeRva = kLevelNameRva - 1u; // VA 0x500380
+constexpr uintptr_t kIntroNextLevelRva = kLevelNameRva + 30u; // VA 0x50039F
+constexpr std::uint8_t kIntroEnginePlaying = 9u;
 constexpr char kAfterIntroLevel[] = "learn_10";
 // GOG/retail Rayman 2 engine: Fix actor 6 owns the progress-bit array
 // (designer variable 42). Read dynamically; do NOT assume heap pointers.
@@ -5038,6 +5044,30 @@ void poll_learn_intro_skip() {
     }
 }
 
+// Only read native engine state; no writes to GAM_tdstEngineStructure.
+// Unknown/unreadable mode must fail closed rather than issuing an early
+// level-change request during native level initialization.
+std::uintptr_t intro_game_base() {
+    return reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+}
+int intro_native_engine_mode(std::uintptr_t base) {
+    std::uint8_t mode=0xff;
+    if(!base || !read_u8(base+kIntroEngineModeRva,mode) ||
+       mode>kIntroEnginePlaying)return -1;
+    return int(mode);
+}
+// Small bounded diagnostic; never log arbitrary native game strings.
+int intro_next_level_status(std::uintptr_t base) {
+    if(!base)return -1;
+    char name[30]{};
+    SIZE_T got=0;
+    if(!ReadProcessMemory(GetCurrentProcess(),
+         reinterpret_cast<const void*>(base+kIntroNextLevelRva),
+         name,sizeof(name),&got) || got!=sizeof(name) ||
+       !std::memchr(name,0,sizeof(name)))return -1;
+    if(name[0]==0)return 0; // none
+    return std::strcmp(name,kAfterIntroLevel)==0 ? 1 : 2; // expected / other
+}
 void poll_second_intro_skip() {
     if(!g_skip_cinematics)return;
     const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
@@ -5047,13 +5077,26 @@ void poll_second_intro_skip() {
     static DWORD entered_at=0,requested_at=0,last_input_diag=0;
     static unsigned input_polls=0,down_polls=0,down_edges=0;
     static bool last_down=false;
+    static int last_engine_mode=-2,last_next_level=-2;
+    static DWORD last_engine_probe_at=0;
     const bool in_intro = r2fix::is_second_intro(g_current_level);
     if (in_intro && !g_intro_level_logged) {
         entered_at=GetTickCount();
         requested_at=last_input_diag=0;
         input_polls=down_polls=down_edges=0;
         last_down=false;
+        last_engine_mode=last_next_level=-2;
+        last_engine_probe_at=0;
         log_line("RUNTIME-INTRO: jail_20 detected; Space/Enter/Esc can skip to learn_10");
+        if(g_log) {
+            const auto base=intro_game_base();
+            char line[180]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-INTRO-ENGINE: stage=entry mode=%d next=%d "
+                "(0=empty,1=learn_10,2=other,-1=unavailable; read-only)",
+                intro_native_engine_mode(base),intro_next_level_status(base));
+            log_line(line);
+        }
         g_intro_level_logged = true;
     } else if (!in_intro && g_intro_level_logged) {
         if(g_log && requested_at) {
@@ -5069,6 +5112,8 @@ void poll_second_intro_skip() {
         entered_at=requested_at=last_input_diag=0;
         input_polls=down_polls=down_edges=0;
         last_down=false;
+        last_engine_mode=last_next_level=-2;
+        last_engine_probe_at=0;
     }
     // Never read keyboard state unless the game owns the foreground.
     // Being unfocused or holding a key while entering the scene is not a
@@ -5083,28 +5128,73 @@ void poll_second_intro_skip() {
         if(down)++down_polls;
         if(down && !last_down)++down_edges;
     }
-    // Preserve exactly one original state-machine update per camera tick.
-    const bool requested=g_intro_guard.update(g_current_level, down);
+    // Queue an early fresh press without calling the native level-change
+    // routine until the ORIGINAL GAM engine reports E_EM_ModePlaying=9.
+    // No timer threshold and no retry loop: one request per level.
+    const bool need_mode=in_intro &&
+        (g_intro_guard.pending ||
+         (g_intro_guard.released && down && !g_intro_guard.requested));
+    const auto game_base=intro_game_base();
+    const int mode=need_mode ? intro_native_engine_mode(game_base) : -1;
+    // A queued press must survive Alt-Tab; dispatch only in foreground.
+    const bool ready=foreground && mode==int(kIntroEnginePlaying);
+    const bool was_pending=g_intro_guard.pending;
+    const bool requested=g_intro_guard.update(g_current_level,down,ready);
+    if(in_intro && g_log && !was_pending && g_intro_guard.pending) {
+        char line[185]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-INTRO-ENGINE: stage=queued mode=%d "
+            "elapsed_ms=%lu (one key press retained; no game writes)",
+            mode,static_cast<unsigned long>(DWORD(GetTickCount()-entered_at)));
+        log_line(line);
+    }
     if(in_intro && g_log) {
         const DWORD now=GetTickCount();
         const bool edge=down && !last_down;
         if(!last_input_diag || DWORD(now-last_input_diag)>=5000u ||
            (edge && down_edges<=12u) || requested) {
             last_input_diag=now;
-            char input[290]{};
+            char input[370]{};
             std::snprintf(input,sizeof(input),
                 "RUNTIME-INTRO-INPUT: elapsed_ms=%lu input_polls=%u "
                 "down_polls=%u key_down_edges=%u foreground=%u key_down=%u "
-                "released_latch=%u request_latch=%u (camera-thread sampled; "
-                "no key hook, no skip behavior changes)",
+                "released_latch=%u request_latch=%u pending=%u engine_mode=%d "
+                "(camera-thread sampled; no key hook; dispatch gated by Playing)",
                 static_cast<unsigned long>(DWORD(now-entered_at)),
                 input_polls,down_polls,down_edges,
                 unsigned(foreground),unsigned(down),
                 unsigned(g_intro_guard.released),
-                unsigned(g_intro_guard.requested));
+                unsigned(g_intro_guard.requested),
+                unsigned(g_intro_guard.pending),mode);
             log_line(input);
         }
         last_down=down;
+    }
+    // For diagnostics, watch native mode/target for up to ten seconds after
+    // the ONE request. Emit only on changes or every two seconds; no polling
+    // of player state and no new native game calls.
+    if(in_intro && g_log && requested_at) {
+        const DWORD now=GetTickCount();
+        const DWORD after=DWORD(now-requested_at);
+        if(after<=10000u) {
+            const int observed_mode=intro_native_engine_mode(game_base);
+            const int observed_next=intro_next_level_status(game_base);
+            if(observed_mode!=last_engine_mode ||
+               observed_next!=last_next_level ||
+               !last_engine_probe_at ||
+               DWORD(now-last_engine_probe_at)>=2000u) {
+                last_engine_mode=observed_mode;
+                last_next_level=observed_next;
+                last_engine_probe_at=now;
+                char line[230]{};
+                std::snprintf(line,sizeof(line),
+                    "RUNTIME-INTRO-ENGINE: stage=after-request age_ms=%lu "
+                    "mode=%d next=%d (read-only; no retry)",
+                    static_cast<unsigned long>(after),
+                    observed_mode,observed_next);
+                log_line(line);
+            }
+        }
     }
     if (!requested || !foreground) return;
 
@@ -5121,6 +5211,20 @@ void poll_second_intro_skip() {
         input_polls,down_polls);
     log_line(line);
     native_change(kAfterIntroLevel, 0);
+    if(g_log) {
+        const int mode_after=intro_native_engine_mode(game_base);
+        const int next_after=intro_next_level_status(game_base);
+        last_engine_mode=mode_after;
+        last_next_level=next_after;
+        last_engine_probe_at=GetTickCount();
+        char state[235]{};
+        std::snprintf(state,sizeof(state),
+            "RUNTIME-INTRO-ENGINE: stage=post-ask "
+            "mode_before=%d mode_after=%d next=%d "
+            "(read-only acknowledgement snapshot, not execution proof)",
+            mode,mode_after,next_after);
+        log_line(state);
+    }
 }
 
 // Service the existing skip and ESC music decision machines exclusively
