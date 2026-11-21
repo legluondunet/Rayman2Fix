@@ -253,6 +253,13 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME wine-host-audio-reexec-policy COMMAND wine_host_audio_tests)
 
+  # Non-invasive data model for the future read-only native Resolution menu.
+  # No SDL3, menu hook, video mode change, or external on-screen overlay.
+  add_executable(graphics_menu_info_tests tests/graphics_menu_info_tests.cpp)
+  target_include_directories(graphics_menu_info_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-readonly-info-model COMMAND graphics_menu_info_tests)
+
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
   # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
   add_executable(esc_music_shadow_cpp_tests tests/esc_music_shadow_cpp_tests.cpp)
