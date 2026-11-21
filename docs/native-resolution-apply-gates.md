@@ -194,3 +194,25 @@ then a separate guarded no-mode-change behavior test.
 
 The screenshots and runtime traces are the authority for actual menu
 layout; CI alone cannot establish it.
+
+
+## Wine feedback — V51 latch and premature restoration (21 November 2026, 14:56)
+
+Owner log `Rayman2Fix(20261121-145638).log` from the preceding native-graphics prototype (runtime build `ffc3cf77`) and direct visual observation:
+
+- `status=native-text-installed ... scope=video-choice-only` at ~6s, when verified Menu normal=5/reflex=0, V17=1, **V51=0**.
+- At ~9.6s, after a navigation Enter edge, the same verified normal=5/reflex=0/V17=1 has **V51=1**. Previous code incorrectly required `V51==0`, removed the substituted labels, and disabled its JFFTXT glyph layout.
+- First status at 10s: `native_labels=0 video_actions_blocked=1 saves_blocked=0 original_video_calls_forwarded=0 reflowed_glyphs=19378`. The intercepted video-selection command **was blocked**, but the labels disappeared and the glyph count stopped increasing.
+- Later returns to normal=5/reflex=0 at ~16.9, ~23.9, ~40.9s still have `V51=1`, so text substitution never recovered. This **proves the previous predicate was not stable across normal menu navigation**.
+- V17=4 is reached in normal=5/reflex=0 (at ~27.7s); brightness remains a separate normal=18/reflex=5 state (~28.5s). Internal GLI remains 1024x768x16, index 5, throughout this session. That is evidence of no mode change observed in this run, not a universal guarantee.
+
+### Changes in the research branch
+
+- `graphics_info_video_page` now requires a verified PE, the MENU level and validated AI controller, normal=5/reflex=0, V17=1..4 and a **validated V51 in either {0,1}**. It does not assume V51=0. Any unknown V51 or unrelated normal/reflex state fails closed. Separate passive scope classifier updated consistently.
+- The original localization strings are still restored on a *true* exit from the normal-5 video behavior (including brightness and other menus), and on unload. They are no longer restored just because the in-menu action latch became 1.
+- Diagnostic events `status=video-page-visible row=... latch=... return_visit=...` and `status=video-page-exit` make it possible to verify continuous display after Enter and correct restoration on true exit.
+- New policy/controller tests include V51=0/1, V17=1..4, re-entry with sticky latch=1, and rejection of brightness/other menus and unknown inputs.
+
+**Caveat:** This is still the original interactive native menu underneath the informational labels. Only the exact script-level resolution-selection and save hooks are guarded; avoiding unintended menu navigation requires a separate, carefully validated native behavioral change. Do not describe the page as a finished non-interactive UI or merge to `main` based on synthetic tests alone.
+
+**Next Wine test:** open Options → Résolution, verify the information screen and its layout, press Enter once on one original selection **only after confirming the research guard is installed**, and check that the information remains visible and `video_actions_blocked` increments without a mode change. Exit to Options, visit Brightness, reopen Resolution; verify information returns even with V51=1. Supply `Rayman2Fix.log` and two screenshots. Check actual behavior and 4:3 geometry on Windows after Wine.
