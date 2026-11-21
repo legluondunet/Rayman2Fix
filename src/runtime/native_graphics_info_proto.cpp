@@ -377,42 +377,67 @@ void restore_text() noexcept {
 }
 DWORD WINAPI worker(void*) {
     build_texts();
-    const DWORD start=GetTickCount();
-    bool protected_now=false;
-    unsigned scans=0;
-    for(unsigned i=0;i<1800;++i) { // 3 minutes, 100-ms cadence
+    const DWORD began=GetTickCount();
+    bool guarded=false;
+    unsigned attempts=0;
+    DWORD next_report=began+5000u;
+    DWORD next_retry=began;
+    bool reported_text_issue=false;
+    // Keep the guard active while the process lives. Revert script hooks
+    // when the original Menu level is unloaded; never silently expose
+    // the original clickable settings after a diagnostic timeout.
+    for(;;) {
+        const DWORD now=GetTickCount();
         const bool in_menu=is_native_menu();
         if(!in_menu) {
-            g_protected.store(false,std::memory_order_release);
-            restore_text();
+            if(guarded) {
+                g_protected.store(false,std::memory_order_release);
+                restore_text();
+                restore_callbacks();
+                guarded=false;
+                attempts=0;
+                next_retry=now+500u;
+                g_logger("RUNTIME-GRAPHICS-INFO: status=menu-unloaded native-text-restored=1 guards-disabled=1");
+            }
         } else {
             MenuAiModel model{};MenuAiState mind{};
-            if(!protected_now && scans<60u &&
-               get_verified_menu_controller(model,mind)) {
-                ++scans;
-                if(install_callbacks(model)) {
-                    protected_now=true;
-                    g_protected.store(true,std::memory_order_release);
-                    g_logger("RUNTIME-GRAPHICS-INFO: status=commands-guarded native-select-id=356 native-save-id=261 brightness-id=357-unmodified");
-                } else
-                    g_logger("RUNTIME-GRAPHICS-INFO: status=callbacks-unavailable original-menu-retained");
+            if(!guarded && static_cast<LONG>(now-next_retry)>=0) {
+                next_retry=now+1000u;
+                if(get_verified_menu_controller(model,mind)) {
+                    ++attempts;
+                    if(install_callbacks(model)) {
+                        guarded=true;
+                        g_logger("RUNTIME-GRAPHICS-INFO: status=commands-guarded native-select-id=356 native-save-id=261 brightness-id=357-unmodified");
+                    } else if(attempts==1 || attempts%5u==0)
+                        g_logger("RUNTIME-GRAPHICS-INFO: status=callbacks-unavailable original-menu-retained");
+                }
             }
-            if(protected_now && !g_language_table && patch_text_table())
-                g_logger("RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched");
+            if(guarded && !g_language_table) {
+                if(patch_text_table()) {
+                    g_protected.store(true,std::memory_order_release);
+                    g_logger("RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched");
+                } else if(!reported_text_issue &&
+                         DWORD(now-began)>7000u) {
+                    reported_text_issue=true;
+                    g_logger("RUNTIME-GRAPHICS-INFO: status=text-table-unverified no-replacement");
+                }
+            }
+        }
+        if(static_cast<LONG>(now-next_report)>=0) {
+            next_report=now+5000u;
+            if(guarded) {
+                char line[240]{};
+                std::snprintf(line,sizeof(line),
+                   "RUNTIME-GRAPHICS-INFO: status=active native_labels=%u video_actions_blocked=%u saves_blocked=%u original_video_calls_forwarded=%u",
+                   unsigned(g_language_table!=0),
+                   g_select_suppressed.load(std::memory_order_relaxed),
+                   g_save_suppressed.load(std::memory_order_relaxed),
+                   g_other_forwarded.load(std::memory_order_relaxed));
+                g_logger(line);
+            }
         }
         Sleep(100);
     }
-    g_protected.store(false,std::memory_order_release);
-    restore_text();
-    restore_callbacks();
-    char line[210]{};
-    std::snprintf(line,sizeof(line),
-       "RUNTIME-GRAPHICS-INFO: status=finished select_suppressed=%u save_suppressed=%u other_select_forwarded=%u elapsed_ms=%lu",
-       g_select_suppressed.load(std::memory_order_relaxed),
-       g_save_suppressed.load(std::memory_order_relaxed),
-       g_other_forwarded.load(std::memory_order_relaxed),
-       static_cast<unsigned long>(GetTickCount()-start));
-    g_logger(line);
     return 0;
 }
 } // namespace

@@ -228,9 +228,11 @@ DWORD WINAPI worker(void*) {
             MenuAiState current{};
             if(!check_mind(model,mind.mind,current)) {
                 g_verified_model.store(0,std::memory_order_release);
-                g_logger("RUNTIME-MENU-AI: status=controller-inaccessible; stop sampling without reusing stale pointers");
+                g_logger("RUNTIME-MENU-AI: status=controller-inaccessible; awaiting new level load");
                 ++reports;
-                break;
+                model={}; mind={};
+                next_scan=now+1500u;
+                continue;
             }
             const auto vars=observe_menu_selection(current.mind,&read32,&read8);
             const int selection=vars.selection_valid ?
