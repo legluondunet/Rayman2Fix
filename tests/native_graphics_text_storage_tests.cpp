@@ -1,8 +1,9 @@
 #include <array>
-#include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include "rayman2fix/native_graphics_text_storage.hpp"
 using r2fix::switch_stable_menu_labels;
+static void check(bool result) {if(!result)std::abort();}
 using Row=std::array<char,56>;
 using Bank=std::array<Row,6>;
 static void put(Row& row,const char* src) {
@@ -24,14 +25,14 @@ int main() {
     // remain exactly the same as in the graphics information page.
     switch_stable_menu_labels(live,native);
     for(unsigned i=0;i<6;++i){
-        assert(live[i].data()==fixed[i]);
-        assert(std::strcmp(live[i].data(),original[i])==0);
+        check(live[i].data()==fixed[i]);
+        check(std::strcmp(live[i].data(),original[i])==0);
     }
     switch_stable_menu_labels(live,info);
     for(unsigned i=0;i<6;++i) {
-        assert(live[i].data()==fixed[i]);
-        assert(std::strcmp(live[i].data(),replacement[i])==0);
+        check(live[i].data()==fixed[i]);
+        check(std::strcmp(live[i].data(),replacement[i])==0);
     }
     switch_stable_menu_labels(live,native);
-    assert(std::strcmp(live[0].data(),"RESOLUTION")==0);
+    check(std::strcmp(live[0].data(),"RESOLUTION")==0);
 }
