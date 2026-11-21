@@ -20,6 +20,7 @@
 #include "rayman2fix/graphics_menu_glyph_layout.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
 #include "rayman2fix/graphics_menu_controller_model.hpp"
+#include "rayman2fix/graphics_menu_controller_vars.hpp"
 #include "rayman2fix/native_graphics_info_policy.hpp"
 #include "rayman2fix/native_graphics_info_proto.hpp"
 
@@ -366,7 +367,9 @@ void build_texts() noexcept {
     const unsigned render_w=output_w?output_w:screen_w;
     const unsigned render_h=output_h?output_h:screen_h;
     const unsigned gcd=std::gcd(render_w,render_h);
-    const unsigned x=gcd?render_w/gcd:0u,y=gcd?render_h/gcd:0u;
+    unsigned x=gcd?render_w/gcd:0u,y=gcd?render_h/gcd:0u;
+    // Exact conventional 16:10 is labeled 16:10, not reduced 8:5.
+    if(x==8u && y==5u){x=16u;y=10u;}
     std::snprintf(g_rows[0].data(),g_rows[0].size(),"VIDEO INFORMATION");
     char line[100]{};
     std::snprintf(line,sizeof(line),"%ux%u %u:%u",render_w,render_h,x,y);
@@ -479,9 +482,16 @@ DWORD WINAPI worker(void*) {
                 // replace them in Options, Brightness or unrelated pages.
                 // Normal 5/reflex 0 is a verified video-choice candidate,
                 // though the final page identity needs visual validation.
-                const bool video_page=get_verified_menu_controller(
-                        current_model,current) &&
-                    current.normal==5 && current.reflex==0;
+                const bool valid_controller=get_verified_menu_controller(
+                        current_model,current);
+                const auto vars=valid_controller ?
+                    observe_menu_selection(current.mind,&read32,&read8) :
+                    MenuSelectionVars{};
+                const bool video_page=valid_controller &&
+                    current.normal==5 && current.reflex==0 &&
+                    vars.selection_valid && vars.selection>=1 &&
+                    vars.selection<=3 && vars.activate_valid &&
+                    vars.activate==0;
                 if(video_page) {
                     if(!g_language_table) {
                         if(patch_text_table()) {
