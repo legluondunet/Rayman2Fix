@@ -17,6 +17,7 @@
 #include <numeric>
 #include <cwchar>
 #include "rayman2fix/graphics_menu_target.hpp"
+#include "rayman2fix/graphics_menu_glyph_layout.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
 #include "rayman2fix/graphics_menu_controller_model.hpp"
 #include "rayman2fix/native_graphics_info_policy.hpp"
@@ -49,6 +50,10 @@ SaveFunc g_original_save=nullptr;
 Evaluate g_eval=nullptr;
 std::atomic<bool> g_started{false};
 std::atomic<bool> g_protected{false};
+std::atomic<bool> g_layout_active{false};
+std::atomic<unsigned> g_reflowed_glyphs{0};
+std::atomic<unsigned> g_output_w{0};
+std::atomic<unsigned> g_output_h{0};
 std::array<std::atomic<std::uintptr_t>,4> g_select_children{};
 std::atomic<std::uintptr_t> g_save_child{0};
 std::array<std::array<char,56>,6> g_rows{};
@@ -219,6 +224,7 @@ bool swap_slot(std::uintptr_t slot,std::uintptr_t original,
 void restore_callbacks() noexcept {
     const auto base=exe_base();
     g_protected.store(false,std::memory_order_release);
+    g_layout_active.store(false,std::memory_order_release);
     if(!base)return;
     if(writable_slot(base+kProcSelectSlot))
         InterlockedCompareExchangePointer(
@@ -295,6 +301,9 @@ std::uintptr_t text_slot_table() noexcept {
 void text_row(unsigned n,const char* prefix,const char* value) noexcept {
     std::snprintf(g_rows[n].data(),g_rows[n].size(),
                   "%s %.34s",prefix,value?value:"?");
+    // Hard ceiling for native menu text: complete detected values remain
+    // available to the launcher/log, never projected beyond the 4:3 canvas.
+    g_rows[n][35]='\0';
 }
 void build_texts() noexcept {
     wchar_t wide_name[128]{};
@@ -349,18 +358,25 @@ void build_texts() noexcept {
             ReleaseDC(nullptr,dc);
         }
     }
-    const unsigned gcd=std::gcd(screen_w,screen_h);
-    const unsigned x=gcd?screen_w/gcd:0u,y=gcd?screen_h/gcd:0u;
+    // The native game can render into a centered 4:3 window even when the
+    // desktop is 16:9. Always show the launcher-approved GLIDE output,
+    // not the EnumDisplaySettings physical desktop dimensions.
+    const unsigned output_w=g_output_w.load(std::memory_order_acquire);
+    const unsigned output_h=g_output_h.load(std::memory_order_acquire);
+    const unsigned render_w=output_w?output_w:screen_w;
+    const unsigned render_h=output_h?output_h:screen_h;
+    const unsigned gcd=std::gcd(render_w,render_h);
+    const unsigned x=gcd?render_w/gcd:0u,y=gcd?render_h/gcd:0u;
     std::snprintf(g_rows[0].data(),g_rows[0].size(),"VIDEO INFORMATION");
     char line[100]{};
-    std::snprintf(line,sizeof(line),"%ux%u %u:%u",screen_w,screen_h,x,y);
-    text_row(1,"DISPLAY:",line);
+    std::snprintf(line,sizeof(line),"%ux%u %u:%u",render_w,render_h,x,y);
+    text_row(1,"OUTPUT:",line);
     text_row(2,"GPU:",adapter.data());
     text_row(3,"D3D9:",driver.data());
-    std::snprintf(line,sizeof(line),"%u bits (Glide 16)",depth);
-    text_row(4,"DEPTH:",line);
+    std::snprintf(line,sizeof(line),"desktop %u / Glide 16",depth);
+    text_row(4,"BPP:",line);
     std::snprintf(g_rows[5].data(),g_rows[5].size(),
-                  "GLIDE: 1024x768 / 4:3");
+                  "GLIDE: 1024x768x16");
 }
 bool original_text_valid(std::uintptr_t p) noexcept {
     char s[72]{};
@@ -449,19 +465,41 @@ DWORD WINAPI worker(void*) {
                     ++attempts;
                     if(install_callbacks(model)) {
                         guarded=true;
+                        // Video-action guards must stay active independently
+                        // of whether text is currently being drawn.
+                        g_protected.store(true,std::memory_order_release);
                         g_logger("RUNTIME-GRAPHICS-INFO: status=commands-guarded native-select-id=356 native-save-id=261 brightness-id=357-unmodified");
                     } else if(attempts==1 || attempts%5u==0)
                         g_logger("RUNTIME-GRAPHICS-INFO: status=callbacks-unavailable original-menu-retained preflight-log=1");
                 }
             }
-            if(guarded && !g_language_table) {
-                if(patch_text_table()) {
-                    g_protected.store(true,std::memory_order_release);
-                    g_logger("RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched");
-                } else if(!reported_text_issue &&
-                         DWORD(now-began)>7000u) {
-                    reported_text_issue=true;
-                    g_logger("RUNTIME-GRAPHICS-INFO: status=text-table-unverified no-replacement");
+            if(guarded) {
+                MenuAiModel current_model{};MenuAiState current{};
+                // The original text handles are global to MENU. Do not
+                // replace them in Options, Brightness or unrelated pages.
+                // Normal 5/reflex 0 is a verified video-choice candidate,
+                // though the final page identity needs visual validation.
+                const bool video_page=get_verified_menu_controller(
+                        current_model,current) &&
+                    current.normal==5 && current.reflex==0;
+                if(video_page) {
+                    if(!g_language_table) {
+                        if(patch_text_table()) {
+                            g_logger("RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched scope=video-choice-only");
+                        } else if(!reported_text_issue &&
+                                 DWORD(now-began)>7000u) {
+                            reported_text_issue=true;
+                            g_logger("RUNTIME-GRAPHICS-INFO: status=text-table-unverified no-replacement");
+                        }
+                    }
+                    g_layout_active.store(g_language_table!=0,
+                                          std::memory_order_release);
+                } else {
+                    // Restore text atomically when leaving the verified
+                    // video-choice state. The native brightness command
+                    // and other options remain in their own original UI.
+                    g_layout_active.store(false,std::memory_order_release);
+                    if(g_language_table)restore_text();
                 }
             }
         }
@@ -470,11 +508,12 @@ DWORD WINAPI worker(void*) {
             if(guarded) {
                 char line[240]{};
                 std::snprintf(line,sizeof(line),
-                   "RUNTIME-GRAPHICS-INFO: status=active native_labels=%u video_actions_blocked=%u saves_blocked=%u original_video_calls_forwarded=%u",
+                   "RUNTIME-GRAPHICS-INFO: status=active native_labels=%u video_actions_blocked=%u saves_blocked=%u original_video_calls_forwarded=%u reflowed_glyphs=%u",
                    unsigned(g_language_table!=0),
                    g_select_suppressed.load(std::memory_order_relaxed),
                    g_save_suppressed.load(std::memory_order_relaxed),
-                   g_other_forwarded.load(std::memory_order_relaxed));
+                   g_other_forwarded.load(std::memory_order_relaxed),
+                   g_reflowed_glyphs.load(std::memory_order_relaxed));
                 g_logger(line);
             }
         }
@@ -483,8 +522,22 @@ DWORD WINAPI worker(void*) {
     return 0;
 }
 } // namespace
-void start_native_graphics_info_proto(GraphicsInfoLogger logger) noexcept {
+bool remap_native_graphics_info_glyph(float& xmin,float& ymin,
+                                      float& xmax,float& ymax) noexcept {
+    if(!g_layout_active.load(std::memory_order_acquire))return false;
+    GraphicsInfoQuad out{};
+    if(!layout_graphics_info_quad({xmin,ymin,xmax,ymax},out))
+        return false;
+    xmin=out.left;ymin=out.top;xmax=out.right;ymax=out.bottom;
+    g_reflowed_glyphs.fetch_add(1,std::memory_order_relaxed);
+    return true;
+}
+void start_native_graphics_info_proto(GraphicsInfoLogger logger,
+                                       unsigned output_width,
+                                       unsigned output_height) noexcept {
     if(!logger || g_started.exchange(true,std::memory_order_acq_rel))return;
+    g_output_w.store(output_width,std::memory_order_release);
+    g_output_h.store(output_height,std::memory_order_release);
     if(!approved()) {
         logger("RUNTIME-GRAPHICS-INFO: status=unsupported-image no-changes");
         return;
