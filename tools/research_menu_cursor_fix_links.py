@@ -233,20 +233,35 @@ def cursor_normal_script_evidence(graph: Graph, actor: dict,
     state=int(family_info["state"],16)
     family=int(family_info["family"],16)
     action_owners={}
+    template_sos={}
     for action in set(action_refs):
+        # Each script ActionRef resolves to a shared Fix Perso with
+        # typed Perso -> StandardGame -> SuperObject -> Perso links.
+        # The counterpart SO is in the shared Fix (5,1) block, NOT
+        # necessarily the rendered menu cursor instance.
+        std=graph.ptr(action+4,(4,0),(4,0))
+        so=graph.ptr(std+12,(4,0),(5,1))
+        if graph.u32(so)!=2 or (
+           graph.ptr(so+4,(5,1),(4,0))!=action):
+            raise Refused("invalid shared template SuperObject back-link")
+        template_sos[action]=so
         back_state=[graph.ptr(action+j,(4,0),(4,0))
                     for j in (0x3C,0x40,0x44)]
         back_family=graph.ptr(action+0x50,(4,0),(4,0))
         action_owners[action]=(
             all(p==state for p in back_state) and back_family==family)
     linked=[a for a in action_refs if action_owners[a]]
-    if len(linked)!=2 or len(set(linked))!=1:
-        raise Refused("cursor script action/state self-ownership ambiguous")
+    if len(linked)!=2 or len(set(linked))!=1 or (
+       len(set(template_sos.values()))!=3):
+        raise Refused("cursor script ActionRef template ownership ambiguous")
     return {
         "script_node_count":count,
         "action_ref_count":len(action_refs),
         "distinct_action_ref_count":len(set(action_refs)),
         "own_state_action_refs":len(linked),
+        "shared_superobject_templates_verified":len(template_sos),
+        "cursor_family_template_superobject":
+            f"0x{template_sos[linked[0]]:08X}",
         "normal_behaviors":2,
         "cursor_ai_action_links_verified":True,
         "visual_draw_owner_verified":False,
