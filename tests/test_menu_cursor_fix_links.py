@@ -7,7 +7,8 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1] / "tools"))
 from research_menu_cursor_actor import Block,Graph,Refused
 from research_menu_cursor_fix_links import (
-    linked_family_state, decode_fix_rtb, decode_fix_blocks
+    linked_family_state, linked_external_graphics_block,
+    decode_fix_rtb, decode_fix_blocks
 )
 
 
@@ -57,6 +58,53 @@ class SharedCursorVisualTests(unittest.TestCase):
         actor_bad={**actor,"type_indices":[3,11,11]}
         with self.assertRaises(Refused):
             linked_family_state(Graph(blocks,rt),actor_bad)
+
+    def test_bounded_graphics_chain_and_negative_controls(self):
+        m4,f4,m13=0x07000000,0x001A0000,0x02280000
+        shared=bytearray(0x400)
+        other=bytearray(0x500)
+        cursor_state=f4+0x80
+        genmenu_state=f4+0x180
+        rt={}
+        nodes_a=[m13+0x20,m13+0x38,m13+0x68,
+                 m13+0x7c,m13+0x94,m13+0xa0]
+        nodes_b=[m13+0x120,m13+0x138,m13+0x170,
+                 m13+0x184,m13+0x198,m13+0x1a4]
+        for state,field,nodes in (
+                (cursor_state,0x30,nodes_a),
+                (genmenu_state,0x44,nodes_b)):
+            struct.pack_into("<I",shared,state+field-f4,nodes[0])
+            rt[state+field]=(4,0,13,0)
+            for one,two in zip(nodes,nodes[1:]):
+                struct.pack_into("<I",other,one-m13,two)
+                rt[one]=(13,0,13,0)
+        blocks={(4,0):Block(4,0,f4,bytes(shared)),
+                (13,0):Block(13,0,m13,bytes(other))}
+        graph=Graph(blocks,rt)
+        cursor=linked_external_graphics_block(graph,cursor_state,0x30)
+        gen=linked_external_graphics_block(graph,genmenu_state,0x44)
+        self.assertEqual(cursor["resource_root"],"0x02280020")
+        self.assertEqual(gen["resource_root"],"0x02280120")
+        self.assertEqual(cursor["typed_hops_verified"],6)
+        self.assertFalse(cursor["identity_of_graphics_renderer_verified"])
+        with self.assertRaises(Refused):
+            linked_external_graphics_block(graph,cursor_state,0x10)
+        missing=dict(rt)
+        missing.pop(nodes_a[2])
+        with self.assertRaises(Refused):
+            linked_external_graphics_block(
+                Graph(blocks,missing),cursor_state,0x30)
+        backwards=bytearray(other)
+        struct.pack_into("<I",backwards,nodes_a[2]-m13,nodes_a[1])
+        with self.assertRaises(Refused):
+            linked_external_graphics_block(
+                Graph({**blocks,(13,0):Block(13,0,m13,bytes(backwards))},
+                      rt),cursor_state,0x30)
+        wrong=dict(rt)
+        wrong[cursor_state+0x30]=(4,0,4,0)
+        with self.assertRaises(Refused):
+            linked_external_graphics_block(
+                Graph(blocks,wrong),cursor_state,0x30)
 
     def test_malformed_common_resources_refused(self):
         with self.assertRaises(Refused):
