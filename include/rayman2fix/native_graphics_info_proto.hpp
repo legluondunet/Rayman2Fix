@@ -4,6 +4,9 @@ using GraphicsInfoLogger=void (*)(const char*);
 void start_native_graphics_info_proto(GraphicsInfoLogger logger,
                                       unsigned output_width,
                                       unsigned output_height) noexcept;
+// Safe read-only state for diagnostic sprite callbacks. The caller
+// must never change rendering or keyboard behavior based on this alone.
+bool graphics_info_is_visible() noexcept;
 // Only called for the verified native game glyph producer, before 4:3
 // horizontal centering. Returns false without altering coordinates
 // outside the validated Resolution page.
