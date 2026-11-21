@@ -7510,12 +7510,14 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         needs_native_render_events=needs_native_render_events ||
             g_proto_enabled.load(std::memory_order_acquire);
 #endif
-        if(g_hud_scale<0.9999f || g_remove_dialogue_backgrounds ||
-           g_remove_cinematic_bars || needs_native_render_events
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
-           || true // diagnostic UI glyph reflow also in native 4:3
+        constexpr bool needs_graphics_info_glyph_hook=true;
+#else
+        constexpr bool needs_graphics_info_glyph_hook=false;
 #endif
-           )
+        if(g_hud_scale<0.9999f || g_remove_dialogue_backgrounds ||
+           g_remove_cinematic_bars || needs_native_render_events ||
+           needs_graphics_info_glyph_hook)
             install_native_2d_percent_hook();
 #if RAYMAN2FIX_RESEARCH_PROBES
         // Read-only hook at VA 0x4710C0 is not part of the actual fix.
