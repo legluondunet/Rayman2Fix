@@ -5752,6 +5752,14 @@ void __cdecl native_2d_percent_sprite(void* viewport,
             double(ymin),double(ymax));
         log_line(sample);
     }
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    // Experimental Resolution page only: position existing native font
+    // glyph quads into a regular 4:3-safe information grid. Non-glyph
+    // producers (including the brightness bar) remain untouched.
+    if(producer==Native2DProducer::Glyph) {
+        r2fix::remap_native_graphics_info_glyph(xmin,ymin,xmax,ymax);
+    }
+#endif
     float left=0.0f,right=0.0f;
     if(g_hud_scale>=0.9999f ||
        !r2fix::center_native_2d_percent(
@@ -7503,7 +7511,11 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
             g_proto_enabled.load(std::memory_order_acquire);
 #endif
         if(g_hud_scale<0.9999f || g_remove_dialogue_backgrounds ||
-           g_remove_cinematic_bars || needs_native_render_events)
+           g_remove_cinematic_bars || needs_native_render_events
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+           || true // diagnostic UI glyph reflow also in native 4:3
+#endif
+           )
             install_native_2d_percent_hook();
 #if RAYMAN2FIX_RESEARCH_PROBES
         // Read-only hook at VA 0x4710C0 is not part of the actual fix.
@@ -7520,7 +7532,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         if(g_log) {
             r2fix::start_menu_ai_controller_trace(&log_line);
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
-            r2fix::start_native_graphics_info_proto(&log_line);
+            r2fix::start_native_graphics_info_proto(&log_line,
+                settings->output_width,settings->output_height);
 #endif
             r2fix::start_graphics_menu_trace(&log_line);
         }
