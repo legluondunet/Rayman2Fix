@@ -8,7 +8,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1] / "tools"))
 from research_menu_cursor_actor import Block,Graph,Refused
 from research_menu_cursor_fix_links import (
     linked_family_state, linked_external_graphics_block,
-    decode_fix_rtb, decode_fix_blocks
+    actor_direct_object_list, decode_fix_rtb, decode_fix_blocks
 )
 
 
@@ -105,6 +105,33 @@ class SharedCursorVisualTests(unittest.TestCase):
         with self.assertRaises(Refused):
             linked_external_graphics_block(
                 Graph(blocks,wrong),cursor_state,0x30)
+
+    def test_direct_object_list_presence_is_not_a_renderer_proof(self):
+        blocks,rt,actor=self.make_graph()
+        default=actor_direct_object_list(Graph(blocks,rt),actor)
+        self.assertFalse(default["direct_instance_object_list"])
+        m4=blocks[(4,1)].base
+        visual=int(actor["visual_data"],16)
+        scene=bytearray(blocks[(4,1)].data)
+        for offset in (0x0c,0x10):
+            struct.pack_into("<I",scene,visual+offset-m4,m4+0xd0)
+            rt[visual+offset]=(4,1,4,1)
+        changed={**blocks,(4,1):Block(4,1,m4,bytes(scene))}
+        self.assertTrue(actor_direct_object_list(
+            Graph(changed,rt),actor)["direct_instance_object_list"])
+        # Zero-valued fields must not carry typed relocation records.
+        with self.assertRaises(Refused):
+            actor_direct_object_list(Graph(blocks,rt),actor)
+        different=bytearray(scene)
+        struct.pack_into("<I",different,visual+0x10-m4,m4+0xd4)
+        with self.assertRaises(Refused):
+            actor_direct_object_list(Graph({
+                **changed,(4,1):Block(4,1,m4,bytes(different))
+            },rt),actor)
+        no_type=dict(rt)
+        no_type.pop(visual+0x0c)
+        with self.assertRaises(Refused):
+            actor_direct_object_list(Graph(changed,no_type),actor)
 
     def test_malformed_common_resources_refused(self):
         with self.assertRaises(Refused):
