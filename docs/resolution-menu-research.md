@@ -66,3 +66,33 @@ les gestes du joueur, **elle ne prouve pas à elle seule l'identité du sous-men
 La phase 2 nécessitera d'établir une signature native de ce menu, de vérifier
 le point d'entrée du changement de mode, puis de remplacer les commandes par
 les informations approuvées en PR #50. La production `main` est inchangée.
+
+## Retour de test Wine — 21 novembre 2026
+
+Le premier essai (`Rayman2Fix(20261121-095736).log`) a rapporté
+`RUNTIME-VIDEO-MENU-TRACE: status=unsupported-original-image; no sampling`.
+Le reste du runtime était actif, `jail_20` sortait en 386 ms et
+`learn_10` rapportait `status=pass`. La capture **ne prouve donc
+aucune entrée ni sortie du sous-menu Résolution**.
+
+Le binaire CD approuvé, récupéré depuis la bibliothèque du mainteneur
+(676352 octets, SHA256 `7927a106...d5e3`), a été réinspecté hors ligne :
+`TimeDateStamp=0x3807B68B`, `SizeOfImage=0x117000`, PE32 i386.
+Tous correspondent aux constantes de l'observateur. L'échec vient de
+la reconnaissance *en mémoire* de la session Wine ou de sa lecture
+`ReadProcessMemory(GetCurrentProcess(),...)`, sans preuve suffisante
+pour déterminer laquelle avec cette seule ligne.
+
+La révision de recherche suivante remplace la lecture du processus
+courant par `VirtualQuery` + copie locale **sur des régions déjà
+engagées et lisibles**, conformément au comportement des hooks
+standards. Elle produit aussi une erreur détaillée par étape
+(`dos-unreadable`, `nt-unreadable`, `nt-fingerprint`, etc.)
+si une identification échoue. Aucun hook vidéo, changement de résolution,
+injection de touches ni écriture mémoire ne sont ajoutés.
+
+**Nouveau test indispensable :** vérifier d'abord
+`RUNTIME-VIDEO-MENU-TRACE: status=accepted-image`, puis les lignes
+`t_ms=...` lors de deux entrées/sorties de Options → Résolution.
+Sans celles-ci, le sous-menu reste non identifié et la PR reste en
+brouillon.
