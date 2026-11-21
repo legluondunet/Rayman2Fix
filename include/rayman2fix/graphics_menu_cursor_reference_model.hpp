@@ -47,4 +47,33 @@ constexpr bool menu_cursor_reference_offsets_clustered(
     }
     return static_cast<unsigned>(high-low)<=limit;
 }
+// The Wine #1532 sample shows one local site per target at precisely
+// target_address - 12. This is evidence of an inline pointer preceding
+// its own data, NOT a link from a distinct actor.
+constexpr int menu_cursor_reference_target_delta(unsigned kind) noexcept {
+    switch(kind) {
+        case 1: return 0;    // YAM_CurseurMenu_I1
+        case 2: return 92;   // ARG_CurseurMenu
+        case 3: return 2260; // YAM_GenMenu_I1, negative control
+        case 4: return -444; // tentative module-4 base
+        default: return 0;
+    }
+}
+constexpr bool menu_cursor_is_inline_reference(int site_offset,
+                                               unsigned kind) noexcept {
+    return kind>=1u && kind<=4u &&
+           site_offset==menu_cursor_reference_target_delta(kind)-12;
+}
+inline bool menu_cursor_is_inline_reference_site(
+    std::uintptr_t site,std::uintptr_t name_anchor,
+    unsigned kind) noexcept {
+    int offset=0;
+    return menu_cursor_relative_reference_offset(
+        site,name_anchor,offset) &&
+        menu_cursor_is_inline_reference(offset,kind);
+}
+constexpr std::uintptr_t menu_cursor_reference_site_gap(
+    std::uintptr_t a,std::uintptr_t b) noexcept {
+    return a>b ? a-b : b-a;
+}
 } // namespace r2fix
