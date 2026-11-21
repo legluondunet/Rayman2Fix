@@ -172,7 +172,7 @@ ScanResult locate_controller() noexcept {
 // absolute pointer, rendering callback or actor visibility is assumed.
 // This is ONE bounded, read-only pass in the research build only.
 struct CursorNameScan {
-    unsigned matches=0, unreadable=0, scanned_mib=0;
+    unsigned name_hits=0, matches=0, unreadable=0, scanned_mib=0;
 };
 CursorNameScan locate_cursor_name_anchor() noexcept {
     CursorNameScan out{};
@@ -209,7 +209,10 @@ CursorNameScan locate_cursor_name_anchor() noexcept {
             if(ok && copied>=kMenuCursorActorAnchorWindow) {
                 for(std::size_t j=0;j<kChunk &&
                     j+kMenuCursorActorAnchorWindow<=copied;++j) {
-                    if(bytes[j]!='Y')continue;
+                    if(bytes[j]!='Y' ||
+                       !menu_cursor_name_present(
+                           bytes.data()+j,copied-j))continue;
+                    ++out.name_hits;
                     if(!verified_menu_cursor_name_anchor(
                            bytes.data()+j,copied-j))continue;
                     ++out.matches;
@@ -279,9 +282,9 @@ DWORD WINAPI worker(void*) {
                 const auto cursor_names=locate_cursor_name_anchor();
                 char cursor_line[245]{};
                 std::snprintf(cursor_line,sizeof(cursor_line),
-                    "RUNTIME-MENU-CURSOR-ACTOR: name-table-matches=%u scanned_mib=%u unreadable_chunks=%u verified-actor-renderer=0 mutation=0 (one-shot read-only)",
-                    cursor_names.matches,cursor_names.scanned_mib,
-                    cursor_names.unreadable);
+                    "RUNTIME-MENU-CURSOR-ACTOR: exact-name-hits=%u name-table-matches=%u scanned_mib=%u unreadable_chunks=%u verified-actor-renderer=0 mutation=0 (one-shot read-only)",
+                    cursor_names.name_hits,cursor_names.matches,
+                    cursor_names.scanned_mib,cursor_names.unreadable);
                 g_logger(cursor_line);
             } else if(tries==1u || tries==kMaxScans ||
                       scanned.matches>1u || (tries%4u)==0u) {
