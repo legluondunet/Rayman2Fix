@@ -32,12 +32,22 @@ inline bool layout_graphics_info_quad(
     const float middle=(in.top+in.bottom)*0.5f;
     for(const auto& row:kGraphicsInfoRows) {
         if(middle<row.first_y || middle>=row.last_y)continue;
-        // Keep the entire line within the original 4:3-safe canvas.
-        const float x0=21.0f+(in.left-row.source_x)*0.40f;
-        const float x1=21.0f+(in.right-row.source_x)*0.40f;
+        // The named menu selection butterfly remains rendered around
+        // the middle of the native VIDEO choice region. Until its draw
+        // owner is verified, preserve the actor and lay out read-only
+        // information in a deliberately LEFT-SIDED column instead.
+        // This only remaps the font quads in the verified video state:
+        // it does not affect native selection, other menus or brightness.
+        // Smaller glyph scale also makes long adapter descriptions fit.
+        constexpr float kInfoColumnX=8.0f;
+        constexpr float kInfoGlyphScale=0.28f;
+        const float x0=kInfoColumnX+(in.left-row.source_x)*kInfoGlyphScale;
+        const float x1=kInfoColumnX+(in.right-row.source_x)*kInfoGlyphScale;
         const float y0=row.target_y+(in.top-row.source_y)*0.40f;
         const float y1=row.target_y+(in.bottom-row.source_y)*0.40f;
-        if(x0<10.0f || x1>90.0f || y0<12.0f || y1>78.0f)
+        // Bounded 4:3 percent canvas; allow long GPU text only as far
+        // as this left-column geometry can position it safely.
+        if(x0<5.0f || x1>65.0f || y0<12.0f || y1>78.0f)
             return false;
         out={x0,y0,x1,y1};
         return true;
