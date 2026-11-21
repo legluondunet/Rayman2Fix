@@ -163,6 +163,38 @@ def find_actors(graph: Graph) -> list[dict]:
     return found
 
 
+
+def named_actor_from_typed_links(graph: Graph, actors: list[dict],
+                                 name_address: int,
+                                 record_to_std_offset: int,
+                                 std_to_record_offset: int) -> dict:
+    """Find the unique actor owning a scene-name record, without guessing
+    its role from a numerical family/model/instance tuple.
+
+    Both directions MUST have validated RTB entries:
+      (name - 24) -> (StandardGame + record_to_std_offset)
+      (StandardGame + std_to_record_offset) -> (name - 24)
+    The -12 self-pointer is checked independently by inspect().
+    """
+    record = name_address - 24
+    target = graph.ptr(record, (4, 1), (4, 1))
+    matches = []
+    for actor in actors:
+        std = int(actor["standard_game"], 16)
+        if target != std + record_to_std_offset:
+            continue
+        try:
+            backlink = graph.ptr(std + std_to_record_offset,
+                                 (4, 1), (4, 1))
+        except Refused:
+            continue
+        if backlink == record:
+            matches.append(actor)
+    if len(matches) != 1:
+        raise Refused("name-to-actor RTB links absent or ambiguous")
+    return matches[0]
+
+
 def inspect(menu: Path, dat: Path) -> dict:
     if sha256(menu) != MENU_HASH or sha256(dat) != DAT_HASH:
         raise Refused("unapproved resource hashes")
@@ -179,6 +211,22 @@ def inspect(menu: Path, dat: Path) -> dict:
         if graph.ptr(names.base+rel-12,(4,1),(4,1)) != names.base+rel:
             raise Refused("missing name self-reference")
     actors = find_actors(graph)
+    cursor_name = names.base + NAMES["YAM_CurseurMenu_I1"]
+    arg_name = names.base + NAMES["ARG_CurseurMenu"]
+    genmenu_name = names.base + NAMES["YAM_GenMenu_I1"]
+    # Two DIFFERENT native name records independently point back to the
+    # cursor actor's StandardGame fields (+0x38/+0x5C), with matching
+    # reciprocal links (+0x3C/+0x60). GenMenu is a negative control.
+    cursor_by_name = named_actor_from_typed_links(
+        graph, actors, cursor_name, 0x38, 0x3C)
+    cursor_by_arg = named_actor_from_typed_links(
+        graph, actors, arg_name, 0x5C, 0x60)
+    if cursor_by_arg != cursor_by_name:
+        raise Refused("cursor and ARG name records disagree")
+    genmenu_by_name = named_actor_from_typed_links(
+        graph, actors, genmenu_name, 0x38, 0x3C)
+    if genmenu_by_name == cursor_by_name:
+        raise Refused("cursor and GenMenu actor identities overlap")
 
     def only(types):
         result = [a for a in actors if a["type_indices"]==list(types)]
@@ -186,14 +234,21 @@ def inspect(menu: Path, dat: Path) -> dict:
             raise Refused("actor type tuple absent or ambiguous")
         return result[0]
 
+    # Numerical type tuples are cross-checks, not identity sources.
+    if cursor_by_name != only((2,11,11)) or genmenu_by_name != only((3,13,13)):
+        raise Refused("name-linked actor disagrees with type tuple")
+
     return {
         "mode":"hash-verified, read-only static SNA/RTB",
         "relocations_verified":len(relocations),
         "perso_chains_verified":len(actors),
         "cursor_name_anchor_verified":True,
-        "cursor_candidate":only((2,11,11)),
+        "cursor_candidate":cursor_by_name,
+        "cursor_name_links_verified":True,
+        "cursor_arg_links_verified":True,
         "video_controller_control":only((3,12,12)),
-        "genmenu_control":only((3,13,13)),
+        "genmenu_control":genmenu_by_name,
+        "genmenu_name_links_verified":True,
         "actor_to_renderer_verified":False,
         "asset_modified":False,
     }
