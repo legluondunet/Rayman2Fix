@@ -5758,6 +5758,9 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // producers (including the brightness bar) remain untouched.
     if(producer==Native2DProducer::Glyph) {
         r2fix::remap_native_graphics_info_glyph(xmin,ymin,xmax,ymax);
+    } else if(producer==Native2DProducer::ScreenImage) {
+        r2fix::observe_native_graphics_info_screen_image(
+            xmin,ymin,xmax,ymax);
     }
 #endif
     float left=0.0f,right=0.0f;
