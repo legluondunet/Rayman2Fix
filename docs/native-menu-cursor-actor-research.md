@@ -446,3 +446,39 @@ its graphics presentation from the interactive resolution rows
 rather than assuming hiding the named AI actor is sufficient.
 Only a consolidated functional change should be offered for Wine
 testing. `main` remains intact; PR #51 is still experimental.
+
+
+### New cross-resource verification: three shared actor templates
+
+The script's three distinct, RTB-typed ActionRef values are not
+unstructured pointers. All three point to **shared Fix module 4/0
+Perso-like records** that have complete, independently verifiable
+`Perso+4 → StandardGame → SuperObject → Perso` paths:
+
+| ActionRef target / Fix Perso | StandardGame | Shared Fix SuperObject |
+|---|---|---|
+| `0x001B631C` | `0x001B6474` | `0x021778FC` |
+| `0x001A22D0` | `0x001A2428` | `0x021515A0` |
+| `0x001B5AD0` (twice) | `0x001B5C28` | `0x02175A64` |
+
+For each record the **typed** StandardGame `+0x0C` field points
+to a Fix module 5/1 SuperObject of type 2, and the SuperObject
+`+0x04` field points back to exactly the same Fix Perso. The
+third actor's `Perso+0x3C,+0x40,+0x44` all resolve to the menu
+cursor's already authenticated Fix state `0x001B5D14`, while
+`Perso+0x50` resolves to its family `0x001B5CD8`.
+The other two shared templates resolve to separate state/family
+pairs. The third template's SuperObject has raw flags `0x8`,
+the same as the named scene cursor's SuperObject; this is
+**not** a reliable signature of the visible 3D butterfly.
+
+This establishes a **typed shared actor-template ownership chain**
+from the named cursor's original AI script, beyond the previous
+coincidental 32-bit name references. It still does not identify
+the final on-screen renderer or confirm that altering either
+SuperObject will suppress only the animation of the menu cursor.
+Accordingly, the project continues to avoid actor visibility
+mutation. `cursor_normal_script_evidence` fails closed unless
+every shared ActionRef template has a valid typed reciprocal
+SuperObject, and synthetic tests cover incorrect type and
+missing back-links.
