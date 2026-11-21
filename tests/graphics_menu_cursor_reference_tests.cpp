@@ -16,5 +16,20 @@ int main() {
     check(r2fix::menu_cursor_reference_site_near_anchor(anchor-300,anchor));
     check(!r2fix::menu_cursor_reference_site_near_anchor(anchor+70000,anchor));
     check(!r2fix::menu_cursor_reference_site_near_anchor(0,anchor));
+    int relative=1234;
+    check(r2fix::menu_cursor_relative_reference_offset(
+        anchor-64u,anchor,relative));
+    check(relative==-64);
+    check(r2fix::menu_cursor_relative_reference_offset(
+        anchor+96u,anchor,relative));
+    check(relative==96);
+    check(!r2fix::menu_cursor_relative_reference_offset(
+        anchor+65540u,anchor,relative));
+    check(relative==96); // rejected site must not change result
+    const int likely_table[4]={-100,-96,-88,-80};
+    const int scattered[4]={-2000,-96,80,900};
+    check(r2fix::menu_cursor_reference_offsets_clustered(likely_table));
+    check(!r2fix::menu_cursor_reference_offsets_clustered(scattered));
+    check(!r2fix::menu_cursor_reference_offsets_clustered(likely_table,8u));
     return 0;
 }
