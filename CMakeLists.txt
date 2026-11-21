@@ -301,6 +301,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME native-graphics-info-prototype-scope
     COMMAND native_graphics_info_policy_tests)
+  add_executable(graphics_menu_start_policy_tests
+    tests/graphics_menu_start_policy_tests.cpp)
+  target_include_directories(graphics_menu_start_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-log0-feature-startup
+    COMMAND graphics_menu_start_policy_tests)
   add_executable(native_graphics_text_storage_tests
     tests/native_graphics_text_storage_tests.cpp)
   target_include_directories(native_graphics_text_storage_tests PRIVATE
