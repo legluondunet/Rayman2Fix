@@ -211,3 +211,59 @@ When the next log establishes the offsets, inspect offline against
 the known SNA/RTB field layout before selecting any live actor
 hook. In particular, never hide objects based only on exact names
 or this proximity statistic. The PR remains unmerged.
+
+
+## Wine #1532: the four local sites are INLINE self-references (21 November 2026)
+
+The owner supplied `Rayman2Fix(20261121-163931).log`, runtime
+`d50e68ca`, compiled from the PR merge, with the following result:
+
+```text
+RUNTIME-MENU-CURSOR-REF-LAYOUT: relative-sites=-12,80,2248,-456 span_bytes=2704 within_256_bytes=0 identity=unverified actor-renderer=unverified mutation=0
+```
+
+The four candidate *targets*, relative to the cursor-name anchor,
+are `0,+92,+2260,-444` (cursor name, ARG name, menu controller name,
+tentative module base). Subtracting the targets from the four *sites*
+gives `-12,-12,-12,-12` exactly. Therefore each of the four
+nearby pointer-like values sits **12 bytes before the data it points
+to**. These are **inline self-references**, not one four-member
+actor/renderer pointer table. The regular 12-byte prefix resembles a
+per-entry serialized or relocated header, but no struct-field type is
+yet verified; `target=-444` is especially tentative.
+
+The previous nearest-source clustering measure
+`within_256_bytes=0` was true but misleading as an actor-research
+signal: this is a fixed source/target displacement, not an absence of
+structure. **Do not treat these four local hits as independent
+actor links or hide the cursor using them.**
+
+The already-existing single bounded pointer scan also found
+`direct-name=4 arg-name=2 menu-name=2 candidate-block-base=2`.
+Excluding the four local self-references leaves **at most** the
+following external candidates: `3,1,1,1`. Their identities remain
+unknown; they may be duplicates or relocation/loader bookkeeping,
+not actor references.
+
+### One follow-up without additional memory scans
+
+The research code now classifies every hit in the existing bounded
+scan as either an inline `site == target-12` reference or an
+external candidate, and retains only up to 16 **source-site addresses**
+per kind transiently to compute the distance between the nearest
+external cursor-name and ARG-name reference sites. It never logs raw
+addresses or dereferences them, and it does not change gameplay or
+graphics. The new diagnostic is:
+
+`RUNTIME-MENU-CURSOR-REF-CLASS: inline_minus12=a,b,c,d external_candidates=w,x,y,z closest_external_cursor_arg_bytes=N external_pair_within_256=0|1 typed_actor_links=0 mutation=0`
+
+The `external_pair_within_256` flag merely compares pointer-site
+proximity; even a small distance is not enough to identify a
+`SuperObject`, `Perso`, animation owner, or draw path. A pure test
+now checks all four exact -12 offsets and their fail-closed behavior.
+The research-specific CI checks that the compiled fix DLL contains
+this diagnostic. Keep `main` untouched and PR #51 unmerged.
+
+The old menu video behavior continues to select original entries,
+while script-level resolution changes are guarded. The new logging
+does not remove the luciole or produce a non-interactive settings page.
