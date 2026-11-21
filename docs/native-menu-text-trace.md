@@ -24,3 +24,12 @@ RUNTIME-MENU-TEXT: status=installed followed by t_ms samples.
 These samples only prove text lookup paths, not yet specific submenu
 identity. Native VID_SelectResolution and brightness calls remain
 untouched. Work on the actual read-only in-game screen is still pending.
+
+## Wine result 2026-11-21
+
+See `docs/native-menu-text-wine-result.md`.
+The original text resolver and AI lookup route are confirmed, **but all
+resolution and brightness labels are queried as one synchronized group**.
+Label counts are not a safe submenu predicate. Further text-only tracing
+cannot identify the active page; prioritize the AI controller's live
+behavior and preserve native resolution/brightness behavior unchanged.
