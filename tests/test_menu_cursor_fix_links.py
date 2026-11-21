@@ -157,10 +157,11 @@ class SharedCursorVisualTests(unittest.TestCase):
             actor_direct_object_list(Graph(changed,no_type),actor)
 
     def make_cursor_script_graph(self):
-        m4,m13,fix=0x07000000,0x07900000,0x001A0000
+        m4,m13,fix,fixso=0x07000000,0x07900000,0x001A0000,0x01B50000
         scene=bytearray(0x300)
         ai=bytearray(0x700)
         common=bytearray(0x700)
+        shared_sos=bytearray(0x400)
         rt={}
         brain=m4+0x30
         mind=m13+0x20
@@ -194,7 +195,15 @@ class SharedCursorVisualTests(unittest.TestCase):
                 rt[nodes+idx*8]=(13,1,4,0)
             struct.pack_into("<IHBB",ai,nodes+idx*8-m13,
                              param,0,indent,typ)
-        for a in actions:
+        for index,a in enumerate(actions):
+            # Each ActionRef target is itself a shared Fix Perso.
+            # Typed chain: Perso+4 -> StdGame+0xC -> SO+4 -> Perso.
+            std=a+0x80
+            so=fixso+0x20+index*0x60
+            link(common,fix,a+4,std,(4,0,4,0))
+            link(common,fix,std+12,so,(4,0,5,1))
+            struct.pack_into("<I",shared_sos,so-fixso,2)
+            link(shared_sos,fixso,so+4,a,(5,1,4,0))
             own=a==actions[2]
             owner_state=state if own else fix+0x500
             owner_family=family if own else fix+0x580
@@ -203,13 +212,15 @@ class SharedCursorVisualTests(unittest.TestCase):
             link(common,fix,a+0x50,owner_family,(4,0,4,0))
         blocks={(4,1):Block(4,1,m4,bytes(scene)),
                 (13,1):Block(13,1,m13,bytes(ai)),
-                (4,0):Block(4,0,fix,bytes(common))}
+                (4,0):Block(4,0,fix,bytes(common)),
+                (5,1):Block(5,1,fixso,bytes(shared_sos))}
         actor={"brain":f"0x{brain:08X}"}
         family_info={"state":f"0x{state:08X}",
                      "family":f"0x{family:08X}"}
         return blocks,rt,actor,family_info,dict(
             brain=brain,mind=mind,normal=normal,entries=entries,
-            nodes=nodes,actions=actions,fix=fix,m13=m13,m4=m4)
+            nodes=nodes,actions=actions,fix=fix,fixso=fixso,
+            m13=m13,m4=m4)
 
     def test_cursor_ai_action_links_and_fail_closed(self):
         blocks,rt,actor,family,ids=self.make_cursor_script_graph()
@@ -219,6 +230,9 @@ class SharedCursorVisualTests(unittest.TestCase):
         self.assertEqual(result["action_ref_count"],4)
         self.assertEqual(result["distinct_action_ref_count"],3)
         self.assertEqual(result["own_state_action_refs"],2)
+        self.assertEqual(result["shared_superobject_templates_verified"],3)
+        self.assertEqual(result["cursor_family_template_superobject"],
+                         "0x01B500E0")
         self.assertFalse(result["visual_draw_owner_verified"])
         missing=dict(rt)
         missing.pop(ids["nodes"]+20*8)
@@ -237,6 +251,20 @@ class SharedCursorVisualTests(unittest.TestCase):
             cursor_normal_script_evidence(
                 Graph({**blocks,(4,0):Block(
                     4,0,ids["fix"],bytes(common))},rt),actor,family)
+        # A matching raw 32-bit value without the SO->Perso RTB
+        # record is not acceptable evidence of a shared actor.
+        bad_so=dict(rt)
+        bad_so.pop(ids["fixso"]+0xE0+4)
+        with self.assertRaises(Refused):
+            cursor_normal_script_evidence(
+                Graph(blocks,bad_so),actor,family)
+        changed_so=bytearray(blocks[(5,1)].data)
+        struct.pack_into("<I",changed_so,0xE0,1)
+        with self.assertRaises(Refused):
+            cursor_normal_script_evidence(
+                Graph({**blocks,(5,1):Block(
+                    5,1,ids["fixso"],bytes(changed_so))},rt),
+                actor,family)
         ai=bytearray(blocks[(13,1)].data)
         ai[ids["nodes"]+25*8+7-ids["m13"]]=5
         with self.assertRaises(Refused):
