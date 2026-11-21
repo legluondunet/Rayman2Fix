@@ -313,6 +313,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME graphics-menu-passive-cursor-probe
     COMMAND graphics_menu_cursor_probe_tests)
+  add_executable(graphics_menu_cursor_actor_anchor_tests
+    tests/graphics_menu_cursor_actor_anchor_tests.cpp)
+  target_include_directories(graphics_menu_cursor_actor_anchor_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-cursor-actor-name-fingerprint
+    COMMAND graphics_menu_cursor_actor_anchor_tests)
   # Pure native-JFFTXT glyph placement contract: stable 4:3 canvas and
   # intentional exclusion of the original brightness control.
   add_executable(graphics_menu_glyph_layout_tests
