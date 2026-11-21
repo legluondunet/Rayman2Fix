@@ -177,6 +177,82 @@ def linked_shared_ai_mind(graph: Graph, state: int,
     }
 
 
+
+def cursor_normal_script_evidence(graph: Graph, actor: dict,
+                                  family_info: dict) -> dict:
+    """Inspect a single bounded original cursor AI script, read-only.
+
+    Raymap's ScriptNode PC format is <param:u32,pad:u16,indent:u8,
+    type:u8>. Type 23 is an ActionRef. Every reference to common Fix
+    module 4/0 is verified by RTB; state/family ownership is proven
+    independently by the referenced action's +0x3C/+0x40/+0x44 and
+    +0x50 fields. No script bytes are emitted or patched.
+    """
+    brain=int(actor["brain"],16)
+    mind=graph.ptr(brain,(4,1),(13,1))
+    model=graph.ptr(mind,(13,1),(13,1))
+    if model!=mind+0x18:
+        raise Refused("cursor live Mind AIModel layout mismatched")
+    normal=graph.ptr(mind+4,(13,1),(13,1))
+    if graph.ptr(normal,(13,1),(13,1))!=model:
+        raise Refused("cursor current Intelligence not linked to AIModel")
+    if graph.u32(mind+8) or mind+8 in graph.rtb:
+        raise Refused("unexpected cursor reflex Intelligence")
+    behaviors=graph.ptr(model,(13,1),(13,1))
+    entries=graph.ptr(behaviors,(13,1),(13,1))
+    if graph.u32(behaviors+4)!=2:
+        raise Refused("unexpected cursor normal behavior count")
+    if graph.ptr(normal+8,(13,1),(13,1))!=entries:
+        raise Refused("cursor selected behavior not first entry")
+    if graph.u32(entries+8)!=1:
+        raise Refused("cursor first behavior script count mismatch")
+    wrapper=graph.ptr(entries,(13,1),(13,1))
+    nodes=graph.ptr(wrapper,(13,1),(13,1))
+    action_refs=[]
+    types={}
+    count=0
+    for i in range(64):
+        at=nodes+8*i
+        block=graph.block(at,8)
+        param,padding,indent,tag=struct.unpack_from(
+            "<IHBB",block.data,at-block.base)
+        if padding!=0 or indent>16:
+            raise Refused("malformed cursor script node")
+        types[tag]=types.get(tag,0)+1
+        if tag==23:  # Raymap ActionRef
+            action_refs.append(graph.ptr(at,(13,1),(4,0)))
+        count+=1
+        if indent==0:
+            if tag!=8:  # Raymap EndMacro / script end
+                raise Refused("unexpected cursor script terminator")
+            break
+    else:
+        raise Refused("unterminated cursor AI script")
+    if count!=26 or len(action_refs)!=4 or len(set(action_refs))!=3:
+        raise Refused("unrecognized cursor AI script signature")
+    state=int(family_info["state"],16)
+    family=int(family_info["family"],16)
+    action_owners={}
+    for action in set(action_refs):
+        back_state=[graph.ptr(action+j,(4,0),(4,0))
+                    for j in (0x3C,0x40,0x44)]
+        back_family=graph.ptr(action+0x50,(4,0),(4,0))
+        action_owners[action]=(
+            all(p==state for p in back_state) and back_family==family)
+    linked=[a for a in action_refs if action_owners[a]]
+    if len(linked)!=2 or len(set(linked))!=1:
+        raise Refused("cursor script action/state self-ownership ambiguous")
+    return {
+        "script_node_count":count,
+        "action_ref_count":len(action_refs),
+        "distinct_action_ref_count":len(set(action_refs)),
+        "own_state_action_refs":len(linked),
+        "normal_behaviors":2,
+        "cursor_ai_action_links_verified":True,
+        "visual_draw_owner_verified":False,
+    }
+
+
 def inspect_shared_links(menu_sna: Path, levels0_dat: Path,
                          fix_sna: Path, fix_rtb: Path) -> dict:
     if any(sha256(p)!=expected for p,expected in (
@@ -213,6 +289,7 @@ def inspect_shared_links(menu_sna: Path, levels0_dat: Path,
         graph,int(info_gen["state"],16),0x44)
     if cursor_mind["mind"]==genmenu_mind["mind"]:
         raise Refused("cursor and GenMenu shared AI Minds overlap")
+    cursor_script=cursor_normal_script_evidence(graph,cursor,info_cursor)
     cursor_lists=actor_direct_object_list(graph,cursor)
     genmenu_lists=actor_direct_object_list(graph,genmenu)
     direct_list_count=sum(
@@ -225,6 +302,7 @@ def inspect_shared_links(menu_sna: Path, levels0_dat: Path,
         "cursor":info_cursor,
         "genmenu_negative_control":info_gen,
         "cursor_shared_ai_mind":cursor_mind,
+        "cursor_live_menu_script":cursor_script,
         "genmenu_shared_ai_mind_control":genmenu_mind,
         "cursor_instance_object_list":cursor_lists,
         "genmenu_instance_object_list":genmenu_lists,
