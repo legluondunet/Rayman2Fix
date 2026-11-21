@@ -31,8 +31,8 @@ int main() {
     const auto wide=make_graphics_menu_info(3440,1440,false);
     check(wide.actual_aspect_ratio()=="43:18",
           "do not mislabel 3440x1440 as the mathematically different 21:9");
-    check(make_graphics_menu_info(1920,1200,false).actual_aspect_ratio()=="8:5",
-          "exact 16:10 also reduces to equivalent 8:5");
+    check(make_graphics_menu_info(1920,1200,false).actual_aspect_ratio()=="16:10",
+          "display familiar exact 16:10 without incorrectly approximating");
     check(make_graphics_menu_info(3840,2160,false).actual_aspect_ratio()=="16:9",
           "ratio is independent of resolution scale");
 
