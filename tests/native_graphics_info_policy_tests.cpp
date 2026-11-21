@@ -16,5 +16,21 @@ for(unsigned broken=0;broken<4;++broken){
  require(!suppress_menu_video_call(broken!=0,broken!=1,broken!=2,broken!=3,
    NativeVideoCall::save));
 }
+// Regression: first video visit V51=0; Enter changes V51 to 1,
+// and this persists across a later return to the video menu.
+// Neither transition may silently reveal the interactive original UI.
+for(unsigned latch: {0u,1u}) {
+ for(int row=1;row<=4;++row)
+   require(graphics_info_video_page(true,true,true,5,0,true,row,true,latch));
+}
+require(!graphics_info_video_page(true,true,true,5,0,true,1,true,2));
+require(!graphics_info_video_page(true,true,true,5,0,true,0,true,1));
+require(!graphics_info_video_page(true,true,true,5,0,true,5,true,1));
+require(!graphics_info_video_page(true,true,true,18,5,true,5,true,1)); // brightness
+require(!graphics_info_video_page(true,true,true,11,0,true,1,true,1)); // options
+require(!graphics_info_video_page(true,true,true,5,1,true,1,true,1));
+for(unsigned i=0;i<5;++i)
+ require(!graphics_info_video_page(i!=0,i!=1,i!=2,5,0,
+                                     i!=3,1,i!=4,1));
 std::cout<<"Native video commands limited to exact validated menu nodes: PASS\n";
 }
