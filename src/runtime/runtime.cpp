@@ -28,6 +28,7 @@
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
 #include "rayman2fix/graphics_menu_trace.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
+#include "rayman2fix/graphics_menu_start_policy.hpp"
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
 #include "rayman2fix/native_graphics_info_proto.hpp"
 #endif
@@ -7533,16 +7534,26 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         install_native_frame_flip_hook();
         start_hud_monitor();
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
-        // Read-only observer lives solely in the dedicated research build.
-        // It never runs within the audio/render critical paths.
-        if(g_log) {
+        // The read-only observer is also the VERIFIED controller source
+        // required by the native information page and its exact-script
+        // video-mode write guards. Never tie this functionality to Log=1:
+        // the normal packaged default is Log=0.
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+        constexpr bool kNativeGraphicsInformationCompiled=true;
+#else
+        constexpr bool kNativeGraphicsInformationCompiled=false;
+#endif
+        if(r2fix::menu_controller_worker_required(
+                g_log,kNativeGraphicsInformationCompiled))
             r2fix::start_menu_ai_controller_trace(&log_line);
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
-            r2fix::start_native_graphics_info_proto(&log_line,
-                settings->output_width,settings->output_height);
+        // log_line() is intentionally a no-op at Log=0. The feature,
+        // callbacks and text presentation still initialize normally.
+        r2fix::start_native_graphics_info_proto(&log_line,
+            settings->output_width,settings->output_height);
 #endif
+        if(r2fix::menu_passive_diagnostics_required(g_log))
             r2fix::start_graphics_menu_trace(&log_line);
-        }
 #endif
         // Apply game EXE icon in its own process, independently of ESC audio.
         r2fix::start_game_window_icon_worker(&log_line);
