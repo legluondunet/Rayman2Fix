@@ -267,3 +267,94 @@ this diagnostic. Keep `main` untouched and PR #51 unmerged.
 The old menu video behavior continues to select original entries,
 while script-level resolution changes are guarded. The new logging
 does not remove the luciole or produce a non-interactive settings page.
+
+
+## Autonomy phase: directly typed cursor-name ownership and shared visuals
+
+The maintainer asked for a sustained autonomous phase without additional
+Wine screenshots/log cycles. We re-used the **owner-provided** original
+`menu.sna`, `levels0.dat`, `fix.sna` and `fix.rtb` in read-only
+analysis. Their verified SHA256 values are pinned by the two scripts:
+
+- `tools/research_menu_cursor_actor.py`: approved Menu.sna + Levels DAT
+- `tools/research_menu_cursor_fix_links.py`: approved Fix.sna + Fix.rtb,
+  plus the Menu/Levels hashes
+
+### Directly proven name → StandardGame → Perso/SuperObject chain
+
+`YAM_CurseurMenu_I1` resides at scene virtual `0x07E701DC`
+within the Menu module 4/1. Its name-record pointer at `name-0x18`
+is *typed by RTB* and targets `0x07E70588`, which equals the cursor
+actor's StandardGame `0x07E70550 + 0x38`. Conversely, the
+StandardGame field `+0x3C` holds a **typed** pointer back to the
+name record `0x07E701C4`.
+
+The **independent** `ARG_CurseurMenu` name record at
+`0x07E70238 - 0x18` points (typed) to
+`0x07E70550 + 0x5C`; the StandardGame's `+0x60` field
+points back to that name record. Both links identify the **same
+StandardGame**, without relying on a numerical object-type tuple
+as the primary identifier.
+
+The already-verified cursor actor chain is:
+`SuperObject 0x07AB2174` → `Perso 0x07E703F8` →
+`StandardGame 0x07E70550`, with a typed back-link from
+StandardGame `+0x0C` to the same SuperObject. The brain is
+`0x07E705D4`, and visual-data block is `0x07E70434`.
+The name-linked actor's object-type tuple `(2,11,11)` now acts
+only as a cross-check. A separately proven `YAM_GenMenu_I1`
+name record resolves to the *different* GenMenu actor, preventing
+accidental conflation with the cursor and the video-controller actor.
+
+This is a substantive improvement: the named cursor actor's
+**identity within the original scene is now supported by reciprocal
+typed relocations, not merely co-located labels or pointer counts**.
+It is not proof that the actor's visible 3D model is exactly the
+butterfly/luciole in the user's screenshots.
+
+### Verified link to common Fix visual state
+
+Raymap's `Perso3dData` layout identifies pointers at offsets
+`+0,+4,+8` as the actor's initial/current/secondary visual states
+and `+0x14` as its family. The hash-locked original CD files provide
+typed SNA/RTB links:
+
+- Cursor visual-data `0x07E70434 +0,+4,+8` →
+  common Fix state `0x001B5D14`, all identical
+- Cursor visual-data `+0x14` →
+  common Fix family `0x001B5CD8`
+- Family index at `+0x0C` = `2`, consistent with cursor
+  StandardGame family index `2`
+- The family's two state-list head pointers at `+0x10,+0x14`
+  both point (typed) to `0x001B5D14`, and its state count is `1`
+
+For the **GenMenu negative control**, the distinct visual-data block
+`0x07E70B50` resolves to family `0x001B6274`
+(index `3`) and state `0x001B62B0`, also typed and internally
+consistent. The cursor and GenMenu do not share a family/state.
+
+These links demonstrate that the cursor instance has a separate
+native visual state/family. They still do **not** establish the
+associated mesh, texture, renderer callback, or whether making that
+SuperObject invisible will remove the butterfly without affecting
+unrelated menu behavior.
+
+### Test and privacy policy
+
+The script emits **metadata only**, no proprietary SNA contents.
+It refuses unrecognized file hashes, missing typed relocations,
+ambiguous ownership, wrong family indices and inconsistent state
+pointers. Pure synthetic unit tests cover forged or missing back-links
+and malformed cross-file visual state. The CI runs these tests under
+Linux without requiring bundled commercial game assets.
+
+Until renderer ownership is validated, leave the original cursor
+visible and preserve the existing guarded video-selection calls,
+brightness control, text localization and other native menus. No
+actor flags, matrix, input routing or draw calls have been changed.
+
+**Next engineering milestone:** use the now-established
+named-actor → family/state chain to identify the actual animation
+or geometric object owner, then isolate the resolution information
+presentation from native highlight and selection UI. Do not ship
+a visibility toggle based solely on name ownership.
