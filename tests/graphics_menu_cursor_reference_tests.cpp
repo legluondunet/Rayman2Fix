@@ -31,5 +31,21 @@ int main() {
     check(r2fix::menu_cursor_reference_offsets_clustered(likely_table));
     check(!r2fix::menu_cursor_reference_offsets_clustered(scattered));
     check(!r2fix::menu_cursor_reference_offsets_clustered(likely_table,8u));
+    // Wine #1532: four local references precede their own targets,
+    // rather than forming one shared 256-byte actor-pointer table.
+    const int observed_local_sites[4]={-12,80,2248,-456};
+    for(unsigned kind=1;kind<=4;++kind) {
+        check(r2fix::menu_cursor_is_inline_reference(
+            observed_local_sites[kind-1u],kind));
+        check(r2fix::menu_cursor_is_inline_reference_site(
+            anchor+observed_local_sites[kind-1u],anchor,kind));
+        check(!r2fix::menu_cursor_is_inline_reference(
+            observed_local_sites[kind-1u]+4,kind));
+    }
+    check(!r2fix::menu_cursor_is_inline_reference(-12,0));
+    check(!r2fix::menu_cursor_is_inline_reference(-12,5));
+    check(r2fix::menu_cursor_reference_site_gap(anchor+80u,anchor+92u)==12u);
+    check(r2fix::menu_cursor_reference_site_gap(anchor-12u,anchor+80u)==92u);
+    check(r2fix::menu_cursor_reference_site_gap(anchor+5u,anchor+5u)==0u);
     return 0;
 }
