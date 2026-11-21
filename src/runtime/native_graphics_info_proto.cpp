@@ -18,6 +18,7 @@
 #include <cwchar>
 #include "rayman2fix/graphics_menu_target.hpp"
 #include "rayman2fix/graphics_menu_glyph_layout.hpp"
+#include "rayman2fix/native_graphics_text_storage.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
 #include "rayman2fix/graphics_menu_controller_model.hpp"
 #include "rayman2fix/graphics_menu_controller_vars.hpp"
@@ -396,8 +397,7 @@ void build_texts() noexcept {
 void show_information_rows(bool visible) noexcept {
     if(!g_language_table || g_information_mode==visible)return;
     const auto& source=visible?g_information_rows:g_original_rows;
-    for(unsigned i=0;i<6;++i)
-        std::memcpy(g_rows[i].data(),source[i].data(),g_rows[i].size());
+    switch_stable_menu_labels(g_rows,source);
     g_information_mode=visible;
 }
 bool original_text_valid(std::uintptr_t p) noexcept {
@@ -427,9 +427,7 @@ bool patch_text_table() noexcept {
     }
     // On a new MENU load, the previous session may have restored original
     // content. Prepare information BEFORE publishing these stable slots.
-    for(unsigned i=0;i<6;++i)
-        std::memcpy(g_rows[i].data(),g_information_rows[i].data(),
-                    g_rows[i].size());
+    switch_stable_menu_labels(g_rows,g_information_rows);
     g_information_mode=true;
     unsigned patched=0;
     for(unsigned i=0;i<6;++i) {
