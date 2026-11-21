@@ -47,6 +47,10 @@ struct Evidence {
     int voice_other_gate=-1;
 };
 
+// Native pause depth is cumulative: subsequent ESC menus can begin at
+// 2 (or higher), rather than always 1. Require exactly one native depth
+// increment and preserve all independent owner/voice/stream guards.
+// This is still NOT a verified physical ADPCM voice generation.
 // This only gates *one* experimental resume decision on a trusted
 // render thread. Native Pauses and script Resumes are still owned by
 // the original game. The runtime revalidates live Theme/SXD identity
@@ -59,7 +63,8 @@ constexpr bool can_try_pending_theme_resume(const Evidence& e) noexcept {
         e.pending_age_ms<=100u &&
         e.pause_callbacks==2u && e.other_callbacks==0u &&
         e.different_handles==0u && e.transition_type==4 &&
-        e.depth_before==1 && e.depth_after==2 &&
+        e.depth_before>=1 && e.depth_before<=8 &&
+        e.depth_after==e.depth_before+1 &&
         e.global_play_stop_stable &&
         e.direct_snapshot && e.direct_refs==1u &&
         e.direct_candidates==1u && e.direct_stamped==1u &&

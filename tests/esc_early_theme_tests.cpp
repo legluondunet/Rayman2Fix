@@ -42,6 +42,41 @@ Evidence approved() {
 int main() {
     const auto normal=approved();
     CHECK(can_try_pending_theme_resume(normal));
+    // The original game keeps a cumulative pause depth. The first menu
+    // uses 1->2, but subsequent ESC menus may enter at 2->3 (Windows log,
+    // 2026-11-20). The other source/owner/ADPCM guards must still hold.
+    for (int depth=1; depth<=8; ++depth) {
+        auto later=approved();
+        later.depth_before=depth;
+        later.depth_after=depth+1;
+        CHECK(can_try_pending_theme_resume(later));
+    }
+    {
+        auto no_increment=approved();
+        no_increment.depth_before=2;
+        no_increment.depth_after=2;
+        CHECK(!can_try_pending_theme_resume(no_increment));
+        no_increment.depth_after=4;
+        CHECK(!can_try_pending_theme_resume(no_increment));
+        no_increment.depth_before=0;
+        no_increment.depth_after=1;
+        CHECK(!can_try_pending_theme_resume(no_increment));
+        no_increment.depth_before=9;
+        no_increment.depth_after=10;
+        CHECK(!can_try_pending_theme_resume(no_increment));
+    }
+    {
+        auto pending=approved();
+        pending.depth_before=2;
+        pending.depth_after=3;
+        pending.voice_paused=0;
+        CHECK(!can_try_pending_theme_resume(pending));
+        pending=approved();
+        pending.depth_before=2;
+        pending.depth_after=3;
+        pending.native_target_matches_outer=0;
+        CHECK(!can_try_pending_theme_resume(pending));
+    }
     // Every individual safety prerequisite is an independent fail-close.
     DENY(experimental_enabled,false);
     DENY(pending_menu,false);
