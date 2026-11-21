@@ -238,8 +238,14 @@ CursorNameScan locate_cursor_name_anchor() noexcept {
 struct CursorRefs {
     std::array<unsigned,4> hits{};
     std::array<unsigned,4> local_hits{};
+    std::array<int,4> local_site_offsets{};
     unsigned scanned_mib=0,unreadable=0;
     bool anchor_still_valid=false;
+    bool singleton_offsets_complete() const noexcept {
+        for(unsigned i=0;i<4;++i)
+            if(local_hits[i]!=1u)return false;
+        return true;
+    }
 };
 CursorRefs locate_cursor_name_references(std::uintptr_t name_anchor) noexcept {
     CursorRefs out{};
@@ -288,9 +294,13 @@ CursorRefs locate_cursor_name_references(std::uintptr_t name_anchor) noexcept {
                         value,name_anchor);
                     if(!kind)continue;
                     ++out.hits[kind-1u];
-                    if(menu_cursor_reference_site_near_anchor(
-                          at+j,name_anchor))
+                    int offset=0;
+                    if(menu_cursor_relative_reference_offset(
+                          at+j,name_anchor,offset)) {
+                        if(out.local_hits[kind-1u]==0u)
+                            out.local_site_offsets[kind-1u]=offset;
                         ++out.local_hits[kind-1u];
+                    }
                 }
             }else ++out.unreadable;
             const auto advance=std::min<std::uintptr_t>(kChunk,end-at);
@@ -372,6 +382,30 @@ DWORD WINAPI worker(void*) {
                        refs.local_hits[0],refs.local_hits[1],refs.local_hits[2],
                        refs.local_hits[3],refs.scanned_mib,refs.unreadable);
                     g_logger(reference_line);
+                    if(refs.anchor_still_valid &&
+                       refs.singleton_offsets_complete()) {
+                        // Show ONLY signed offsets from the verified
+                        // scene-name anchor. Never print absolute game
+                        // pointers or claim an identified actor.
+                        int offsets[4]{};
+                        for(unsigned i=0;i<4;++i)
+                            offsets[i]=refs.local_site_offsets[i];
+                        const bool clustered=
+                           menu_cursor_reference_offsets_clustered(offsets);
+                        int low=offsets[0],high=offsets[0];
+                        for(unsigned i=1;i<4;++i) {
+                            low=std::min(low,offsets[i]);
+                            high=std::max(high,offsets[i]);
+                        }
+                        char layout_line[275]{};
+                        std::snprintf(layout_line,sizeof(layout_line),
+                            "RUNTIME-MENU-CURSOR-REF-LAYOUT: relative-sites=%d,%d,%d,%d span_bytes=%d within_256_bytes=%u identity=unverified actor-renderer=unverified mutation=0",
+                            offsets[0],offsets[1],offsets[2],offsets[3],
+                            high-low,unsigned(clustered));
+                        g_logger(layout_line);
+                    } else {
+                        g_logger("RUNTIME-MENU-CURSOR-REF-LAYOUT: status=not-enough-singleton-references mutation=0");
+                    }
                 }
             } else if(tries==1u || tries==kMaxScans ||
                       scanned.matches>1u || (tries%4u)==0u) {
