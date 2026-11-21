@@ -1,6 +1,7 @@
 #include "rayman2fix/native_graphics_info_policy.hpp"
 #include <stdexcept>
 #include <iostream>
+#include <initializer_list>
 void require(bool v){if(!v)throw std::runtime_error("native graphics scope policy");}
 int main(){
 using namespace r2fix;
