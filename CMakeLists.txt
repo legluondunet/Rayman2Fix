@@ -90,7 +90,7 @@ if(WIN32)
   if(RAYMAN2FIX_GRAPHICS_MENU_TRACE)
     target_sources(Rayman2FixRuntime PRIVATE
       src/runtime/graphics_menu_trace.cpp
-      src/runtime/graphics_menu_text_trace.cpp)
+      src/runtime/graphics_menu_controller_trace.cpp)
     target_compile_definitions(Rayman2FixRuntime PRIVATE
       RAYMAN2FIX_GRAPHICS_MENU_TRACE=1)
   endif()
@@ -279,6 +279,12 @@ if(BUILD_TESTING)
   target_include_directories(menu_text_probe_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME menu-text-handle-scoping COMMAND menu_text_probe_tests)
+  add_executable(graphics_menu_controller_tests
+    tests/graphics_menu_controller_model_tests.cpp)
+  target_include_directories(graphics_menu_controller_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-controller-relocation-and-state
+    COMMAND graphics_menu_controller_tests)
 
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
   # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
