@@ -487,11 +487,11 @@ DWORD WINAPI worker(void*) {
                 const auto vars=valid_controller ?
                     observe_menu_selection(current.mind,&read32,&read8) :
                     MenuSelectionVars{};
-                const bool video_page=valid_controller &&
-                    current.normal==5 && current.reflex==0 &&
-                    vars.selection_valid && vars.selection>=1 &&
-                    vars.selection<=3 && vars.activate_valid &&
-                    vars.activate==0;
+                const bool video_page=graphics_info_video_page(
+                    approved(),in_menu,valid_controller,
+                    current.normal,current.reflex,
+                    vars.selection_valid,vars.selection,
+                    vars.activate_valid,vars.activate);
                 if(video_page) {
                     if(!g_language_table) {
                         if(patch_text_table()) {
