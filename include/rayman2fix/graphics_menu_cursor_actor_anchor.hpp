@@ -8,6 +8,12 @@
 #include <cstring>
 namespace r2fix {
 constexpr std::size_t kMenuCursorActorAnchorWindow=2300u;
+inline bool menu_cursor_name_present(const std::uint8_t* bytes,
+                                     std::size_t n) noexcept {
+    constexpr char kName[]="YAM_CurseurMenu_I1";
+    return bytes && n>=sizeof(kName) &&
+           std::memcmp(bytes,kName,sizeof(kName))==0;
+}
 inline bool verified_menu_cursor_name_anchor(
     const std::uint8_t* data,std::size_t size) noexcept {
     if(!data || size<kMenuCursorActorAnchorWindow)return false;
