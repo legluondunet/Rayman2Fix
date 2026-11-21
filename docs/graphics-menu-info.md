@@ -9,7 +9,7 @@ Phase 0 de [#49](https://github.com/legluondunet/Rayman2Fix/issues/49).
 - **Pilote** : afficher d'abord **GameFrame / Glide2** en tant que moteur du jeu ; afficher séparément le pilote `D3D9` signalé par Windows/Wine, avec indication de la provenance. Le véritable pilote Linux (Mesa/RADV/NVIDIA, version) reste `Indisponible` tant qu'une interrogation native documentée ne l'établit pas.
 - **Résolution de sortie** : utiliser `ChildDisplayOptions::output_width/height` passé par le lanceur (dimension de `GLIDE_SIZE`). Les dimensions physiques du bureau ne sont pas forcément celles de la sortie en mode `4:3`.
 - **Profondeur** : **16 bits internes** ; `ubi.ini` contient `GLI_Mode=1 - 1024 x 768 x 16`. Ne pas afficher `32 bits` comme profondeur du rendu interne simplement parce que le bureau ou la fenêtre utilisent une surface 32 bits.
-- **Ratio** : rapport exact et simplifié `largeur:hauteur` de la sortie ; `3440x1440` est précisément `43:18`, pas `21:9`. Afficher aussi le mode `Auto` ou `4:3`.
+- **Ratio** : rapport exact de la sortie (`16:10` conservé pour les écrans compatibles, autres ratios réduits) ; `3440x1440` est précisément `43:18`, pas `21:9`. Afficher aussi le mode `Auto` ou `4:3`.
 
 Le module pur `include/rayman2fix/graphics_menu_info.hpp` prépare uniquement les valeurs, avec tests C++17 sous Linux/Windows. Les libellés visibles doivent à terme être localisés conformément à la langue du jeu.
 
