@@ -52,3 +52,28 @@ back), without deliberately applying or saving a new mode.
 If no verified controller is found, the memory layout might diverge
 from the static SNA or the matching level not have been loaded. Inspect
 the scan diagnostics before adding more native hooks.
+
+## First verified Wine result and next scalar probe (21 November 2026)
+
+Session `Rayman2Fix(20261121-130111).log`, 27,225 bytes, SHA-256
+`f618d721890efa56b5cc3e3457ff0dc1177b0cb0dc340db8a1bb4d896abd12f9`.
+The controller was **found on scan 2**, uniquely, with verified
+Mind and 27/7 behaviors. Normal 5 appeared twice (8.253, 14.858 s),
+reflex 5 once (10.257 s), and normal 19 did not appear. Original mode
+remained 1024x768x16. No game crash is proved or ruled out by the log.
+The data proves live controller identity; the specific screen associated
+with each behavior still needs confirmation.
+
+Additional static validation of the owner's hash-locked Menu.sna reveals:
+controller Mind `0x07920990` → DsgMem `0x07921430`, with a DsgVar
+declaration of **90 entries**. `V17` is an integer type 5 at offset
+`0x144` in its live value buffer; the normal-5 script tests V17 against
+constants 1, 2, 3, 4 before selection actions. `V51` is a byte kind 0
+at `0x4A5` and is read by the same script. This does **not** yet establish
+whether V17 represents a highlighted row or an action parameter.
+
+The next diagnostic checks the live DsgVar chain and each field's exact
+type/offset before reading. It adds `v17_valid, v17, v51_valid, v51`
+to the existing state-change log and triggers logging on their changes.
+Invalid pointers, changed schemas and non-integer fields cause missing
+values rather than speculative reads. No write, hook or video change.

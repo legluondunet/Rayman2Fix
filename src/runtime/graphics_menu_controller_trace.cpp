@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include "rayman2fix/graphics_menu_controller_model.hpp"
+#include "rayman2fix/graphics_menu_controller_vars.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
 #include "rayman2fix/graphics_menu_target.hpp"
 
@@ -188,6 +189,7 @@ DWORD WINAPI worker(void*) {
     MenuAiState mind{};
     unsigned tries=0,reports=0;
     int prior_normal=-200,prior_reflex=-200;
+    int prior_selection=-200,prior_activate=-200;
     bool announced=false;
     for(unsigned iteration=0;iteration<kSeconds*5u && reports<kMaxReports;
         ++iteration) {
@@ -224,22 +226,35 @@ DWORD WINAPI worker(void*) {
                 ++reports;
                 break;
             }
+            const auto vars=observe_menu_selection(current.mind,&read32,&read8);
+            const int selection=vars.selection_valid ?
+                ((vars.selection>=-1 && vars.selection<=31) ?
+                   int(vars.selection) : -2) : -1;
+            const int activate=vars.activate_valid ? int(vars.activate) : -1;
             const bool changed=current.normal!=prior_normal ||
-                               current.reflex!=prior_reflex;
+                               current.reflex!=prior_reflex ||
+                               selection!=prior_selection ||
+                               activate!=prior_activate;
             if(changed || !announced || iteration%25u==0u) {
-                // Never interpret normal 5/reflex 5 as the same script.
-                char line[260]{};
+                // Preserve independent normal and reflex state; V17 is a
+                // verified native scalar, but NOT yet a proven UI selection.
+                char line[320]{};
                 std::snprintf(line,sizeof(line),
-                   "RUNTIME-MENU-AI: t_ms=%lu fg=%u normal=%d reflex=%d normal5=%u normal19=%u reflex5_brightness=%u level_hint=%s (behavior snapshot; submenu=unverified)",
+                   "RUNTIME-MENU-AI: t_ms=%lu fg=%u normal=%d reflex=%d normal5=%u normal19=%u reflex5_brightness=%u v17_valid=%u v17=%d v51_valid=%u v51=%d level_hint=%s (read-only; submenu=unverified)",
                    static_cast<unsigned long>(now-begin),
                    game_foreground(),current.normal,current.reflex,
                    unsigned(current.normal==5),unsigned(current.normal==19),
-                   unsigned(current.reflex==5),native_level_hint());
+                   unsigned(current.reflex==5),
+                   unsigned(vars.selection_valid),selection,
+                   unsigned(vars.activate_valid),activate,
+                   native_level_hint());
                 g_logger(line);
                 ++reports;
             }
             prior_normal=current.normal;
             prior_reflex=current.reflex;
+            prior_selection=selection;
+            prior_activate=activate;
             announced=true;
         }
         Sleep(200);

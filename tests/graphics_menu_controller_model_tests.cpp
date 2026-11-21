@@ -1,4 +1,5 @@
 #include "rayman2fix/graphics_menu_controller_model.hpp"
+#include "rayman2fix/graphics_menu_controller_vars.hpp"
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -73,5 +74,37 @@ int main() {
     check(menu_behavior_index(normal,27,normal+5*12)==5 &&
           menu_behavior_index(normal,27,normal+1)==-1 &&
           menu_behavior_index(reflex,7,reflex+5*12)==5,"index bounds");
+    // Synthetic DsgMem pointer chain, original Menu controller schema only.
+    const auto dsg=base+0x3500, ref=base+0x3600;
+    const auto decl=base+0x3700, infos=base+0x3800, values=base+0x4000;
+    m.w32(mind+12,dsg);m.w32(dsg,ref);m.w32(ref,decl);
+    m.w32(decl+4,infos);m.w8(decl+12,90);m.w32(dsg+8,values);
+    m.w32(infos+17*16,0x144);m.w32(infos+17*16+4,5);
+    m.w32(infos+51*16,0x4a5);m.w32(infos+51*16+4,0);
+    m.w32(values+0x144,3);m.w8(values+0x4a5,1);
+    const auto v1=observe_menu_selection(mind,read32,read8);
+    check(v1.selection_valid && v1.selection==3 &&
+          v1.activate_valid && v1.activate==1,"menu scalar V17/V51");
+    m.w32(values+0x144,5);m.w8(values+0x4a5,0);
+    const auto v2=observe_menu_selection(mind,read32,read8);
+    check(v2.selection_valid && v2.selection==5 &&
+          v2.activate_valid && v2.activate==0,"scalar transition");
+    m.w32(infos+17*16+4,19); // array/pointer: must reject
+    const auto wrong_type=observe_menu_selection(mind,read32,read8);
+    check(!wrong_type.selection_valid && wrong_type.activate_valid,
+          "non-integer V17 rejected, independent V51");
+    m.w32(infos+17*16+4,5);
+    m.w32(infos+17*16,0x100000); // offsets unrecognized: fail closed
+    check(!observe_menu_selection(mind,read32,read8).selection_valid,
+          "out-of-schema V17 offset rejected");
+    m.w32(infos+17*16,0x144);
+    m.w8(decl+12,89);
+    check(!observe_menu_selection(mind,read32,read8).selection_valid,
+          "incorrect DsgVar declaration rejected");
+    m.w8(decl+12,90);
+    m.w32(dsg,0xF0000000);
+    check(!observe_menu_selection(mind,read32,read8).activate_valid,
+          "unmapped DsgVar reference rejected");
+    m.w32(dsg,ref);
     std::cout<<"Rayman2 menu AI model and live behavior synthetic tests: PASS\n";
 }
