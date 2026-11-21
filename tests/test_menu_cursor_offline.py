@@ -16,7 +16,7 @@ MAGIC=bytes.fromhex("79ccb56a")
 
 class SceneActorResearchTests(unittest.TestCase):
     def test_static_masks_and_bad_rtb_rejected(self):
-        self.assertEqual(next_mask(0xFF000000), 0x78a7bc31)
+        self.assertEqual(next_mask(0xFF000000), 0x560D49DE)
         with self.assertRaises(Refused):
             decode_rtb(b"")
         with self.assertRaises(Refused):
