@@ -1,0 +1,36 @@
+#include <array>
+#include <cassert>
+#include <cstring>
+#include "rayman2fix/native_graphics_text_storage.hpp"
+using Row=std::array<char,56>;
+using Bank=std::array<Row,6>;
+static void put(Row& row,const char* src) {
+    std::memset(row.data(),0,row.size());
+    std::strncpy(row.data(),src,row.size()-1);
+}
+int main() {
+    Bank native{},info{},live{};
+    const char* original[]={"RESOLUTION","SAVE RESOLUTION","LOW",
+                            "MEDIUM","HIGH","OTHER"};
+    const char* replacement[]={" ","OUTPUT: 1920x1080 16:9",
+        "GPU: AMD Radeon RX 6600M","D3D9: atiumdag.dll",
+        "BPP: desktop 32 / Glide 16","GLIDE: 1024x768x16"};
+    for(unsigned i=0;i<6;++i){put(native[i],original[i]);put(info[i],replacement[i]);}
+    switch_stable_menu_labels(live,info);
+    const char* fixed[6]{};
+    for(unsigned i=0;i<6;++i)fixed[i]=live[i].data();
+    // Brightness page uses original text while the cached label pointers
+    // remain exactly the same as in the graphics information page.
+    switch_stable_menu_labels(live,native);
+    for(unsigned i=0;i<6;++i){
+        assert(live[i].data()==fixed[i]);
+        assert(std::strcmp(live[i].data(),original[i])==0);
+    }
+    switch_stable_menu_labels(live,info);
+    for(unsigned i=0;i<6;++i) {
+        assert(live[i].data()==fixed[i]);
+        assert(std::strcmp(live[i].data(),replacement[i])==0);
+    }
+    switch_stable_menu_labels(live,native);
+    assert(std::strcmp(live[0].data(),"RESOLUTION")==0);
+}
