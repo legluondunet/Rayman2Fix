@@ -1,14 +1,16 @@
 # Rayman2Fix — diagnostic natif Options → Résolution (phase 1)
 
 Cette branche **ne remplace pas encore les options graphiques**. Le but est de
-localiser, sur l'exécutable CD SHA-256 approuvé
-`7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3`,
-les **états du menu natif et du gestionnaire de modes vidéo**, afin d'éviter
+localiser sur l'exécutable **déprotégé approuvé**
+(SHA-256 `9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`,
+1 468 928 octets) les **états du menu natif et du gestionnaire de modes vidéo**, afin d'éviter
 un patch qui bloquerait par erreur l'initialisation ou les autres menus.
 
 ## Résultats statiques vérifiés
 
-À partir du désassemblage de l'exécutable CD de 676352 octets :
+À partir du désassemblage du jeu CD d'origine de 676 352 octets et
+du recoupement des emplacements de code ciblés dans l'exécutable déprotégé
+de 1 468 928 octets (mêmes octets à ces appels et chaînes) :
 
 - La configuration de démarrage lit `GLI_Mode` via une référence à
   `0x49F480` depuis `0x405B5A`. Le lanceur conserve la source de vérité.
@@ -67,32 +69,38 @@ La phase 2 nécessitera d'établir une signature native de ce menu, de vérifier
 le point d'entrée du changement de mode, puis de remplacer les commandes par
 les informations approuvées en PR #50. La production `main` est inchangée.
 
-## Retour de test Wine — 21 novembre 2026
+## Correction de l'identification PE — 21 novembre 2026
 
-Le premier essai (`Rayman2Fix(20261121-095736).log`) a rapporté
-`RUNTIME-VIDEO-MENU-TRACE: status=unsupported-original-image; no sampling`.
-Le reste du runtime était actif, `jail_20` sortait en 386 ms et
-`learn_10` rapportait `status=pass`. La capture **ne prouve donc
-aucune entrée ni sortie du sous-menu Résolution**.
+Deux essais successifs sous Wine ont échoué **avant tout échantillonnage du
+menu** :
 
-Le binaire CD approuvé, récupéré depuis la bibliothèque du mainteneur
-(676352 octets, SHA256 `7927a106...d5e3`), a été réinspecté hors ligne :
-`TimeDateStamp=0x3807B68B`, `SizeOfImage=0x117000`, PE32 i386.
-Tous correspondent aux constantes de l'observateur. L'échec vient de
-la reconnaissance *en mémoire* de la session Wine ou de sa lecture
-`ReadProcessMemory(GetCurrentProcess(),...)`, sans preuve suffisante
-pour déterminer laquelle avec cette seule ligne.
+- `Rayman2Fix(20261121-095736).log` : `unsupported-original-image`
+  sans diagnostic détaillé (ancienne vérification) ;
+- `Rayman2Fix(20261121-100707).log` : `stage=nt-fingerprint
+  timestamp=0x3807B68B size=0x001D7000 entry=0x0005FCC0 machine=0x014C`.
+  Ces valeurs sont celles du **bon EXE déprotégé**, pas celles du CD initial.
 
-La révision de recherche suivante remplace la lecture du processus
-courant par `VirtualQuery` + copie locale **sur des régions déjà
-engagées et lisibles**, conformément au comportement des hooks
-standards. Elle produit aussi une erreur détaillée par étape
-(`dos-unreadable`, `nt-unreadable`, `nt-fingerprint`, etc.)
-si une identification échoue. Aucun hook vidéo, changement de résolution,
-injection de touches ni écriture mémoire ne sont ajoutés.
+La cause exacte est établie : le code de recherche exigeait par erreur
+`SizeOfImage=0x00117000`, la taille de l'exécutable CD d'origine.
+Or Rayman2Fix exige et lance le **fichier déprotégé**, 1 468 928 octets,
+`SizeOfImage=0x001D7000`, 6 sections. Le binaire CD d'origine, 676 352
+octets, est sauvegardé dans `rayman2.exe.bak` et n'est pas celui du runtime.
+Les deux PE ont le même timestamp `0x3807B68B` et le même point d'entrée
+`0x0005FCC0`, ce qui masquait cette confusion.
 
-**Nouveau test indispensable :** vérifier d'abord
-`RUNTIME-VIDEO-MENU-TRACE: status=accepted-image`, puis les lignes
-`t_ms=...` lors de deux entrées/sorties de Options → Résolution.
-Sans celles-ci, le sous-menu reste non identifié et la PR reste en
-brouillon.
+- Correction : nouveau contrat pur `include/rayman2fix/graphics_menu_target.hpp`
+  utilisé par l'observateur et testé sur Windows/Linux par
+  `graphics-menu-deprotected-pe-fingerprint`. Toute autre image reste
+  refusée, en particulier l'EXE original et les mauvaises architectures.
+- La lecture `VirtualQuery` + copie en mémoire, déjà introduite lors de la
+  recherche précédente, reste en place ; **l'ancienne hypothèse selon
+  laquelle `ReadProcessMemory(GetCurrentProcess())` serait responsable
+  n'était pas démontrée et est abandonnée**.
+- Le journal doit désormais montrer
+  `RUNTIME-VIDEO-MENU-TRACE: status=accepted-image kind=deprotected-x86`.
+  S'il manque, la vérification `stage=...` reste exploitable.
+
+Ne pas confondre ceci avec la fonctionnalité finale : **aucun menu ni mode
+vidéo n'est encore modifié**. Une fois le traceur accepté sous Wine,
+réaliser deux passages Options → Résolution sans changer la résolution,
+puis interpréter les transitions.

@@ -1,5 +1,7 @@
-// Approved Rayman 2 CD, SHA256 7927a106...d5e3: passive investigation
-// of the original GLI mode table and generic menu flag. Research build ONLY.
+// Approved *deprotected* Rayman 2 x86 executable, SHA256
+// 9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713.
+// The original 676352-byte CD EXE has a different SizeOfImage and is NOT the
+// executable launched by the verified Rayman2Fix path. Research build ONLY.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -8,12 +10,13 @@
 #include <cstdio>
 #include <cstring>
 #include "rayman2fix/graphics_menu_trace.hpp"
+#include "rayman2fix/graphics_menu_target.hpp"
 
 namespace r2fix {
 namespace {
 
-constexpr std::uint32_t kExpectedTimestamp = 0x3807B68Bu;
-constexpr std::uint32_t kExpectedImageSize = 0x117000u;
+constexpr std::uint32_t kExpectedImageSize =
+    r2fix::kDeprotectedGameImageSize;
 constexpr std::uint32_t kEngineModeRva = 0x100380u;   // GAM engine, read-only
 constexpr std::uint32_t kGenericMenuFlagRva = 0x0B9BC8u; // not Resolution-specific
 constexpr std::uint32_t kModeCountRva = 0x0A7238u;
@@ -27,11 +30,12 @@ constexpr unsigned kMaxReports = 180u;   // bounded disk output
 constexpr unsigned kHeartbeatMillis = 4000u;
 std::atomic<bool> g_started{false};
 
-// In the owner's Wine test ReadProcessMemory(GetCurrentProcess(),...)
-// did not produce a usable PE fingerprint even though the standard camera
-// hook accepted the same game's mapped header. Prefer guarded, same-process
-// reads (like the existing camera hook), never a cross-process RPM request.
-// Reads remain strictly passive, bounded to the approved PE image.
+// Read-only, same-process VirtualQuery-guarded snapshots; never use
+// potentially stale file offsets or write to the process image.
+// The previous 21-Nov probe rejected the *correct* 0x1D7000 patched image
+// due to a mistaken 0x117000 original-CD image-size constant, NOT because
+// ReadProcessMemory had been shown to fail. Preserve both protection and
+// the detailed PE-fingerprint diagnostics introduced in the prior revision.
 bool read_bytes(const BYTE* base, std::uint32_t rva, void* out,
                 SIZE_T length) noexcept {
     if (!base || !out || !length || rva >= kExpectedImageSize ||
@@ -66,6 +70,7 @@ struct ImageProbe {
     std::uint32_t observed_image_size=0;
     std::uint32_t observed_entry=0;
     unsigned observed_machine=0;
+    unsigned observed_sections=0;
 };
 bool supported_exe(const BYTE* base,ImageProbe& probe) noexcept {
     if (!base) return false;
@@ -84,12 +89,13 @@ bool supported_exe(const BYTE* base,ImageProbe& probe) noexcept {
     probe.observed_image_size=nt.OptionalHeader.SizeOfImage;
     probe.observed_entry=nt.OptionalHeader.AddressOfEntryPoint;
     probe.observed_machine=nt.FileHeader.Machine;
+    probe.observed_sections=nt.FileHeader.NumberOfSections;
     if(nt.Signature!=IMAGE_NT_SIGNATURE ||
-       nt.FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
-       nt.FileHeader.TimeDateStamp!=kExpectedTimestamp ||
-       nt.OptionalHeader.Magic!=IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
-       nt.OptionalHeader.SizeOfImage!=kExpectedImageSize ||
-       nt.OptionalHeader.AddressOfEntryPoint==0) return false;
+       !r2fix::graphics_menu_accepts_deprotected_image({
+           nt.FileHeader.Machine, nt.FileHeader.NumberOfSections,
+           nt.FileHeader.TimeDateStamp, nt.OptionalHeader.Magic,
+           nt.OptionalHeader.AddressOfEntryPoint,
+           nt.OptionalHeader.SizeOfImage})) return false;
     probe.stage="accepted";
     return true;
 }
@@ -161,14 +167,14 @@ DWORD WINAPI monitor(void* parameter) {
     if(!supported_exe(base,probe)) {
         char line[240]{};
         std::snprintf(line,sizeof(line),
-            "RUNTIME-VIDEO-MENU-TRACE: status=unsupported-original-image stage=%s timestamp=0x%08X size=0x%08X entry=0x%08X machine=0x%04X (read-only; no sampling)",
+            "RUNTIME-VIDEO-MENU-TRACE: status=unsupported-deprotected-image stage=%s timestamp=0x%08X size=0x%08X entry=0x%08X machine=0x%04X sections=%u (read-only; no sampling)",
             probe.stage,probe.observed_timestamp,
             probe.observed_image_size,probe.observed_entry,
-            probe.observed_machine);
+            probe.observed_machine,probe.observed_sections);
         logger(line);
         return 0;
     }
-    logger("RUNTIME-VIDEO-MENU-TRACE: status=accepted-image source=same-process-guarded-read-only");
+    logger("RUNTIME-VIDEO-MENU-TRACE: status=accepted-image kind=deprotected-x86 size=0x001D7000 source=same-process-guarded-read-only");
     logger("RUNTIME-VIDEO-MENU-TRACE: enabled=1 read-only=1 menu-identity=unverified mode-write=disabled max_seconds=300 max_reports=180");
     const DWORD began=GetTickCount();
     DWORD last_report=began;

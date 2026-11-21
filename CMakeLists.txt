@@ -267,6 +267,13 @@ if(BUILD_TESTING)
   target_include_directories(graphics_menu_info_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME graphics-menu-readonly-info-model COMMAND graphics_menu_info_tests)
+  # Guard against confusing original CD (0x117000) with the authenticated
+  # expanded/deprotected game image (0x1D7000), without shipping game bytes.
+  add_executable(graphics_menu_target_tests tests/graphics_menu_target_tests.cpp)
+  target_include_directories(graphics_menu_target_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-deprotected-pe-fingerprint
+    COMMAND graphics_menu_target_tests)
 
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
   # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
