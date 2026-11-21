@@ -12,6 +12,10 @@ int main(){
     check(!r2fix::verified_menu_cursor_name_anchor(nullptr,names.size()));
     check(!r2fix::verified_menu_cursor_name_anchor(names.data(),0));
     put(0,"YAM_CurseurMenu_I1");
+    check(r2fix::menu_cursor_name_present(names.data(),names.size()));
+    check(!r2fix::menu_cursor_name_present(names.data(),3));
+    check(!r2fix::verified_menu_cursor_name_anchor(
+        names.data(),names.size()));
     put(48,"popolopoi_menu");
     put(92,"ARG_CurseurMenu");
     put(2260,"YAM_GenMenu_I1");
