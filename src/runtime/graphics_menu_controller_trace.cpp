@@ -239,6 +239,12 @@ struct CursorRefs {
     std::array<unsigned,4> hits{};
     std::array<unsigned,4> local_hits{};
     std::array<int,4> local_site_offsets{};
+    std::array<unsigned,4> inline_self_references{};
+    std::array<unsigned,4> external_references{};
+    // Keep a bounded number of reference SITES, not their target data.
+    // Values never appear in a log. Sites are used only to compare
+    // possible adjacency after the already-existing read-only scan.
+    std::array<std::array<std::uintptr_t,16>,4> external_sites{};
     unsigned scanned_mib=0,unreadable=0;
     bool anchor_still_valid=false;
     bool singleton_offsets_complete() const noexcept {
@@ -294,6 +300,15 @@ CursorRefs locate_cursor_name_references(std::uintptr_t name_anchor) noexcept {
                         value,name_anchor);
                     if(!kind)continue;
                     ++out.hits[kind-1u];
+                    if(menu_cursor_is_inline_reference_site(
+                           at+j,name_anchor,kind)) {
+                        ++out.inline_self_references[kind-1u];
+                    } else {
+                        const unsigned index=kind-1u;
+                        const unsigned count=out.external_references[index]++;
+                        if(count<out.external_sites[index].size())
+                            out.external_sites[index][count]=at+j;
+                    }
                     int offset=0;
                     if(menu_cursor_relative_reference_offset(
                           at+j,name_anchor,offset)) {
@@ -406,6 +421,41 @@ DWORD WINAPI worker(void*) {
                     } else {
                         g_logger("RUNTIME-MENU-CURSOR-REF-LAYOUT: status=not-enough-singleton-references mutation=0");
                     }
+                    // A four-way source-site spread does not rule out
+                    // local reference *headers*. Subtract the expected
+                    // target offsets and classify source=target-12.
+                    // The remaining sites may be useful for actor
+                    // research, but are not typed links yet.
+                    std::uintptr_t closest=~std::uintptr_t{0};
+                    const auto& cursors=refs.external_sites[0];
+                    const auto& args=refs.external_sites[1];
+                    const unsigned nc=std::min<unsigned>(
+                        refs.external_references[0],cursors.size());
+                    const unsigned na=std::min<unsigned>(
+                        refs.external_references[1],args.size());
+                    for(unsigned i=0;i<nc;++i)
+                        for(unsigned j=0;j<na;++j) {
+                            const auto gap=menu_cursor_reference_site_gap(
+                                cursors[i],args[j]);
+                            if(gap<closest)closest=gap;
+                        }
+                    const bool pair_available=nc>0u && na>0u;
+                    const long nearest=pair_available &&
+                        closest<=0x7FFFFFFFu?
+                        static_cast<long>(closest):-1L;
+                    char self_line[325]{};
+                    std::snprintf(self_line,sizeof(self_line),
+                        "RUNTIME-MENU-CURSOR-REF-CLASS: inline_minus12=%u,%u,%u,%u external_candidates=%u,%u,%u,%u closest_external_cursor_arg_bytes=%ld external_pair_within_256=%u typed_actor_links=0 mutation=0",
+                        refs.inline_self_references[0],
+                        refs.inline_self_references[1],
+                        refs.inline_self_references[2],
+                        refs.inline_self_references[3],
+                        refs.external_references[0],
+                        refs.external_references[1],
+                        refs.external_references[2],
+                        refs.external_references[3],nearest,
+                        unsigned(pair_available && closest<=256u));
+                    g_logger(self_line);
                 }
             } else if(tries==1u || tries==kMaxScans ||
                       scanned.matches>1u || (tries%4u)==0u) {
