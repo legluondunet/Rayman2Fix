@@ -16,6 +16,7 @@
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
 #include "rayman2fix/graphics_menu_target.hpp"
 #include "rayman2fix/graphics_menu_cursor_actor_anchor.hpp"
+#include "rayman2fix/graphics_menu_cursor_reference_model.hpp"
 
 #if !defined(_M_IX86)
 #error Menu controller trace requires Windows x86
@@ -172,6 +173,7 @@ ScanResult locate_controller() noexcept {
 // absolute pointer, rendering callback or actor visibility is assumed.
 // This is ONE bounded, read-only pass in the research build only.
 struct CursorNameScan {
+    std::uintptr_t one_verified_anchor=0;
     unsigned name_hits=0, matches=0, unreadable=0, scanned_mib=0;
 };
 CursorNameScan locate_cursor_name_anchor() noexcept {
@@ -216,7 +218,9 @@ CursorNameScan locate_cursor_name_anchor() noexcept {
                     if(!verified_menu_cursor_name_anchor(
                            bytes.data()+j,copied-j))continue;
                     ++out.matches;
-                    if(out.matches>=2u)break; // ambiguous: fail closed
+                    if(out.matches==1u)out.one_verified_anchor=at+j;
+                    else out.one_verified_anchor=0; // ambiguous; fail closed
+                    if(out.matches>=2u)break;
                 }
             } else ++out.unreadable;
             const auto advance=std::min<std::uintptr_t>(kChunk,end-at);
@@ -225,6 +229,76 @@ CursorNameScan locate_cursor_name_anchor() noexcept {
         }
     }
     out.scanned_mib=(processed+1024u*1024u-1u)/(1024u*1024u);
+    return out;
+}
+// After exactly one verified four-name fingerprint, inspect x86
+// pointer VALUES in readable/writable private memory. This can reveal
+// potential links to the name block, but the pointer's FIELD TYPE is
+// unknown. No pointer is dereferenced and no game data are changed.
+struct CursorRefs {
+    std::array<unsigned,4> hits{};
+    std::array<unsigned,4> near{};
+    unsigned scanned_mib=0,unreadable=0;
+    bool anchor_still_valid=false;
+};
+CursorRefs locate_cursor_name_references(std::uintptr_t name_anchor) noexcept {
+    CursorRefs out{};
+    if(!menu_safe_ptr(name_anchor,
+           static_cast<unsigned>(kMenuCursorActorAnchorWindow)))return out;
+    std::array<BYTE,kMenuCursorActorAnchorWindow> proof{};
+    SIZE_T proof_count=0;
+    if(!ReadProcessMemory(GetCurrentProcess(),
+          reinterpret_cast<const void*>(name_anchor),proof.data(),
+          proof.size(),&proof_count) || proof_count!=proof.size() ||
+       !verified_menu_cursor_name_anchor(proof.data(),proof.size()))
+        return out;
+    out.anchor_still_valid=true;
+
+    SYSTEM_INFO system{};
+    GetSystemInfo(&system);
+    const auto last=std::min<std::uintptr_t>(
+       reinterpret_cast<std::uintptr_t>(system.lpMaximumApplicationAddress),
+       0x7FFF0000u);
+    std::array<BYTE,kChunk+4u> bytes{};
+    std::uintptr_t cursor=0x10000u;
+    unsigned scanned=0;
+    while(cursor<last && scanned<kMemoryBudget) {
+        MEMORY_BASIC_INFORMATION region{};
+        if(!VirtualQuery(reinterpret_cast<const void*>(cursor),&region,
+                         sizeof(region)) || !region.RegionSize)break;
+        const auto begin=reinterpret_cast<std::uintptr_t>(region.BaseAddress);
+        const auto end=std::min(last,
+            begin+static_cast<std::uintptr_t>(region.RegionSize));
+        if(end<=cursor)break;
+        cursor=end;
+        if(region.State!=MEM_COMMIT || region.Type!=MEM_PRIVATE ||
+           !readable_writable(region.Protect))continue;
+        for(auto at=begin;at<end && scanned<kMemoryBudget;) {
+            const auto length=static_cast<SIZE_T>(
+                std::min<std::uintptr_t>(kChunk+3u,end-at));
+            SIZE_T copied=0;
+            if(ReadProcessMemory(GetCurrentProcess(),
+                  reinterpret_cast<const void*>(at),bytes.data(),
+                  length,&copied) && copied>=4u) {
+                const unsigned first=unsigned((4u-(at&3u))&3u);
+                for(unsigned j=first;j<kChunk && j+4u<=copied;j+=4u) {
+                    std::uint32_t value=0;
+                    std::memcpy(&value,bytes.data()+j,sizeof(value));
+                    const unsigned kind=menu_cursor_reference_kind(
+                        value,name_anchor);
+                    if(!kind)continue;
+                    ++out.hits[kind-1u];
+                    if(menu_cursor_reference_site_near_anchor(
+                          at+j,name_anchor))
+                        ++out.near[kind-1u];
+                }
+            }else ++out.unreadable;
+            const auto advance=std::min<std::uintptr_t>(kChunk,end-at);
+            at+=advance;
+            scanned+=static_cast<unsigned>(advance);
+        }
+    }
+    out.scanned_mib=(scanned+1024u*1024u-1u)/(1024u*1024u);
     return out;
 }
 const char* native_level_hint() noexcept {
@@ -286,6 +360,19 @@ DWORD WINAPI worker(void*) {
                     cursor_names.name_hits,cursor_names.matches,
                     cursor_names.scanned_mib,cursor_names.unreadable);
                 g_logger(cursor_line);
+                if(cursor_names.matches==1u &&
+                   cursor_names.one_verified_anchor) {
+                    const auto refs=locate_cursor_name_references(
+                        cursor_names.one_verified_anchor);
+                    char reference_line[335]{};
+                    std::snprintf(reference_line,sizeof(reference_line),
+                       "RUNTIME-MENU-CURSOR-REFS: anchor-revalidated=%u direct-name=%u arg-name=%u menu-name=%u candidate-block-base=%u nearby=%u,%u,%u,%u scanned_mib=%u unreadable_chunks=%u actor-links-unverified=1 mutation=0",
+                       unsigned(refs.anchor_still_valid),refs.hits[0],
+                       refs.hits[1],refs.hits[2],refs.hits[3],
+                       refs.near[0],refs.near[1],refs.near[2],
+                       refs.near[3],refs.scanned_mib,refs.unreadable);
+                    g_logger(reference_line);
+                }
             } else if(tries==1u || tries==kMaxScans ||
                       scanned.matches>1u || (tries%4u)==0u) {
                 char line[240]{};
