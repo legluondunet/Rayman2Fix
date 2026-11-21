@@ -18,11 +18,21 @@ int main() {
         "GPU: AMD Radeon RX 6600M","D3D9: atiumdag.dll",
         "BPP: desktop 32 / Glide 16","GLIDE: 1024x768x16"};
     for(unsigned i=0;i<6;++i){put(native[i],original[i]);put(info[i],replacement[i]);}
-    switch_stable_menu_labels(live,info);
+    // New MENU-level installation stages ORIGINAL localized labels
+    // before anyone enters the video page. Stable pointers survive
+    // subsequent switches to the information page and back.
+    switch_stable_menu_labels(live,native);
     const char* fixed[6]{};
-    for(unsigned i=0;i<6;++i)fixed[i]=live[i].data();
-    // Brightness page uses original text while the cached label pointers
-    // remain exactly the same as in the graphics information page.
+    for(unsigned i=0;i<6;++i) {
+        fixed[i]=live[i].data();
+        check(std::strcmp(live[i].data(),original[i])==0);
+    }
+    switch_stable_menu_labels(live,info);
+    for(unsigned i=0;i<6;++i){
+        check(live[i].data()==fixed[i]);
+        check(std::strcmp(live[i].data(),replacement[i])==0);
+    }
+    // Brightness page uses original text while cached pointers persist.
     switch_stable_menu_labels(live,native);
     for(unsigned i=0;i<6;++i){
         check(live[i].data()==fixed[i]);
