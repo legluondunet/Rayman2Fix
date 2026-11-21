@@ -33,10 +33,16 @@ original and deprotected builds. It selects the current-language table
 using globals 0x500FA8 and 0x50026C. Direct caller 0x4829E9 invokes it
 when a compiled AI text expression has type 0x24.
 
-This does not yet identify the active Resolution submenu or authorize
-patching video mode changes. The matching Menu.rtb companion to Menu.sna
-is needed to relocate the original YAM_GenMenu_I1 AI model and scripts.
-There is no new runtime hook in this commit.
+This still does not identify the active Resolution submenu in a live game,
+nor authorize patching global video mode changes. However, the needed
+relocation table is now found **inside LEVELS0.DAT at 0x00E65000**, not
+necessarily as a separate Menu.rtb file. It contains 8,522 relocations;
+7,923 references resolve to nonempty local Menu.sna blocks. The script
+for selecting a resolution belongs to a distinct controller AI model at
+scene VA 0x079209A8 (not to the YAM_GenMenu_I1 actor's model). The
+separate brightness script is also traced. Full details and exact native
+AI script addresses are recorded in docs/levels0-menu-rtb-research.md.
+There is no new runtime hook in this research commit.
 
 Reproduction with locally owned game assets:
 python3 tools/inspect_rayman2_menu_texts.py Fix.sna Fix.rtb Menu.dsb
