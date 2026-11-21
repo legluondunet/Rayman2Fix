@@ -253,6 +253,14 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME wine-host-audio-reexec-policy COMMAND wine_host_audio_tests)
 
+  # SDL3 integration phase 0: pure input transition/foreground/hotplug model.
+  # This test does not load SDL3, inject native game input or alter the runtime.
+  add_executable(gamepad_input_policy_tests tests/gamepad_input_policy_tests.cpp)
+  target_include_directories(gamepad_input_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME gamepad-input-focus-hotplug-policy
+    COMMAND gamepad_input_policy_tests)
+
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
   # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
   add_executable(esc_music_shadow_cpp_tests tests/esc_music_shadow_cpp_tests.cpp)
