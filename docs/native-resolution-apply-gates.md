@@ -136,3 +136,61 @@ both original dispatch entries and original native text remain unchanged.
 First require the specific `commands-guarded` and
 `native-text-installed` markers and a screenshot confirming the
 native presentation. The only allowed first test is navigation.
+
+
+## Follow-up experimental glyph layout (21 November 2026)
+
+The owner tested research build `30d98abd` (log
+`Rayman2Fix(20261121-140005).log`) and provided a 16:9 Wine screenshot
+of the video options. The native dispatcher guards and text replacement
+installed successfully, but the unmodified 1999 UI widget geometry
+showed enormous intersecting and offscreen information strings.
+The counters `video_actions_blocked=0`, `saves_blocked=0` **do not
+prove video mode protection**; they only show no captured action.
+
+The follow-up branch remains **experimental and unmerged**:
+
+- `native_graphics_info_proto.cpp` protects exact video-script calls
+  independently of whether its text UI can render; the original
+  brightness function 357 remains forwarded.
+- Localization handles 379–384 are now temporarily substituted **only**
+  while a validated native Menu controller reports normal behavior 5,
+  reflex 0, V17=1..3 and V51=0; original language pointers are
+  restored when leaving that state. This is a verified *video-choice
+  candidate*, not a complete proof of every original submenu edge.
+- The already-installed native glyph hook optionally transforms the
+  existing game's JFFTXT character quads into a five-row 4:3-safe grid.
+  The source percent-coordinate bands come from the screenshot and
+  the native glyph diagnostics. **Position bands are provisional**:
+  they are only applied for the validated state and must be checked
+  visually on Wine and Windows. No game binaries, scripts, textures,
+  fonts or driver callbacks are modified on disk.
+- `Rayman2Fix_Initialize` supplies the actual launcher output surface
+  dimensions to the information module. Internal Glide remains
+  1024×768×16 and desktop depth is explicitly labeled separately.
+  Output ratio 16:10 retains its conventional label.
+- Strings have a strict 35-byte native-line cap. This may abbreviate
+  long reported GPU/driver names until a genuinely resizable
+  native-font panel is established; it is *not* a finished information UI.
+- Native brightness glyphs/slider below the original 80%-Y boundary
+  are never reflowed, and other menu states disable text substitution
+  and layout transformations.
+- Pure Windows/Linux tests cover row mapping, screen bounds, brightness
+  exclusion, unknown Y bands and invalid quads. The runtime logs
+  `reflowed_glyphs` so an unchanged UI is distinguishable from
+  a successful glyph-hook invocation.
+
+**Next test (navigation only, before any video-control activation):**
+Install the special `Rayman2Fix-Windows-x86-native-graphics-menu-prototype`
+artifact after CI passes. With `[Debug] Log=1`, visit Options →
+Résolution and take a screenshot; check line order, spacing, aspect
+and the persistent brightness control. Then back out, visit brightness,
+return to Resolution, and exit. Do not select/save a video resolution.
+Inspect `RUNTIME-GRAPHICS-INFO` markers for an installed menu guard,
+scoped text replacement and nonzero `reflowed_glyphs`. Failure to
+see these markers means the displayed result is not evidence of
+the new position transform. Follow with native Windows tests and only
+then a separate guarded no-mode-change behavior test.
+
+The screenshots and runtime traces are the authority for actual menu
+layout; CI alone cannot establish it.
