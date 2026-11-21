@@ -4,6 +4,10 @@ Date: 21 November 2026. Branch: `research/native-resolution-menu-state`.
 This document records **read-only evidence**, not a verified cursor-render
 suppression technique. Do not merge it as an interactive feature.
 
+**Current interpretation:** the module 13/0 roots earlier described as
+"graphics" have been reclassified as AI `Mind` records. See the
+correction section at the end; older diary entries are historical.
+
 ## Last Wine experiment
 
 The owner ran the isolated prototype #1510 (runtime `c0a7a16b`)
@@ -360,59 +364,85 @@ presentation from native highlight and selection UI. Do not ship
 a visibility toggle based solely on name ownership.
 
 
-## Autonomous session: bounded state→shared data chain and object-list negative finding
+## 21 November correction: shared block 13/0 is AI Mind, NOT a graphics renderer
 
-A subsequent autonomous investigation used the *same four previously
-hash-verified user-owned CD resources*. It did **not** change game
-files, the launcher runtime, the video-selection guards or the
-brightness script, and did not require new Wine tests.
+**This section supersedes the earlier interpretation of the six-hop
+"graphics" link.** Cross-checking the actual data fields against the
+Rayman 2 OpenSpace/Raymap `Mind`, `AIModel` and `Intelligence`
+layouts proves that the two previously observed shared roots encode
+**AI behavioral state**, not identified graphical/mesh resources.
+The older pointer graph was genuine but its semantic label was wrong.
+The code now uses `linked_shared_ai_mind` and explicitly tests
+AIModel and Intelligence reciprocal typed relocations.
 
-The Menu instance's named Perso is now tied to its verified
-`Perso3dData` and shared Fix state/family. A newly bounded
-`linked_external_graphics_block` validation follows a chain of
-relocated 32-bit pointers from that state into shared Fix module
-`13/0`. The chain is verified using **exact source and target
-module IDs** from RTB at every step, with six nodes total and
-fail-closed checks for cycles, reversed addresses, missing relocation
-records, and unexpected root layout. Specific approved-CD results:
+| Known scene instance | Fix 13/0 Mind | AIModel at Mind+0 | Normal Intelligence at +4 | Reflex |
+|---|---|---|---|---|
+| Named menu cursor | `0x0229FE34` | `0x0229FE4C` | `0x022A1D90` | Absent |
+| GenMenu control | `0x022A21FC` | `0x022A2214` | `0x022C89E8` | `0x022C8B4C` |
 
-| Subject | State field | First shared 13/0 root | Last verified node |
-|---|---|---|---|
-| Named `YAM_CurseurMenu_I1` instance | `0x001B5D14+0x30` | `0x0229FE34` | `0x022A0918` |
-| Separate `YAM_GenMenu_I1` instance | `0x001B62B0+0x44` | `0x022A21FC` | `0x022A3088` |
+For both roots, `Mind+0` resolves to `Mind+0x18` (AIModel),
+`Mind+4` resolves to a normal Intelligence whose first pointer
+returns to that AIModel, and `Mind+0x0C` resolves to an optional
+DsgMem (present in both reviewed instances). The GenMenu reflex
+Intelligence's first pointer resolves to `AIModel+4`.
+The AIModel normal behavior-table headers contain respectively
+**2** and **23** entries; the cursor reflex pointer is null without
+a relocation, while GenMenu has a typed reflex pointer. These
+independent field checks are more informative than raw pointer
+chaining and rule out treating block 13/0 as a known renderer.
+No graphics callbacks or actor flags have been modified.
 
-The first pointer at both roots targets `root+0x18` as an
-additional structural check. Importantly, **these are typed data
-links, not proof that module 13/0 is the rendering driver, nor proof
-that a particular mesh is the visible butterfly**. We deliberately
-do not attach a guessed structure name to these addresses.
+### Cursor instance AI script traced using menu module 13/1
 
-A second offline comparison examined both `Perso3dData` instance
-object-list pointer slots (`+0x0C` and `+0x10`) for each of
-the 26 RTB-verified Menu Persos. **9** have equal, typed
-non-null list pointers; **17** have two zero fields without
-relocations. The named Cursor and GenMenu instances are among
-those without *direct instance object-list pointers*.
-This does **not** mean the named cursor actor cannot affect
-rendering: it could animate or drive other game objects, effects,
-or menu drawing via scripts. It does mean a naïve assumption that
-the named cursor Perso directly owns the butterfly mesh is
-unsupported.
+The approved scene has the following separately verified path:
+`SuperObject 0x07AB2174` → `Perso 0x07E703F8` →
+`Brain 0x07E705D4` → `Mind 0x079206F0` →
+`AIModel 0x07920708` → normal behavior list
+`0x07920720` (2 behaviors) → selected behavior
+`0x07920734` → script wrapper `0x07920750` →
+script nodes at `0x07920758`.
 
-Both findings were added to the read-only
-`tools/research_menu_cursor_fix_links.py` output. Synthetic,
-asset-free tests in `tests/test_menu_cursor_fix_links.py` cover
-the typed chain, distinct root checks, missing or forged relocation
-records, zeroed list fields with forbidden relocation metadata,
-and non-null typed list pairs.
+The one observed script contains **26** PC ScriptNodes
+(`param:u32, padding:u16, indent:u8, type:u8`) and ends with an
+indent-zero type-8 terminator. Four type-23 **ActionRef** nodes
+(all RTB-typed into shared Fix 4/0) reference three distinct
+action records:
 
-**Engineering decision:** do not add any live SuperObject
-`Invisible` toggle, input interception, global sprite suppression,
-or text-renderer callback based on this evidence alone. Next
-reasonable proof is `name-linked Perso → current brain/script or
-visual state → concrete drawing owner`; alternatively design an
-independent information panel that does not reuse the native
-resolution-choice animation and cursor. Keep the current brightness
-control intact. Group any future actual UI change into one
-meaningful Wine/Windows verification instead of serial diagnostic
-builds.
+- `0x001B631C` once;
+- `0x001A22D0` once;
+- `0x001B5AD0` twice.
+
+Crucially, the last record has **three independent typed links**
+at offsets `+0x3C,+0x40,+0x44` back to the cursor's already
+verified visual state `0x001B5D14`, and one at `+0x50` to its
+family `0x001B5CD8`. The two other action records consistently
+reference **different** state/family pairs. This is positive evidence
+that the cursor AI script controls or selects an action attached to
+its own state/family; it does **not** identify a rasterizer, textured
+butterfly, or safe per-page visibility control.
+
+The new read-only analyzer `cursor_normal_script_evidence` verifies
+the complete typed path, bounded node count, signature and action
+ownership. Its synthetic-only regression tests refuse missing
+relocations, forged cross-links, contradictory owner records and
+invalid terminators. Proprietary script bytes are never emitted or
+redistributed; the only output is aggregate metadata.
+
+### Instance object lists and remaining uncertainty
+
+Among the 26 RTB-verified Menu Persos, **9** have two equal typed,
+non-null object-list pointers at Perso3dData `+0x0C,+0x10`,
+while **17** have both slots null with no relocations. The named
+Cursor and GenMenu instances have **no direct instance object list**.
+They might still drive separate drawing objects or scripted effects.
+The AI findings above narrow the behavior path; they do not supply
+a mesh or texture identity.
+
+**Engineering decision:** no live SuperObject `Invisible` change,
+sprite quad filtering, input interception, or brightness changes.
+The native video page still uses the game's selection behavior
+for layout/color/cursor. To achieve a truly read-only page, isolate
+its graphics presentation from the interactive resolution rows
+rather than assuming hiding the named AI actor is sufficient.
+Only a consolidated functional change should be offered for Wine
+testing. `main` remains intact; PR #51 is still experimental.
