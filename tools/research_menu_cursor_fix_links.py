@@ -103,6 +103,28 @@ def linked_family_state(graph: Graph, actor: dict) -> dict:
             "visual_state_links_verified":True}
 
 
+def actor_direct_object_list(graph: Graph, actor: dict) -> dict:
+    """Inspect the two Perso3dData instance-object-list slots.
+
+    Zero means NO direct list stored in these fields, *not* that the
+    actor cannot produce visuals. Other actors can use animations,
+    script effects or external resources. Nonzero requires two
+    identically typed links to the same Menu (4,1) object list.
+    """
+    visual=int(actor["visual_data"],16)
+    a=graph.u32(visual+0x0C)
+    b=graph.u32(visual+0x10)
+    if a==b==0:
+        if visual+0x0C in graph.rtb or visual+0x10 in graph.rtb:
+            raise Refused("zero object-list field with unexpected relocation")
+        return {"direct_instance_object_list":False}
+    one=graph.ptr(visual+0x0C,(4,1),(4,1))
+    two=graph.ptr(visual+0x10,(4,1),(4,1))
+    if a!=b or one!=two:
+        raise Refused("instance object-list fields differ")
+    return {"direct_instance_object_list":True}
+
+
 def linked_external_graphics_block(
         graph: Graph, state: int, pointer_offset: int) -> dict:
     """Verify a fixed, typed path from a family state into the shared
@@ -169,6 +191,11 @@ def inspect_shared_links(menu_sna: Path, levels0_dat: Path,
         graph,int(info_gen["state"],16),0x44)
     if cursor_gfx["resource_root"]==genmenu_gfx["resource_root"]:
         raise Refused("cursor and GenMenu graphics roots overlap")
+    cursor_lists=actor_direct_object_list(graph,cursor)
+    genmenu_lists=actor_direct_object_list(graph,genmenu)
+    direct_list_count=sum(
+        int(actor_direct_object_list(graph,actor)[
+            "direct_instance_object_list"]) for actor in actors)
     return {
         "mode":"hash-verified CD Menu/Fixed scene cross-links (read-only)",
         "cursor_actor":cursor["superobject"],
@@ -177,6 +204,9 @@ def inspect_shared_links(menu_sna: Path, levels0_dat: Path,
         "genmenu_negative_control":info_gen,
         "cursor_shared_graphics_links":cursor_gfx,
         "genmenu_shared_graphics_control":genmenu_gfx,
+        "cursor_instance_object_list":cursor_lists,
+        "genmenu_instance_object_list":genmenu_lists,
+        "actors_with_direct_instance_object_lists":direct_list_count,
         "cursor_name_and_arg_reciprocal_links_verified":True,
         "cursor_renderer_identified":False,
         "actor_visibility_modified":False
