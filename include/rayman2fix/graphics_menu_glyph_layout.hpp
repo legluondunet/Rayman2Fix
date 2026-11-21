@@ -33,10 +33,10 @@ inline bool layout_graphics_info_quad(
     for(const auto& row:kGraphicsInfoRows) {
         if(middle<row.first_y || middle>=row.last_y)continue;
         // Keep the entire line within the original 4:3-safe canvas.
-        const float x0=21.0f+(in.left-row.source_x)*0.34f;
-        const float x1=21.0f+(in.right-row.source_x)*0.34f;
-        const float y0=row.target_y+(in.top-row.source_y)*0.48f;
-        const float y1=row.target_y+(in.bottom-row.source_y)*0.48f;
+        const float x0=21.0f+(in.left-row.source_x)*0.40f;
+        const float x1=21.0f+(in.right-row.source_x)*0.40f;
+        const float y0=row.target_y+(in.top-row.source_y)*0.40f;
+        const float y1=row.target_y+(in.bottom-row.source_y)*0.40f;
         if(x0<10.0f || x1>90.0f || y0<12.0f || y1>78.0f)
             return false;
         out={x0,y0,x1,y1};
