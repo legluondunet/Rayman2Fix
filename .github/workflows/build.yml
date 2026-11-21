@@ -556,6 +556,7 @@ jobs:
           assert b'RUNTIME-GRAPHICS-INFO: status=commands-guarded' in dll, 'Missing bounded video action guards'
           assert b'RUNTIME-MENU-CURSOR-REFS: anchor-revalidated=' in dll, 'Missing cursor name-reference scan'
           assert b'RUNTIME-MENU-CURSOR-REF-LAYOUT: relative-sites=' in dll, 'Missing candidate reference layout probe'
+          assert b'RUNTIME-MENU-CURSOR-REF-CLASS: inline_minus12=' in dll, 'Missing inline self-reference classification'
           assert b'RUNTIME-GRAPHICS-INFO: status=preflight-refused reason=%s' in dll, 'Missing safe diagnostic for refused callbacks'
           assert b'v17_valid=%u v17=%d' in dll, 'Missing verified native selection scalar probe'
           assert b'scope=%s level_hint=%s' in dll, 'Missing conservative video/brightness scope diagnostics'
