@@ -27,32 +27,71 @@ constexpr unsigned kMaxReports = 180u;   // bounded disk output
 constexpr unsigned kHeartbeatMillis = 4000u;
 std::atomic<bool> g_started{false};
 
+// In the owner's Wine test ReadProcessMemory(GetCurrentProcess(),...)
+// did not produce a usable PE fingerprint even though the standard camera
+// hook accepted the same game's mapped header. Prefer guarded, same-process
+// reads (like the existing camera hook), never a cross-process RPM request.
+// Reads remain strictly passive, bounded to the approved PE image.
 bool read_bytes(const BYTE* base, std::uint32_t rva, void* out,
                 SIZE_T length) noexcept {
-    if (!base || !out || rva >= kExpectedImageSize ||
+    if (!base || !out || !length || rva >= kExpectedImageSize ||
         length > kExpectedImageSize - rva) return false;
-    SIZE_T copied = 0;
-    return ReadProcessMemory(GetCurrentProcess(),base+rva,out,length,
-                             &copied) && copied==length;
+    const auto* address=base+rva;
+    MEMORY_BASIC_INFORMATION region{};
+    if (!VirtualQuery(address,&region,sizeof(region)) ||
+        region.State!=MEM_COMMIT ||
+        (region.Protect & (PAGE_GUARD | PAGE_NOACCESS))!=0)
+        return false;
+    const DWORD protection=region.Protect & 0xFFu;
+    if(protection!=PAGE_READONLY && protection!=PAGE_READWRITE &&
+       protection!=PAGE_WRITECOPY && protection!=PAGE_EXECUTE_READ &&
+       protection!=PAGE_EXECUTE_READWRITE &&
+       protection!=PAGE_EXECUTE_WRITECOPY) return false;
+    const auto start=reinterpret_cast<std::uintptr_t>(address);
+    const auto region_start=reinterpret_cast<std::uintptr_t>(
+        region.BaseAddress);
+    if(start < region_start || start-region_start > region.RegionSize ||
+       length > region.RegionSize - (start-region_start))
+        return false;  // one wholly readable committed memory region only
+    std::memcpy(out,address,length);
+    return true;
 }
 template <typename T>
 bool read_value(const BYTE* base, std::uint32_t rva, T& out) noexcept {
     return read_bytes(base,rva,&out,sizeof(out));
 }
-bool supported_exe(const BYTE* base) noexcept {
+struct ImageProbe {
+    const char* stage="module";
+    std::uint32_t observed_timestamp=0;
+    std::uint32_t observed_image_size=0;
+    std::uint32_t observed_entry=0;
+    unsigned observed_machine=0;
+};
+bool supported_exe(const BYTE* base,ImageProbe& probe) noexcept {
     if (!base) return false;
     IMAGE_DOS_HEADER dos{};
-    if (!read_bytes(base,0,&dos,sizeof(dos)) ||
-        dos.e_magic != IMAGE_DOS_SIGNATURE ||
-        dos.e_lfanew <= 0 || dos.e_lfanew > 0x1000) return false;
+    probe.stage="dos-unreadable";
+    if (!read_bytes(base,0,&dos,sizeof(dos))) return false;
+    probe.stage="dos-signature";
+    if (dos.e_magic!=IMAGE_DOS_SIGNATURE ||
+        dos.e_lfanew<=0 || dos.e_lfanew>=0x1000) return false;
     IMAGE_NT_HEADERS32 nt{};
-    return read_bytes(base,static_cast<std::uint32_t>(dos.e_lfanew),
-                      &nt,sizeof(nt)) &&
-        nt.Signature==IMAGE_NT_SIGNATURE &&
-        nt.FileHeader.Machine==IMAGE_FILE_MACHINE_I386 &&
-        nt.FileHeader.TimeDateStamp==kExpectedTimestamp &&
-        nt.OptionalHeader.Magic==IMAGE_NT_OPTIONAL_HDR32_MAGIC &&
-        nt.OptionalHeader.SizeOfImage==kExpectedImageSize;
+    probe.stage="nt-unreadable";
+    if(!read_bytes(base,static_cast<std::uint32_t>(dos.e_lfanew),
+                   &nt,sizeof(nt)))return false;
+    probe.stage="nt-fingerprint";
+    probe.observed_timestamp=nt.FileHeader.TimeDateStamp;
+    probe.observed_image_size=nt.OptionalHeader.SizeOfImage;
+    probe.observed_entry=nt.OptionalHeader.AddressOfEntryPoint;
+    probe.observed_machine=nt.FileHeader.Machine;
+    if(nt.Signature!=IMAGE_NT_SIGNATURE ||
+       nt.FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       nt.FileHeader.TimeDateStamp!=kExpectedTimestamp ||
+       nt.OptionalHeader.Magic!=IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
+       nt.OptionalHeader.SizeOfImage!=kExpectedImageSize ||
+       nt.OptionalHeader.AddressOfEntryPoint==0) return false;
+    probe.stage="accepted";
+    return true;
 }
 bool game_foreground() noexcept {
     const HWND window=GetForegroundWindow();
@@ -118,10 +157,18 @@ DWORD WINAPI monitor(void* parameter) {
     auto logger=reinterpret_cast<GraphicsTraceLogger>(parameter);
     if(!logger) return 0;
     const auto* base=reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
-    if(!supported_exe(base)) {
-        logger("RUNTIME-VIDEO-MENU-TRACE: status=unsupported-original-image; no sampling");
+    ImageProbe probe{};
+    if(!supported_exe(base,probe)) {
+        char line[240]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-VIDEO-MENU-TRACE: status=unsupported-original-image stage=%s timestamp=0x%08X size=0x%08X entry=0x%08X machine=0x%04X (read-only; no sampling)",
+            probe.stage,probe.observed_timestamp,
+            probe.observed_image_size,probe.observed_entry,
+            probe.observed_machine);
+        logger(line);
         return 0;
     }
+    logger("RUNTIME-VIDEO-MENU-TRACE: status=accepted-image source=same-process-guarded-read-only");
     logger("RUNTIME-VIDEO-MENU-TRACE: enabled=1 read-only=1 menu-identity=unverified mode-write=disabled max_seconds=300 max_reports=180");
     const DWORD began=GetTickCount();
     DWORD last_report=began;
