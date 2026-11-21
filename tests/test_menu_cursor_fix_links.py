@@ -8,7 +8,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1] / "tools"))
 from research_menu_cursor_actor import Block,Graph,Refused
 from research_menu_cursor_fix_links import (
     linked_family_state, linked_shared_ai_mind,
-    actor_direct_object_list, decode_fix_rtb, decode_fix_blocks
+    actor_direct_object_list, cursor_normal_script_evidence,
+    decode_fix_rtb, decode_fix_blocks
 )
 
 
@@ -154,6 +155,94 @@ class SharedCursorVisualTests(unittest.TestCase):
         no_type.pop(visual+0x0c)
         with self.assertRaises(Refused):
             actor_direct_object_list(Graph(changed,no_type),actor)
+
+    def make_cursor_script_graph(self):
+        m4,m13,fix=0x07000000,0x07900000,0x001A0000
+        scene=bytearray(0x300)
+        ai=bytearray(0x700)
+        common=bytearray(0x700)
+        rt={}
+        brain=m4+0x30
+        mind=m13+0x20
+        model=mind+0x18
+        normal=m13+0x100
+        behaviors=m13+0x180
+        entries=m13+0x1c0
+        wrapper=m13+0x240
+        nodes=m13+0x260
+        state=fix+0x360
+        family=fix+0x400
+        actions=[fix+0x50,fix+0x150,fix+0x250]
+        def link(array,base,source,target,typ):
+            struct.pack_into("<I",array,source-base,target)
+            rt[source]=typ
+        link(scene,m4,brain,mind,(4,1,13,1))
+        for source,target in (
+            (mind,model),(mind+4,normal),(normal,model),
+            (model,behaviors),(behaviors,entries),
+            (normal+8,entries),(entries,wrapper),(wrapper,nodes)):
+            link(ai,m13,source,target,(13,1,13,1))
+        struct.pack_into("<I",ai,behaviors+4-m13,2)
+        struct.pack_into("<I",ai,entries+8-m13,1)
+        for idx in range(26):
+            param=0
+            typ=8 if idx==25 else 2
+            indent=0 if idx==25 else 1
+            if idx in (1,8,11,20):
+                typ=23
+                param=actions[{1:0,8:1,11:2,20:2}[idx]]
+                rt[nodes+idx*8]=(13,1,4,0)
+            struct.pack_into("<IHBB",ai,nodes+idx*8-m13,
+                             param,0,indent,typ)
+        for a in actions:
+            own=a==actions[2]
+            owner_state=state if own else fix+0x500
+            owner_family=family if own else fix+0x580
+            for delta in (0x3c,0x40,0x44):
+                link(common,fix,a+delta,owner_state,(4,0,4,0))
+            link(common,fix,a+0x50,owner_family,(4,0,4,0))
+        blocks={(4,1):Block(4,1,m4,bytes(scene)),
+                (13,1):Block(13,1,m13,bytes(ai)),
+                (4,0):Block(4,0,fix,bytes(common))}
+        actor={"brain":f"0x{brain:08X}"}
+        family_info={"state":f"0x{state:08X}",
+                     "family":f"0x{family:08X}"}
+        return blocks,rt,actor,family_info,dict(
+            brain=brain,mind=mind,normal=normal,entries=entries,
+            nodes=nodes,actions=actions,fix=fix,m13=m13,m4=m4)
+
+    def test_cursor_ai_action_links_and_fail_closed(self):
+        blocks,rt,actor,family,ids=self.make_cursor_script_graph()
+        graph=Graph(blocks,rt)
+        result=cursor_normal_script_evidence(graph,actor,family)
+        self.assertEqual(result["script_node_count"],26)
+        self.assertEqual(result["action_ref_count"],4)
+        self.assertEqual(result["distinct_action_ref_count"],3)
+        self.assertEqual(result["own_state_action_refs"],2)
+        self.assertFalse(result["visual_draw_owner_verified"])
+        missing=dict(rt)
+        missing.pop(ids["nodes"]+20*8)
+        with self.assertRaises(Refused):
+            cursor_normal_script_evidence(
+                Graph(blocks,missing),actor,family)
+        broken=dict(rt)
+        broken.pop(ids["normal"]+8)
+        with self.assertRaises(Refused):
+            cursor_normal_script_evidence(
+                Graph(blocks,broken),actor,family)
+        common=bytearray(blocks[(4,0)].data)
+        own=ids["actions"][2]
+        struct.pack_into("<I",common,own+0x50-ids["fix"],ids["fix"]+0x580)
+        with self.assertRaises(Refused):
+            cursor_normal_script_evidence(
+                Graph({**blocks,(4,0):Block(
+                    4,0,ids["fix"],bytes(common))},rt),actor,family)
+        ai=bytearray(blocks[(13,1)].data)
+        ai[ids["nodes"]+25*8+7-ids["m13"]]=5
+        with self.assertRaises(Refused):
+            cursor_normal_script_evidence(
+                Graph({**blocks,(13,1):Block(
+                    13,1,ids["m13"],bytes(ai))},rt),actor,family)
 
     def test_malformed_common_resources_refused(self):
         with self.assertRaises(Refused):
