@@ -553,6 +553,7 @@ jobs:
           assert b'RUNTIME-VIDEO-MENU-TRACE: enabled=1 read-only=1' in dll, 'Missing native graphics trace marker'
           assert b'RUNTIME-MENU-AI: status=started read-only=1' in dll, 'Missing passive AI controller diagnostic'
           assert b'v17_valid=%u v17=%d' in dll, 'Missing verified native selection scalar probe'
+          assert b'scope=%s level_hint=%s' in dll, 'Missing conservative video/brightness scope diagnostics'
           assert b'RUNTIME-MENU-TEXT: status=installed' not in dll, 'Obsolete native text detour must not be included'
           assert b'RUNTIME-AUDIO-TRACE: enabled=1' not in dll, 'Unexpected research audio tracer'
           print('Isolated native graphics menu tracer: PASS')

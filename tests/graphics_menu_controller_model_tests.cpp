@@ -1,5 +1,6 @@
 #include "rayman2fix/graphics_menu_controller_model.hpp"
 #include "rayman2fix/graphics_menu_controller_vars.hpp"
+#include "rayman2fix/graphics_menu_screen_candidate.hpp"
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -106,5 +107,29 @@ int main() {
     check(!observe_menu_selection(mind,read32,read8).activate_valid,
           "unmapped DsgVar reference rejected");
     m.w32(dsg,ref);
+    // Regression from real Wine 2026-11-21 V17/V51 observations:
+    // normal5/reflex0 V17=1,2,3 -> video choice candidate, but never
+    // equate V17 alone with this menu; normal11 also has V17=1..5.
+    for(int v:{1,2,3}) {
+        check(classify_menu_scope(true,true,true,5,0,true,v,true,0)==
+              MenuScopeCandidate::video_choices,"video choice scope");
+        check(classify_menu_scope(true,true,true,11,0,true,v,true,0)!=
+              MenuScopeCandidate::video_choices,"general selection not video");
+    }
+    check(classify_menu_scope(true,true,true,18,5,true,5,true,0)==
+          MenuScopeCandidate::brightness,"brightness independent");
+    for(int v:{0,4,5,6})
+        check(classify_menu_scope(true,true,true,5,0,true,v,true,0)==
+              MenuScopeCandidate::unknown,"unverified video row rejected");
+    check(classify_menu_scope(true,true,true,5,5,true,1,true,0)==
+          MenuScopeCandidate::unknown,"reflex must not be conflated");
+    check(classify_menu_scope(true,true,false,5,0,true,2,true,0)==
+          MenuScopeCandidate::unknown,"not menu level");
+    check(classify_menu_scope(true,true,true,5,0,true,2,true,1)==
+          MenuScopeCandidate::unknown,"unobserved activation flag");
+    check(classify_menu_scope(true,true,true,5,0,false,2,true,0)==
+          MenuScopeCandidate::unknown,"unverified pointer");
+    check(classify_menu_scope(false,true,true,5,0,true,2,true,0)==
+          MenuScopeCandidate::unknown,"unverified model");
     std::cout<<"Rayman2 menu AI model and live behavior synthetic tests: PASS\n";
 }

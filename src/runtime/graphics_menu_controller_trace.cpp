@@ -12,6 +12,7 @@
 #include <cstring>
 #include "rayman2fix/graphics_menu_controller_model.hpp"
 #include "rayman2fix/graphics_menu_controller_vars.hpp"
+#include "rayman2fix/graphics_menu_screen_candidate.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
 #include "rayman2fix/graphics_menu_target.hpp"
 
@@ -231,6 +232,14 @@ DWORD WINAPI worker(void*) {
                 ((vars.selection>=-1 && vars.selection<=31) ?
                    int(vars.selection) : -2) : -1;
             const int activate=vars.activate_valid ? int(vars.activate) : -1;
+            // Conservative classification only: not proof of active page.
+            const auto level=native_level_hint();
+            const auto scope=classify_menu_scope(
+                model.valid(),current.valid(),
+                std::strcmp(level,"menu-level")==0,
+                current.normal,current.reflex,
+                vars.selection_valid,selection,
+                vars.activate_valid,activate);
             const bool changed=current.normal!=prior_normal ||
                                current.reflex!=prior_reflex ||
                                selection!=prior_selection ||
@@ -240,14 +249,14 @@ DWORD WINAPI worker(void*) {
                 // verified native scalar, but NOT yet a proven UI selection.
                 char line[320]{};
                 std::snprintf(line,sizeof(line),
-                   "RUNTIME-MENU-AI: t_ms=%lu fg=%u normal=%d reflex=%d normal5=%u normal19=%u reflex5_brightness=%u v17_valid=%u v17=%d v51_valid=%u v51=%d level_hint=%s (read-only; submenu=unverified)",
+                   "RUNTIME-MENU-AI: t_ms=%lu fg=%u normal=%d reflex=%d normal5=%u normal19=%u reflex5_brightness=%u v17_valid=%u v17=%d v51_valid=%u v51=%d scope=%s level_hint=%s (read-only; submenu=unverified)",
                    static_cast<unsigned long>(now-begin),
                    game_foreground(),current.normal,current.reflex,
                    unsigned(current.normal==5),unsigned(current.normal==19),
                    unsigned(current.reflex==5),
                    unsigned(vars.selection_valid),selection,
                    unsigned(vars.activate_valid),activate,
-                   native_level_hint());
+                   menu_scope_label(scope),level);
                 g_logger(line);
                 ++reports;
             }

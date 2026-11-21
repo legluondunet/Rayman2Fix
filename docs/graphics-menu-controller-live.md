@@ -77,3 +77,39 @@ type/offset before reading. It adds `v17_valid, v17, v51_valid, v51`
 to the existing state-change log and triggers logging on their changes.
 Invalid pointers, changed schemas and non-integer fields cause missing
 values rather than speculative reads. No write, hook or video change.
+
+## 13:15 Wine confirmation — observed active video choices
+
+Uploaded session files: `Rayman2Fix_installer(20261121-131532).log`
+(4,534 bytes, SHA-256 `4096194fff4125cb4bcef9229ee63b8ebd7f4bd320e52e4dd24b536fa2eda8af`)
+and `Rayman2Fix(20261121-131532).log` (29,308 bytes,
+SHA-256 `44906135d00bfcd05e3e567e30c2909778668671c15e6fdd9c1ed4d7e8b82452`).
+
+Installer reports `RUNTIME-DEPLOY: status=replaced`, `Log=1`,
+`LAUNCH-EXIT: child_exit_code=0x00000000`; runtime reports verified
+controller on scan 2, both DsgVar fields valid. **24 AI samples**:
+- Normal 5 / reflex 0: 13 observations, **V17 only 1/2/3**, changing
+  with Up/Down navigation; the code of this behavior contains native
+  VID_SelectResolution and VID_SaveCurrentResolution calls.
+- Normal 18 / reflex 5: 2 observations, **V17=5**, consistent with the
+  separate brightness script.
+- Normal 11 / reflex 0: six observations, **V17=0/1/3/4/5**,
+  demonstrating why V17 alone cannot identify a video-options screen.
+- V51 was **0 in all 24 samples**; its exact control role remains
+  unproven. Normal 19 was not observed.
+- Native GLI mode remained index 5 (1024x768x16) out of eight modes;
+  this is not the 1920x1080 desktop output. No changes in mode detected.
+
+The tested pure classifier introduced alongside this research is
+**advisory only**: model+Mind valid, known Menu level, V17/V51
+validated, V51=0, normal 5/reflex 0, and V17 in 1..3 yields
+`video-choice-candidate`. Normal 18/reflex 5/V17=5 yields
+`brightness-candidate`. Normal 11 remains a distinct candidate.
+**Unseen rows (e.g. V17=4) and unverified states are unknown**, rather
+than guessed. No renderer operation, menu text, or video setting is
+modified on the basis of this provisional predicate.
+
+This guards against accidentally blocking unrelated menu pages when
+preparing a read-only graphics details presentation. The actual screen
+identity and save/apply behavior still need safe runtime/visual
+validation before any destructive or mode-changing patch.
