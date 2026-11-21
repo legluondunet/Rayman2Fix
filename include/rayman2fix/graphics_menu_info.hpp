@@ -39,6 +39,10 @@ struct GraphicsMenuInfo {
     }
     std::string actual_aspect_ratio() const {
         if (!output_width || !output_height) return "Indisponible";
+        // Preserve the familiar exact 16:10 label rather than reducing it
+        // to 8:5. Never approximate arbitrary ultra-wide outputs as 21:9.
+        if (std::uint64_t(output_width)*10u ==
+            std::uint64_t(output_height)*16u) return "16:10";
         const auto divisor = std::gcd(output_width, output_height);
         return std::to_string(output_width / divisor) + ":" +
                std::to_string(output_height / divisor);
