@@ -15,6 +15,7 @@
 #include "rayman2fix/graphics_menu_screen_candidate.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
 #include "rayman2fix/graphics_menu_target.hpp"
+#include "rayman2fix/graphics_menu_start_policy.hpp"
 
 #if !defined(_M_IX86)
 #error Menu controller trace requires Windows x86
@@ -28,6 +29,11 @@ constexpr unsigned kMaxScans=18u;
 constexpr unsigned kSeconds=180u;
 constexpr unsigned kMaxReports=160u;
 constexpr unsigned kScanPeriodMs=5000u;
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+constexpr bool kPersistentMenuController=true;
+#else
+constexpr bool kPersistentMenuController=false;
+#endif
 std::atomic<bool> g_started{false};
 MenuAiLogger g_logger=nullptr;
 std::atomic<std::uintptr_t> g_verified_mind{0};
@@ -194,10 +200,37 @@ DWORD WINAPI worker(void*) {
     int prior_normal=-200,prior_reflex=-200;
     int prior_selection=-200,prior_activate=-200;
     bool announced=false;
-    for(unsigned iteration=0;iteration<kSeconds*5u && reports<kMaxReports;
+    const auto report=[&](const char* line) noexcept {
+        if(reports<kMaxReports) {
+            g_logger(line);
+            ++reports;
+        }
+    };
+    for(unsigned iteration=0;
+        menu_controller_worker_continue(kPersistentMenuController,
+            iteration,reports,kSeconds*5u,kMaxReports);
         ++iteration) {
         const DWORD now=GetTickCount();
-        if(!model.valid() && tries<kMaxScans &&
+        const bool in_menu=std::strcmp(
+            native_level_hint(),"menu-level")==0;
+        if(kPersistentMenuController && !in_menu) {
+            // A returned-to-menu game can reload ALL scene pointers.
+            // Clear the stale cache and restart verification on entry.
+            g_verified_model.store(0,std::memory_order_release);
+            g_verified_mind.store(0,std::memory_order_release);
+            model={}; mind={}; tries=0; announced=false;
+            next_scan=now+500u;
+            Sleep(200);
+            continue;
+        }
+        if(kPersistentMenuController && in_menu && !model.valid() &&
+           tries>=kMaxScans &&
+           static_cast<LONG>(now-next_scan)>=0) {
+            tries=0; next_scan=now+10000u;
+        }
+        if(!model.valid() &&
+           menu_controller_scan_allowed(kPersistentMenuController,
+                in_menu,tries,kMaxScans) &&
            static_cast<LONG>(now-next_scan)>=0) {
             next_scan=now+kScanPeriodMs;
             ++tries;
@@ -211,8 +244,7 @@ DWORD WINAPI worker(void*) {
                 std::snprintf(line,sizeof(line),
                    "RUNTIME-MENU-AI: status=controller-found scan=%u models=1 mind=validated normal_behaviors=27 reflex_behaviors=7 level_hint=%s scanned_mib=%u (read-only)",
                    tries,native_level_hint(),scanned.scanned_mib);
-                g_logger(line);
-                ++reports;
+                report(line);
             } else if(tries==1u || tries==kMaxScans ||
                       scanned.matches>1u || (tries%4u)==0u) {
                 char line[240]{};
@@ -220,17 +252,17 @@ DWORD WINAPI worker(void*) {
                    "RUNTIME-MENU-AI: scan=%u matches=%u mind_valid=%u unreadable_chunks=%u scanned_mib=%u level_hint=%s (read-only; no fixed scene address)",
                    tries,scanned.matches,unsigned(scanned.mind.valid()),
                    scanned.unreadable,scanned.scanned_mib,native_level_hint());
-                g_logger(line);
-                ++reports;
+                report(line);
             }
         }
         if(model.valid() && mind.valid()) {
             MenuAiState current{};
             if(!check_mind(model,mind.mind,current)) {
                 g_verified_model.store(0,std::memory_order_release);
-                g_logger("RUNTIME-MENU-AI: status=controller-inaccessible; awaiting new level load");
-                ++reports;
+                g_verified_mind.store(0,std::memory_order_release);
+                report("RUNTIME-MENU-AI: status=controller-inaccessible; awaiting new level load");
                 model={}; mind={};
+                if(kPersistentMenuController)tries=0;
                 next_scan=now+1500u;
                 continue;
             }
@@ -264,8 +296,7 @@ DWORD WINAPI worker(void*) {
                    unsigned(vars.selection_valid),selection,
                    unsigned(vars.activate_valid),activate,
                    menu_scope_label(scope),level);
-                g_logger(line);
-                ++reports;
+                report(line);
             }
             prior_normal=current.normal;
             prior_reflex=current.reflex;
@@ -300,7 +331,9 @@ void start_menu_ai_controller_trace(MenuAiLogger logger) noexcept {
         return;
     }
     g_logger=logger;
-    logger("RUNTIME-MENU-AI: status=started read-only=1 model=script-fingerprint mind=validated relocation=dynamic max_seconds=180");
+    logger(kPersistentMenuController?
+        "RUNTIME-MENU-AI: status=started read-only=1 model=script-fingerprint mind=validated persistent=1 scan-only-in-menu=1 reports-capped=1":
+        "RUNTIME-MENU-AI: status=started read-only=1 model=script-fingerprint mind=validated relocation=dynamic max_seconds=180");
     HANDLE thread=CreateThread(nullptr,0,&worker,nullptr,0,nullptr);
     if(thread)CloseHandle(thread);
     else logger("RUNTIME-MENU-AI: status=thread-failed; no sampling");
