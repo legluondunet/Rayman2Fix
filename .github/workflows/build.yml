@@ -622,6 +622,8 @@ jobs:
         run: cmake --build build --parallel
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Validate masked SNA menu inventory parser using synthetic data
+        run: python3 -m unittest discover -s tests -p 'test_sna_menu_inventory.py'
       - name: Verify Linux bootstrap workspace
         run: |
           result=0
