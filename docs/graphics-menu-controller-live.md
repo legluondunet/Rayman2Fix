@@ -113,3 +113,5 @@ This guards against accidentally blocking unrelated menu pages when
 preparing a read-only graphics details presentation. The actual screen
 identity and save/apply behavior still need safe runtime/visual
 validation before any destructive or mode-changing patch.
+
+See also [native-resolution-apply-gates.md](native-resolution-apply-gates.md) for the script-level gates and functional UI acceptance criteria.
