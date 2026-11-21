@@ -237,7 +237,7 @@ CursorNameScan locate_cursor_name_anchor() noexcept {
 // unknown. No pointer is dereferenced and no game data are changed.
 struct CursorRefs {
     std::array<unsigned,4> hits{};
-    std::array<unsigned,4> near{};
+    std::array<unsigned,4> local_hits{};
     unsigned scanned_mib=0,unreadable=0;
     bool anchor_still_valid=false;
 };
@@ -290,7 +290,7 @@ CursorRefs locate_cursor_name_references(std::uintptr_t name_anchor) noexcept {
                     ++out.hits[kind-1u];
                     if(menu_cursor_reference_site_near_anchor(
                           at+j,name_anchor))
-                        ++out.near[kind-1u];
+                        ++out.local_hits[kind-1u];
                 }
             }else ++out.unreadable;
             const auto advance=std::min<std::uintptr_t>(kChunk,end-at);
@@ -369,8 +369,8 @@ DWORD WINAPI worker(void*) {
                        "RUNTIME-MENU-CURSOR-REFS: anchor-revalidated=%u direct-name=%u arg-name=%u menu-name=%u candidate-block-base=%u nearby=%u,%u,%u,%u scanned_mib=%u unreadable_chunks=%u actor-links-unverified=1 mutation=0",
                        unsigned(refs.anchor_still_valid),refs.hits[0],
                        refs.hits[1],refs.hits[2],refs.hits[3],
-                       refs.near[0],refs.near[1],refs.near[2],
-                       refs.near[3],refs.scanned_mib,refs.unreadable);
+                       refs.local_hits[0],refs.local_hits[1],refs.local_hits[2],
+                       refs.local_hits[3],refs.scanned_mib,refs.unreadable);
                     g_logger(reference_line);
                 }
             } else if(tries==1u || tries==kMaxScans ||
