@@ -32,7 +32,8 @@ add_executable(Rayman2Fix
   src/launcher/runtime_inject.cpp
   src/launcher/patch_install.cpp
   src/launcher/startup.cpp
-  src/launcher/system_inventory.cpp)
+  src/launcher/system_inventory.cpp
+  src/launcher/wine_host_reexec.cpp)
 target_link_libraries(Rayman2Fix PRIVATE rayman2_disc rayman2_patch)
 if(NOT WIN32)
   # Linux host-test binary uses a distinct name from the Windows launcher.
@@ -245,6 +246,12 @@ if(BUILD_TESTING)
     target_link_libraries(game_launch_tests PRIVATE shell32)
   endif()
   add_test(NAME game-launch-preflight COMMAND game_launch_tests)
+
+  # Test all policy decisions on both Windows and Linux.
+  add_executable(wine_host_audio_tests tests/wine_host_audio_tests.cpp)
+  target_include_directories(wine_host_audio_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME wine-host-audio-reexec-policy COMMAND wine_host_audio_tests)
 
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
   # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
