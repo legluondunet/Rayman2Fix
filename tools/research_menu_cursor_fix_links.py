@@ -103,6 +103,36 @@ def linked_family_state(graph: Graph, actor: dict) -> dict:
             "visual_state_links_verified":True}
 
 
+def linked_external_graphics_block(
+        graph: Graph, state: int, pointer_offset: int) -> dict:
+    """Verify a fixed, typed path from a family state into the shared
+    module 13/0. Its type is NOT yet known: an animation, geometry,
+    resource table or renderer cannot be inferred from RTB alone.
+
+    This is intentionally a bounded 6-hop pointer chain for the
+    hash-pinned original CD, not arbitrary pointer graph exploration.
+    """
+    if pointer_offset not in (0x30,0x44):
+        raise Refused("unapproved graphics-link field")
+    origin = state + pointer_offset
+    root = graph.ptr(origin,(4,0),(13,0))
+    nodes = [root]
+    for _ in range(5):
+        following = graph.ptr(nodes[-1],(13,0),(13,0))
+        if following in nodes or following<=nodes[-1]:
+            raise Refused("graphics relocation chain cycles or reverses")
+        nodes.append(following)
+    if nodes[1] != root+0x18:
+        raise Refused("unexpected module 13/0 root header")
+    return {
+        "state_field":f"+0x{pointer_offset:02X}",
+        "shared_block":"13/0",
+        "resource_root":f"0x{root:08X}",
+        "typed_hops_verified":len(nodes),
+        "identity_of_graphics_renderer_verified":False,
+    }
+
+
 def inspect_shared_links(menu_sna: Path, levels0_dat: Path,
                          fix_sna: Path, fix_rtb: Path) -> dict:
     if any(sha256(p)!=expected for p,expected in (
@@ -133,12 +163,20 @@ def inspect_shared_links(menu_sna: Path, levels0_dat: Path,
     info_gen=linked_family_state(graph,genmenu)
     if info_cursor["family"]==info_gen["family"]:
         raise Refused("cursor and GenMenu family unexpectedly identical")
+    cursor_gfx = linked_external_graphics_block(
+        graph,int(info_cursor["state"],16),0x30)
+    genmenu_gfx = linked_external_graphics_block(
+        graph,int(info_gen["state"],16),0x44)
+    if cursor_gfx["resource_root"]==genmenu_gfx["resource_root"]:
+        raise Refused("cursor and GenMenu graphics roots overlap")
     return {
         "mode":"hash-verified CD Menu/Fixed scene cross-links (read-only)",
         "cursor_actor":cursor["superobject"],
         "cursor_visual_data":cursor["visual_data"],
         "cursor":info_cursor,
         "genmenu_negative_control":info_gen,
+        "cursor_shared_graphics_links":cursor_gfx,
+        "genmenu_shared_graphics_control":genmenu_gfx,
         "cursor_name_and_arg_reciprocal_links_verified":True,
         "cursor_renderer_identified":False,
         "actor_visibility_modified":False
