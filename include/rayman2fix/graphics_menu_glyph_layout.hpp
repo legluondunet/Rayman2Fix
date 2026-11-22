@@ -22,6 +22,25 @@ constexpr GraphicsInfoRow kGraphicsInfoRows[]{
     {53.0f,62.0f,55.0f,55.0f,62.0f}, // Glide + desktop, handle 383
     {62.0f,75.0f,47.0f,64.0f,32.0f}  // output, handle 380
 };
+// A native VIDEO choice widget can retain text prepared with the
+// information pointers after the original localization table is restored.
+// On the separately verified BRIGHTNESS behavior only, discard its stale
+// glyph quads at the original four VIDEO choice bands. The VIDEO title
+// (y≈20), LUMINOSITY (y≈85), color bar (non-glyph), and 3D butterfly are
+// outside this policy. Never apply it to unknown/other menu behaviors.
+inline bool cached_video_glyph_in_brightness(
+    bool verified_brightness,bool previously_showed_information,
+    const GraphicsInfoQuad& in) noexcept {
+    if(!verified_brightness || !previously_showed_information ||
+       !std::isfinite(in.left) || !std::isfinite(in.top) ||
+       !std::isfinite(in.right) || !std::isfinite(in.bottom) ||
+       in.right<=in.left || in.bottom<=in.top ||
+       in.left<35.0f || in.right>210.0f)return false;
+    const float mid=(in.top+in.bottom)*0.5f;
+    for(const auto& row:kGraphicsInfoRows)
+        if(mid>=row.first_y && mid<row.last_y)return true;
+    return false;
+}
 inline bool layout_graphics_info_quad(
     const GraphicsInfoQuad& in,GraphicsInfoQuad& out) noexcept {
     if(!std::isfinite(in.left) || !std::isfinite(in.top) ||
