@@ -409,10 +409,12 @@ void build_texts() noexcept {
     text_row(1,"OUTPUT:",line);
     text_row(2,"GPU:",adapter.data());
     text_row(3,"D3D9:",driver.data());
-    std::snprintf(line,sizeof(line),"desktop %u / Glide 16",depth);
-    text_row(4,"BPP:",line);
-    std::snprintf(g_rows[5].data(),g_rows[5].size(),
-                  "GLIDE: 1024x768x16");
+    // Native handle 384 ("OTHER") is not drawn on the verified FR menu.
+    // Place both the native engine resolution and the desktop bit depth
+    // in handle 383, the fourth actually visible information row.
+    std::snprintf(g_rows[4].data(),g_rows[4].size(),
+                  "GLIDE 1024x768x16 / DESKTOP %u",depth);
+    std::snprintf(g_rows[5].data(),g_rows[5].size()," ");
 }
 bool original_text_valid(std::uintptr_t p) noexcept {
     char s[72]{};
