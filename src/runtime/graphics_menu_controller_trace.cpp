@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <initializer_list>
 #include <cstdio>
 #include <cstring>
 #include "rayman2fix/graphics_menu_controller_model.hpp"
