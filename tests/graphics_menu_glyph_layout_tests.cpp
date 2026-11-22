@@ -5,10 +5,9 @@ using namespace r2fix;
 void expect(bool ok) { if(!ok)std::abort(); }
 int main() {
     GraphicsInfoQuad out{};
-    // Native menu strings: 5 unevenly positioned rows -> ordered grid.
-    expect(layout_graphics_info_quad({35,20,38,25},out));
-    expect(out.left>=7.0f && out.left<12.0f &&
-           out.top>=17.0f && out.bottom<22.0f);
+    // The VIDEO heading at 20% must remain native and centered.
+    // Only the four data-row bands are remapped.
+    expect(!layout_graphics_info_quad({35,20,38,25},out));
     expect(layout_graphics_info_quad({47,64,50,69},out));
     expect(out.top>=28 && out.bottom<34);
     expect(layout_graphics_info_quad({55,34,58,39},out));
@@ -37,10 +36,10 @@ int main() {
     // Reject bizarre off-column glyphs instead of remapping them:
     // the viewport hook must fail back to the untouched native quad.
     expect(!layout_graphics_info_quad({-9,45,210,50},wide));
-    // For each known native information row, the first glyph should
-    // start consistently in the left column, retaining y ordering.
+    // Every data-row first glyph starts in the left column.
+    // The unmodified VIDEO heading is deliberately excluded.
     const GraphicsInfoQuad samples[]={
-        {35,20,38,25}, {55,34,58,39}, {8,45,11,50},
+        {55,34,58,39}, {8,45,11,50},
         {55,55,58,60}, {47,64,50,69}};
     for(const auto& src:samples) {
         GraphicsInfoQuad transformed{};
