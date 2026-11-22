@@ -6,6 +6,7 @@ namespace r2fix {
 struct MenuSelectionVars {
     bool selection_valid=false, activate_valid=false;
     std::int32_t selection=-1;
+    std::uintptr_t selection_slot=0;
     unsigned activate=0;
 };
 template<class R32,class R8>
@@ -33,6 +34,7 @@ MenuSelectionVars observe_menu_selection(std::uintptr_t mind,R32 r32,
        r32(std::uintptr_t(values)+offset,value)) {
         result.selection_valid=true;
         result.selection=static_cast<std::int32_t>(value);
+        result.selection_slot=std::uintptr_t(values)+offset;
     }
     std::uint8_t flag=0;
     if(r32(infos+51u*16u,offset) && offset==0x4A5u &&
