@@ -97,14 +97,25 @@ struct ScanResult {
 // Scan owned, committed, writable/private game memory only. A cheap flag
 // filter avoids calling ReadProcessMemory for arbitrary 4-byte words.
 // The complete script/brightness fingerprint must match before reporting.
-ScanResult locate_controller(std::uintptr_t& resume_cursor) noexcept {
+ScanResult locate_controller(std::uintptr_t& resume_cursor,
+                             std::uintptr_t& candidate_hint) noexcept {
     ScanResult out{};
-    MenuAiModel direct{};
-    if(check_model(kSceneModelHint,direct)) {
+    // A previously detected script-valid model may have been observed
+    // before its Mind was fully initialized. Revalidate BOTH structures
+    // on every retry rather than losing that candidate when the bounded
+    // scan advances into a later memory region.
+    for(const std::uintptr_t hint:{kSceneModelHint,candidate_hint}) {
+        if(!hint)continue;
+        MenuAiModel direct{};
+        if(!check_model(hint,direct))continue;
         out.model=direct;
         out.matches=1;
-        // Do not assume the scene VA equals the loaded model VA: the hint
-        // is used only if it passes the SAME full script validation.
+        if(direct.model>=0x10018u &&
+           check_mind(direct,direct.model-24u,out.mind)) {
+            candidate_hint=0;
+            return out;
+        }
+        break;
     }
     std::array<BYTE,kChunk+32> buf{};
     SYSTEM_INFO system{};
@@ -150,7 +161,7 @@ ScanResult locate_controller(std::uintptr_t& resume_cursor) noexcept {
                        !menu_safe_ptr(rp,8u) ||
                        (np&3u)!=0u || (rp&3u)!=0u)continue;
                     const std::uintptr_t candidate=at+j;
-                    if(candidate==kSceneModelHint && out.matches==1u)
+                    if(out.matches==1u && candidate==out.model.model)
                         continue; // same model already checked by fast path
                     MenuAiModel current{};
                     if(!check_model(candidate,current))continue;
@@ -175,7 +186,8 @@ ScanResult locate_controller(std::uintptr_t& resume_cursor) noexcept {
         // normal and reflex intelligence structures to verify both.
         if(out.model.model>=0x10018u)
             check_mind(out.model,out.model.model-24u,out.mind);
-    }
+        candidate_hint=out.mind.valid()?0:out.model.model;
+    } else candidate_hint=0;
     return out;
 }
 const char* native_level_hint() noexcept {
@@ -206,6 +218,7 @@ DWORD WINAPI worker(void*) {
     MenuAiState mind{};
     unsigned tries=0,reports=0;
     std::uintptr_t scan_cursor=0x10000u;
+    std::uintptr_t candidate_hint=0;
     int prior_normal=-200,prior_reflex=-200;
     int prior_selection=-200,prior_activate=-200;
     bool announced=false;
@@ -229,6 +242,7 @@ DWORD WINAPI worker(void*) {
             g_verified_mind.store(0,std::memory_order_release);
             model={}; mind={}; tries=0; announced=false;
             scan_cursor=0x10000u;
+            candidate_hint=0;
             next_scan=now+500u;
             Sleep(200);
             continue;
@@ -244,7 +258,7 @@ DWORD WINAPI worker(void*) {
            static_cast<LONG>(now-next_scan)>=0) {
             next_scan=now+kScanPeriodMs;
             ++tries;
-            const auto scanned=locate_controller(scan_cursor);
+            const auto scanned=locate_controller(scan_cursor,candidate_hint);
             if(scanned.matches==1u && scanned.mind.valid()) {
                 model=scanned.model;
                 mind=scanned.mind;
