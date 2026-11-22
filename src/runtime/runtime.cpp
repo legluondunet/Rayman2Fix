@@ -7074,8 +7074,9 @@ void trace_native_information_glyph_palette(const r2fix::HudVertex* quad,
     const unsigned source=g_native_info_source_row;
     const int focus=r2fix::native_graphics_info_focus_row();
     if(source<1u || source>4u || focus<1 || focus>4)return;
-    const unsigned index=(unsigned(focus)-1u)*4u+(source-1u);
-    const std::uint32_t bit=1u<<index;
+    const std::uint32_t bit=
+        r2fix::graphics_info_material_sample_bit(source,focus);
+    if(!bit)return;
     if(g_native_info_material_pairs_seen.fetch_or(
            bit,std::memory_order_relaxed)&bit)return;
     std::uint32_t words[4]{};
