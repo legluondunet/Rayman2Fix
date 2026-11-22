@@ -216,3 +216,45 @@ Owner log `Rayman2Fix(20261121-145638).log` from the preceding native-graphics p
 **Caveat:** This is still the original interactive native menu underneath the informational labels. Only the exact script-level resolution-selection and save hooks are guarded; avoiding unintended menu navigation requires a separate, carefully validated native behavioral change. Do not describe the page as a finished non-interactive UI or merge to `main` based on synthetic tests alone.
 
 **Next Wine test:** open Options → Résolution, verify the information screen and its layout, press Enter once on one original selection **only after confirming the research guard is installed**, and check that the information remains visible and `video_actions_blocked` increments without a mode change. Exit to Options, visit Brightness, reopen Resolution; verify information returns even with V51=1. Supply `Rayman2Fix.log` and two screenshots. Check actual behavior and 4:3 geometry on Windows after Wine.
+
+
+## Offline PE disassembly and native material scope (23 November 2026)
+
+**Approved user-provided executable**: `Rayman2.exe`, 1,468,928 bytes,
+SHA-256 `9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713`.
+It matches the established PE fingerprint (timestamp `0x3807B68B`,
+six sections, entry RVA `0x5FCC0`, image size `0x1D7000`).
+Disassembled in memory-independent, read-only mode using `objdump -d -M intel`.
+No game executable or original code bytes are included in the repository.
+
+At approved EXE VA **0x429670** the native
+`GLI_vDraw2DSpriteWithPercent` source function constructs screen-space
+vertices and, for its *colored* path, constructs a separate color argument
+before calling the stored callback at **0x504838** (VA **0x4297E6**).
+The path reads native color channels from globals near
+`0x503748..0x50374A`; alpha/other values come from the current
+render state. This explains why a previous *vertex-only* opaque-white
+experiment did not remove the screenshot's colored native option labels.
+**A pointer to the colored callback's second argument must not be
+treated as a proven 4×ARGB array yet:** the layout and draw semantics
+need direct runtime evidence. Blindly overwriting it could corrupt
+geometry or draw state.
+
+**Next controlled research build:** the already-verified native GLI font
+callback reads the first 16 bytes of that otherwise opaque secondary
+color argument using a bounded, protected process-memory read. Each
+sample is explicitly labeled with (1) the original native glyph source
+band (four known information rows), and (2) the script-validated
+native V17 focus row (1..4), to a maximum of **16 log lines total**.
+Markers are `RUNTIME-GRAPHICS-MATERIAL: focus=N row=N raw_dwords=...`.
+No pointer/address is logged, no color is changed, and none of the
+original navigation, brightness, butterfly, text restoration or
+resolution-action guards are touched.
+
+These observations will establish whether color data tracks focus and
+whether it can be safely cloned at the original renderer boundary.
+Even matching material-color values **would not by itself** disable
+native selection: the final informational screen must also avoid
+iterating active buttons while preserving the original brightness
+and return behaviors. Do not call the current prototype
+non-selectable until that property has been observed in-game.
