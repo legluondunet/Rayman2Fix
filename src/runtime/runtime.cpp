@@ -47,6 +47,7 @@
 #include <climits>
 #include <cstdio>
 #include <unordered_set>
+#include <string>
 #include <vector>
 
 #if !defined(_M_IX86)
@@ -483,9 +484,18 @@ void log_line(const char* message) {
     HANDLE file = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) return;
-    DWORD written = 0;
-    WriteFile(file, message, static_cast<DWORD>(std::strlen(message)), &written, nullptr);
-    WriteFile(file, "\r\n", 2, &written, nullptr);
+    // One append operation per entry: separate writes for text and CRLF
+    // allowed different debug threads to interleave two log records.
+    // Preserve the entire original message, including long diagnostic
+    // summaries, and append its line ending in the SAME WriteFile.
+    const std::size_t length=std::strlen(message);
+    if (length <= static_cast<std::size_t>(MAXDWORD)-2u) {
+        std::string entry(message,length);
+        entry.append("\r\n");
+        DWORD written=0;
+        WriteFile(file,entry.data(),static_cast<DWORD>(entry.size()),
+                  &written,nullptr);
+    }
     CloseHandle(file);
 }
 // Read-only audit of the ORIGINAL CPA sound configuration, not a fix
