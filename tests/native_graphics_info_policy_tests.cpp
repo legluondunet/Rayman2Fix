@@ -44,5 +44,35 @@ require(!graphics_info_video_page(true,true,true,5,1,true,1,true,1));
 for(unsigned i=0;i<5;++i)
  require(!graphics_info_video_page(i!=0,i!=1,i!=2,5,0,
                                      i!=3,1,i!=4,1));
+// Read-only VIDEO experiment: V17=1..4 is not a user-adjustable
+// value. Only the original native brightness entry V17=5 may retain
+// focus; otherwise all controls revert to the previous guarded page.
+for(unsigned latch: {0u,1u}) {
+ for(int row=1;row<=4;++row)
+  require(graphics_info_request_brightness_focus(
+      true,true,true,5,0,true,row,true,latch));
+ require(graphics_info_brightness_request_pending(
+      true,true,true,5,0,true,5,true,latch));
+}
+require(!graphics_info_request_brightness_focus(
+    true,true,true,18,5,true,5,true,0));
+require(!graphics_info_request_brightness_focus(
+    true,true,false,5,0,true,2,true,0));
+require(!graphics_info_request_brightness_focus(
+    true,false,true,5,0,true,2,true,0));
+require(!graphics_info_request_brightness_focus(
+    true,true,true,5,0,true,5,true,0));
+require(!graphics_info_brightness_request_pending(
+    true,true,true,5,0,true,4,true,0));
+require(graphics_info_focus_on_brightness(
+    true,true,true,18,5,true,5));
+require(!graphics_info_focus_on_brightness(
+    true,true,true,18,5,true,4));
+require(!graphics_info_focus_on_brightness(
+    true,true,true,5,0,true,5));
+require(!graphics_info_focus_on_brightness(
+    true,true,false,18,5,true,5));
+require(!graphics_info_focus_on_brightness(
+    false,true,true,18,5,true,5));
 std::cout<<"Native video commands limited to exact validated menu nodes: PASS\n";
 }
