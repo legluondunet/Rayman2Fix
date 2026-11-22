@@ -31,6 +31,7 @@
 #include "rayman2fix/graphics_menu_start_policy.hpp"
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
 #include "rayman2fix/native_graphics_info_proto.hpp"
+#include "rayman2fix/graphics_menu_glyph_layout.hpp"
 #endif
 #endif
 #include <mutex>
@@ -380,6 +381,8 @@ thread_local unsigned g_current_native_route=3;
 // synchronous on the same render thread. Do not infer target glyphs from
 // color, position or arbitrary global screens outside this verified scope.
 thread_local bool g_native_info_remapped_glyph=false;
+thread_local unsigned g_native_info_source_row=0;
+std::atomic<std::uint32_t> g_native_info_material_pairs_seen{0};
 std::atomic<unsigned> g_native_info_tinted_quads{0};
 #endif
 thread_local float g_native_input_left=0.0f;
@@ -5779,6 +5782,7 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // glyph quads into a regular 4:3-safe information grid. Non-glyph
     // producers (including the brightness bar) remain untouched.
     bool information_glyph=false;
+    unsigned information_source_row=0u;
     if(producer==Native2DProducer::Glyph) {
         // The game may keep glyphs built with VIDEO information strings
         // after localization pointers are restored. Only in the verified
@@ -5786,8 +5790,12 @@ void __cdecl native_2d_percent_sprite(void* viewport,
         // before forwarding to GLI. The butterfly is not a font producer.
         if(r2fix::suppress_cached_native_graphics_info_glyph(
                 xmin,ymin,xmax,ymax))return;
+        const auto source_quad=r2fix::GraphicsInfoQuad{
+            xmin,ymin,xmax,ymax};
+        information_source_row=r2fix::graphics_info_source_row(source_quad);
         information_glyph=
             r2fix::remap_native_graphics_info_glyph(xmin,ymin,xmax,ymax);
+        if(!information_glyph)information_source_row=0u;
     } else {
         r2fix::observe_native_graphics_info_non_glyph(
             static_cast<unsigned>(producer),xmin,ymin,xmax,ymax);
@@ -5803,11 +5811,14 @@ void __cdecl native_2d_percent_sprite(void* viewport,
             log_line("RUNTIME-HUD: native 2D input geometry invalid; original percent coordinates retained");
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
         const bool previous_info=g_native_info_remapped_glyph;
+        const unsigned previous_source_row=g_native_info_source_row;
         g_native_info_remapped_glyph=information_glyph;
+        g_native_info_source_row=information_source_row;
 #endif
         original(viewport,xmin,ymin,xmax,ymax,material);
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
         g_native_info_remapped_glyph=previous_info;
+        g_native_info_source_row=previous_source_row;
 #endif
         return;
     }
@@ -5828,11 +5839,14 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     ++g_native_2d_call_depth;
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
     const bool previous_info=g_native_info_remapped_glyph;
+    const unsigned previous_source_row=g_native_info_source_row;
     g_native_info_remapped_glyph=information_glyph;
+    g_native_info_source_row=information_source_row;
 #endif
     original(viewport,left,ymin,right,ymax,material);
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
     g_native_info_remapped_glyph=previous_info;
+    g_native_info_source_row=previous_source_row;
 #endif
     --g_native_2d_call_depth;
     g_current_native_route=previous_route;
