@@ -457,7 +457,10 @@ struct RuntimeOptions {
     DWORD remove_cinematic_bars;
     DWORD music_in_pause_menu;
     DWORD skip_learn10;
+    DWORD classic_4_3;
 };
+static_assert(sizeof(RuntimeOptions)==44u,
+              "Rayman2Fix x86 runtime ABI size mismatch");
 
 bool valid_angle(float v) {
     return std::isfinite(v) && v > 0.05f && v < 3.0f;
@@ -7406,7 +7409,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     if (settings->size != sizeof(RuntimeOptions) ||
         settings->magic != kConfigMagic ||
         settings->output_width < 640 || settings->output_width > 16384 ||
-        settings->output_height < 480 || settings->output_height > 8640)
+        settings->output_height < 480 || settings->output_height > 8640 ||
+        settings->classic_4_3>1u)
         return 5;
     const float aspect = static_cast<float>(settings->output_width) /
                          static_cast<float>(settings->output_height);
@@ -7550,7 +7554,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         // log_line() is intentionally a no-op at Log=0. The feature,
         // callbacks and text presentation still initialize normally.
         r2fix::start_native_graphics_info_proto(&log_line,
-            settings->output_width,settings->output_height);
+            settings->output_width,settings->output_height,
+            settings->classic_4_3!=0);
 #endif
         if(r2fix::menu_passive_diagnostics_required(g_log))
             r2fix::start_graphics_menu_trace(&log_line);
