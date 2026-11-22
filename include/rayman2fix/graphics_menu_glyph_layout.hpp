@@ -17,10 +17,10 @@ struct GraphicsInfoRow {
 // These bands remain provisional until validated in Wine/Windows.
 // Brightness lives below y=80 and is never touched.
 constexpr GraphicsInfoRow kGraphicsInfoRows[]{
-    {31.0f,43.0f,55.0f,34.0f,40.0f}, // GPU, handle 381
-    {43.0f,53.0f, 8.0f,45.0f,51.0f}, // driver, handle 382
-    {53.0f,62.0f,55.0f,55.0f,62.0f}, // depth, handle 383
-    {62.0f,75.0f,47.0f,64.0f,29.0f}  // output, handle 380
+    {31.0f,43.0f,55.0f,34.0f,42.0f}, // GPU, handle 381
+    {43.0f,53.0f,55.0f,45.0f,52.0f}, // driver, handle 382
+    {53.0f,62.0f,55.0f,55.0f,62.0f}, // Glide + desktop, handle 383
+    {62.0f,75.0f,47.0f,64.0f,32.0f}  // output, handle 380
 };
 inline bool layout_graphics_info_quad(
     const GraphicsInfoQuad& in,GraphicsInfoQuad& out) noexcept {
