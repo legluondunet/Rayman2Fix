@@ -489,6 +489,11 @@ DWORD WINAPI worker(void*) {
     bool reported_text_issue=false;
     bool was_visible=false;
     bool showed_information_in_menu=false;
+    bool focus_redirect_requested=false;
+    bool focus_redirect_confirmed=false;
+    bool focus_redirect_disabled=false;
+    DWORD focus_redirect_tick=0;
+    LONG focus_redirect_old=1;
     unsigned last_latch=~0u;
     // Keep the guard active while the process lives. Revert script hooks
     // when the original Menu level is unloaded; never silently expose
@@ -503,6 +508,9 @@ DWORD WINAPI worker(void*) {
                 g_cached_video_text_in_brightness.store(
                     false,std::memory_order_release);
                 showed_information_in_menu=false;
+                focus_redirect_requested=false;
+                focus_redirect_confirmed=false;
+                focus_redirect_disabled=false;
                 was_visible=false;
                 last_latch=~0u;
                 restore_text();
@@ -554,12 +562,48 @@ DWORD WINAPI worker(void*) {
                 const auto vars=valid_controller ?
                     observe_menu_selection(current.mind,&read32,&read8) :
                     MenuSelectionVars{};
+                const bool image_ok=approved();
                 const bool video_page=graphics_info_video_page(
-                    approved(),in_menu,valid_controller,
+                    image_ok,in_menu,valid_controller,
                     current.normal,current.reflex,
                     vars.selection_valid,vars.selection,
                     vars.activate_valid,vars.activate);
-                if(video_page) {
+                const bool brightness=graphics_info_focus_on_brightness(
+                    image_ok,in_menu,valid_controller,current.normal,
+                    current.reflex,vars.selection_valid,vars.selection);
+                if(focus_redirect_requested && brightness) {
+                    focus_redirect_requested=false;
+                    focus_redirect_confirmed=true;
+                    g_logger("RUNTIME-GRAPHICS-INFO: status=information-focus-brightness-confirmed only-native-control=brightness butterfly=untouched");
+                }
+                if(focus_redirect_requested &&
+                   DWORD(now-focus_redirect_tick)>1600u) {
+                    // A V17 data write may not trigger the original
+                    // behavior transition without its native input edge.
+                    // Undo only OUR exact compare-exchange, disable the
+                    // redirection for this MENU load and keep the previous
+                    // fully guarded presentation as a safe fallback.
+                    if(valid_controller && current.normal==5 &&
+                       current.reflex==0 && vars.selection_valid &&
+                       vars.selection==5 && writable_slot(vars.selection_slot))
+                        InterlockedCompareExchange(
+                          reinterpret_cast<volatile LONG*>(vars.selection_slot),
+                          focus_redirect_old,5);
+                    focus_redirect_requested=false;
+                    focus_redirect_confirmed=false;
+                    focus_redirect_disabled=true;
+                    g_logger("RUNTIME-GRAPHICS-INFO: status=information-focus-redirect-unconfirmed legacy-video-navigation-retained=1");
+                }
+                if(video_page && focus_redirect_confirmed)
+                    focus_redirect_confirmed=false; // user pressed Up from brightness
+                const bool redirect_pending=focus_redirect_requested &&
+                    graphics_info_brightness_request_pending(
+                        image_ok,in_menu,valid_controller,current.normal,
+                        current.reflex,vars.selection_valid,vars.selection,
+                        vars.activate_valid,vars.activate);
+                const bool information_screen=video_page ||
+                    redirect_pending || (focus_redirect_confirmed && brightness);
+                if(information_screen) {
                     g_cached_video_text_in_brightness.store(
                         false,std::memory_order_release);
                     if(native_graphics_text_transition(true,g_language_table!=0)==
@@ -575,6 +619,29 @@ DWORD WINAPI worker(void*) {
                     }
                     g_layout_active.store(g_language_table!=0,
                                           std::memory_order_release);
+                    // The four former VIDEO labels are *information*, not
+                    // four interactive settings. Request the already native
+                    // V17=5 brightness choice, which keeps the original
+                    // brightness slider and EXIT path alive. Never write a
+                    // menu-selection field unless its declaration and slot
+                    // have passed all existing script/Mind checks.
+                    if(video_page && !focus_redirect_disabled &&
+                       !focus_redirect_requested && g_language_table) {
+                        if(vars.selection_slot &&
+                           writable_slot(vars.selection_slot) &&
+                           InterlockedCompareExchange(
+                             reinterpret_cast<volatile LONG*>(vars.selection_slot),
+                             5,static_cast<LONG>(vars.selection))==
+                               static_cast<LONG>(vars.selection)) {
+                            focus_redirect_requested=true;
+                            focus_redirect_tick=now;
+                            focus_redirect_old=static_cast<LONG>(vars.selection);
+                            g_logger("RUNTIME-GRAPHICS-INFO: status=information-focus-redirect-requested from=verified-video-row target=native-brightness transient=1");
+                        } else {
+                            focus_redirect_disabled=true;
+                            g_logger("RUNTIME-GRAPHICS-INFO: status=information-focus-redirect-refused previous-navigation-retained=1");
+                        }
+                    }
                     if(g_language_table &&
                        (!was_visible || last_latch!=vars.activate)) {
                         char event[180]{};
@@ -591,10 +658,10 @@ DWORD WINAPI worker(void*) {
                     // a localization pointer restoration. Suppress ONLY
                     // their cached glyph quads while the verified brightness
                     // behavior is active, never any other menu or scene.
-                    const bool brightness=valid_controller &&
+                    const bool legacy_brightness=valid_controller &&
                         current.normal==18 && current.reflex==5;
                     g_cached_video_text_in_brightness.store(
-                        brightness && showed_information_in_menu,
+                        legacy_brightness && showed_information_in_menu,
                         std::memory_order_release);
                     // Preserve all other Options screens: restore the
                     // original localized POINTERS when leaving VIDEO.
