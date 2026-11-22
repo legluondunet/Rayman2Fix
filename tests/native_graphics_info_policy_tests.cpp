@@ -11,6 +11,17 @@ require(!graphics_info_text_handle(370) && !graphics_info_text_handle(385));
 require(suppress_menu_video_call(true,true,true,true,NativeVideoCall::selection));
 require(suppress_menu_video_call(true,true,true,true,NativeVideoCall::save));
 require(!suppress_menu_video_call(true,true,true,true,NativeVideoCall::brightness));
+// The validated MENU video-dispatch slots are protected immediately,
+// even while the relocated controller is not yet found. After discovery
+// exact script children provide the narrower same protection.
+require(protected_menu_video_dispatch(true,true,false,true,NativeVideoCall::selection));
+require(protected_menu_video_dispatch(true,true,false,true,NativeVideoCall::save));
+require(protected_menu_video_dispatch(true,true,true,false,NativeVideoCall::selection));
+require(protected_menu_video_dispatch(true,true,true,false,NativeVideoCall::save));
+require(!protected_menu_video_dispatch(true,true,false,false,NativeVideoCall::selection));
+require(!protected_menu_video_dispatch(true,false,false,true,NativeVideoCall::selection));
+require(!protected_menu_video_dispatch(false,true,false,true,NativeVideoCall::selection));
+require(!protected_menu_video_dispatch(true,true,true,true,NativeVideoCall::brightness));
 for(unsigned broken=0;broken<4;++broken){
  require(!suppress_menu_video_call(broken!=0,broken!=1,broken!=2,broken!=3,
    NativeVideoCall::selection));
