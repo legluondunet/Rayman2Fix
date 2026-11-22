@@ -4,6 +4,14 @@
 static void check(bool ok) { if(!ok) std::abort(); }
 
 int main() {
+    using r2fix::menu_scan_resume_cursor;
+    // A prior 160-MiB pass must never restart from the low address
+    // until the process address space has been traversed.
+    check(menu_scan_resume_cursor(0x10000u,0x7FFF0000u)==0x10000u);
+    check(menu_scan_resume_cursor(0x0A234000u,0x7FFF0000u)==0x0A234000u);
+    check(menu_scan_resume_cursor(0x17FF0000u,0x7FFF0000u)==0x17FF0000u);
+    check(menu_scan_resume_cursor(0x7FFF0000u,0x7FFF0000u)==0x10000u);
+    check(menu_scan_resume_cursor(0x0u,0x7FFF0000u)==0x10000u);
     using r2fix::menu_controller_worker_required;
     using r2fix::menu_passive_diagnostics_required;
     // Release default: Log=0; the VIDEO information feature and its
