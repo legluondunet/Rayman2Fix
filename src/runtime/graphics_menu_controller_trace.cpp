@@ -245,8 +245,12 @@ DWORD WINAPI worker(void*) {
                    "RUNTIME-MENU-AI: status=controller-found scan=%u models=1 mind=validated normal_behaviors=27 reflex_behaviors=7 level_hint=%s scanned_mib=%u (read-only)",
                    tries,native_level_hint(),scanned.scanned_mib);
                 report(line);
-            } else if(tries==1u || tries==kMaxScans ||
+            } else if(tries<=4u || tries==kMaxScans ||
                       scanned.matches>1u || (tries%4u)==0u) {
+                // Report every attempt during the first 15-20 seconds
+                // of a MENU scene. Previously scans #2 and #3 were
+                // silent, making short logs look like retry never ran.
+                // All reports remain behind Log=1 and globally capped.
                 char line[240]{};
                 std::snprintf(line,sizeof(line),
                    "RUNTIME-MENU-AI: scan=%u matches=%u mind_valid=%u unreadable_chunks=%u scanned_mib=%u level_hint=%s (read-only; no fixed scene address)",
