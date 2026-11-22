@@ -32,6 +32,33 @@ constexpr bool graphics_info_video_page(
            selection_valid && selection>=1 && selection<=4 &&
            latch_valid && latch<=1u;
 }
+// Experimental non-selectable information page: the native VIDEO mode
+// choices remain protected, but V17=1..4 still moves the visible focus.
+// Only after verifying the exact script/Mind and the V17 field may the
+// prototype request the adjacent original BRIGHTNESS entry (V17=5).
+// An unanswered request is rolled back instead of forcing any AI behavior.
+constexpr bool graphics_info_request_brightness_focus(
+    bool approved_exe,bool menu_level,bool controller_valid,
+    int normal,int reflex,bool selection_valid,int selection,
+    bool latch_valid,unsigned latch) noexcept {
+    return graphics_info_video_page(approved_exe,menu_level,
+        controller_valid,normal,reflex,selection_valid,selection,
+        latch_valid,latch);
+}
+constexpr bool graphics_info_focus_on_brightness(
+    bool approved_exe,bool menu_level,bool controller_valid,
+    int normal,int reflex,bool selection_valid,int selection) noexcept {
+    return approved_exe && menu_level && controller_valid &&
+        normal==18 && reflex==5 && selection_valid && selection==5;
+}
+constexpr bool graphics_info_brightness_request_pending(
+    bool approved_exe,bool menu_level,bool controller_valid,
+    int normal,int reflex,bool selection_valid,int selection,
+    bool latch_valid,unsigned latch) noexcept {
+    return approved_exe && menu_level && controller_valid &&
+        normal==5 && reflex==0 && selection_valid && selection==5 &&
+        latch_valid && latch<=1u;
+}
 constexpr bool graphics_info_text_handle(unsigned id) noexcept {
     return id>=379u && id<=384u;
 }
