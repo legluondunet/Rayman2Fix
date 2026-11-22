@@ -58,6 +58,8 @@ std::atomic<bool> g_protected{false};
 // the model is resolved. This prevents early user mode changes.
 std::atomic<bool> g_guard_menu_video_dispatch{false};
 std::atomic<bool> g_layout_active{false};
+std::atomic<bool> g_cached_video_text_in_brightness{false};
+std::atomic<unsigned> g_brightness_ghost_glyphs_suppressed{0};
 std::atomic<unsigned> g_reflowed_glyphs{0};
 // 3 non-glyph routes, up to 8 distinct geometries per route.
 std::array<std::array<std::atomic<std::uint32_t>,8>,3> g_image_quad_samples{};
@@ -486,6 +488,7 @@ DWORD WINAPI worker(void*) {
     DWORD next_retry=began;
     bool reported_text_issue=false;
     bool was_visible=false;
+    bool showed_information_in_menu=false;
     unsigned last_latch=~0u;
     // Keep the guard active while the process lives. Revert script hooks
     // when the original Menu level is unloaded; never silently expose
@@ -497,6 +500,9 @@ DWORD WINAPI worker(void*) {
             if(guarded) {
                 g_protected.store(false,std::memory_order_release);
                 g_layout_active.store(false,std::memory_order_release);
+                g_cached_video_text_in_brightness.store(
+                    false,std::memory_order_release);
+                showed_information_in_menu=false;
                 was_visible=false;
                 last_latch=~0u;
                 restore_text();
@@ -554,9 +560,12 @@ DWORD WINAPI worker(void*) {
                     vars.selection_valid,vars.selection,
                     vars.activate_valid,vars.activate);
                 if(video_page) {
+                    g_cached_video_text_in_brightness.store(
+                        false,std::memory_order_release);
                     if(native_graphics_text_transition(true,g_language_table!=0)==
                        NativeGraphicsTextTransition::install_information_pointers) {
                         if(patch_text_table()) {
+                            showed_information_in_menu=true;
                             g_logger("RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched scope=verified-video-page content=information pointer-swap=1");
                         } else if(!reported_text_issue &&
                                   DWORD(now-began)>7000u) {
@@ -578,6 +587,15 @@ DWORD WINAPI worker(void*) {
                         last_latch=vars.activate;
                     }
                 } else {
+                    // The original MENU still retains rendered choices after
+                    // a localization pointer restoration. Suppress ONLY
+                    // their cached glyph quads while the verified brightness
+                    // behavior is active, never any other menu or scene.
+                    const bool brightness=valid_controller &&
+                        current.normal==18 && current.reflex==5;
+                    g_cached_video_text_in_brightness.store(
+                        brightness && showed_information_in_menu,
+                        std::memory_order_release);
                     // Preserve all other Options screens: restore the
                     // original localized POINTERS when leaving VIDEO.
                     g_layout_active.store(false,std::memory_order_release);
@@ -647,6 +665,17 @@ void observe_native_graphics_info_non_glyph(unsigned route,
         g_logger(line);
         return;
     }
+}
+bool suppress_cached_native_graphics_info_glyph(
+    float xmin,float ymin,float xmax,float ymax) noexcept {
+    if(!g_cached_video_text_in_brightness.load(
+           std::memory_order_acquire))return false;
+    if(!cached_video_glyph_in_brightness(true,true,
+           {xmin,ymin,xmax,ymax}))return false;
+    if(g_brightness_ghost_glyphs_suppressed.fetch_add(
+           1,std::memory_order_relaxed)==0 && g_logger)
+        g_logger("RUNTIME-GRAPHICS-INFO: status=brightness-cached-video-glyph-filter first=1 title=untouched slider=untouched butterfly=untouched");
+    return true;
 }
 bool remap_native_graphics_info_glyph(float& xmin,float& ymin,
                                       float& xmax,float& ymax) noexcept {
