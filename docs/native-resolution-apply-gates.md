@@ -258,3 +258,48 @@ native selection: the final informational screen must also avoid
 iterating active buttons while preserving the original brightness
 and return behaviors. Do not call the current prototype
 non-selectable until that property has been observed in-game.
+
+
+## Experimental static VIDEO information scripts — 23 November 2026
+
+Using the owner's validated `Menu.sna` and `levels0.dat`, the
+verified normal behavior 5 has five native scripts. Two presentation
+scripts end in `fn_p_stJFFTXTProcedure` (PC Raymap function/procedure
+index 506) with first parameter `V17`, the original keyboard-driven
+selection scalar. In the decoded approved resource, they have:
+
+| Normal 5 script | Full node count | Final JFFTXT call node | Normalized script FNV64 |
+| --- | ---: | ---: | --- |
+| 1 | 324 | 313 | `b363803e1ef0a4df` |
+| 4 | 517 | 512 | `e3f194a21d7d5471` |
+
+The fingerprints cover EVERY 8-byte node (parameter, padding, depth,
+type), zeroing parameters only in Raymap pointer-bearing node types
+14,23,28,30,32 that the CD's scene loader relocates. The four
+JFFTXT argument nodes, terminal type-8 node and two full fingerprints
+must all match before any replacement.
+
+**Opt-in prototype on PR #51, not a release change:** allocate two
+private memory-only COPIES of those two scripts and replace only the
+first JFFTXT argument's typed `V17` node with a literal zero. Then
+atomically swap the two corresponding normal-5 script list slots
+while the approved executable, exact Menu model and native VIDEO
+behavior have been verified. At the first transition out of VIDEO,
+restore the exact original pointers using compare-and-swap; the
+original game SNA and executable remain unchanged on disk.
+Never free a once-swapped script copy while game threads may still
+be referring to it. The whole operation refuses if signatures,
+pointer validity or script-slot protection differ; rollback retains
+ownership of any partial swap. The existing video-selection and save
+guards remain installed; brightness's separate reflex-5 script and
+the decorative butterfly are never modified.
+
+**Important limitation:** `V17` and original up/down navigation
+remain native. This is an *isolated highlight/presentation
+experiment*, not proof that the information rows have ceased to be
+selectable. Literal zero may blank a native JFFTXT element or produce
+a different color. An in-game Wine screenshot/log is essential
+to validate that the four info lines remain visible, fixed and
+unhighlighted, that brightness/return work, and that exit/reentry
+restores the exact original menu behavior. If anything is abnormal,
+revert this experiment rather than manipulating V17 or a cursor actor.
