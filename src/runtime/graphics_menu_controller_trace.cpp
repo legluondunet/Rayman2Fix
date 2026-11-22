@@ -115,8 +115,7 @@ ScanResult locate_controller(std::uintptr_t& resume_cursor) noexcept {
     // Continue at the first unexamined region on subsequent attempts.
     // Restart from the low address only after reaching the end of the
     // 32-bit address space or when the menu level is reloaded.
-    std::uintptr_t cursor=std::max<std::uintptr_t>(resume_cursor,0x10000u);
-    if(cursor>=last)cursor=0x10000u;
+    std::uintptr_t cursor=menu_scan_resume_cursor(resume_cursor,last);
     unsigned processed=0;
     while(cursor<last && processed<kMemoryBudget) {
         MEMORY_BASIC_INFORMATION info{};
@@ -168,7 +167,7 @@ ScanResult locate_controller(std::uintptr_t& resume_cursor) noexcept {
         }
         if(out.matches>1u)break;
     }
-    resume_cursor=cursor>=last ? 0x10000u : cursor;
+    resume_cursor=menu_scan_resume_cursor(cursor,last);
     out.scanned_mib=(processed+1024u*1024u-1u)/(1024u*1024u);
     if(out.matches==1u) {
         // In the approved SNA, Mind immediately precedes AIModel by 24
