@@ -5780,6 +5780,12 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // producers (including the brightness bar) remain untouched.
     bool information_glyph=false;
     if(producer==Native2DProducer::Glyph) {
+        // The game may keep glyphs built with VIDEO information strings
+        // after localization pointers are restored. Only in the verified
+        // native brightness behavior, drop those stale VIDEO choice glyphs
+        // before forwarding to GLI. The butterfly is not a font producer.
+        if(r2fix::suppress_cached_native_graphics_info_glyph(
+                xmin,ymin,xmax,ymax))return;
         information_glyph=
             r2fix::remap_native_graphics_info_glyph(xmin,ymin,xmax,ymax);
     } else {
