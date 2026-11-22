@@ -71,6 +71,19 @@ inline void center_screen_sprite_quad(HudVertex* quad,
     for (unsigned i = 0; i < 4; ++i)
         quad[i].x = centered_hud_x(quad[i].x, source_width, scale);
 }
+// Research-only: try a uniform bright native-font tint on a COPY of
+// vertices submitted by the verified VIDEO information page. The original
+// game's material/secondary colors are preserved. This may not alter the
+// visible font if its GLI color comes entirely from a separate color array.
+// Never modify a world sprite, another menu page or a non-2D quad.
+inline bool tint_native_information_glyph(HudVertex* quad,
+                                          bool scoped_to_information) {
+    if (!scoped_to_information || !is_screen_sprite_quad(quad))
+        return false;
+    for(unsigned i=0;i<4;++i)
+        quad[i].packed_color=0xFFFFFFFFu;
+    return true;
+}
 // Read-only classification of lower-screen quads not submitted by the
 // verified native 2D percent path. Never use these predicates to move
 // game vertices: arbitrary 3D world sprites may share screen coordinates.
