@@ -9,7 +9,7 @@ int main() {
     // Only the four data-row bands are remapped.
     expect(!layout_graphics_info_quad({35,20,38,25},out));
     expect(layout_graphics_info_quad({47,64,50,69},out));
-    expect(out.top>=28 && out.bottom<34);
+    expect(out.top>=31 && out.bottom<=35);
     expect(layout_graphics_info_quad({55,34,58,39},out));
     expect(out.top>=39 && out.bottom<45);
     expect(layout_graphics_info_quad({55,45,58,50},out));
