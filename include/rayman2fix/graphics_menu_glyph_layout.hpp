@@ -10,12 +10,13 @@ struct GraphicsInfoRow {
     float first_y, last_y, source_x, source_y, target_y;
 };
 // Source bands are the visual MENU level's native JFFTXT glyph percent
-// positions observed in the owner-provided 1920x1080 Wine screenshot.
-// The slots are spatially out of order (379,381,382,383,380).
-// These are provisional and must be validated under Wine and Windows.
+// positions observed in the owner-provided screenshot.
+// Preserve y=18..28: this is the native VIDEO heading (handle 371),
+// not a replaceable VIDEO information field. The four data rows are
+// handles 381,382,383,380; handle 379 is blanked by localization.
+// These bands remain provisional until validated in Wine/Windows.
 // Brightness lives below y=80 and is never touched.
 constexpr GraphicsInfoRow kGraphicsInfoRows[]{
-    {18.0f,28.0f,35.0f,20.0f,18.0f}, // title, handle 379
     {31.0f,43.0f,55.0f,34.0f,40.0f}, // GPU, handle 381
     {43.0f,53.0f, 8.0f,45.0f,51.0f}, // driver, handle 382
     {53.0f,62.0f,55.0f,55.0f,62.0f}, // depth, handle 383
