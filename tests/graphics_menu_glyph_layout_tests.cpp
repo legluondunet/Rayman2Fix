@@ -60,6 +60,16 @@ int main() {
     expect(std::fabs(gpu.left-depth.left)<0.0001f);
     expect(std::fabs(gpu.left-output.left)<0.0001f);
     expect(output.top<gpu.top && gpu.top<driver.top && driver.top<depth.top);
+    // Read-only material provenance: classify which original widget
+    // produced each remapped information glyph, before any source move.
+    expect(graphics_info_source_row({55,34,58,39})==1u);
+    expect(graphics_info_source_row({55,45,58,50})==2u);
+    expect(graphics_info_source_row({55,55,58,60})==3u);
+    expect(graphics_info_source_row({47,64,50,69})==4u);
+    expect(graphics_info_source_row({35,20,38,25})==0u);
+    expect(graphics_info_source_row({8,84,11,89})==0u);
+    expect(graphics_info_source_row({NAN,45,50,50})==0u);
+    expect(graphics_info_source_row({55,50,54,55})==0u);
     // Wine regression 2026-11-22: the old VIDEO info text was cached
     // and rendered giant after entry into LUMINOSITY. This exact
     // brightness-only glyph mask leaves the original title, brightness
