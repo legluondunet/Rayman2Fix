@@ -188,14 +188,14 @@ void* __cdecl protected_select(void* actor,void* child) {
         const auto ptr=reinterpret_cast<std::uintptr_t>(child);
         for(const auto& expected:g_select_children) {
             if(expected.load(std::memory_order_relaxed)==ptr && ptr) {
-                MenuAiModel live_model{}; MenuAiState live_state{};
-                if(!get_verified_menu_controller(live_model,live_state))
-                    break;
-                const bool belongs_to_normal5=(&expected==&g_select_children[0] ||
-                    &expected==&g_select_children[1] || &expected==&g_select_children[2]);
-                if((belongs_to_normal5 && live_state.normal!=5) ||
-                   (!belongs_to_normal5 && live_state.normal!=19))
-                    break;
+                // The exact child pointers were script-fingerprint verified
+                // before the dispatcher slots were installed. The native
+                // behavior may already have advanced by the time this x86
+                // callback runs; requiring its *current* index here made
+                // a video-setting action capable of slipping through.
+                // Only this Menu-level ID 356 script is suppressed. Other
+                // dispatcher calls are still forwarded without changes.
+                if(!g_eval)break;
                 std::uint8_t temporary[16]{};
                 g_select_suppressed.fetch_add(1,std::memory_order_relaxed);
                 return g_eval(actor,child,temporary);
@@ -211,11 +211,11 @@ void* __cdecl protected_select(void* actor,void* child) {
 void* __cdecl protected_save(void* actor,void* child,void* result) {
     const auto ptr=reinterpret_cast<std::uintptr_t>(child);
     const auto out=reinterpret_cast<std::uintptr_t>(result);
-    MenuAiModel live_model{}; MenuAiState live_state{};
+    // The saved child is the exact F261 script node from a validated
+    // Menu AI model. Protect it even if the native behavior transitions
+    // before this function returns; never intercept unrelated F261 calls.
     if(g_protected.load(std::memory_order_acquire) && is_native_menu() &&
        ptr && ptr==g_save_child.load(std::memory_order_relaxed) &&
-       get_verified_menu_controller(live_model,live_state) &&
-       live_state.normal==5 &&
        writable_slot(out) && writable_slot(out+12u)) {
         InterlockedExchange(reinterpret_cast<volatile LONG*>(out),1);
         InterlockedExchange(reinterpret_cast<volatile LONG*>(out+12u),6);
