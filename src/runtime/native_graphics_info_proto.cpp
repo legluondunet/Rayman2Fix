@@ -552,7 +552,8 @@ DWORD WINAPI worker(void*) {
                     vars.selection_valid,vars.selection,
                     vars.activate_valid,vars.activate);
                 if(video_page) {
-                    if(!g_language_table) {
+                    if(native_graphics_text_transition(true,g_language_table!=0)==
+                       NativeGraphicsTextTransition::install_information_pointers) {
                         if(patch_text_table()) {
                             g_logger("RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched scope=verified-video-page content=information pointer-swap=1");
                         } else if(!reported_text_issue &&
@@ -582,7 +583,9 @@ DWORD WINAPI worker(void*) {
                         g_logger("RUNTIME-GRAPHICS-INFO: status=video-page-exit original-label-pointers-restored=1");
                     was_visible=false;
                     last_latch=~0u;
-                    if(g_language_table)restore_text();
+                    if(native_graphics_text_transition(false,g_language_table!=0)==
+                       NativeGraphicsTextTransition::restore_original_pointers)
+                        restore_text();
                 }
             }
         }
