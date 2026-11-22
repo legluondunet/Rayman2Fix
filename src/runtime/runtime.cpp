@@ -7038,6 +7038,63 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
 }
 
 
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+// Original approved Rayman2.exe @ 0x4297E6 passes a stack-built, opaque
+// color array separately from the vertex quad to the colored GLI callback.
+// Read its FIRST 16 bytes strictly for diagnostic metadata. It is not yet
+// proven to be four packed ARGB colors or safe to replace. Neither the
+// caller's memory nor the values sent to GLI may be modified here.
+bool snapshot_native_glyph_palette(const void* ptr,
+                                   std::uint32_t (&words)[4]) noexcept {
+    if(!ptr)return false;
+    MEMORY_BASIC_INFORMATION m{};
+    if(VirtualQuery(ptr,&m,sizeof(m))!=sizeof(m) ||
+       m.State!=MEM_COMMIT || (m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))
+        return false;
+    const DWORD protection=m.Protect&0xffu;
+    if(protection!=PAGE_READONLY && protection!=PAGE_READWRITE &&
+       protection!=PAGE_WRITECOPY && protection!=PAGE_EXECUTE_READ &&
+       protection!=PAGE_EXECUTE_READWRITE &&
+       protection!=PAGE_EXECUTE_WRITECOPY)return false;
+    const auto address=reinterpret_cast<std::uintptr_t>(ptr);
+    const auto begin=reinterpret_cast<std::uintptr_t>(m.BaseAddress);
+    if(address<begin || m.RegionSize<sizeof(words) ||
+       address-begin>m.RegionSize-sizeof(words))return false;
+    SIZE_T bytes_read=0;
+    return ReadProcessMemory(GetCurrentProcess(),ptr,words,
+                             sizeof(words),&bytes_read)!=0 &&
+           bytes_read==sizeof(words);
+}
+void trace_native_information_glyph_palette(const r2fix::HudVertex* quad,
+                                             const void* colors) noexcept {
+    // Cap at 4 glyph rows x 4 native focus positions = 16 lines for the
+    // entire session, even at 60 FPS. Never log raw process addresses.
+    if(!quad || !g_native_info_remapped_glyph ||
+       g_native_2d_call_depth==0u)return;
+    const unsigned source=g_native_info_source_row;
+    const int focus=r2fix::native_graphics_info_focus_row();
+    if(source<1u || source>4u || focus<1 || focus>4)return;
+    const unsigned index=(unsigned(focus)-1u)*4u+(source-1u);
+    const std::uint32_t bit=1u<<index;
+    if(g_native_info_material_pairs_seen.fetch_or(
+           bit,std::memory_order_relaxed)&bit)return;
+    std::uint32_t words[4]{};
+    const bool readable=snapshot_native_glyph_palette(colors,words);
+    char line[240]{};
+    if(readable)
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-GRAPHICS-MATERIAL: focus=%d row=%u raw_dwords=%08X,%08X,%08X,%08X vertex0=%08X source=verified-native-glyph no-color-write=1",
+            focus,source,unsigned(words[0]),unsigned(words[1]),
+            unsigned(words[2]),unsigned(words[3]),
+            unsigned(quad[0].packed_color));
+    else
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-GRAPHICS-MATERIAL: focus=%d row=%u readable=0 no-color-write=1",
+            focus,source);
+    log_line(line);
+}
+#endif
+
 void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
                               float z, void* globals) {
     const auto original = reinterpret_cast<ColorSpriteFn>(
@@ -7045,6 +7102,10 @@ void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
     if (!original) return;
     report_first(g_color_seen, "RUNTIME-HUD: colored sprite callback reached");
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    // Compare source-row and native-focus color data before attempting
+    // to neutralize any highlight. Prior vertex-only white tint did not
+    // change the user's visible yellow/blue/red selection colors.
+    trace_native_information_glyph_palette(quad,colors);
     // Experimental info-only style. Never alter the original game's
     // vertex storage or its opaque secondary color/material pointer.
     if(g_native_info_remapped_glyph && quad &&
