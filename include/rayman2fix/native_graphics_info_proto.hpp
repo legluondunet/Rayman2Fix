@@ -10,6 +10,12 @@ void start_native_graphics_info_proto(GraphicsInfoLogger logger,
 // outside the validated Resolution page.
 bool remap_native_graphics_info_glyph(float& xmin,float& ymin,
                                       float& xmax,float& ymax) noexcept;
+// Only for the verified native font producer in the separately verified
+// BRIGHTNESS behavior, after the video information was shown. Returns
+// true to discard a stale cached VIDEO information glyph. Never touches
+// the original brightness slider or butterfly.
+bool suppress_cached_native_graphics_info_glyph(
+    float xmin,float ymin,float xmax,float ymax) noexcept;
 // Read-only, bounded geometry evidence for each non-glyph producer in
 // the verified video information page: screen image, frame and other.
 // route values match Native2DProducer (1,2,3). Never draws or hides.
