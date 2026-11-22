@@ -2,6 +2,16 @@
 #include <cstdint>
 namespace r2fix {
 enum class NativeVideoCall { selection, save, brightness };
+// The two hashed-executable VIDEO dispatcher slots may be guarded before
+// the Menu AI controller has been found. Once verified, guard only exact
+// model script children. Never suppress brightness (separate procedure 357).
+constexpr bool protected_menu_video_dispatch(
+    bool verified_hook_active,bool menu_level,bool exact_script_child,
+    bool approved_dispatch_fallback,NativeVideoCall which) noexcept {
+    return verified_hook_active && menu_level &&
+        (exact_script_child || approved_dispatch_fallback) &&
+        which!=NativeVideoCall::brightness;
+}
 constexpr bool suppress_menu_video_call(
     bool approved_exe, bool validated_controller, bool menu_level,
     bool exact_script_child, NativeVideoCall which) noexcept {
