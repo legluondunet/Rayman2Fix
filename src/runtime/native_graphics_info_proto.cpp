@@ -58,6 +58,7 @@ std::atomic<bool> g_protected{false};
 // the model is resolved. This prevents early user mode changes.
 std::atomic<bool> g_guard_menu_video_dispatch{false};
 std::atomic<bool> g_layout_active{false};
+std::atomic<int> g_info_focus_row{-1}; // read-only V17 snapshot for material probe
 std::atomic<bool> g_cached_video_text_in_brightness{false};
 std::atomic<unsigned> g_brightness_ghost_glyphs_suppressed{0};
 std::atomic<unsigned> g_reflowed_glyphs{0};
@@ -500,6 +501,7 @@ DWORD WINAPI worker(void*) {
             if(guarded) {
                 g_protected.store(false,std::memory_order_release);
                 g_layout_active.store(false,std::memory_order_release);
+                g_info_focus_row.store(-1,std::memory_order_release);
                 g_cached_video_text_in_brightness.store(
                     false,std::memory_order_release);
                 showed_information_in_menu=false;
@@ -560,6 +562,7 @@ DWORD WINAPI worker(void*) {
                     vars.selection_valid,vars.selection,
                     vars.activate_valid,vars.activate);
                 if(video_page) {
+                    g_info_focus_row.store(vars.selection,std::memory_order_release);
                     g_cached_video_text_in_brightness.store(
                         false,std::memory_order_release);
                     if(native_graphics_text_transition(true,g_language_table!=0)==
@@ -587,6 +590,7 @@ DWORD WINAPI worker(void*) {
                         last_latch=vars.activate;
                     }
                 } else {
+                    g_info_focus_row.store(-1,std::memory_order_release);
                     // The original MENU still retains rendered choices after
                     // a localization pointer restoration. Suppress ONLY
                     // their cached glyph quads while the verified brightness
@@ -631,6 +635,10 @@ DWORD WINAPI worker(void*) {
     return 0;
 }
 } // namespace
+int native_graphics_info_focus_row() noexcept {
+    return g_layout_active.load(std::memory_order_acquire) ?
+        g_info_focus_row.load(std::memory_order_acquire) : -1;
+}
 void observe_native_graphics_info_non_glyph(unsigned route,
     float xmin,float ymin,float xmax,float ymax) noexcept {
     if(route<1u || route>3u ||
