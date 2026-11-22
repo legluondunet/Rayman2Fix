@@ -70,6 +70,21 @@ int main() {
     expect(graphics_info_source_row({8,84,11,89})==0u);
     expect(graphics_info_source_row({NAN,45,50,50})==0u);
     expect(graphics_info_source_row({55,50,54,55})==0u);
+    // The raw material diagnostic may log exactly 16 distinct pairs,
+    // never outside the four verified VIDEO rows and four native focus
+    // values. Reject unknown focus or brightness, with no navigation edits.
+    std::uint32_t material_bits=0;
+    for(int focus=1;focus<=4;++focus)
+        for(unsigned source=1;source<=4;++source) {
+            const auto bit=graphics_info_material_sample_bit(source,focus);
+            expect(bit!=0u && (material_bits&bit)==0u);
+            material_bits|=bit;
+        }
+    expect(material_bits==0xFFFFu);
+    expect(graphics_info_material_sample_bit(0,1)==0u);
+    expect(graphics_info_material_sample_bit(5,1)==0u);
+    expect(graphics_info_material_sample_bit(1,0)==0u);
+    expect(graphics_info_material_sample_bit(1,5)==0u);
     // Wine regression 2026-11-22: the old VIDEO info text was cached
     // and rendered giant after entry into LUMINOSITY. This exact
     // brightness-only glyph mask leaves the original title, brightness
