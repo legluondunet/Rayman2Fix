@@ -16,6 +16,9 @@ bool remap_native_graphics_info_glyph(float& xmin,float& ymin,
 // the original brightness slider or butterfly.
 bool suppress_cached_native_graphics_info_glyph(
     float xmin,float ymin,float xmax,float ymax) noexcept;
+// Snapshot the verified native VIDEO focus (V17) for the scoped glyph
+// material diagnostic. Returns -1 for all other screens; no writes.
+int native_graphics_info_focus_row() noexcept;
 // Read-only, bounded geometry evidence for each non-glyph producer in
 // the verified video information page: screen image, frame and other.
 // route values match Native2DProducer (1,2,3). Never draws or hides.
