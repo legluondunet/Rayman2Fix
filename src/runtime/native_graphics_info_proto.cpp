@@ -53,6 +53,10 @@ SaveFunc g_original_save=nullptr;
 Evaluate g_eval=nullptr;
 std::atomic<bool> g_started{false};
 std::atomic<bool> g_protected{false};
+// Until the live MENU AI script is verified, guard only the two approved
+// VIDEO dispatcher IDs within MENU; switch to exact script children once
+// the model is resolved. This prevents early user mode changes.
+std::atomic<bool> g_guard_menu_video_dispatch{false};
 std::atomic<bool> g_layout_active{false};
 std::atomic<unsigned> g_reflowed_glyphs{0};
 // 3 non-glyph routes, up to 8 distinct geometries per route.
@@ -186,8 +190,11 @@ bool original_script_children(const MenuAiModel& model,
 void* __cdecl protected_select(void* actor,void* child) {
     if(g_protected.load(std::memory_order_acquire) && is_native_menu()) {
         const auto ptr=reinterpret_cast<std::uintptr_t>(child);
+        const bool guard_dispatch=
+            g_guard_menu_video_dispatch.load(std::memory_order_acquire);
         for(const auto& expected:g_select_children) {
-            if(expected.load(std::memory_order_relaxed)==ptr && ptr) {
+            if(ptr && (guard_dispatch ||
+                expected.load(std::memory_order_relaxed)==ptr)) {
                 // The exact child pointers were script-fingerprint verified
                 // before the dispatcher slots were installed. The native
                 // behavior may already have advanced by the time this x86
@@ -215,7 +222,8 @@ void* __cdecl protected_save(void* actor,void* child,void* result) {
     // Menu AI model. Protect it even if the native behavior transitions
     // before this function returns; never intercept unrelated F261 calls.
     if(g_protected.load(std::memory_order_acquire) && is_native_menu() &&
-       ptr && ptr==g_save_child.load(std::memory_order_relaxed) &&
+       ptr && (g_guard_menu_video_dispatch.load(std::memory_order_acquire) ||
+               ptr==g_save_child.load(std::memory_order_relaxed)) &&
        writable_slot(out) && writable_slot(out+12u)) {
         InterlockedExchange(reinterpret_cast<volatile LONG*>(out),1);
         InterlockedExchange(reinterpret_cast<volatile LONG*>(out+12u),6);
@@ -234,6 +242,7 @@ bool swap_slot(std::uintptr_t slot,std::uintptr_t original,
 void restore_callbacks() noexcept {
     const auto base=exe_base();
     g_protected.store(false,std::memory_order_release);
+    g_guard_menu_video_dispatch.store(false,std::memory_order_release);
     g_layout_active.store(false,std::memory_order_release);
     if(!base)return;
     if(writable_slot(base+kProcSelectSlot))
@@ -247,7 +256,7 @@ void restore_callbacks() noexcept {
             reinterpret_cast<PVOID>(base+kFuncSaveRva),
             reinterpret_cast<PVOID>(&protected_save));
 }
-bool install_callbacks(const MenuAiModel& model) noexcept {
+bool install_callbacks(const MenuAiModel* model) noexcept {
     const auto base=exe_base();
     if(!approved() || !base)return rejected("executable-not-approved");
     BYTE proc[sizeof(kProcSignature)]{},fn[sizeof(kSaveSignature)]{},
@@ -274,7 +283,12 @@ bool install_callbacks(const MenuAiModel& model) noexcept {
         return rejected("save-slot-protection");
     std::array<std::uintptr_t,4> children{};
     std::uintptr_t save=0;
-    if(!original_script_children(model,children,save))return false;
+    // When the MENU controller is still being located, use the native
+    // dispatcher IDs verified by this approved EXE fingerprint instead
+    // of leaving the original selectable modes live. Never intercept
+    // GLI_DRV_hChangeMode, required during game initialization.
+    const bool exact=model && model->valid();
+    if(exact && !original_script_children(*model,children,save))return false;
     for(unsigned i=0;i<4;++i)
         g_select_children[i].store(children[i],std::memory_order_relaxed);
     g_save_child.store(save,std::memory_order_release);
@@ -289,6 +303,7 @@ bool install_callbacks(const MenuAiModel& model) noexcept {
         restore_callbacks();
         return rejected("save-slot-compare-exchange");
     }
+    g_guard_menu_video_dispatch.store(!exact,std::memory_order_release);
     g_preflight_reported.store(0,std::memory_order_relaxed);
     return true;
 }
@@ -509,18 +524,33 @@ DWORD WINAPI worker(void*) {
             }
         } else {
             MenuAiModel model{};MenuAiState mind{};
+            const bool controller_ready=get_verified_menu_controller(model,mind);
             if(!guarded && static_cast<LONG>(now-next_retry)>=0) {
                 next_retry=now+1000u;
-                if(get_verified_menu_controller(model,mind)) {
-                    ++attempts;
-                    if(install_callbacks(model)) {
-                        guarded=true;
-                        // Video-action guards must stay active independently
-                        // of whether text is currently being drawn.
-                        g_protected.store(true,std::memory_order_release);
-                        g_logger("RUNTIME-GRAPHICS-INFO: status=commands-guarded native-select-id=356 native-save-id=261 brightness-id=357-unmodified");
-                    } else if(attempts==1 || attempts%5u==0)
-                        g_logger("RUNTIME-GRAPHICS-INFO: status=callbacks-unavailable original-menu-retained preflight-log=1");
+                ++attempts;
+                if(install_callbacks(controller_ready ? &model : nullptr)) {
+                    guarded=true;
+                    // Guard video writes even before the AI model scan
+                    // finishes. Never change brightness (procedure 357).
+                    g_protected.store(true,std::memory_order_release);
+                    g_logger(controller_ready ?
+                        "RUNTIME-GRAPHICS-INFO: status=commands-guarded scope=verified-script-children native-select-id=356 native-save-id=261 brightness-id=357-unmodified" :
+                        "RUNTIME-GRAPHICS-INFO: status=commands-guarded scope=MENU-video-dispatch native-select-id=356 native-save-id=261 brightness-id=357-unmodified controller=pending");
+                } else if(attempts==1 || attempts%5u==0)
+                    g_logger("RUNTIME-GRAPHICS-INFO: status=callbacks-unavailable original-menu-retained preflight-log=1");
+            }
+            if(guarded && controller_ready &&
+               g_guard_menu_video_dispatch.load(std::memory_order_acquire)) {
+                // Narrow to the four exact selection children and one save
+                // child as soon as the loaded AI model is verified.
+                std::array<std::uintptr_t,4> children{};
+                std::uintptr_t save=0;
+                if(original_script_children(model,children,save)) {
+                    for(unsigned i=0;i<4;++i)
+                        g_select_children[i].store(children[i],std::memory_order_relaxed);
+                    g_save_child.store(save,std::memory_order_release);
+                    g_guard_menu_video_dispatch.store(false,std::memory_order_release);
+                    g_logger("RUNTIME-GRAPHICS-INFO: status=commands-narrowed scope=verified-script-children controller=validated");
                 }
             }
             if(guarded) {
