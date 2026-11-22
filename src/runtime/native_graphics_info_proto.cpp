@@ -325,11 +325,19 @@ bool install_static_information_scripts(NativeStaticScripts& state) noexcept {
     state.ever_swapped=true;
     if(!swap_slot(state.items[1].slot,state.items[1].original,
                   state.items[1].clone)) {
-        if(writable_slot(state.items[0].slot))
-            InterlockedCompareExchangePointer(
+        // A partial installation must never lose rollback ownership.
+        // Keep active=true if the first slot cannot be restored now;
+        // the worker will retry restoration at VIDEO exit/MENU unload.
+        state.active=true;
+        if(writable_slot(state.items[0].slot)) {
+            const auto observed=InterlockedCompareExchangePointer(
                 reinterpret_cast<PVOID volatile*>(state.items[0].slot),
                 reinterpret_cast<PVOID>(state.items[0].original),
                 reinterpret_cast<PVOID>(state.items[0].clone));
+            if(observed==reinterpret_cast<PVOID>(state.items[0].clone) ||
+               observed==reinterpret_cast<PVOID>(state.items[0].original))
+                state.active=false;
+        }
         return false;
     }
     state.active=true;
