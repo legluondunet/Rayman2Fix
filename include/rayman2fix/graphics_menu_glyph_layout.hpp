@@ -4,6 +4,7 @@
 // of verified Resolution-page text is transformed. Never call this for
 // other menu pages or unknown executable/script states.
 #include <cmath>
+#include <cstdint>
 namespace r2fix {
 struct GraphicsInfoQuad { float left=0, top=0, right=0, bottom=0; };
 struct GraphicsInfoRow {
@@ -39,6 +40,16 @@ inline unsigned graphics_info_source_row(const GraphicsInfoQuad& in) noexcept {
         if(mid>=kGraphicsInfoRows[i].first_y &&
            mid<kGraphicsInfoRows[i].last_y)return i+1u;
     return 0u;
+}
+// At most one material sample per (source glyph row, native focus).
+// Returning zero rejects the unknown MENU/brightness states. The 16
+// flags fit in a single atomic uint32 and never affect game navigation.
+constexpr std::uint32_t graphics_info_material_sample_bit(
+    unsigned source_row,int focus_row) noexcept {
+    if(source_row<1u || source_row>4u ||
+       focus_row<1 || focus_row>4)return 0u;
+    return std::uint32_t(1u) <<
+           ((unsigned(focus_row)-1u)*4u+(source_row-1u));
 }
 // A native VIDEO choice widget can retain text prepared with the
 // information pointers after the original localization table is restored.
