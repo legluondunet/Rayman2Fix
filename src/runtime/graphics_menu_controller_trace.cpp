@@ -97,7 +97,7 @@ struct ScanResult {
 // Scan owned, committed, writable/private game memory only. A cheap flag
 // filter avoids calling ReadProcessMemory for arbitrary 4-byte words.
 // The complete script/brightness fingerprint must match before reporting.
-ScanResult locate_controller() noexcept {
+ScanResult locate_controller(std::uintptr_t& resume_cursor) noexcept {
     ScanResult out{};
     MenuAiModel direct{};
     if(check_model(kSceneModelHint,direct)) {
@@ -112,7 +112,11 @@ ScanResult locate_controller() noexcept {
     const auto last=std::min<std::uintptr_t>(
         reinterpret_cast<std::uintptr_t>(system.lpMaximumApplicationAddress),
         0x7FFF0000u);
-    std::uintptr_t cursor=0x10000u;
+    // Continue at the first unexamined region on subsequent attempts.
+    // Restart from the low address only after reaching the end of the
+    // 32-bit address space or when the menu level is reloaded.
+    std::uintptr_t cursor=std::max<std::uintptr_t>(resume_cursor,0x10000u);
+    if(cursor>=last)cursor=0x10000u;
     unsigned processed=0;
     while(cursor<last && processed<kMemoryBudget) {
         MEMORY_BASIC_INFORMATION info{};
@@ -122,10 +126,13 @@ ScanResult locate_controller() noexcept {
         const auto end=std::min(last,
            start+static_cast<std::uintptr_t>(info.RegionSize));
         if(end<=cursor)break;
-        cursor=end;
         if(info.State!=MEM_COMMIT || info.Type!=MEM_PRIVATE ||
-           !readable_writable(info.Protect))continue;
-        for(auto at=start;at<end && processed<kMemoryBudget;) {
+           !readable_writable(info.Protect)) {
+            cursor=end;
+            continue;
+        }
+        for(auto at=std::max(start,cursor);
+            at<end && processed<kMemoryBudget;) {
             const SIZE_T length=static_cast<SIZE_T>(
                 std::min<std::uintptr_t>(kChunk+20u,end-at));
             SIZE_T copied=0;
@@ -156,10 +163,12 @@ ScanResult locate_controller() noexcept {
             if(out.matches>1u)break;
             const auto advance=std::min<std::uintptr_t>(kChunk,end-at);
             at+=advance;
+            cursor=at; // preserve exact progress within a large allocation
             processed+=static_cast<unsigned>(advance);
         }
         if(out.matches>1u)break;
     }
+    resume_cursor=cursor>=last ? 0x10000u : cursor;
     out.scanned_mib=(processed+1024u*1024u-1u)/(1024u*1024u);
     if(out.matches==1u) {
         // In the approved SNA, Mind immediately precedes AIModel by 24
@@ -197,6 +206,7 @@ DWORD WINAPI worker(void*) {
     MenuAiModel model{};
     MenuAiState mind{};
     unsigned tries=0,reports=0;
+    std::uintptr_t scan_cursor=0x10000u;
     int prior_normal=-200,prior_reflex=-200;
     int prior_selection=-200,prior_activate=-200;
     bool announced=false;
@@ -219,6 +229,7 @@ DWORD WINAPI worker(void*) {
             g_verified_model.store(0,std::memory_order_release);
             g_verified_mind.store(0,std::memory_order_release);
             model={}; mind={}; tries=0; announced=false;
+            scan_cursor=0x10000u;
             next_scan=now+500u;
             Sleep(200);
             continue;
@@ -234,7 +245,7 @@ DWORD WINAPI worker(void*) {
            static_cast<LONG>(now-next_scan)>=0) {
             next_scan=now+kScanPeriodMs;
             ++tries;
-            const auto scanned=locate_controller();
+            const auto scanned=locate_controller(scan_cursor);
             if(scanned.matches==1u && scanned.mind.valid()) {
                 model=scanned.model;
                 mind=scanned.mind;
