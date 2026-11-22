@@ -1,10 +1,19 @@
 #pragma once
+#include <cstdint>
 // Compile-time feature presence and the user's INI logging flag are
 // different concerns. The experimental native VIDEO information screen
 // and its script-level video-write guards must initialize even at Log=0.
 // Passive observations which exist solely to write diagnostics remain
 // disabled unless logging is explicitly enabled.
 namespace r2fix {
+// A bounded scan may stop part-way through a large MEM_PRIVATE allocation.
+// Preserve the address of the first unread byte, not just the region base.
+// Only wrap after reaching the end of the eligible 32-bit space.
+constexpr std::uintptr_t menu_scan_resume_cursor(
+    std::uintptr_t next,std::uintptr_t address_space_end) noexcept {
+    return next>=0x10000u && next<address_space_end ?
+        next : static_cast<std::uintptr_t>(0x10000u);
+}
 constexpr bool menu_controller_worker_required(
     bool logging_enabled,bool graphics_info_compiled) noexcept {
     return graphics_info_compiled || logging_enabled;
