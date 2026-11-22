@@ -12,7 +12,7 @@ int main() {
     expect(out.top>=28 && out.bottom<34);
     expect(layout_graphics_info_quad({55,34,58,39},out));
     expect(out.top>=39 && out.bottom<45);
-    expect(layout_graphics_info_quad({8,45,11,50},out));
+    expect(layout_graphics_info_quad({55,45,58,50},out));
     expect(out.top>=50 && out.bottom<57);
     expect(layout_graphics_info_quad({55,55,58,60},out));
     expect(out.top>=61 && out.bottom<68);
@@ -39,7 +39,7 @@ int main() {
     // Every data-row first glyph starts in the left column.
     // The unmodified VIDEO heading is deliberately excluded.
     const GraphicsInfoQuad samples[]={
-        {55,34,58,39}, {8,45,11,50},
+        {55,34,58,39}, {55,45,58,50},
         {55,55,58,60}, {47,64,50,69}};
     for(const auto& src:samples) {
         GraphicsInfoQuad transformed{};
@@ -47,5 +47,18 @@ int main() {
         expect(transformed.left>=5 && transformed.left<=12);
         expect(transformed.right<15);
     }
+    // The maintainer's 2026-11-22 screenshot showed the D3D9 line
+    // ~170 screen pixels to the right of every other information row.
+    // Its source anchor was 55%, not the old guessed 8%; equal native
+    // X anchors must map to equal screen X across all four rows.
+    GraphicsInfoQuad gpu{},driver{},depth{},output{};
+    expect(layout_graphics_info_quad({55,34,59,39},gpu));
+    expect(layout_graphics_info_quad({55,45,59,50},driver));
+    expect(layout_graphics_info_quad({55,55,59,60},depth));
+    expect(layout_graphics_info_quad({47,64,51,69},output));
+    expect(std::fabs(gpu.left-driver.left)<0.0001f);
+    expect(std::fabs(gpu.left-depth.left)<0.0001f);
+    expect(std::fabs(gpu.left-output.left)<0.0001f);
+    expect(output.top<gpu.top && gpu.top<driver.top && driver.top<depth.top);
     return 0;
 }
