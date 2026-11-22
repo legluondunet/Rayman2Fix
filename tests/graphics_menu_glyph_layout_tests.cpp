@@ -60,5 +60,19 @@ int main() {
     expect(std::fabs(gpu.left-depth.left)<0.0001f);
     expect(std::fabs(gpu.left-output.left)<0.0001f);
     expect(output.top<gpu.top && gpu.top<driver.top && driver.top<depth.top);
+    // Wine regression 2026-11-22: the old VIDEO info text was cached
+    // and rendered giant after entry into LUMINOSITY. This exact
+    // brightness-only glyph mask leaves the original title, brightness
+    // label, slider (non-glyph) and butterfly untouched.
+    for(const auto& src:samples) {
+        expect(cached_video_glyph_in_brightness(true,true,src));
+        expect(!cached_video_glyph_in_brightness(false,true,src));
+        expect(!cached_video_glyph_in_brightness(true,false,src));
+    }
+    expect(!cached_video_glyph_in_brightness(true,true,{35,20,39,25}));
+    expect(!cached_video_glyph_in_brightness(true,true,{48,84,52,89}));
+    expect(!cached_video_glyph_in_brightness(true,true,{5,45,9,50}));
+    expect(!cached_video_glyph_in_brightness(true,true,{NAN,45,60,50}));
+    expect(!cached_video_glyph_in_brightness(true,true,{50,31,49,34}));
     return 0;
 }
