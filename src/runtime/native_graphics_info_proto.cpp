@@ -193,8 +193,9 @@ void* __cdecl protected_select(void* actor,void* child) {
         const bool guard_dispatch=
             g_guard_menu_video_dispatch.load(std::memory_order_acquire);
         for(const auto& expected:g_select_children) {
-            if(ptr && (guard_dispatch ||
-                expected.load(std::memory_order_relaxed)==ptr)) {
+            if(ptr && protected_menu_video_dispatch(
+                   true,true,expected.load(std::memory_order_relaxed)==ptr,
+                   guard_dispatch,NativeVideoCall::selection)) {
                 // The exact child pointers were script-fingerprint verified
                 // before the dispatcher slots were installed. The native
                 // behavior may already have advanced by the time this x86
@@ -222,8 +223,10 @@ void* __cdecl protected_save(void* actor,void* child,void* result) {
     // Menu AI model. Protect it even if the native behavior transitions
     // before this function returns; never intercept unrelated F261 calls.
     if(g_protected.load(std::memory_order_acquire) && is_native_menu() &&
-       ptr && (g_guard_menu_video_dispatch.load(std::memory_order_acquire) ||
-               ptr==g_save_child.load(std::memory_order_relaxed)) &&
+       ptr && protected_menu_video_dispatch(
+           true,true,ptr==g_save_child.load(std::memory_order_relaxed),
+           g_guard_menu_video_dispatch.load(std::memory_order_acquire),
+           NativeVideoCall::save) &&
        writable_slot(out) && writable_slot(out+12u)) {
         InterlockedExchange(reinterpret_cast<volatile LONG*>(out),1);
         InterlockedExchange(reinterpret_cast<volatile LONG*>(out+12u),6);
