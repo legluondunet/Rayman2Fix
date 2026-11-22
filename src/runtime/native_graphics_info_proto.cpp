@@ -60,6 +60,7 @@ std::array<std::array<std::atomic<std::uint32_t>,8>,3> g_image_quad_samples{};
 std::array<std::atomic<unsigned>,3> g_image_route_seen{};
 std::atomic<unsigned> g_output_w{0};
 std::atomic<unsigned> g_output_h{0};
+std::atomic<bool> g_classic_4_3{false};
 std::array<std::atomic<std::uintptr_t>,4> g_select_children{};
 std::atomic<std::uintptr_t> g_save_child{0};
 std::array<std::array<char,56>,6> g_rows{};
@@ -383,7 +384,13 @@ void build_texts() noexcept {
     // repeating a second information title collides with D3D9.
     std::snprintf(g_rows[0].data(),g_rows[0].size()," ");
     char line[100]{};
-    std::snprintf(line,sizeof(line),"%ux%u %u:%u",render_w,render_h,x,y);
+    // The launcher knows whether the player requested 4:3 or Auto.
+    // Do not infer this from the output dimensions: a physical 4:3
+    // monitor can legitimately run in Auto as well.
+    std::snprintf(line,sizeof(line),"%ux%u %u:%u %s",
+                  render_w,render_h,x,y,
+                  g_classic_4_3.load(std::memory_order_acquire)?
+                      "4:3":"AUTO");
     text_row(1,"OUTPUT:",line);
     text_row(2,"GPU:",adapter.data());
     text_row(3,"D3D9:",driver.data());
@@ -642,10 +649,12 @@ bool remap_native_graphics_info_glyph(float& xmin,float& ymin,
 }
 void start_native_graphics_info_proto(GraphicsInfoLogger logger,
                                        unsigned output_width,
-                                       unsigned output_height) noexcept {
+                                       unsigned output_height,
+                                       bool classic_4_3) noexcept {
     if(!logger || g_started.exchange(true,std::memory_order_acq_rel))return;
     g_output_w.store(output_width,std::memory_order_release);
     g_output_h.store(output_height,std::memory_order_release);
+    g_classic_4_3.store(classic_4_3,std::memory_order_release);
     if(!approved()) {
         logger("RUNTIME-GRAPHICS-INFO: status=unsupported-image no-changes");
         return;
