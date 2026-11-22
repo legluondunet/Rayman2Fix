@@ -375,6 +375,13 @@ Bottom2DStats g_native_bottom_2d[4];
 // driver vertices, without changing the existing thread-local
 // double-correction bypass. Native 2D callbacks are synchronous.
 thread_local unsigned g_current_native_route=3;
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+// The original native glyph percent-call and the colored driver call are
+// synchronous on the same render thread. Do not infer target glyphs from
+// color, position or arbitrary global screens outside this verified scope.
+thread_local bool g_native_info_remapped_glyph=false;
+std::atomic<unsigned> g_native_info_tinted_quads{0};
+#endif
 thread_local float g_native_input_left=0.0f;
 thread_local float g_native_input_right=0.0f;
 thread_local float g_native_mapped_left=0.0f;
@@ -5771,8 +5778,10 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // Experimental Resolution page only: position existing native font
     // glyph quads into a regular 4:3-safe information grid. Non-glyph
     // producers (including the brightness bar) remain untouched.
+    bool information_glyph=false;
     if(producer==Native2DProducer::Glyph) {
-        r2fix::remap_native_graphics_info_glyph(xmin,ymin,xmax,ymax);
+        information_glyph=
+            r2fix::remap_native_graphics_info_glyph(xmin,ymin,xmax,ymax);
     } else {
         r2fix::observe_native_graphics_info_non_glyph(
             static_cast<unsigned>(producer),xmin,ymin,xmax,ymax);
@@ -5786,7 +5795,14 @@ void __cdecl native_2d_percent_sprite(void* viewport,
            !g_native_2d_invalid_logged.exchange(
                true,std::memory_order_relaxed))
             log_line("RUNTIME-HUD: native 2D input geometry invalid; original percent coordinates retained");
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+        const bool previous_info=g_native_info_remapped_glyph;
+        g_native_info_remapped_glyph=information_glyph;
+#endif
         original(viewport,xmin,ymin,xmax,ymax,material);
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+        g_native_info_remapped_glyph=previous_info;
+#endif
         return;
     }
     g_native_2d_calls.fetch_add(1,std::memory_order_relaxed);
@@ -5804,7 +5820,14 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     g_native_mapped_left=left;
     g_native_mapped_right=right;
     ++g_native_2d_call_depth;
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    const bool previous_info=g_native_info_remapped_glyph;
+    g_native_info_remapped_glyph=information_glyph;
+#endif
     original(viewport,left,ymin,right,ymax,material);
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    g_native_info_remapped_glyph=previous_info;
+#endif
     --g_native_2d_call_depth;
     g_current_native_route=previous_route;
     g_native_input_left=prev_input_l;
@@ -7001,6 +7024,27 @@ void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
         g_color_sprite_original.load(std::memory_order_acquire));
     if (!original) return;
     report_first(g_color_seen, "RUNTIME-HUD: colored sprite callback reached");
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    // Experimental info-only style. Never alter the original game's
+    // vertex storage or its opaque secondary color/material pointer.
+    if(g_native_info_remapped_glyph && quad &&
+       r2fix::is_screen_sprite_quad(quad)) {
+        r2fix::HudVertex styled[4]{};
+        std::memcpy(styled,quad,sizeof(styled));
+        if(r2fix::tint_native_information_glyph(styled,true)) {
+            if(g_native_2d_call_depth!=0) {
+                probe_native_2d_driver(quad,"colored");
+                g_native_2d_passthrough_color.fetch_add(
+                    1,std::memory_order_relaxed);
+            }
+            if(g_native_info_tinted_quads.fetch_add(
+                    1u,std::memory_order_relaxed)==0u)
+                log_line("RUNTIME-GRAPHICS-STYLE: status=first-verified-info-glyph color=opaque-white source=vertex-copy original-material=untouched experimental=1");
+            original(styled,colors,z,globals);
+            return;
+        }
+    }
+#endif
     if (g_native_2d_call_depth!=0) {
         probe_native_2d_driver(quad,"colored");
         g_native_2d_passthrough_color.fetch_add(1,std::memory_order_relaxed);
