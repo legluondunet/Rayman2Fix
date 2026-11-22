@@ -311,7 +311,7 @@ if(BUILD_TESTING)
     tests/native_graphics_text_storage_tests.cpp)
   target_include_directories(native_graphics_text_storage_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  add_test(NAME graphics-menu-stable-text-pointer-lifetime
+  add_test(NAME graphics-menu-video-pointer-restore
     COMMAND native_graphics_text_storage_tests)
   add_executable(graphics_menu_cursor_actor_anchor_tests
     tests/graphics_menu_cursor_actor_anchor_tests.cpp)
