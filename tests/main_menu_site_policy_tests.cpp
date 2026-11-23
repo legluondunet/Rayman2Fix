@@ -1,4 +1,6 @@
 #include "rayman2fix/main_menu_site_policy.hpp"
+#include "rayman2fix/main_menu_site_script_policy.hpp"
+#include <vector>
 #include <cstdlib>
 #include <initializer_list>
 using namespace r2fix;
@@ -21,5 +23,27 @@ int main(){
         "rayman2.exe","https://rayman2.com.evil.example/"}) {
         check(!site_redirect_approved_url(uri));
     }
+    std::vector<NativeMenuScriptNode> original(kSiteScriptNodes);
+    original[kSiteProcedureNode]={369u,0u,7u,4u};
+    original[kSiteUrlNode]={0x221122u,0u,8u,20u};
+    original.back()={0u,0u,0u,8u};
+    const auto hash=menu_site_script_shape(original.data(),
+                                           kSiteScriptNodes);
+    check(redirect_menu_site_script(original.data(),kSiteScriptNodes,
+          0x221122u,0x334433u,hash));
+    check(original[kSiteUrlNode].parameter==0x334433u);
+    check(!redirect_menu_site_script(original.data(),kSiteScriptNodes,
+          0x221122u,0x334433u,hash));
+    original[kSiteUrlNode].parameter=0x221122u;
+    original[kSiteProcedureNode].parameter=368u;
+    check(!redirect_menu_site_script(original.data(),kSiteScriptNodes,
+          0x221122u,0x334433u,hash));
+    original[kSiteProcedureNode].parameter=369u;
+    original[kSiteUrlNode].type=12u;
+    check(!redirect_menu_site_script(original.data(),kSiteScriptNodes,
+          0x221122u,0x334433u,hash));
+    original[kSiteUrlNode].type=20u;
+    check(!redirect_menu_site_script(original.data(),100u,
+          0x221122u,0x334433u,hash));
     return 0;
 }
