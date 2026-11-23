@@ -561,11 +561,14 @@ bool install_native_disabled_video_choices(
             g_logger(line);
             valid=false;reason="script-shape";break;
         }
-        // Scripts 1 and 4 contain the native focus-sensitive
-        // terminal JFFTXT command. Validate their exact original
-        // structure before any local V14/navigation modifications.
-        const auto* font_plan=k==0u ? &kNativeInfoTextPlans[0] :
-                              k==3u ? &kNativeInfoTextPlans[1] : nullptr;
+        // MENU normal-5 script 1 initializes the parent Options
+        // menu. Its text handles 371/372/373/370 are VIDEO, SOUND,
+        // OTHER OPTIONS and LANGUAGE; V14[0..2] are parent entries.
+        // Do not alter its state assignments or JFFTXT focus.
+        // Keep the identical verified private copy for atomic
+        // script-list publication; only VIDEO script 4 may freeze text.
+        if(k==0u)continue;
+        const auto* font_plan=k==3u ? &kNativeInfoTextPlans[1] : nullptr;
         if(font_plan && !native_video_static_font_preflight(
                 copy,plan,*font_plan)) {
             valid=false;reason="font-focus-preflight";break;
@@ -663,7 +666,7 @@ bool install_native_disabled_video_choices(
         std::memory_order_release);
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
     g_brightness_transition_disabled.store(true,std::memory_order_release);
-    g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1,2,3,4 brightness-transition=suppressed font-focus=static-0 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
+    g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1-original,2,3,4 brightness-transition=suppressed font-focus=static-0-video4-only parent-options-preserved=1 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
     return true;
 }
 void restore_native_disabled_video_choices(
