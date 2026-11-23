@@ -25,6 +25,7 @@
 #include "rayman2fix/graphics_menu_controller_vars.hpp"
 #include "rayman2fix/native_graphics_info_policy.hpp"
 #include "rayman2fix/native_graphics_static_text_policy.hpp"
+#include "rayman2fix/native_video_disable_choices.hpp"
 #include "rayman2fix/native_graphics_info_proto.hpp"
 
 #if !defined(_M_IX86)
@@ -476,6 +477,136 @@ void trace_native_static_script_preflight(const MenuAiModel& model) noexcept {
         g_logger(line);
     }
 }
+// Live VIDEO option-state suppression. Disabled choices use the game's
+// own V14 UI state=1 (the same disabled state as the original inactive
+// save-resolution entry). Brightness stays state=2, V17 is NEVER forced.
+// Only two copies of complete, shape-verified native scripts are patched;
+// the original script memory, source assets and code sections stay intact.
+struct NativeChoicesPatch {
+    struct Slot {
+        std::uintptr_t pointer_slot=0;
+        std::uintptr_t original=0;
+        NativeMenuScriptNode* copy=nullptr;
+    };
+    std::array<Slot,2> slots{};
+    bool attempted=false;
+    bool active=false;
+    bool ever_swapped=false;
+};
+bool install_native_disabled_video_choices(
+    NativeChoicesPatch& state,const MenuAiModel& model) noexcept {
+    if(!approved() || !model.valid() || state.attempted)return false;
+    state.attempted=true;
+    const std::uintptr_t entry=model.normal_entries+5u*12u;
+    std::uint32_t scripts=0;
+    std::uint8_t count=0;
+    if(!read32(entry,scripts) || !read8(entry+8u,count) ||
+       count!=5u || !menu_safe_ptr(scripts,5u*4u)) {
+        g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=normal5-script-list read-only-original=1");
+        return false;
+    }
+    std::array<NativeChoicesPatch::Slot,2> prepared{};
+    bool valid=true;
+    const char* reason="unverified";
+    for(unsigned k=0u;k<prepared.size();++k) {
+        const auto& plan=kVideoDisablePlans[k];
+        const auto slot=std::uintptr_t(scripts)+4u*plan.script_index;
+        std::uint32_t original=0;
+        const SIZE_T bytes=SIZE_T(plan.count)*sizeof(NativeMenuScriptNode);
+        if(!writable_slot(slot) || !read32(slot,original) ||
+           !menu_safe_ptr(original,unsigned(bytes))) {
+            valid=false;reason="slot-or-script-pointer";break;
+        }
+        auto* copy=static_cast<NativeMenuScriptNode*>(
+            VirtualAlloc(nullptr,bytes,MEM_RESERVE|MEM_COMMIT,
+                         PAGE_READWRITE));
+        if(!copy) {
+            valid=false;reason="allocation";break;
+        }
+        prepared[k]={slot,original,copy};
+        if(!read_bytes(original,copy,bytes)) {
+            valid=false;reason="unreadable-script";break;
+        }
+        const auto observed=native_video_script_shape_hash(copy,plan.count);
+        if(observed!=plan.original_shape_hash) {
+            char line[220]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-GRAPHICS-CHOICES: status=script-shape-mismatch script=%u observed=%08X%08X approved=%08X%08X no-write=1",
+                plan.script_index,unsigned(observed>>32),unsigned(observed),
+                unsigned(plan.original_shape_hash>>32),
+                unsigned(plan.original_shape_hash));
+            g_logger(line);
+            valid=false;reason="script-shape";break;
+        }
+        if(!disable_native_video_choices(copy,plan)) {
+            valid=false;reason="script-assignments";break;
+        }
+    }
+    if(!valid) {
+        for(auto& item:prepared)
+            if(item.copy)VirtualFree(item.copy,0,MEM_RELEASE);
+        char line[160]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=%s original-scripts-unchanged=1",
+            reason);
+        g_logger(line);
+        return false;
+    }
+    // Swap only on an approved MENU state OUTSIDE normal-5 script
+    // execution. Own all previously published clones until process exit:
+    // an in-flight original game script may still hold their addresses.
+    if(!swap_slot(prepared[0].pointer_slot,prepared[0].original,
+                 prepared[0].copy)) {
+        for(auto& item:prepared)
+            if(item.copy)VirtualFree(item.copy,0,MEM_RELEASE);
+        g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=first-script-cas");
+        return false;
+    }
+    state.ever_swapped=true;
+    state.slots=prepared;
+    if(!swap_slot(prepared[1].pointer_slot,prepared[1].original,
+                 prepared[1].copy)) {
+        state.active=true;
+        if(writable_slot(prepared[0].pointer_slot)) {
+            const auto seen=InterlockedCompareExchangePointer(
+                reinterpret_cast<PVOID volatile*>(prepared[0].pointer_slot),
+                reinterpret_cast<PVOID>(prepared[0].original),
+                reinterpret_cast<PVOID>(prepared[0].copy));
+            if(seen==reinterpret_cast<PVOID>(prepared[0].copy) ||
+               seen==reinterpret_cast<PVOID>(prepared[0].original))
+                state.active=false;
+        }
+        g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=second-script-cas first-rollback-guarded=1");
+        return false;
+    }
+    state.active=true;
+    g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-options-copies-installed scripts=3,4 options=1,2,3 native-disabled-state=1 brightness=original v17=untouched");
+    return true;
+}
+void restore_native_disabled_video_choices(
+    NativeChoicesPatch& state) noexcept {
+    if(!state.ever_swapped)return;
+    unsigned restored=0u;
+    for(auto& item:state.slots) {
+        if(!item.pointer_slot || !writable_slot(item.pointer_slot))
+            continue;
+        const auto found=InterlockedCompareExchangePointer(
+            reinterpret_cast<PVOID volatile*>(item.pointer_slot),
+            reinterpret_cast<PVOID>(item.original),
+            reinterpret_cast<PVOID>(item.copy));
+        if(found==reinterpret_cast<PVOID>(item.copy) ||
+           found==reinterpret_cast<PVOID>(item.original))
+            ++restored;
+    }
+    // Never free a published copy; race-free reclamation requires an AI
+    // interpreter quiescence guarantee that this experiment does not have.
+    char line[170]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-GRAPHICS-CHOICES: status=script-copies-restore-attempt confirmed=%u/2 copied-buffers-retained=1",
+        restored);
+    g_logger(line);
+    state=NativeChoicesPatch{};
+}
 bool patch_text_table() noexcept {
     if(g_language_table)return true;
     const auto table=text_slot_table();
@@ -540,6 +671,7 @@ DWORD WINAPI worker(void*) {
     bool showed_information_in_menu=false;
     bool reported_brightness_panel=false;
     bool reported_static_script_preflight=false;
+    NativeChoicesPatch disabled_choices{};
     unsigned last_latch=~0u;
     // Keep the guard active while the process lives. Revert script hooks
     // when the original Menu level is unloaded; never silently expose
@@ -548,6 +680,8 @@ DWORD WINAPI worker(void*) {
         const DWORD now=GetTickCount();
         const bool in_menu=is_native_menu();
         if(!in_menu) {
+            if(disabled_choices.ever_swapped)
+                restore_native_disabled_video_choices(disabled_choices);
             if(guarded) {
                 g_protected.store(false,std::memory_order_release);
                 g_layout_active.store(false,std::memory_order_release);
@@ -582,6 +716,13 @@ DWORD WINAPI worker(void*) {
                         "RUNTIME-GRAPHICS-INFO: status=commands-guarded scope=MENU-video-dispatch native-select-id=356 native-save-id=261 brightness-id=357-unmodified controller=pending");
                 } else if(attempts==1 || attempts%5u==0)
                     g_logger("RUNTIME-GRAPHICS-INFO: status=callbacks-unavailable original-menu-retained preflight-log=1");
+            }
+            if(guarded && controller_ready &&
+               mind.normal!=5 && !disabled_choices.attempted) {
+                // Never exchange script pointers during normal-5 execution.
+                // Controller discovery on the parent menu normally occurs
+                // before the first VIDEO entry, avoiding startup races.
+                install_native_disabled_video_choices(disabled_choices,model);
             }
             if(guarded && controller_ready &&
                g_guard_menu_video_dispatch.load(std::memory_order_acquire)) {
