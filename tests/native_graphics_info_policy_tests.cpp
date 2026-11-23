@@ -101,6 +101,32 @@ require(!graphics_info_restore_pinned_text(true,true));
 require(graphics_info_restore_pinned_text(false,true));
 require(graphics_info_restore_pinned_text(true,false));
 require(graphics_info_restore_pinned_text(false,false));
+// The 10:18 session contains a repeat normal-3 entry with
+// V17 0->1->0 before normal-5. That is still a single approved
+// read-only VIDEO transition; old glyphs must stay suppressed.
+for(int focus:{0,1})
+ require(graphics_info_readonly_preparation(
+     true,true,true,3,0,true,focus,true,0,true));
+require(graphics_info_readonly_preparation(
+     true,true,true,3,0,true,1,true,1,true));
+require(!graphics_info_readonly_preparation(
+     true,true,true,3,0,true,1,true,0,false));
+require(!graphics_info_readonly_preparation(
+     true,true,true,3,0,true,2,true,0,true));
+require(!graphics_info_readonly_preparation(
+     true,true,true,11,0,true,1,true,0,true));
+require(!graphics_info_readonly_preparation(
+     true,true,true,5,0,true,1,true,0,true));
+require(!graphics_info_readonly_preparation(
+     true,true,true,3,1,true,1,true,0,true));
+require(!graphics_info_readonly_preparation(
+     true,true,true,3,0,true,1,true,2,true));
+require(!graphics_info_readonly_preparation(
+     false,true,true,3,0,true,1,true,0,true));
+require(!graphics_info_readonly_preparation(
+     true,false,true,3,0,true,1,true,0,true));
+require(!graphics_info_readonly_preparation(
+     true,true,false,3,0,true,1,true,0,true));
 // The normal-3 native MENU preparation script contains VIDEO text
 // handles. Install their new pointers before normal-5 caches glyphs.
 require(graphics_info_video_preparation(
