@@ -1,0 +1,84 @@
+#pragma once
+// Approved shared Fix.sna 23/6 controller: exact original VIDEO scripts.
+// Runtime uses these policies ONLY in a private copy, after matching the
+// complete original script shape. No copyrighted data or source is shipped.
+#include <cstdint>
+#include "rayman2fix/native_video_disable_choices.hpp"
+namespace r2fix {
+struct PauseVideoScriptPlan {
+    unsigned behavior,script,count;
+    std::uint64_t shape;
+};
+constexpr PauseVideoScriptPlan kPauseVideoPlans[5]{
+    {9u,1u,304u,0x3184f1d2bf00dd9dULL},
+    {9u,2u,424u,0xb6a5f08ae8ef7914ULL},
+    {9u,3u,33u,0x9902892c1e0da3c5ULL},
+    {9u,4u,497u,0x3f613086ca03920bULL},
+    {15u,2u,45u,0x9a1d153d13735006ULL}
+};
+inline bool rewrite_pause_video_script(
+    NativeMenuScriptNode* copy,const PauseVideoScriptPlan& p) noexcept {
+    if(!copy || native_video_script_shape_hash(copy,p.count)!=p.shape ||
+       copy[p.count-1u].type!=8u ||
+       copy[p.count-1u].indent!=0u)return false;
+    if(p.behavior==9u && p.script==1u) {
+        // Source V17 is the maximum selection and V16 is its cursor.
+        // The original 0..3 range is replaced by the known 1..1 native
+        // singleton pattern. Keep the script's title, SETAGO and
+        // all parent ESC/Options navigation byte-for-byte.
+        if(!native_video_direct_assignment(copy,p.count,143u,17u,3u) ||
+           !native_video_direct_assignment(copy,p.count,146u,16u,0u))
+            return false;
+        copy[143].parameter=1u;
+        copy[146].parameter=1u;
+        return true;
+    }
+    if(p.behavior==9u && p.script==2u) {
+        // Owns all 3 mutable VID_SelectResolution calls and save/labels.
+        if(copy[0].type!=0u || copy[0].indent!=1u ||
+           copy[1].type!=1u || copy[1].parameter!=45u ||
+           copy[40].type!=4u || copy[40].parameter!=356u ||
+           copy[50].type!=4u || copy[50].parameter!=356u ||
+           copy[60].type!=4u || copy[60].parameter!=356u ||
+           copy[71].type!=27u || copy[71].parameter!=379u ||
+           copy[101].type!=27u || copy[101].parameter!=371u ||
+           copy[422].type!=3u || copy[422].parameter!=261u)
+            return false;
+        copy[0]={0u,0u,0u,8u};
+        return true;
+    }
+    if(p.behavior==9u && p.script==3u) {
+        // Brightness page has been removed from the readonly VIDEO menu.
+        if(copy[0].type!=0u || copy[0].indent!=1u ||
+           copy[1].type!=1u || copy[1].parameter!=4u ||
+           copy[2].type!=11u || copy[2].parameter!=16u ||
+           copy[3].type!=12u || copy[3].parameter!=5u ||
+           copy[29].type!=4u || copy[29].parameter!=71u)
+            return false;
+        copy[0]={0u,0u,0u,8u};
+        return true;
+    }
+    if(p.behavior==9u && p.script==4u) {
+        // Keep two source-position SetAGO calls to preserve original
+        // animated menu actor, then terminate old resolution widgets.
+        if(copy[0].type!=0u || copy[0].parameter!=3u ||
+           copy[3].type!=4u || copy[3].parameter!=503u ||
+           copy[15].type!=4u || copy[15].parameter!=503u ||
+           copy[27].type!=2u || copy[27].parameter!=11u ||
+           copy[34].type!=27u || copy[34].parameter!=379u)
+            return false;
+        copy[27]={0u,0u,0u,8u};
+        return true;
+    }
+    if(p.behavior==15u && p.script==2u) {
+        // Another original resolution procedure in this shared model.
+        if(copy[0].type!=0u || copy[0].indent!=1u ||
+           copy[1].type!=1u || copy[1].parameter!=45u ||
+           copy[6].type!=4u || copy[6].parameter!=356u)
+            return false;
+        copy[0]={0u,0u,0u,8u};
+        return true;
+    }
+    return false;
+}
+} // namespace r2fix
