@@ -32,7 +32,7 @@ int main() {
     nodes[31].parameter=static_cast<std::uint32_t>(reflex5);
     check(native_video_script_shape_hash(nodes.data(),nodes.size())==
           kNativeBrightnessTransitionShape);
-    const auto original=nodes;
+    auto original=nodes;
     check(suppress_native_video_brightness_transition(
         nodes.data(),nodes.size(),normal18,reflex5));
     for(unsigned i=0;i<nodes.size();++i) {
