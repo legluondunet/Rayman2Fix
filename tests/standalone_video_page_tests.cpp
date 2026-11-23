@@ -16,10 +16,17 @@ int main() {
     // Source-scoped policy, not screen coordinates: never suppress
     // fonts outside the standalone page, on a failed LFB renderer,
     // or for non-glyph native 2D producers (butterfly and background).
-    check(standalone_video_hide_native_glyphs(true,true,true));
-    check(!standalone_video_hide_native_glyphs(false,true,true));
-    check(!standalone_video_hide_native_glyphs(true,false,true));
-    check(!standalone_video_hide_native_glyphs(true,true,false));
+    check(standalone_video_hide_native_glyphs(true,true,true,false));
+    check(!standalone_video_hide_native_glyphs(false,true,true,false));
+    check(!standalone_video_hide_native_glyphs(true,false,true,false));
+    check(!standalone_video_hide_native_glyphs(true,true,false,false));
+    check(standalone_video_native_title_glyph(35.3f,20.0f,39.5f,25.0f));
+    check(!standalone_video_hide_native_glyphs(true,true,true,true));
+    check(!standalone_video_native_title_glyph(35.3f,40.0f,39.5f,45.0f));
+    check(!standalone_video_native_title_glyph(35.3f,58.0f,39.5f,63.0f));
+    check(!standalone_video_native_title_glyph(2.0f,20.0f,8.0f,25.0f));
+    check(!standalone_video_native_title_glyph(35.3f,35.0f,39.5f,33.0f));
+    check(standalone_video_hide_native_glyphs(true,true,true,false));
     std::array<NativeMenuScriptNode,430> a{};
     a[0]={0u,0u,1u,0u};
     a[1]={45u,0u,2u,1u};

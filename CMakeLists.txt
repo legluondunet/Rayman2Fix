@@ -111,7 +111,7 @@ if(WIN32)
   endif()
   if(RAYMAN2FIX_STANDALONE_VIDEO_PAGE)
     target_sources(Rayman2FixRuntime PRIVATE src/runtime/standalone_video_page.cpp)
-    target_link_libraries(Rayman2FixRuntime PRIVATE gdi32)
+    target_link_libraries(Rayman2FixRuntime PRIVATE gdi32 setupapi advapi32)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_STANDALONE_VIDEO_PAGE=1)
   endif()
   target_compile_definitions(Rayman2FixRuntime PRIVATE
@@ -335,6 +335,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME standalone-video-direct-transition
     COMMAND standalone_video_transition_tests)
+  add_executable(standalone_video_device_policy_tests
+    tests/standalone_video_device_policy_tests.cpp)
+  target_include_directories(standalone_video_device_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME standalone-video-gpu-matching
+    COMMAND standalone_video_device_policy_tests)
   add_executable(standalone_video_page_tests
     tests/standalone_video_page_tests.cpp)
   target_include_directories(standalone_video_page_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

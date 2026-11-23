@@ -1,7 +1,10 @@
 #include "rayman2fix/standalone_video_page.hpp"
+#include "rayman2fix/standalone_video_device_policy.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <setupapi.h>
+#include <cmath>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -15,7 +18,10 @@ namespace {
 // Keep the independent page below the animated native 3D butterfly.
 // The approved Glide internal canvas is 1024x768, regardless of the
 // output desktop's aspect ratio or scaling (e.g. 1920x1200).
-constexpr unsigned kX=92u,kY=290u,kW=585u,kH=419u;
+// Center on the approved 1024x768 Glide frame, below the native VIDEO title.
+constexpr unsigned kW=600u,kH=320u;
+constexpr unsigned kX=(1024u-kW)/2u,kY=(768u-kH)/2u;
+static_assert(kX==212u && kY==224u,"VIDEO info panel centered");
 static_assert(kX+kW<=1024u && kY+kH<=768u,
               "Standalone VIDEO panel must fit the original Glide canvas");
 constexpr int kBackBuffer=1,kRgb565=0;
@@ -31,7 +37,9 @@ std::atomic<bool> g_glide_missing{false};
 std::atomic<bool> g_write_error{false};
 GlideRead g_read=nullptr;
 GlideWrite g_write=nullptr;
-std::array<std::array<char,128>,6> g_lines{};
+std::array<std::array<char,128>,5> g_lines{};
+constexpr const char* kRowLabels[5]{"SORTIE","GPU","PILOTE","RENDU","INTERNE"};
+std::atomic<bool> g_title_preserved_logged{false};
 std::vector<std::uint16_t> g_pixels;
 std::vector<std::uint32_t> g_text_mask;
 bool g_prepared=false;
@@ -69,6 +77,72 @@ std::uint16_t blend_565(std::uint16_t original,
                          ((g*63u+127u)/255u)<<5 |
                          ((b*31u+127u)/255u));
 }
+// Read only the installed Windows display driver version of an
+// unambiguously matched active PCI adapter. Under Wine the synthetic
+// Windows adapter must not be mistaken for the host Mesa/RADV driver.
+constexpr GUID kDisplayClassGuid={
+    0x4d36e968u,0xe325u,0x11ceu,
+    {0xbf,0xc1,0x08,0x00,0x2b,0xe1,0x03,0x18}};
+bool read_registry_string(HKEY key,const char* name,
+                          char* out,DWORD capacity) noexcept {
+    if(!key || !out || capacity<2u)return false;
+    DWORD kind=0,bytes=capacity;
+    const LSTATUS status=RegQueryValueExA(
+        key,name,nullptr,&kind,reinterpret_cast<BYTE*>(out),&bytes);
+    if(status!=ERROR_SUCCESS ||
+       (kind!=REG_SZ && kind!=REG_EXPAND_SZ) ||
+       !bytes || bytes>capacity)return false;
+    out[capacity-1u]='\0';
+    return out[0]!='\0';
+}
+void primary_display_driver(const DISPLAY_DEVICEA& primary,
+                            char* friendly,unsigned friendly_capacity,
+                            char* version,unsigned version_capacity) noexcept {
+    if(!primary.DeviceID[0] || !friendly || !version ||
+       friendly_capacity<2u || version_capacity<2u)return;
+    const HDEVINFO devices=SetupDiGetClassDevsA(
+        &kDisplayClassGuid,nullptr,nullptr,DIGCF_PRESENT);
+    if(devices==INVALID_HANDLE_VALUE)return;
+    unsigned matches=0;
+    char matched_name[128]{},matched_version[96]{};
+    for(DWORD i=0;i<32u;++i) {
+        SP_DEVINFO_DATA item{};item.cbSize=sizeof(item);
+        if(!SetupDiEnumDeviceInfo(devices,i,&item))break;
+        char instance_id[512]{};
+        if(!SetupDiGetDeviceInstanceIdA(devices,&item,instance_id,
+                DWORD(sizeof(instance_id)),nullptr) ||
+           !matching_display_pci_identity(primary.DeviceID,instance_id))
+            continue;
+        ++matches;
+        if(matches>1u)break; // Do not attribute another GPU's driver.
+        DWORD type=0;
+        char name[128]{};
+        if(!SetupDiGetDeviceRegistryPropertyA(devices,&item,
+                SPDRP_FRIENDLYNAME,&type,
+                reinterpret_cast<PBYTE>(name),DWORD(sizeof(name)),nullptr) ||
+           type!=REG_SZ || !name[0]) {
+            name[0]='\0';type=0;
+            SetupDiGetDeviceRegistryPropertyA(devices,&item,
+                SPDRP_DEVICEDESC,&type,
+                reinterpret_cast<PBYTE>(name),DWORD(sizeof(name)),nullptr);
+        }
+        name[sizeof(name)-1u]='\0';
+        if(name[0])std::snprintf(matched_name,sizeof(matched_name),"%s",name);
+        const HKEY key=SetupDiOpenDevRegKey(devices,&item,
+            DICS_FLAG_GLOBAL,0,DIREG_DRV,KEY_READ);
+        if(key!=INVALID_HANDLE_VALUE) {
+            read_registry_string(key,"DriverVersion",
+                matched_version,DWORD(sizeof(matched_version)));
+            RegCloseKey(key);
+        }
+    }
+    SetupDiDestroyDeviceInfoList(devices);
+    if(matches!=1u)return;
+    if(matched_name[0])
+        std::snprintf(friendly,friendly_capacity,"%s",matched_name);
+    if(matched_version[0])
+        std::snprintf(version,version_capacity,"%s",matched_version);
+}
 bool prepare_mask() noexcept {
     if(g_prepared)return true;
     if(g_prepare_failed)return false;
@@ -95,27 +169,28 @@ bool prepare_mask() noexcept {
     std::memset(bits,0,kW*kH*4u);
     SetBkMode(dc,TRANSPARENT);
     SetTextColor(dc,RGB(241,245,222));
-    HFONT heading=CreateFontA(-44,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,
+    // The title uses the original Rayman 2 JFFTXT glyphs / animation,
+    // not a GDI imitation. Only the data rows are rasterized here.
+    HFONT font=CreateFontA(-23,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,
         DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
         ANTIALIASED_QUALITY,DEFAULT_PITCH|FF_SWISS,"Segoe UI");
-    HFONT text=CreateFontA(-23,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,
-        DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
-        ANTIALIASED_QUALITY,DEFAULT_PITCH|FF_SWISS,"Segoe UI");
-    if(!heading || !text) {
-        if(heading)DeleteObject(heading);
-        if(text)DeleteObject(text);
+    if(!font) {
         SelectObject(dc,prior);DeleteObject(bitmap);DeleteDC(dc);
         ReleaseDC(nullptr,screen);
         g_prepare_failed=true;return false;
     }
-    auto* old_font=SelectObject(dc,heading);
-    TextOutA(dc,40,22,"VIDEO",5);
-    SelectObject(dc,text);
-    for(unsigned i=0;i<g_lines.size();++i)
-        TextOutA(dc,40,114+int(i)*43,g_lines[i].data(),
-                 int(std::strlen(g_lines[i].data())));
+    const auto old_font=SelectObject(dc,font);
+    for(unsigned i=0;i<g_lines.size();++i) {
+        const int y=42+int(i)*53;
+        RECT label{40,y,166,y+38};
+        RECT value{172,y,int(kW)-22,y+38};
+        DrawTextA(dc,kRowLabels[i],-1,&label,
+                  DT_SINGLELINE|DT_NOPREFIX|DT_VCENTER);
+        DrawTextA(dc,g_lines[i].data(),-1,&value,
+                  DT_SINGLELINE|DT_NOPREFIX|DT_VCENTER|DT_END_ELLIPSIS);
+    }
     SelectObject(dc,old_font);
-    DeleteObject(heading);DeleteObject(text);
+    DeleteObject(font);
     g_text_mask.resize(kW*kH);
     std::memcpy(g_text_mask.data(),bits,kW*kH*4u);
     SelectObject(dc,prior);DeleteObject(bitmap);DeleteDC(dc);
@@ -136,37 +211,51 @@ void standalone_video_page_configure(StandaloneVideoLogger logger,
     if(divisor){a=out_w/divisor;b=out_h/divisor;}
     if(a==8u && b==5u){a=16u;b=10u;}
     DISPLAY_DEVICEA device{};device.cb=sizeof(device);
-    const char* gpu="Display adapter";
+    DISPLAY_DEVICEA primary{};primary.cb=sizeof(primary);
     for(DWORD i=0;i<8u;++i) {
         device={};device.cb=sizeof(device);
         if(!EnumDisplayDevicesA(nullptr,i,&device,0))break;
         if((device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) &&
            (device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP)) {
-            gpu=device.DeviceString;
-            break;
+            primary=device;break;
         }
     }
-    std::snprintf(g_lines[0].data(),128,"SORTIE    %u x %u  %u:%u  %s",
+    char gpu[128]{},driver_version[96]{};
+    std::snprintf(gpu,sizeof(gpu),"%s",
+        primary.DeviceString[0]?primary.DeviceString:"Non disponible");
+    const bool wine=[]() noexcept {
+        const HMODULE ntdll=GetModuleHandleW(L"ntdll.dll");
+        return ntdll && GetProcAddress(ntdll,"wine_get_version")!=nullptr;
+    }();
+    if(!wine)
+        primary_display_driver(primary,gpu,unsigned(sizeof(gpu)),
+                               driver_version,unsigned(sizeof(driver_version)));
+    std::snprintf(g_lines[0].data(),128,"%u x %u  %u:%u  %s",
         out_w,out_h,a,b,classic?"4:3":"AUTO");
-    std::snprintf(g_lines[1].data(),128,"GPU       %.44s",gpu);
-    std::snprintf(g_lines[2].data(),128,"RENDU     GAMEFRAME / GLIDE2");
-    std::snprintf(g_lines[3].data(),128,"INTERNE   1024 x 768 x 16");
-    std::snprintf(g_lines[4].data(),128,"REGLAGES  AUTOMATIQUES");
-    std::snprintf(g_lines[5].data(),128,"ECHAP     RETOUR");
+    std::snprintf(g_lines[1].data(),128,"%s",gpu);
+    std::snprintf(g_lines[2].data(),128,"%s",
+        wine?"Pilote hote non expose (Wine)":
+        driver_version[0]?driver_version:"Version non disponible");
+    std::snprintf(g_lines[3].data(),128,"GAMEFRAME / GLIDE2");
+    std::snprintf(g_lines[4].data(),128,"1024 x 768 x 16");
     g_configured.store(true,std::memory_order_release);
-    if(g_log)g_log("RUNTIME-STANDALONE-VIDEO: configured independent-page=1 native-label-pointers=unused original-video-widgets=unused renderer=Glide2-LFB");
+    if(g_log)g_log("RUNTIME-STANDALONE-VIDEO: configured independent-page=1 native-title=original-video centered-panel=1 rows=5 win32-driver=verified-setupapi renderer=Glide2-LFB");
 }
 
 void standalone_video_page_set_visible(bool value) noexcept {
     g_visible.store(value,std::memory_order_release);
 }
-bool standalone_video_page_suppress_native_glyphs() noexcept {
+bool standalone_video_page_suppress_native_glyphs(float xmin,float ymin,float xmax,float ymax) noexcept {
     // Do not hide any native glyph before our replacement page has
     // successfully rendered at least once; unsupported Glide LFB
     // implementations keep the original UI visible, not a blank page.
-    return standalone_video_hide_native_glyphs(
-        g_visible.load(std::memory_order_acquire),
-        g_drew.load(std::memory_order_acquire),true);
+    const bool visible=g_visible.load(std::memory_order_acquire);
+    const bool drew=g_drew.load(std::memory_order_acquire);
+    const bool title=standalone_video_native_title_glyph(xmin,ymin,xmax,ymax);
+    if(visible && drew && title &&
+       !g_title_preserved_logged.exchange(true) && g_log)
+        g_log("RUNTIME-STANDALONE-VIDEO: native-title-preserved=1 source=JFFTXT upper-title-band=video-only");
+    return standalone_video_hide_native_glyphs(visible,drew,true,title);
 }
 bool standalone_video_page_draw_before_flip() noexcept {
     if(!g_visible.load(std::memory_order_acquire) ||
@@ -180,9 +269,9 @@ bool standalone_video_page_draw_before_flip() noexcept {
     if(!g_read(kBackBuffer,kX,kY,kW,kH,kW*2u,g_pixels.data()))
         return false;
     // Read the actual animated menu background and darken it in-place.
-    // Native JFFTXT glyphs are suppressed independently at the
-    // verified font producer callback while this panel is visible.
-    // This retains the original 3D scene and butterfly.
+    // All native text glyphs except the original VIDEO title are
+    // suppressed at the verified font producer. The live 3D scene and
+    // animated butterfly are never intercepted.
     for(unsigned y=0;y<kH;++y)for(unsigned x=0;x<kW;++x) {
         const unsigned i=y*kW+x;
         auto pix=g_pixels[i];

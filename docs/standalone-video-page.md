@@ -50,9 +50,16 @@ artifact from the draft PR #52, not the standard bootstrap EXE.
 - The native `normal-3` preparation stage is shared with unrelated
   menus. This build does not suppress its glyphs or infer ownership by
   their screen coordinates; a residual transition is still possible.
-- The first renderer uses a plain system font for its memory-only
-  raster mask, not Ubisoft's proprietary font, and is an exploratory
-  layout. Rayman-inspired styling must be validated separately.
+- Five data rows use a system font in a memory-only raster mask. The
+  VIDEO title is the original animated native JFFTXT heading, retained
+  in the verified title band only while the standalone page is visible.
+  The 600x320 panel is centered in the 1024x768 canvas and has no
+  Retour/Echap or automatic-settings row.
+- GPU name comes from EnumDisplayDevicesA. On native Windows, SetupAPI
+  supplies a more precise matched display-class device name and an
+  installed DriverVersion only when there is one unique VEN/DEV match.
+  Under Wine the host graphics driver version is reported as
+  unavailable, never guessed from the Win32 emulation layer.
 - The GameFrame LFB read/write ABI is based on Glide2's documented
   eight- and seven-parameter exports, and must be checked under Windows
   and Wine before a release. On unsupported exports the original flip

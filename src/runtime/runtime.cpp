@@ -5706,14 +5706,15 @@ void __cdecl native_2d_percent_sprite(void* viewport,
         1,std::memory_order_relaxed);
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
     // Exact source identity: return RVA 0x664D9 belongs only to
-    // JFFTXT_vDrawString font glyphs. Unlike the failed normal-3
-    // coordinate mask, this scope is the verified standalone VIDEO
-    // state (normal-5/reflex-0), and cannot remove Options, Son,
-    // Controls or Language glyphs on their own menu pages.
+    // JFFTXT_vDrawString glyphs. Keep the native VIDEO heading in its
+    // known top title band, preserving its animated original artwork.
+    // The position exception applies only to an authenticated VIDEO
+    // page after the owned LFB panel rendered, never normal-3/Options.
     // Our own page text is rasterized into Glide's LFB and never
     // passes through this native glyph producer.
     if(producer==Native2DProducer::Glyph &&
-       r2fix::standalone_video_page_suppress_native_glyphs()) {
+       r2fix::standalone_video_page_suppress_native_glyphs(
+           xmin,ymin,xmax,ymax)) {
         static std::atomic<bool> reported{false};
         if(!reported.exchange(true,std::memory_order_relaxed))
             log_line("RUNTIME-STANDALONE-VIDEO: source-glyph-suppressed=1 source=JFFTXT-vDrawString verified-return-rva=0x664D9 scope=own-page-only butterfly=untouched");
