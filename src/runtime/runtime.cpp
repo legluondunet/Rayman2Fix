@@ -5722,6 +5722,22 @@ void __cdecl native_2d_percent_sprite(void* viewport,
         return;
     }
 #endif
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    // Exact two source-identified ScreenImage halves of the native
+    // retired brightness gauge. This filter already works in MENU;
+    // additionally apply its verified 60..90 x 85..90 source geometry
+    // while the authenticated in-game Pause VIDEO page is drawn.
+    // No rounded region masks or 3D actor filtering.
+    if(producer==Native2DProducer::ScreenImage &&
+       r2fix::readonly_video_brightness_meter_quad(
+           r2fix::standalone_video_page_pause_is_drawn(),route,
+           {xmin,ymin,xmax,ymax})) {
+        static std::atomic<bool> once{false};
+        if(!once.exchange(true,std::memory_order_relaxed))
+            log_line("RUNTIME-PAUSE-VIDEO-PAGE: native-brightness-gauge-suppressed=1 source=ScreenImage exact-halves=60..90/85..90 scene=verified-normal9/reflex2");
+        return;
+    }
+#endif
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
     // SOURCE-SCOPED only: the original two screen-image rectangles
     // of the obsolete brightness meter. Never filter generic quads
