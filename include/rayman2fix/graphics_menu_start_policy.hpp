@@ -14,6 +14,17 @@ constexpr std::uintptr_t menu_scan_resume_cursor(
     return next>=0x10000u && next<address_space_end ?
         next : static_cast<std::uintptr_t>(0x10000u);
 }
+// Before the first VIDEO screen, controller discovery is the only
+// remaining source of a visible old-resolution-menu flash. The owner's
+// Wine run scanned 161 MiB on pass 1 and found the exact verified model
+// after 16 MiB on pass 2, but the fixed 5-second retry interval delayed
+// it until 7.9 seconds. Permit three quick bounded follow-up scans;
+// revert to the conservative 5-second cadence if still unavailable.
+// This changes neither the scan budget nor its approved model checks.
+constexpr unsigned menu_controller_retry_ms(unsigned completed_scans)
+    noexcept {
+    return completed_scans<=3u ? 750u : 5000u;
+}
 constexpr bool menu_controller_worker_required(
     bool logging_enabled,bool graphics_info_compiled) noexcept {
     return graphics_info_compiled || logging_enabled;
