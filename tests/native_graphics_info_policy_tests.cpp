@@ -86,6 +86,21 @@ require(!graphics_info_readonly_video_page(
     true,false,true,5,0,true,5,true,0,true));
 require(!graphics_info_readonly_video_page(
     true,true,false,5,0,true,5,true,0,true));
+// Regression: old VIDEO labels appeared for roughly one second because
+// the global strings were not replaced until normal-3 preparation.
+// For the verified, patched MENU, these VIDEO-exclusive strings should
+// already be installed on the parent menu and remain until unload.
+require(graphics_info_pin_text_for_menu(
+    true,true,true,true,true,false));
+for(unsigned missing=0;missing<6;++missing) {
+    require(!graphics_info_pin_text_for_menu(
+        missing!=0,missing!=1,missing!=2,missing!=3,missing!=4,
+        missing==5));
+}
+require(!graphics_info_restore_pinned_text(true,true));
+require(graphics_info_restore_pinned_text(false,true));
+require(graphics_info_restore_pinned_text(true,false));
+require(graphics_info_restore_pinned_text(false,false));
 // The normal-3 native MENU preparation script contains VIDEO text
 // handles. Install their new pointers before normal-5 caches glyphs.
 require(graphics_info_video_preparation(
