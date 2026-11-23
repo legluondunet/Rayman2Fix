@@ -2,7 +2,7 @@ name: Build Rayman2Fix bootstrap
 
 on:
   push:
-    branches: [ main, feat/bootstrap-cd-images ]
+    branches: [ main, feat/bootstrap-cd-images, integration/video-pages-release-candidate ]
   pull_request:
     # Standalone VIDEO research is stacked on the unmerged graphics-info
     # study, so its draft PR targets this research branch, not main.
@@ -78,6 +78,35 @@ jobs:
         run: cmake --build build --config Release --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Audit default single-EXE VIDEO feature inclusion
+        shell: pwsh
+        run: |
+          # The earlier 52-PR research build worked only through
+          # explicit CMake -D flags. A release-candidate's *normal*
+          # configure must include exactly the same validated pages.
+          $cache = Get-Content build/CMakeCache.txt -Raw
+          foreach ($key in @('RAYMAN2FIX_GRAPHICS_MENU_TRACE',
+                             'RAYMAN2FIX_GRAPHICS_INFO_PROTO',
+                             'RAYMAN2FIX_STANDALONE_VIDEO_PAGE')) {
+            if (!$cache.Contains("$($key):BOOL=ON")) {
+              throw "Standard release artifact omitted $key"
+            }
+          }
+          $bytes = [IO.File]::ReadAllBytes((Resolve-Path 'build/Release/fix.dll'))
+          $text = [Text.Encoding]::ASCII.GetString($bytes)
+          foreach ($marker in @(
+              'RUNTIME-VIDEO-INPUT: status=installed',
+              'RUNTIME-STANDALONE-VIDEO: configured independent-page=1',
+              'RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1',
+              'RUNTIME-MENU-SITE: status=installed handle=362')) {
+            if (!$text.Contains($marker)) {
+              throw "Default x86 fix.dll missing required VIDEO feature: $marker"
+            }
+          }
+          if ($text.Contains('RUNTIME-AUDIO-TRACE: enabled=1')) {
+            throw 'Normal release accidentally included opt-in audio research'
+          }
+          Write-Host 'Standard x86 runtime contains both VIDEO pages, arrow isolation and GitHub menu actions'
       - name: Verify launcher workspace and diagnostics
         shell: pwsh
         run: |
