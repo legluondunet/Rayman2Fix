@@ -597,3 +597,85 @@ after entering VIDEO, immediate Luminosity accessibility, proper
 return, and unchanged video mode. An unresponsive/hanging menu is
 a failure: revert the experiment and retain the #1652 visual
 baseline. PR #51 must not merge before this live validation.
+
+
+## User scope change and #1672 regression (23 November 2026, 09:16)
+
+User explicitly decided **not to retain the brightness adjustment** in the
+Rayman2Fix VIDEO screen. The new target is a **read-only graphics information
+page** (OUTPUT, GPU, D3D9, GLIDE), retaining the original animated yellow
+butterfly and ordinary return-to-Options handling. Arrows/confirmation must
+not select or alter graphics settings; the old slider, `LUMINOSITÉ` label
+and legacy mode choices need not appear. No new INI toggle is requested.
+
+The provided screenshots `image(20261123-091443).png` and
+`image(20261123-091458).png` reveal the regression: an old
+`RÉSOLU...` / `SAUVE...` overlay appears on one state; the other
+shows only `LUMINOSITÉ` with its slider. The butterfly is present in
+both. The log `Rayman2Fix(20261123-091616).log`
+(`build=33dd635f`, prototype #1672) establishes:
+
+- `disabled-options-copies-installed ... navigation-range=5..5`
+  succeeded at ~3.39s; `pre-video-information-text-installed` at
+  ~4.64s, then native VIDEO `normal=5` at ~7.64s.
+- Native selection still intermittently sets `V17=3` in `normal=5`
+  and `V17=5` in the actual brightness state
+  `normal=18/reflex=5`. Each transition can call
+  `video-page-exit original-label-pointers-restored` and reinstall
+  localization pointers, explaining the changing menu appearance.
+- Native video mode remains `1024x768x16`. The video-mode change
+  and save counters are zero: no attempted mode write was observed.
+- This is **not** fixed by changing V14 entry states or by narrowing
+  V19/V20 alone. Do not claim keyboard navigation is disabled.
+
+### Exact native transition discovery
+
+The approved original `menu.sna` reveals the small **normal-5
+script #2**: 33 typed eight-byte nodes. Its leading condition checks
+`Cond_Equal(V17,5)` at nodes 1..3, and its trailing instruction
+calls `Proc_ChangeMyComportAndMyReflex` (procedure index 71)
+at node 29 with target behavior references to
+**normal 18** and **reflex 5** at nodes 30..31. These are the precise
+native state transitions causing the obsolete brightness slider to
+replace our read-only data. The complete type/depth/padding structural
+fingerprint of script 2 is `9902892c1e0da3c5`.
+
+### Next experimental fix: no brightness transition, butterfly preserved
+
+- Extend the earlier fail-closed runtime script copies from normal-5
+  scripts 1,3,4 to **1,2,3,4**. Before publishing any pointer, verify
+  the whole script-2 structural fingerprint, the exact
+  `Cond_Equal(V17,5)` AST and the procedure-71 normal18/reflex5
+  live target addresses. In the private script copy change **only**
+  the condition literal `5` to an unreachable unsigned index
+  `0xFFFFFFFF`. Original asset bytes and all butterfly actor
+  instructions remain unchanged; no background V17 forcing.
+- Keep the existing mode-write guards during CAS of all four script
+  pointers and retarget script-3 child hooks to the new copy's address.
+  Retain a once-published clone to prevent possible use-after-free.
+- Hide text handle **385** (native obsolete brightness label)
+  by substituting a single blank-space string in the VIDEO-localized
+  pointer table, with exact compare-exchange restoration on exit.
+  **Only hide it if the script-2 brightness transition was
+  successfully suppressed.** If preflight fails, leave the
+  original brightness option visible rather than having a hidden
+  still-clickable setting; earlier information labels still use
+  handles 379..384.
+- Leave the original 3D scene, native butterfly and return mechanisms
+  alone. The brightness-specific reflex procedure 357 is not patched
+  because its entrypoint should no longer be reachable from this page.
+- Tests include complete 33-node structural shape verification,
+  typed operands, live behavior target references, preservation of
+  every untouched node, and atomic refusal for altered conditions,
+  targets, or node layout. These are synthetic fixtures, not bundled
+  copyrighted game scripts.
+
+**Important limitation:** suppressing this *known* transition should
+stabilize display across arrow presses, but this does not by itself
+prove the original menu's keyboard focus scalar V17 stops changing
+internally. A real-game screenshot/log must establish that the panel
+remains visually constant, that Enter never opens brightness, the
+butterfly is animated, and Escape returns normally. No merge of PR
+#51 until this validation. If another path still enters normal18,
+investigate it separately; do not hide all UI or suppress unknown
+GLI quads by generic geometry.
