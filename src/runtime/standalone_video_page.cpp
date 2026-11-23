@@ -12,7 +12,12 @@
 
 namespace r2fix {
 namespace {
-constexpr unsigned kX=92u,kY=174u,kW=585u,kH=419u;
+// Keep the independent page below the animated native 3D butterfly.
+// The approved Glide internal canvas is 1024x768, regardless of the
+// output desktop's aspect ratio or scaling (e.g. 1920x1200).
+constexpr unsigned kX=92u,kY=290u,kW=585u,kH=419u;
+static_assert(kX+kW<=1024u && kY+kH<=768u,
+              "Standalone VIDEO panel must fit the original Glide canvas");
 constexpr int kBackBuffer=1,kRgb565=0;
 using GlideRead=std::int32_t (WINAPI*)(int,unsigned,unsigned,unsigned,
                                        unsigned,unsigned,void*);
