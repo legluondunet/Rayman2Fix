@@ -582,6 +582,14 @@ bool install_native_disabled_video_choices(
             }
             continue;
         }
+        // V51 is the native Enter/confirm latch. The obsolete
+        // SAVE RESOLUTION row must not become visually enabled for
+        // a single frame when Enter is pressed on our static page.
+        // This patch only changes V14[4]=2 to 1 in verified VIDEO
+        // script copies 3/4; the parent Options script 1 is untouched.
+        if(!neutralize_native_video_enter_save_status(copy,plan)) {
+            valid=false;reason="enter-save-status";break;
+        }
         if(!disable_native_video_choices(copy,plan)) {
             valid=false;reason="script-assignments";break;
         }
@@ -666,7 +674,7 @@ bool install_native_disabled_video_choices(
         std::memory_order_release);
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
     g_brightness_transition_disabled.store(true,std::memory_order_release);
-    g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1-original,2,3,4 brightness-transition=suppressed font-focus=static-0-video4-only parent-options-preserved=1 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
+    g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1-original,2,3,4 brightness-transition=suppressed font-focus=static-0-video4-only enter-save-status=inert parent-options-preserved=1 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
     return true;
 }
 void restore_native_disabled_video_choices(
