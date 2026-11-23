@@ -18,6 +18,21 @@ int main(){
     const auto shape=pause_site_script_shape(n.data(),n.size());
     ck(shape!=0u);
     ck(authenticated_pause_site_script(n.data(),n.size(),shape));
+    ck(authenticated_pause_site_branch(n.data(),n.size()));
+    auto unrelated=n;
+    unrelated[66].type=10u; // another branch may be rewritten in RAM
+    ck(!authenticated_pause_site_script(
+        unrelated.data(),unrelated.size(),shape));
+    ck(authenticated_pause_site_branch(
+        unrelated.data(),unrelated.size()));
+    unrelated=n;
+    unrelated[1158].parameter=370u; // never accept another procedure
+    ck(!authenticated_pause_site_branch(
+        unrelated.data(),unrelated.size()));
+    unrelated=n;
+    unrelated[1156].parameter=4u; // V16 must select exact site row
+    ck(!authenticated_pause_site_branch(
+        unrelated.data(),unrelated.size()));
     ck(!authenticated_pause_site_script(n.data(),n.size(),shape+1u));
     ck(!authenticated_pause_site_script(n.data(),n.size()-1u,shape));
     for(auto [ix,p]:std::vector<std::pair<unsigned,unsigned>>{
