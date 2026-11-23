@@ -34,6 +34,7 @@
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
 #include "rayman2fix/standalone_video_page.hpp"
 #include "rayman2fix/pause_video_text_filter_policy.hpp"
+#include "rayman2fix/pause_video_companion_layout_policy.hpp"
 #endif
 #include "rayman2fix/graphics_menu_glyph_layout.hpp"
 #include "rayman2fix/native_graphics_info_color.hpp"
@@ -5986,6 +5987,26 @@ void __cdecl centered_native_screen_to_vertex(
                 log_line(msg);
             }
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+            // This is the engine's approved native 2D->3D conversion
+            // for Menu.sna/Fix.sna superimposed actors, not a global
+            // vertex or world camera hook. Adjust the lower native
+            // ESC companion only while normal9/reflex2 has drawn the
+            // owned informational VIDEO panel. Other menus and all
+            // world rendering retain their original source geometry.
+            const float original_y=y;
+            if(r2fix::lift_pause_video_companion(
+                r2fix::standalone_video_page_pause_is_drawn(),
+                viewport==g_approved_overlay_viewport,
+                route,before,y,depth)) {
+                static std::atomic<bool> reported{false};
+                if(!reported.exchange(true,std::memory_order_relaxed)) {
+                    char msg[248]{};
+                    std::snprintf(msg,sizeof(msg),
+                        "RUNTIME-PAUSE-VIDEO-PAGE: native-companion-lift=active source=approved-3d-superimposed-route%u original-y=%.4f aligned-y=%.4f native-gameplay=untouched",
+                        route,double(original_y),double(y));
+                    log_line(msg);
+                }
+            }
             // Original pause UI text is a 3D TextSuperImposed object,
             // not the JFFTXT 2D glyph path. The latter was already
             // suppressed but still left SON/CONTROLES behind the panel.
