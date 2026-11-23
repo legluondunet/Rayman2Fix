@@ -194,6 +194,19 @@ void test_video_script1_only_range() {
     put(149u,19u,0u);
     put(152u,20u,3u);
     put(165u,17u,0u);
+    // Two source-authenticated SetAGO subtrees followed by the original
+    // end-of-script/title/ESC statements. No game script bytes shipped.
+    for(unsigned k=0u;k<2u;++k){
+        const unsigned i=176u+12u*k;
+        before[i]={503u,0u,2u,4u};
+        before[i+1u]={k?120u:50u,0u,3u,12u};
+        before[i+2u]={0u,0u,3u,16u};
+        before[i+6u]={0u,0u,3u,16u};
+        for(unsigned q:{3u,4u,5u,7u,8u,9u})
+            before[i+q]={0u,0u,4u,13u};
+        before[i+10u]={0x2175e80u+4u*k,0u,3u,32u};
+        before[i+11u]={0u,0u,3u,12u};
+    }
     before[313]={506u,0u,3u,4u};
     before[314]={17u,0u,4u,11u};
     before[315]={1u,0u,4u,12u};
@@ -204,23 +217,30 @@ void test_video_script1_only_range() {
         {0u,0u,0u},{0u,0u,0u}};
     auto changed=before;
     check(standalone_video_script1_singleton(changed.data(),plan));
-    for(unsigned i=0;i<before.size();++i) {
-        check(changed[i].parameter==
-            ((i==146u||i==149u||i==152u||i==165u||i==314u)?1u:
-                before[i].parameter));
-        check(changed[i].type==(i==314u?12u:before[i].type));
+    for(unsigned i=0u;i<176u;++i){
+        const bool pin=i==146u||i==149u||i==152u||i==165u;
+        check(changed[i].parameter==(pin?1u:before[i].parameter));
+        check(changed[i].type==before[i].type);
         check(changed[i].indent==before[i].indent);
-        check(changed[i].padding==before[i].padding);
     }
-    // Native JFFTXT procedure/geometry unchanged; focus is a fixed 1.
-    check(changed[315].parameter==1u &&
-          changed[316].parameter==0x3f800000u);
-    for(const unsigned at:{146u,149u,152u,165u,313u,314u,315u,316u}) {
-        auto bad=before;bad[at].parameter^=1u;
-        const auto unchanged=bad;
+    for(unsigned i=176u;i<300u;++i) {
+        const auto src=before[i+24u];
+        const auto dst=changed[i];
+        check(dst.parameter==(i==290u?1u:src.parameter));
+        check(dst.type==(i==290u?12u:src.type));
+        check(dst.indent==src.indent);
+        check(dst.padding==src.padding);
+    }
+    check(changed[299].type==8u && changed[299].indent==0u);
+    check(changed[289].parameter==506u &&
+          changed[290].parameter==1u && changed[290].type==12u);
+    for(unsigned i=300u;i<324u;++i)
+        check(changed[i].type==8u && changed[i].indent==0u);
+    for(unsigned idx:{146u,149u,152u,165u,176u,177u,
+                      188u,189u,313u,314u,315u,316u}) {
+        auto bad=before;
+        bad[idx].parameter^=1u;
         check(!standalone_video_script1_singleton(bad.data(),plan));
-        for(unsigned i=0;i<before.size();++i)
-            check(bad[i].parameter==unchanged[i].parameter);
     }
     auto bad=before;
     bad[17].type=9u;
