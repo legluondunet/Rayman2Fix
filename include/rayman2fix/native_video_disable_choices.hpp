@@ -93,6 +93,41 @@ inline bool disable_native_video_choices(
     }
     return true;
 }
+// A standalone VIDEO page must not construct the original choice
+// widgets. The caller authenticated the full, original 430/517-node
+// script shapes and native dispatch before touching its private copy.
+// This fails closed if the script prefix differs from the CD resource.
+inline bool standalone_remove_legacy_video_widgets(
+    NativeMenuScriptNode* copy,unsigned script,unsigned node_count) noexcept {
+    if(!copy || (script!=3u && script!=4u) ||
+       node_count!=(script==3u?430u:517u) ||
+       copy[node_count-1u].type!=8u ||
+       copy[node_count-1u].indent!=0u)return false;
+    if(script==3u) {
+        // Source script-3 both creates selection widgets and can call
+        // the now protected resolution functions. A single END at its
+        // entry makes that behavior inert.
+        if(copy[0].type!=0u || copy[0].indent!=1u ||
+           copy[1].type!=1u || copy[1].parameter!=45u ||
+           copy[16].type!=4u || copy[16].parameter!=506u)
+            return false;
+        copy[0]={0u,0u,0u,8u};
+        return true;
+    }
+    // Preserve the first two native SetAGO scene-position operations,
+    // which may own the animated menu butterfly. Stop before ANY
+    // V11 text-handle assignments and selection-status widget creation.
+    if(copy[0].type!=0u || copy[0].parameter!=4u ||
+       copy[1].type!=12u || copy[1].parameter!=1u ||
+       copy[3].type!=4u || copy[3].parameter!=503u ||
+       copy[15].type!=4u || copy[15].parameter!=503u ||
+       copy[26].type!=12u || copy[26].parameter!=21u ||
+       copy[27].type!=2u || copy[27].parameter!=11u)
+        return false;
+    copy[27]={0u,0u,0u,8u};
+    return true;
+}
+
 // The approved PC Menu.sna script 3/4 updates V14[4] when V51
 // (native Enter/confirm latch) is set: 1=disabled, 2=enabled. This is
 // the old SAVE RESOLUTION widget, now reused by the read-only info
