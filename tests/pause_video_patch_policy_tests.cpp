@@ -23,6 +23,7 @@ static void run(unsigned k) {
             x[i+6u]={0u,0u,3u,16u};
             for(unsigned j:{3u,4u,5u,7u,8u,9u})
                 x[i+j]={0u,0u,4u,13u};
+            if(k==1u)x[i+5u]={41u,0u,4u,11u}; // original Fix.sna V41
             x[i+10u]={0x2175e80u+4u*k,0u,3u,32u};
             x[i+11u]={3u,0u,3u,12u};
         }
