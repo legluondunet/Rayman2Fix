@@ -210,10 +210,10 @@ inline bool suppress_native_video_brightness_transition(
        variable.padding!=0u || selection.padding!=0u ||
        transition.padding!=0u || next_normal.padding!=0u ||
        next_reflex.padding!=0u || end.padding!=0u)return false;
-    // No native menu entry can have the unsigned index 0xFFFFFFFF.
+    // No native menu entry can have the positive index 0x7FFFFFFF.
     // The interpreter will not enter the brightness-specific branch.
     // Other animation scripts and the animated butterfly are untouched.
-    copy[3].parameter=0xFFFFFFFFu;
+    copy[3].parameter=0x7FFFFFFFu;
     return true;
 }
 } // namespace r2fix
