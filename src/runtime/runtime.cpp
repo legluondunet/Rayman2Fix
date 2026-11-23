@@ -31,6 +31,9 @@
 #include "rayman2fix/graphics_menu_start_policy.hpp"
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
 #include "rayman2fix/native_graphics_info_proto.hpp"
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+#include "rayman2fix/standalone_video_page.hpp"
+#endif
 #include "rayman2fix/graphics_menu_glyph_layout.hpp"
 #include "rayman2fix/native_graphics_info_color.hpp"
 #endif
@@ -6747,6 +6750,19 @@ constexpr uintptr_t kPlainSpriteSlotRva = 0x104530; // VA 0x504530
 constexpr uintptr_t kUvSpriteSlotRva = 0x104524;    // VA 0x504524
 // The colored variant is used by the GLI font/sprite path in Rayman 2.
 constexpr uintptr_t kColorSpriteSlotRva = 0x104838; // VA 0x504838
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+// GLI_DRV_vFlipDeviceWithSyncro was resolved by the approved game
+// into VA 0x504538 (RVA 0x104538). x86 call 0x420F72 has no parameters.
+// This is a late native draw endpoint, before the GameFrame swap.
+constexpr uintptr_t kStandaloneFlipSlotRva=0x104538;
+std::atomic<void*> g_standalone_flip_original{nullptr};
+void __cdecl standalone_video_flip() {
+    r2fix::standalone_video_page_draw_before_flip();
+    const auto original=reinterpret_cast<void (__cdecl*)()>(
+        g_standalone_flip_original.load(std::memory_order_acquire));
+    if(original)original();
+}
+#endif
 constexpr float kInternalGlideWidth = 1024.0f;
 using PlainSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float, void*);
 using UvSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float*, float, void*);
@@ -7309,6 +7325,11 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
         const_cast<BYTE*>(module + kColorSpriteSlotRva));
     auto* black_polygon = reinterpret_cast<void* volatile*>(
         const_cast<BYTE*>(module + kBlackPolygonSlotRva));
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    auto* video_flip = reinterpret_cast<void* volatile*>(
+        const_cast<BYTE*>(module + kStandaloneFlipSlotRva));
+    bool video_flip_logged=false;
+#endif
     bool black_polygon_logged = false;
     bool plain_logged = false;
     bool uv_logged = false;
@@ -7355,6 +7376,13 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
             }
         }
         // The game registers its GLI driver exports after DLL injection.
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+        install_callback(video_flip,
+            reinterpret_cast<void*>(&standalone_video_flip),
+            g_standalone_flip_original,
+            "RUNTIME-STANDALONE-VIDEO: verified-native-flip-hook-installed no-extra-window=1",
+            video_flip_logged);
+#endif
         // Keep the native black-polygon hook installed across driver reloads.
         // The path is strictly opt-in and never touches 4:3 side masks.
         if(g_remove_cinematic_bars)
