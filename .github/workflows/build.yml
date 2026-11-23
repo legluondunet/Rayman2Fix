@@ -4,7 +4,9 @@ on:
   push:
     branches: [ main, feat/bootstrap-cd-images ]
   pull_request:
-    branches: [ main ]
+    # Standalone VIDEO research is stacked on the unmerged graphics-info
+    # study, so its draft PR targets this research branch, not main.
+    branches: [ main, research/native-resolution-menu-state ]
   workflow_dispatch:
 
 permissions:
