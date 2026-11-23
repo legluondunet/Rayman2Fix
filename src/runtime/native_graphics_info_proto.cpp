@@ -710,6 +710,10 @@ DWORD WINAPI worker(void*) {
         if(!in_menu) {
             if(disabled_choices.ever_swapped)
                 restore_native_disabled_video_choices(disabled_choices);
+            else
+                // A failed preflight applies to one loaded MENU only.
+                // A later MENU load may use a different valid scene.
+                disabled_choices=NativeChoicesPatch{};
             if(guarded) {
                 g_protected.store(false,std::memory_order_release);
                 g_layout_active.store(false,std::memory_order_release);
