@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdlib>
 #include "rayman2fix/graphics_menu_glyph_layout.hpp"
+#include "rayman2fix/native_graphics_info_color.hpp"
 using namespace r2fix;
 void expect(bool ok) { if(!ok)std::abort(); }
 int main() {
@@ -85,6 +86,45 @@ int main() {
     expect(graphics_info_material_sample_bit(5,1)==0u);
     expect(graphics_info_material_sample_bit(1,0)==0u);
     expect(graphics_info_material_sample_bit(1,5)==0u);
+    // Wine 23 Nov 2026: the native colored GLI callback provides a
+    // 4×ARGB palette, separately from vertex tint. The selected row
+    // becomes yellow (0xFFFFFF78), other lines blue/pink. A VIDEO
+    // information row must render identically regardless of focus.
+    const std::uint32_t samples_font[][4]={
+        {0xFFFFFFFFu,0xFFFFFFFFu,0xFFFFFF78u,0xFFFFFF78u},
+        {0xFFFFFFFFu,0xFFFFFFFFu,0xFF6EBEFFu,0xFF6EBEFFu},
+        {0xFFFFFFFFu,0xFFFFFFFFu,0xFFFA4646u,0xFFFA4646u},
+        {0x5AFFFFFFu,0x5AFFFFFFu,0x5A6EBEFFu,0x5A6EBEFFu}};
+    for(unsigned native_row=1;native_row<=4;++native_row) {
+        for(int native_focus=1;native_focus<=4;++native_focus) {
+            const auto& palette=samples_font[native_row-1];
+            std::uint32_t fixed[4]{};
+            expect(static_video_information_palette(
+                palette,fixed,true,native_row,native_focus));
+            const std::uint32_t expected=palette[0];
+            for(unsigned i=0;i<4;++i)expect(fixed[i]==expected);
+        }
+    }
+    const std::uint32_t glyph_colors[4]={
+        0xFFFFFFFFu,0xFFFFFFFFu,0xFFFFFF78u,0xFFFFFF78u};
+    std::uint32_t replacement[4]={1u,2u,3u,4u};
+    expect(!static_video_information_palette(
+        glyph_colors,replacement,false,1u,1));
+    expect(!static_video_information_palette(
+        glyph_colors,replacement,true,0u,1));
+    expect(!static_video_information_palette(
+        glyph_colors,replacement,true,1u,5));
+    expect(replacement[0]==1u && replacement[3]==4u);
+    const std::uint32_t wrong_pair[4]={
+        0xFFFFFFFFu,0xFF888888u,0xFF6EBEFFu,0xFF6EBEFFu};
+    expect(!static_video_information_palette(
+        wrong_pair,replacement,true,1u,1));
+    const std::uint32_t bad_alpha[4]={
+        0xFFFFFFFFu,0xFFFFFFFFu,0x5A6EBEFFu,0x5A6EBEFFu};
+    expect(!static_video_information_palette(
+        bad_alpha,replacement,true,1u,1));
+    // Other menus, brightness slider and 3D butterfly are not font
+    // glyphs from the four verified native VIDEO source bands.
     // Wine regression 2026-11-22: the old VIDEO info text was cached
     // and rendered giant after entry into LUMINOSITY. This exact
     // brightness-only glyph mask leaves the original title, brightness
