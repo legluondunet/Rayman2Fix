@@ -50,12 +50,27 @@ int main() {
     check(!standalone_video_upper_bound_needs_reset(0u,0u));
     check(!standalone_video_upper_bound_needs_reset(1u,3u));
     check(!standalone_video_upper_bound_needs_reset(0u,5u));
+    data[info+69u*16u]=0x228u;
+    data[info+69u*16u+4u]=5u;
     data[info+70u*16u]=0x22cu;
     data[info+70u*16u+4u]=5u;
     std::uintptr_t target=0u;
     check(locate_verified_video_navigation_target_cell(
         mind,read32,read8,target));
     check(target==values+0x22cu);
+    std::uintptr_t source=0u;
+    check(locate_verified_video_navigation_source_cell(
+        mind,read32,read8,source));
+    check(source==values+0x228u);
+    data[info+69u*16u+4u]=8u;
+    check(!locate_verified_video_navigation_source_cell(
+        mind,read32,read8,source));
+    check(source==0u);
+    data[info+69u*16u+4u]=5u;
+    data[info+69u*16u]=0x224u;
+    check(!locate_verified_video_navigation_source_cell(
+        mind,read32,read8,source));
+    data[info+69u*16u]=0x228u;
     data[info+70u*16u+4u]=7u;
     check(!locate_verified_video_navigation_target_cell(
         mind,read32,read8,target));
