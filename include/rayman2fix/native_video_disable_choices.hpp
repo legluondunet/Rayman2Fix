@@ -93,6 +93,58 @@ inline bool disable_native_video_choices(
     }
     return true;
 }
+// The approved PC Menu.sna script 3/4 updates V14[4] when V51
+// (native Enter/confirm latch) is set: 1=disabled, 2=enabled. This is
+// the old SAVE RESOLUTION widget, now reused by the read-only info
+// panel. Re-enabling it for one frame on Enter can restart its visual
+// animation even though all actual video/save actions are guarded.
+// Keep BOTH assignment branches in disabled state=1, without changing
+// V51, the keyboard, the parent Options script or ESC navigation.
+// Source nodes: normal-5 script3 366..379, script4 326..339;
+// verified from the owner's exact 638463-byte Menu.sna.
+inline bool neutralize_native_video_enter_save_status(
+    NativeMenuScriptNode* copy,const NativeVideoDisablePlan& plan)
+    noexcept {
+    const unsigned enabled=plan.script_index==3u ? 373u :
+                           plan.script_index==4u ? 333u : 0u;
+    if(!copy || !enabled || enabled+6u>=plan.count ||
+       plan.count<20u || plan.count>1024u ||
+       native_video_script_shape_hash(copy,plan.count)!=
+           plan.original_shape_hash)return false;
+    const auto branch=copy[enabled-7u];
+    const auto pressed=copy[enabled-6u];
+    const auto active_branch=copy[enabled-5u];
+    const auto idle_branch=copy[enabled+1u];
+    const auto validate_assignment=[&](unsigned value,unsigned status) {
+        const auto& op=copy[value-4u];
+        const auto& array=copy[value-3u];
+        const auto& var=copy[value-2u];
+        const auto& row=copy[value-1u];
+        const auto& state=copy[value];
+        return op.type==2u && op.parameter==11u &&
+            array.type==2u && array.parameter==26u &&
+            var.type==11u && var.parameter==14u &&
+            row.type==12u && row.parameter==4u &&
+            state.type==12u && state.parameter==status &&
+            op.padding==0u && array.padding==0u &&
+            var.padding==0u && row.padding==0u &&
+            state.padding==0u &&
+            op.indent+1u==array.indent &&
+            array.indent+1u==var.indent &&
+            row.indent==var.indent &&
+            state.indent==array.indent;
+    };
+    if(branch.type!=0u || branch.parameter!=0u ||
+       pressed.type!=11u || pressed.parameter!=51u ||
+       active_branch.type!=0u || active_branch.parameter!=8u ||
+       idle_branch.type!=0u || idle_branch.parameter!=9u ||
+       !validate_assignment(enabled,2u) ||
+       !validate_assignment(enabled+6u,1u))return false;
+    // Only the typed native UI state for the old save row changes.
+    copy[enabled].parameter=1u;
+    return true;
+}
+
 // The original normal-5 scripts 1 and 4 end in a JFFTXT call whose
 // focus argument is live V17. Even after VIDEO is made read-only the
 // native widget still performs a one-shot focus animation on Enter.
