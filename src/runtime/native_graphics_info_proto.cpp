@@ -555,8 +555,16 @@ bool install_native_disabled_video_choices(
     // Swap only on an approved MENU state OUTSIDE normal-5 script
     // execution. Own all previously published clones until process exit:
     // an in-flight original game script may still hold their addresses.
+    // Hold the broader approved MENU dispatcher guard only during the
+    // atomic switch. Old exact child addresses stop matching when a
+    // private copy is installed; never expose an unprotected VIDEO 356
+    // or save 261 call in that narrow interval.
+    const bool prior_fallback=g_guard_menu_video_dispatch.exchange(
+        true,std::memory_order_acq_rel);
     if(!swap_slot(prepared[0].pointer_slot,prepared[0].original,
                  prepared[0].copy)) {
+        g_guard_menu_video_dispatch.store(
+            prior_fallback,std::memory_order_release);
         for(auto& item:prepared)
             if(item.copy)VirtualFree(item.copy,0,MEM_RELEASE);
         g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=first-script-cas");
@@ -576,16 +584,36 @@ bool install_native_disabled_video_choices(
                seen==reinterpret_cast<PVOID>(prepared[0].original))
                 state.active=false;
         }
+        if(!state.active)
+            g_guard_menu_video_dispatch.store(
+                prior_fallback,std::memory_order_release);
+        // If rollback failed, keep dispatch fallback active until unload
+        // because the original exact children no longer match the copy.
         g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=second-script-cas first-rollback-guarded=1");
         return false;
     }
     state.active=true;
-    g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-options-copies-installed scripts=3,4 options=1,2,3 native-disabled-state=1 brightness=original v17=untouched");
+    // Redirect the EXACT protected children to the new copied script 3.
+    // Otherwise VID_SelectResolution could bypass its protection after
+    // installation. Keep normal-19's fourth selection child untouched.
+    static constexpr unsigned kSelectOffsets[3]{0x140u,0x190u,0x1E0u};
+    for(unsigned i=0;i<3u;++i)
+        g_select_children[i].store(
+            reinterpret_cast<std::uintptr_t>(prepared[0].copy)+
+                kSelectOffsets[i]+8u,std::memory_order_relaxed);
+    g_save_child.store(
+        reinterpret_cast<std::uintptr_t>(prepared[0].copy)+0xD60u+8u,
+        std::memory_order_release);
+    g_guard_menu_video_dispatch.store(false,std::memory_order_release);
+    g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-options-copies-installed scripts=3,4 options=1,2,3 native-disabled-state=1 brightness=original v17=untouched protected-dispatch-retargeted=1");
     return true;
 }
 void restore_native_disabled_video_choices(
     NativeChoicesPatch& state) noexcept {
     if(!state.ever_swapped)return;
+    // Keep mode mutation blocked while the script list transitions back
+    // from clone addresses to the original game addresses.
+    g_guard_menu_video_dispatch.store(true,std::memory_order_release);
     unsigned restored=0u;
     for(auto& item:state.slots) {
         if(!item.pointer_slot || !writable_slot(item.pointer_slot))
@@ -724,7 +752,7 @@ DWORD WINAPI worker(void*) {
                 // before the first VIDEO entry, avoiding startup races.
                 install_native_disabled_video_choices(disabled_choices,model);
             }
-            if(guarded && controller_ready &&
+            if(guarded && controller_ready && !disabled_choices.active &&
                g_guard_menu_video_dispatch.load(std::memory_order_acquire)) {
                 // Narrow to the four exact selection children and one save
                 // child as soon as the loaded AI model is verified.
