@@ -60,6 +60,7 @@ std::atomic<bool> g_protected{false};
 // the model is resolved. This prevents early user mode changes.
 std::atomic<bool> g_guard_menu_video_dispatch{false};
 std::atomic<bool> g_layout_active{false};
+std::atomic<bool> g_brightness_transition_disabled{false};
 std::atomic<int> g_info_focus_row{-1}; // read-only V17 snapshot for material probe
 std::atomic<bool> g_cached_video_text_in_brightness{false};
 std::atomic<unsigned> g_brightness_ghost_glyphs_suppressed{0};
@@ -74,6 +75,7 @@ std::array<std::atomic<std::uintptr_t>,4> g_select_children{};
 std::atomic<std::uintptr_t> g_save_child{0};
 std::array<std::array<char,56>,6> g_rows{};
 std::array<std::uintptr_t,7> g_old_text{};
+unsigned g_info_text_slots_swapped=0;
 char g_hidden_brightness_label[2]{' ',0};
 std::uintptr_t g_language_table=0;
 GraphicsInfoLogger g_logger=nullptr;
@@ -635,12 +637,14 @@ bool install_native_disabled_video_choices(
         reinterpret_cast<std::uintptr_t>(prepared[2].copy)+0xD60u+8u,
         std::memory_order_release);
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
+    g_brightness_transition_disabled.store(true,std::memory_order_release);
     g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1,2,3,4 brightness-transition=suppressed original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
     return true;
 }
 void restore_native_disabled_video_choices(
     NativeChoicesPatch& state) noexcept {
     if(!state.ever_swapped)return;
+    g_brightness_transition_disabled.store(false,std::memory_order_release);
     // Keep mode mutation blocked while the script list transitions back
     // from clone addresses to the original game addresses.
     g_guard_menu_video_dispatch.store(true,std::memory_order_release);
@@ -672,8 +676,10 @@ bool patch_text_table() noexcept {
     if(g_language_table)return true;
     const auto table=text_slot_table();
     if(!table)return false;
+    const unsigned slots=g_brightness_transition_disabled.load(
+        std::memory_order_acquire) ? 7u : 6u;
     std::array<std::uintptr_t,7> originals{};
-    for(unsigned i=0;i<7u;++i) {
+    for(unsigned i=0;i<slots;++i) {
         const auto slot=table+(379u+i)*4u;
         std::uint32_t p=0;
         if(!writable_slot(slot) || !read32(slot,p) ||
@@ -681,7 +687,7 @@ bool patch_text_table() noexcept {
         originals[i]=p;
     }
     unsigned patched=0;
-    for(unsigned i=0;i<7u;++i) {
+    for(unsigned i=0;i<slots;++i) {
         const auto slot=table+(379u+i)*4u;
         void* replacement=i==6u ?
             static_cast<void*>(g_hidden_brightness_label) :
@@ -689,7 +695,7 @@ bool patch_text_table() noexcept {
         if(!swap_slot(slot,originals[i],replacement))break;
         ++patched;
     }
-    if(patched!=7u) {
+    if(patched!=slots) {
         for(unsigned i=0;i<patched;++i) {
             const auto slot=table+(379u+i)*4u;
             if(writable_slot(slot))
@@ -702,12 +708,13 @@ bool patch_text_table() noexcept {
         return false;
     }
     g_old_text=originals;
+    g_info_text_slots_swapped=slots;
     g_language_table=table;
     return true;
 }
 void restore_text() noexcept {
     if(!g_language_table)return;
-    for(unsigned i=0;i<7u;++i) {
+    for(unsigned i=0;i<g_info_text_slots_swapped;++i) {
         const auto slot=g_language_table+(379u+i)*4u;
         if(writable_slot(slot))
             InterlockedCompareExchangePointer(
@@ -717,6 +724,7 @@ void restore_text() noexcept {
                          static_cast<PVOID>(g_rows[i].data()));
     }
     g_language_table=0;
+    g_info_text_slots_swapped=0;
 }
 DWORD WINAPI worker(void*) {
     build_texts();
