@@ -204,6 +204,7 @@ void test_video_script1_only_range() {
         before[i+6u]={0u,0u,3u,16u};
         for(unsigned q:{3u,4u,5u,7u,8u,9u})
             before[i+q]={0u,0u,4u,13u};
+        if(k==1u)before[i+5u]={50u,0u,4u,11u}; // original Menu.sna V50
         before[i+10u]={0x2175e80u+4u*k,0u,3u,32u};
         before[i+11u]={0u,0u,3u,12u};
     }
