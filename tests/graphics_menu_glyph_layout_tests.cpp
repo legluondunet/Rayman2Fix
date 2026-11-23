@@ -125,6 +125,33 @@ int main() {
         0xFFFFFFFFu,0xFFFFFFFFu,0x5A6EBEFFu,0x5A6EBEFFu};
     expect(!static_video_information_palette(
         bad_alpha,replacement,true,1u,1));
+    // Approved Wine trace #1687: the obsolete luminosity meter is a
+    // pair of ScreenImage quads, precisely 60..75.6 and 75.6..90
+    // (percent), y=85..90. Only these two ORIGINAL producer quads
+    // may be suppressed, exclusively on the authenticated read-only
+    // information page. The menu's 3D butterfly is a separate route.
+    const GraphicsInfoQuad meter_left{60.0f,85.0f,75.6f,90.0f};
+    const GraphicsInfoQuad meter_right{75.6f,85.0f,90.0f,90.0f};
+    expect(readonly_video_brightness_meter_quad(true,1,meter_left));
+    expect(readonly_video_brightness_meter_quad(true,1,meter_right));
+    expect(!readonly_video_brightness_meter_quad(false,1,meter_left));
+    expect(!readonly_video_brightness_meter_quad(true,0,meter_left));
+    expect(!readonly_video_brightness_meter_quad(true,2,meter_left));
+    expect(!readonly_video_brightness_meter_quad(true,3,meter_right));
+    expect(!readonly_video_brightness_meter_quad(
+        true,1,{59.0f,85.0f,75.6f,90.0f}));
+    expect(!readonly_video_brightness_meter_quad(
+        true,1,{60.0f,83.0f,75.6f,88.0f}));
+    expect(!readonly_video_brightness_meter_quad(
+        true,1,{60.0f,85.0f,76.0f,90.0f}));
+    expect(!readonly_video_brightness_meter_quad(
+        true,1,{50.0f,85.0f,90.0f,90.0f}));
+    expect(!readonly_video_brightness_meter_quad(
+        true,1,{NAN,85.0f,75.6f,90.0f}));
+    expect(!readonly_video_brightness_meter_quad(
+        true,1,{60.0f,85.0f,75.6f,NAN}));
+    // The VIDEO glyphs, title, butterfly, and all non-source-backed
+    // images stay unmodified, even when visually close to the meter.
     // Other menus, brightness slider and 3D butterfly are not font
     // glyphs from the four verified native VIDEO source bands.
     // Wine regression 2026-11-22: the old VIDEO info text was cached
