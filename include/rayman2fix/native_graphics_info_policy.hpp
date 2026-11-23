@@ -83,6 +83,21 @@ constexpr bool graphics_info_video_preparation(
         normal==3 && reflex==0 && selection_valid && selection==0 &&
         latch_valid && latch<=1u;
 }
+// Native VIDEO preparation normal-3 can briefly move V17 from 0 to
+// 1 and back (observed on the user's second visit, ~71-73 seconds).
+// The original script may still paint old cached selection glyphs in
+// that phase. Only the successfully protected read-only MENU may
+// suppress those preparation glyphs; do not suppress Options text.
+constexpr bool graphics_info_readonly_preparation(
+    bool approved_exe,bool menu_level,bool controller_valid,
+    int normal,int reflex,bool selection_valid,int selection,
+    bool latch_valid,unsigned latch,
+    bool readonly_script_copies_active) noexcept {
+    return readonly_script_copies_active && approved_exe &&
+        menu_level && controller_valid && normal==3 && reflex==0 &&
+        selection_valid && (selection==0 || selection==1) &&
+        latch_valid && latch<=1u;
+}
 // Keep the same read-only information glyphs visible while the native
 // BRIGHTNESS slider is selected after a verified VIDEO visit. The previous
 // implementation restored the text immediately, leaving no information
