@@ -15,6 +15,17 @@ static void run(unsigned k) {
         x[144]={11u,0u,2u,2u};
         x[145]={16u,0u,3u,11u};
         x[146]={0u,0u,3u,12u};
+        for(unsigned k=0u;k<2u;++k) {
+            const unsigned i=157u+k*12u;
+            x[i]={503u,0u,2u,4u};
+            x[i+1u]={k?120u:50u,0u,3u,12u};
+            x[i+2u]={0u,0u,3u,16u};
+            x[i+6u]={0u,0u,3u,16u};
+            for(unsigned j:{3u,4u,5u,7u,8u,9u})
+                x[i+j]={0u,0u,4u,13u};
+            x[i+10u]={0x2175e80u+4u*k,0u,3u,32u};
+            x[i+11u]={3u,0u,3u,12u};
+        }
     } else if(p.behavior==9u && p.script==2u) {
         x[0]={0u,0u,1u,0u};
         x[1]={45u,0u,2u,1u};
@@ -43,10 +54,19 @@ static void run(unsigned k) {
     auto changed=x;
     check(rewrite_pause_video_script(changed.data(),p));
     if(p.behavior==9u && p.script==1u) {
-        check(changed[143].parameter==1u && changed[146].parameter==1u);
-        for(unsigned i=0;i<changed.size();++i)
-            if(i!=143u && i!=146u)
-                check(changed[i].parameter==x[i].parameter);
+        // Preserve V17=3 and V16=0, whose original values control
+        // return to parent Options. Only remove two complete SetAGO
+        // subtrees and compact the remainder of the script.
+        check(changed[143].parameter==3u && changed[146].parameter==0u);
+        for(unsigned i=0;i<157u;++i)
+            check(changed[i].parameter==x[i].parameter &&
+                  changed[i].type==x[i].type);
+        for(unsigned i=157u;i<280u;++i)
+            check(changed[i].parameter==x[i+24u].parameter &&
+                  changed[i].type==x[i+24u].type);
+        check(changed[279].type==8u && changed[279].indent==0u);
+        for(unsigned i=280u;i<changed.size();++i)
+            check(changed[i].type==8u && changed[i].indent==0u);
     } else {
         const unsigned stop=p.behavior==9u && p.script==4u?27u:0u;
         check(changed[stop].type==8u && changed[stop].indent==0u);
@@ -62,6 +82,6 @@ static void run(unsigned k) {
     check(!rewrite_pause_video_script(bad.data(),p));
 }
 int main() {
-    for(unsigned k=0u;k<4u;++k)run(k); // preserve native initialization
+    for(unsigned k=0u;k<5u;++k)run(k); // preserve native V16 and ESC
     return 0;
 }
