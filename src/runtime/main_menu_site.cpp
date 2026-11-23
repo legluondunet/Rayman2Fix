@@ -81,8 +81,11 @@ bool replace_iat(void* expected,void* replacement) noexcept {
     const auto slot=base+kShellExecuteIatRva;
     if(!base || !expected || !replacement)return false;
     std::uint32_t existing=0;
-    if(!read_exact(slot,&existing,4u) ||
-       existing!=reinterpret_cast<std::uintptr_t>(expected))return false;
+    if(!read_exact(slot,&existing,4u))return false;
+    if(existing==reinterpret_cast<std::uintptr_t>(replacement))
+        return true; // already our forwarded hook from prior MENU load
+    if(existing!=reinterpret_cast<std::uintptr_t>(expected))
+        return false;
     DWORD old=0;
     if(!VirtualProtect(reinterpret_cast<void*>(slot),4u,
                        PAGE_READWRITE,&old))return false;
