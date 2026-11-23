@@ -32,6 +32,7 @@
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
 #include "rayman2fix/native_graphics_info_proto.hpp"
 #include "rayman2fix/graphics_menu_glyph_layout.hpp"
+#include "rayman2fix/native_graphics_info_color.hpp"
 #endif
 #endif
 #include <mutex>
@@ -384,6 +385,7 @@ thread_local bool g_native_info_remapped_glyph=false;
 thread_local unsigned g_native_info_source_row=0;
 std::atomic<std::uint32_t> g_native_info_material_pairs_seen{0};
 std::atomic<unsigned> g_native_info_tinted_quads{0};
+std::atomic<unsigned> g_native_info_static_palette_quads{0};
 #endif
 thread_local float g_native_input_left=0.0f;
 thread_local float g_native_input_right=0.0f;
@@ -7039,11 +7041,10 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
 
 
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
-// Original approved Rayman2.exe @ 0x4297E6 passes a stack-built, opaque
-// color array separately from the vertex quad to the colored GLI callback.
-// Read its FIRST 16 bytes strictly for diagnostic metadata. It is not yet
-// proven to be four packed ARGB colors or safe to replace. Neither the
-// caller's memory nor the values sent to GLI may be modified here.
+// The approved EXE's colored GLI callback receives a stack-built
+// 4×32-bit secondary font palette, independent of the vertex colors.
+// Read it via checked process memory. Never modify the game's source
+// palette; any read-only information style uses a separate local copy.
 bool snapshot_native_glyph_palette(const void* ptr,
                                    std::uint32_t (&words)[4]) noexcept {
     if(!ptr)return false;
@@ -7103,27 +7104,35 @@ void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
     if (!original) return;
     report_first(g_color_seen, "RUNTIME-HUD: colored sprite callback reached");
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
-    // Compare source-row and native-focus color data before attempting
-    // to neutralize any highlight. Prior vertex-only white tint did not
-    // change the user's visible yellow/blue/red selection colors.
+    // The owner's screenshot/log proved native focus tint came from
+    // the separate colored-GLI palette (not just vertex packed_color):
+    // FFFFFF78 for the highlighted item; FF6EBEFF for normal text.
+    // Keep the 16 raw diagnostic samples and replace only the four
+    // source-verified VIDEO glyph rows with a local, invariant palette.
     trace_native_information_glyph_palette(quad,colors);
-    // Experimental info-only style. Never alter the original game's
-    // vertex storage or its opaque secondary color/material pointer.
-    if(g_native_info_remapped_glyph && quad &&
+    if(g_native_info_remapped_glyph && g_native_2d_call_depth!=0u &&
+       g_native_info_source_row>=1u && g_native_info_source_row<=4u &&
+       r2fix::native_graphics_info_focus_row()>=1 && quad &&
        r2fix::is_screen_sprite_quad(quad)) {
-        r2fix::HudVertex styled[4]{};
-        std::memcpy(styled,quad,sizeof(styled));
-        if(r2fix::tint_native_information_glyph(styled,true)) {
-            if(g_native_2d_call_depth!=0) {
+        std::uint32_t native_colors[4]{},fixed_colors[4]{};
+        const bool readable=snapshot_native_glyph_palette(
+            colors,native_colors);
+        if(readable && r2fix::static_video_information_palette(
+                native_colors,fixed_colors,true,
+                g_native_info_source_row,
+                r2fix::native_graphics_info_focus_row())) {
+            r2fix::HudVertex styled[4]{};
+            std::memcpy(styled,quad,sizeof(styled));
+            if(r2fix::tint_native_information_glyph(styled,true)) {
                 probe_native_2d_driver(quad,"colored");
                 g_native_2d_passthrough_color.fetch_add(
                     1,std::memory_order_relaxed);
+                if(g_native_info_static_palette_quads.fetch_add(
+                        1u,std::memory_order_relaxed)==0u)
+                    log_line("RUNTIME-GRAPHICS-STYLE: status=static-information-palette-active copy=vertex-and-4colors native-focus-ignored=1 original-material-untouched=1 brightness-and-butterfly=untouched");
+                original(styled,fixed_colors,z,globals);
+                return;
             }
-            if(g_native_info_tinted_quads.fetch_add(
-                    1u,std::memory_order_relaxed)==0u)
-                log_line("RUNTIME-GRAPHICS-STYLE: status=first-verified-info-glyph color=opaque-white source=vertex-copy original-material=untouched experimental=1");
-            original(styled,colors,z,globals);
-            return;
         }
     }
 #endif
