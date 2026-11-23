@@ -5793,13 +5793,11 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     bool information_glyph=false;
     unsigned information_source_row=0u;
     if(producer==Native2DProducer::Glyph) {
-        // Native normal-3 can draw cached old resolution text before
-        // the read-only information panel is constructed. Drop ONLY
-        // the source-verified legacy choice font bands during the
-        // authenticated read-only preparation. Other menus, the VIDEO
-        // title, and the 3D butterfly never enter this filter.
-        if(r2fix::suppress_legacy_video_preparation_glyph(
-                xmin,ymin,xmax,ymax))return;
+        // Never drop font glyphs from normal-3 by screen position.
+        // The VIDEO preparation state also shares rendering with
+        // Options; the geometry-only mask hid legitimate parent-menu
+        // entries (user screenshot, 23 Nov). Preserve all glyphs until
+        // their source widget/actor can be verified independently.
         // The game may keep glyphs built with VIDEO information strings
         // after localization pointers are restored. Only in the verified
         // native brightness behavior, drop those stale VIDEO choice glyphs
