@@ -182,6 +182,49 @@ void check_enter_status(unsigned script_index,unsigned enabled) {
         nodes.data(),parent));
 }
 
+void test_video_script1_only_range() {
+    std::array<NativeMenuScriptNode,324u> before{};
+    for(auto& n:before)n={0u,0u,2u,12u};
+    const auto put=[&](unsigned at,unsigned var,unsigned value) {
+        before[at-2u]={11u,0u,2u,2u};
+        before[at-1u]={var,0u,3u,11u};
+        before[at]={value,0u,3u,12u};
+    };
+    put(146u,17u,0u);
+    put(149u,19u,0u);
+    put(152u,20u,3u);
+    before[313]={506u,0u,3u,4u};
+    before[314]={17u,0u,4u,11u};
+    before[315]={1u,0u,4u,12u};
+    before[316]={0x3f800000u,0u,4u,13u};
+    before.back()={0u,0u,0u,8u};
+    const NativeVideoDisablePlan plan{
+        1u,324u,native_video_script_shape_hash(before.data(),324u),
+        {0u,0u,0u},{0u,0u,0u}};
+    auto changed=before;
+    check(standalone_video_script1_bound_zero(changed.data(),plan));
+    for(unsigned i=0;i<before.size();++i) {
+        check(changed[i].parameter==
+            (i==152u?0u:before[i].parameter));
+        check(changed[i].type==before[i].type);
+        check(changed[i].indent==before[i].indent);
+        check(changed[i].padding==before[i].padding);
+    }
+    // The native heading JFFTXT remains exactly as original.
+    check(changed[315].parameter==1u &&
+          changed[316].parameter==0x3f800000u);
+    for(const unsigned at:{146u,149u,152u,313u,314u,315u,316u}) {
+        auto bad=before;bad[at].parameter^=1u;
+        const auto unchanged=bad;
+        check(!standalone_video_script1_bound_zero(bad.data(),plan));
+        for(unsigned i=0;i<before.size();++i)
+            check(bad[i].parameter==unchanged[i].parameter);
+    }
+    auto bad=before;
+    bad[17].type=9u;
+    check(!standalone_video_script1_bound_zero(bad.data(),plan));
+    check(!standalone_video_script1_bound_zero(nullptr,plan));
+}
 
 int main(){
     static_assert(kVideoDisablePlans[0].script_index==1u);
@@ -200,5 +243,6 @@ int main(){
     check_static_font<517u>(4u,512u);
     check_enter_status<430u>(3u,373u);
     check_enter_status<517u>(4u,333u);
+    test_video_script1_only_range();
     return 0;
 }

@@ -566,11 +566,18 @@ bool install_native_disabled_video_choices(
             g_logger(line);
             valid=false;reason="script-shape";break;
         }
-        // Script 1 participates in native parent Options labels. It
-        // MUST be an identical, hash-approved private copy: rewriting
-        // its JFFTXT focus mode made VIDEO disappear from Options.
-        // Keep all V14, V17, V19, V20 and font instructions intact.
-        if(k==0u)continue;
+        // Normal-5 script 1 also feeds native parent Options labels.
+        // Never change its V14 status or JFFTXT title/focus nodes.
+        // Its independently verified V20=3 bounds the obsolete VIDEO
+        // selection and must instead be 0 BEFORE the AI consumes Down.
+        if(k==0u) {
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+            if(!standalone_video_script1_bound_zero(copy,plan)) {
+                valid=false;reason="video-script1-range-only";break;
+            }
+#endif
+            continue;
+        }
         const auto* font_plan=k==3u ? &kNativeInfoTextPlans[1] : nullptr;
         if(font_plan && !native_video_static_font_preflight(
                 copy,plan,*font_plan)) {
@@ -727,7 +734,7 @@ bool install_native_disabled_video_choices(
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
     g_brightness_transition_disabled.store(true,std::memory_order_release);
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
-    g_logger("RUNTIME-STANDALONE-VIDEO: old-widgets-not-constructed normal3-script2=direct-video-open normal5-scripts3,4=terminated normal5-script1=original-untouched cursor=game-thread-guarded other-options-branches=retained selection-dispatch=guarded");
+    g_logger("RUNTIME-STANDALONE-VIDEO: old-widgets-not-constructed normal3-script2=direct-video-open normal5-scripts3,4=terminated normal5-script1=V20-literal-zero-JFFTXT-unchanged cursor=game-thread-guarded other-options-branches=retained selection-dispatch=guarded");
 #else
     g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1-original,2,3,4 brightness-transition=suppressed font-focus=static-0-video4-only enter-save-status=inert parent-options-preserved=1 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
 #endif

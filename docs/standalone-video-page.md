@@ -109,11 +109,15 @@ from the bootstrap MENU-only CI test.
   drawing its live 3D scene. A 2px transparent blue outline (sampled
   median RGB 145,206,255 from the native title) surrounds the white
   text; no colored or dark rectangular panel.
-- The verified normal-5 selection range is constrained to V19=V20=0
-  at the native render boundary, before the next key evaluation, in
-  addition to the already validated V17 correction. This is limited
-  to the retail VIDEO range 0..3; all unrelated Options behaviors
-  remain untouched.
+- The verified normal-5 script 1 now limits V20 to zero **in the
+  original AI execution path**, before any navigation step. The
+  original JFFTXT focus parameters and every V14 Options label stay
+  untouched. The previous late flip-time V17/V20 guards remain as
+  a defensive fallback, but no longer perform the only correction.
+- The owner's screenshot proved the nominal cyan RGB was rendered
+  as gold in this Glide LFB path. The RGB565 channel order is now
+  compensated to draw a vivid blue border instead; interior pixels
+  are not filled or darkened.
 - The GameFrame LFB read/write ABI is based on Glide2's documented
   eight- and seven-parameter exports, and must be checked under Windows
   and Wine before a release. On unsupported exports the original flip

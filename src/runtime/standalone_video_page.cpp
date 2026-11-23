@@ -274,13 +274,16 @@ bool standalone_video_page_draw_before_flip() noexcept {
     // are composited over the scene; no opaque or dark overlay.
     for(unsigned y=0;y<kH;++y)for(unsigned x=0;x<kW;++x) {
         const unsigned i=y*kW+x;
-        // Source screenshot of the title's blue gradient: median
-        // RGB(145,206,255), sampled from native title glyphs.
-        // This is a 2px outline, not a filled rectangle.
-        constexpr unsigned kBlueR=145u,kBlueG=206u,kBlueB=255u;
+        // Glide2's LFB channel layout here is reversed relative to
+        // the logical color passed to blend_565: the prior nominal
+        // RGB(145,206,255) displayed *gold* on the owner's screenshot
+        // (measured approximately RGB 239,195,140). Encode the inverse
+        // R/B order to obtain the requested Rayman VIDEO-title blue.
+        // No fill: a crisp 2px cyan-blue border around information.
+        constexpr unsigned kLfbRed=255u,kLfbGreen=218u,kLfbBlue=145u;
         const bool outline=x<2u || y<2u || x>=kW-2u || y>=kH-2u;
         auto pix=outline?blend_565(g_pixels[i],
-            kBlueR,kBlueG,kBlueB,240u):g_pixels[i];
+            kLfbRed,kLfbGreen,kLfbBlue,255u):g_pixels[i];
         const auto value=g_text_mask[i];
         const unsigned m=value&255u;
         if(m)pix=blend_565(pix,255u,255u,255u,m);
@@ -293,7 +296,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
         return false;
     }
     if(!g_drew.exchange(true) && g_log)
-        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=untouched-3D blue-outline=145,206,255 border-width=2 controls=Escape-only");
+        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=untouched-3D blue-outline=verified-BGR565-blue border-width=2 controls=Escape-only");
     return true;
 }
 } // namespace r2fix
