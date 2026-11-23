@@ -46,16 +46,20 @@ artifact from the draft PR #52, not the standard bootstrap EXE.
 
 ## In-game ESC Pause menu
 
-The ESC menu inside a playable level is **not established as the same
-native AI model** as the startup MENU scene. The first version of this
-research build therefore never patches any in-game pause scripts by
-accident: it emits a bounded passive transition marker
-`RUNTIME-PAUSE-VIDEO: generic-esc-menu=...` with the level identifier.
-A maintainer log and screenshot from ESC → Options → Vidéo in a saved
-game are required to identify the actual pause-side controller and
-port the same **read-only** page without affecting gameplay, audio,
-save slots or normal ESC navigation. No pause-menu parity is claimed
-from the bootstrap MENU-only CI test.
+The 23 November 15:28 owner log confirms an independently authenticated
+shared Fix.sna controller (23 normal / 6 reflex behaviors). Its
+normal=9/reflex=2 state is the script-identified in-game VIDEO page;
+normal=14/reflex=3 is a distinct submenu state.
+
+The latest **experimental** build now preflights five exact original
+script shapes in this distinct controller, swaps private copies (never
+rewrites commercial assets), guards the obsolete resolution and save
+paths, and draws the same blue-tinted Glide2 information panel while
+the authenticated normal=9/reflex=2 page is visible. The separate
+`RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1` marker confirms actual
+in-game rendering. Visual behavior, Escape navigation, and the native
+butterfly still require manual Windows/Wine validation. No production
+parity is claimed yet.
 
 ## Main-menu Rayman website (research build)
 
@@ -65,14 +69,17 @@ from the bootstrap MENU-only CI test.
   the one validated string-pointer slot is temporarily changed to
   `/C:Rayman2Fix` (no version/commit suffix).
 - The original PC x86 executable imports ShellExecuteA from SHELL32 at
-  import RVA 0x9C220. When the import matches the real DLL procedure,
-  an exact IAT hook forwards only an old Rayman2 website URL to
-  `https://github.com/legluondunet/Rayman2Fix` via the operating
-  system's default browser. All other ShellExecute requests are
-  forwarded unchanged. If the IAT is unavailable or the original text
-  mismatches, NO label replacement is permitted. Both patches are
-  restored on MENU unload. The build does not inject URL requests on
-  the game's render thread.
+  RVA 0x9C220. An exact IAT callback remains as a fallback, but the
+  15:28 owner log showed **no callback** when testing the label.
+  The native main-menu normal-11/script-0 independently contains its
+  original procedure **369** (node 1835) and original website string
+  literal at node 1836 (`http://www.rayman2.com/`). The latest
+  experimental code validates all 1995 script nodes and clones that
+  script in private memory, replacing **only** the verified literal
+  pointer with the Rayman2Fix GitHub URL. No original asset is edited.
+  The original ShellExecute behavior is retained, and both pointer
+  replacements are restored on MENU unload. A live click/Enter test
+  is still required.
 - The site handler was revised in commit cff151c8 to check the
   hash-verified EXE's exact ShellExecuteA **caller return RVA 0x187267**
   rather than reading a legacy website URL. The 15:01 owner log reports
@@ -97,33 +104,28 @@ from the bootstrap MENU-only CI test.
   installed DriverVersion only when there is one unique VEN/DEV match.
   Under Wine the host graphics driver version is reported as
   unavailable, never guessed from the Win32 emulation layer.
-- The native normal-5 script1 is intentionally copied **unchanged**:
-  it also controls original Options labels and changing it caused
-  VIDEO to disappear from the parent menu. The page instead resets
-  only obsolete V17=1..3 selections after native AI updates on the
-  original frame thread, after repeated validations of MENU, the
-  verified current normal5/reflex0 controller and the DsgMem schema.
-  ESC and other menus are never modified; the CD files are untouched.
-  The old normal-5 script1's JFFTXT title drawing is also left
-  unchanged; its percent-glyph title row is normalized to fixed 20..25
-  Y bounds only during the standalone page, retaining original textures
-  and colors without the selected-row bobbing. Data rows now use
-  RGB(255,255,255) in both GDI and Glide RGB565 composition.
+- On the main MENU normal-5 script-1 private clone, the original
+  `[0..3]` selection becomes the native valid singleton `[1..1]`
+  at authenticated V17/V19/V20 source nodes. The previous `[0..0]`
+  attempt was not accepted by the native navigation helper (a Down
+  key still caused a one-step movement). Original JFFTXT title
+  parameters, V14 parent Options status, other menu branches and
+  the animated butterfly are preserved. The game-thread cursor
+  correction is only a defensive fallback. CI proves the patch
+  preflight, not yet the visible elimination of the one-step movement.
 - The information page now composites a subtle translucent midnight-blue
   background (alpha 100/255, 39%) over the live 3D scene using the
   approved Glide2 LFB read/write path. A crisp 2px title-blue border
   surrounds the white text; no asset files, butterfly actor or scene
   geometry are modified. The color and transparency are pending visual
   validation under Windows/Wine.
-- The verified normal-5 script 1 now limits V20 to zero **in the
-  original AI execution path**, before any navigation step. The
-  original JFFTXT focus parameters and every V14 Options label stay
-  untouched. The previous late flip-time V17/V20 guards remain as
-  a defensive fallback, but no longer perform the only correction.
-- The owner's screenshot proved the nominal cyan RGB was rendered
-  as gold in this Glide LFB path. The RGB565 channel order is now
-  compensated to draw a vivid blue border instead; interior pixels
-  are not filled or darkened.
+- The source-level normal-5 `[1..1]` singleton is independent from
+  the late flip-time V17/V19/V20 fallback; it is validated from the
+  original 324-node script before publication. Neither path changes
+  the parent Options menu's selection or the original disk data.
+- Glide RGB565 channel order is compensated (red/blue swapped).
+  The blue outline and subtle dark-blue translucent background were
+  approved visually by the maintainer on 23 November 2026.
 - The GameFrame LFB read/write ABI is based on Glide2's documented
   eight- and seven-parameter exports, and must be checked under Windows
   and Wine before a release. On unsupported exports the original flip
@@ -155,3 +157,18 @@ input, changes the display mode, or draws an information page.
 A log from entering the actual in-game Pause → Options → VIDEO page
 is required before a separate, script-verified read-only replacement
 can be enabled. No in-game parity is claimed in the current build.
+
+## Current acceptance checks (post 15:28, 23 November 2026)
+
+- **MENU → Options → VIDEO**: Down/Up must not move the native focus
+  even one row; Escape must return normally to Options.
+- **MENU → Rayman2Fix**: clicking or Enter must open the default
+  browser on the project home page. Script node 1836 is the primary
+  URL redirect. IAT logging is only a fallback diagnostic.
+- **Game → ESC → Options → VIDEO**: the standalone GPU/driver/output
+  panel must appear without legacy resolution choices or brightness.
+  Confirm the first-frame log `RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1`,
+  preserved pause music, original butterfly and Escape return.
+
+These are **not** production release claims. The scripts and display
+are opt-in on draft PR #52 only; main stays untouched.
