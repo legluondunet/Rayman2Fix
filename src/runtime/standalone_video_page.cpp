@@ -1,5 +1,6 @@
 #include "rayman2fix/standalone_video_page.hpp"
 #include "rayman2fix/standalone_video_device_policy.hpp"
+#include "rayman2fix/video_navigation_input.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -243,6 +244,7 @@ void standalone_video_page_configure(StandaloneVideoLogger logger,
     std::snprintf(g_lines[3].data(),128,"GAMEFRAME / GLIDE2");
     std::snprintf(g_lines[4].data(),128,"1024 x 768 x 16");
     g_configured.store(true,std::memory_order_release);
+    install_video_navigation_input(g_log);
     if(g_log)g_log("RUNTIME-STANDALONE-VIDEO: configured independent-page=1 native-title=original-video centered-panel=1 rows=5 win32-driver=verified-setupapi renderer=Glide2-LFB");
 }
 
@@ -257,6 +259,14 @@ void standalone_video_page_set_pause_visible(bool value) noexcept {
 bool standalone_video_page_pause_is_drawn() noexcept {
     return g_pause_visible.load(std::memory_order_acquire) &&
            g_pause_drawn_this_visit.load(std::memory_order_acquire);
+}
+bool standalone_video_page_owns_navigation(bool& main,
+                                           bool& pause) noexcept {
+    main=g_visible.load(std::memory_order_acquire) &&
+         g_drew.load(std::memory_order_acquire);
+    pause=standalone_video_page_pause_is_drawn();
+    return g_configured.load(std::memory_order_acquire) &&
+           (main||pause);
 }
 bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& xmax,float& ymax) noexcept {
     // Do not hide any native glyph before our replacement page has
