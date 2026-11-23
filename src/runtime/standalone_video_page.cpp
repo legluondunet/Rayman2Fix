@@ -155,6 +155,14 @@ void standalone_video_page_configure(StandaloneVideoLogger logger,
 void standalone_video_page_set_visible(bool value) noexcept {
     g_visible.store(value,std::memory_order_release);
 }
+bool standalone_video_page_suppress_native_glyphs() noexcept {
+    // Do not hide any native glyph before our replacement page has
+    // successfully rendered at least once; unsupported Glide LFB
+    // implementations keep the original UI visible, not a blank page.
+    return standalone_video_hide_native_glyphs(
+        g_visible.load(std::memory_order_acquire),
+        g_drew.load(std::memory_order_acquire),true);
+}
 bool standalone_video_page_draw_before_flip() noexcept {
     if(!g_visible.load(std::memory_order_acquire) ||
        !g_configured.load(std::memory_order_acquire))return false;
@@ -167,8 +175,9 @@ bool standalone_video_page_draw_before_flip() noexcept {
     if(!g_read(kBackBuffer,kX,kY,kW,kH,kW*2u,g_pixels.data()))
         return false;
     // Read the actual animated menu background and darken it in-place.
-    // No old VIDEO glyph is hidden here: the old script is deactivated
-    // upstream before its first JFFTXT call. The 3D scene remains live.
+    // Native JFFTXT glyphs are suppressed independently at the
+    // verified font producer callback while this panel is visible.
+    // This retains the original 3D scene and butterfly.
     for(unsigned y=0;y<kH;++y)for(unsigned x=0;x<kW;++x) {
         const unsigned i=y*kW+x;
         auto pix=g_pixels[i];

@@ -13,6 +13,13 @@ int main() {
     for(int n: {1,3,11,13,18,19})
         check(!standalone_video_page_state(true,true,true,true,n,0));
     check(!standalone_video_page_state(true,true,true,true,5,5));
+    // Source-scoped policy, not screen coordinates: never suppress
+    // fonts outside the standalone page, on a failed LFB renderer,
+    // or for non-glyph native 2D producers (butterfly and background).
+    check(standalone_video_hide_native_glyphs(true,true,true));
+    check(!standalone_video_hide_native_glyphs(false,true,true));
+    check(!standalone_video_hide_native_glyphs(true,false,true));
+    check(!standalone_video_hide_native_glyphs(true,true,false));
     std::array<NativeMenuScriptNode,430> a{};
     a[0]={0u,0u,1u,0u};
     a[1]={45u,0u,2u,1u};
