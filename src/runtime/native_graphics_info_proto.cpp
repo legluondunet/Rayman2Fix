@@ -480,7 +480,7 @@ void trace_native_static_script_preflight(const MenuAiModel& model) noexcept {
 // Live VIDEO option-state suppression. Disabled choices use the game's
 // own V14 UI state=1 (the same disabled state as the original inactive
 // save-resolution entry). Brightness stays state=2, V17 is NEVER forced.
-// Only two copies of complete, shape-verified native scripts are patched;
+// All three relevant normal-5 scripts are copied and verified;
 // the original script memory, source assets and code sections stay intact.
 struct NativeChoicesPatch {
     struct Slot {
@@ -488,7 +488,7 @@ struct NativeChoicesPatch {
         std::uintptr_t original=0;
         NativeMenuScriptNode* copy=nullptr;
     };
-    std::array<Slot,2> slots{};
+    std::array<Slot,3> slots{};
     bool attempted=false;
     bool active=false;
     bool ever_swapped=false;
@@ -505,7 +505,7 @@ bool install_native_disabled_video_choices(
         g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=normal5-script-list read-only-original=1");
         return false;
     }
-    std::array<NativeChoicesPatch::Slot,2> prepared{};
+    std::array<NativeChoicesPatch::Slot,3> prepared{};
     bool valid=true;
     const char* reason="unverified";
     for(unsigned k=0u;k<prepared.size();++k) {
@@ -561,51 +561,59 @@ bool install_native_disabled_video_choices(
     // or save 261 call in that narrow interval.
     const bool prior_fallback=g_guard_menu_video_dispatch.exchange(
         true,std::memory_order_acq_rel);
-    if(!swap_slot(prepared[0].pointer_slot,prepared[0].original,
-                 prepared[0].copy)) {
-        g_guard_menu_video_dispatch.store(
-            prior_fallback,std::memory_order_release);
-        for(auto& item:prepared)
-            if(item.copy)VirtualFree(item.copy,0,MEM_RELEASE);
-        g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=first-script-cas");
-        return false;
+    unsigned exchanged=0u;
+    for(;exchanged<prepared.size();++exchanged) {
+        const auto& item=prepared[exchanged];
+        if(!swap_slot(item.pointer_slot,item.original,item.copy))
+            break;
     }
-    state.ever_swapped=true;
-    state.slots=prepared;
-    if(!swap_slot(prepared[1].pointer_slot,prepared[1].original,
-                 prepared[1].copy)) {
-        state.active=true;
-        if(writable_slot(prepared[0].pointer_slot)) {
-            const auto seen=InterlockedCompareExchangePointer(
-                reinterpret_cast<PVOID volatile*>(prepared[0].pointer_slot),
-                reinterpret_cast<PVOID>(prepared[0].original),
-                reinterpret_cast<PVOID>(prepared[0].copy));
-            if(seen==reinterpret_cast<PVOID>(prepared[0].copy) ||
-               seen==reinterpret_cast<PVOID>(prepared[0].original))
-                state.active=false;
+    if(exchanged!=prepared.size()) {
+        // No reader can see a freed clone: retain every allocation once
+        // even one script-list pointer was published.
+        unsigned confirmed=0u;
+        for(unsigned i=0;i<exchanged;++i) {
+            const auto& item=prepared[i];
+            if(!writable_slot(item.pointer_slot))continue;
+            const auto observed=InterlockedCompareExchangePointer(
+                reinterpret_cast<PVOID volatile*>(item.pointer_slot),
+                reinterpret_cast<PVOID>(item.original),
+                reinterpret_cast<PVOID>(item.copy));
+            if(observed==reinterpret_cast<PVOID>(item.copy) ||
+               observed==reinterpret_cast<PVOID>(item.original))
+                ++confirmed;
         }
+        state.ever_swapped=exchanged>0u;
+        state.active=confirmed!=exchanged;
+        if(state.ever_swapped)state.slots=prepared;
+        else for(auto& item:prepared)
+            if(item.copy)VirtualFree(item.copy,0,MEM_RELEASE);
         if(!state.active)
             g_guard_menu_video_dispatch.store(
                 prior_fallback,std::memory_order_release);
-        // If rollback failed, keep dispatch fallback active until unload
-        // because the original exact children no longer match the copy.
-        g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=second-script-cas first-rollback-guarded=1");
+        char line[220]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=script-list-cas attempted=%u restored=%u guard=%u",
+            exchanged,confirmed,unsigned(state.active));
+        g_logger(line);
         return false;
     }
+    state.slots=prepared;
+    state.ever_swapped=true;
     state.active=true;
-    // Redirect the EXACT protected children to the new copied script 3.
-    // Otherwise VID_SelectResolution could bypass its protection after
-    // installation. Keep normal-19's fourth selection child untouched.
+    // Script 3 is clone 1. Retarget its exact VID_SelectResolution and
+    // VID_SaveCurrentResolution guarded children before dropping fallback.
+    // Script 1 and script 4 contain no protected video-mode call at these
+    // offsets. The original normal-19 selection child is unchanged.
     static constexpr unsigned kSelectOffsets[3]{0x140u,0x190u,0x1E0u};
     for(unsigned i=0;i<3u;++i)
         g_select_children[i].store(
-            reinterpret_cast<std::uintptr_t>(prepared[0].copy)+
+            reinterpret_cast<std::uintptr_t>(prepared[1].copy)+
                 kSelectOffsets[i]+8u,std::memory_order_relaxed);
     g_save_child.store(
-        reinterpret_cast<std::uintptr_t>(prepared[0].copy)+0xD60u+8u,
+        reinterpret_cast<std::uintptr_t>(prepared[1].copy)+0xD60u+8u,
         std::memory_order_release);
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
-    g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-options-copies-installed scripts=3,4 options=1,2,3 native-disabled-state=1 brightness=original v17=untouched protected-dispatch-retargeted=1");
+    g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-options-copies-installed scripts=1,3,4 options=1,2,3 native-disabled-state=1 brightness=original v17=untouched protected-dispatch-retargeted=1");
     return true;
 }
 void restore_native_disabled_video_choices(
@@ -630,7 +638,7 @@ void restore_native_disabled_video_choices(
     // interpreter quiescence guarantee that this experiment does not have.
     char line[170]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-GRAPHICS-CHOICES: status=script-copies-restore-attempt confirmed=%u/2 copied-buffers-retained=1",
+        "RUNTIME-GRAPHICS-CHOICES: status=script-copies-restore-attempt confirmed=%u/3 copied-buffers-retained=1",
         restored);
     g_logger(line);
     state=NativeChoicesPatch{};
