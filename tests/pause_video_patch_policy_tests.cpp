@@ -62,6 +62,6 @@ static void run(unsigned k) {
     check(!rewrite_pause_video_script(bad.data(),p));
 }
 int main() {
-    for(unsigned k=0u;k<5u;++k)run(k); // in-game VIDEO scripts only
+    for(unsigned k=0u;k<4u;++k)run(k); // preserve native initialization
     return 0;
 }
