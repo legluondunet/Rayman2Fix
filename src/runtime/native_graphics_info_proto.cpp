@@ -558,6 +558,14 @@ bool install_native_disabled_video_choices(
                 copy,plan,*font_plan)) {
             valid=false;reason="font-focus-preflight";break;
         }
+        // The two animated native JFFTXT calls in VIDEO script 4 can
+        // briefly repaint enlarged legacy text on Enter. Preflight
+        // against the original script before any local modifications.
+        // Never modify the parent Options script 1.
+        if(k==3u && !neutralize_native_video_text_animations(
+                copy,plan)) {
+            valid=false;reason="video-animation-preflight";break;
+        }
         if(is_brightness_transition) {
             if(!suppress_native_video_brightness_transition(
                  copy,script_nodes,
@@ -659,7 +667,7 @@ bool install_native_disabled_video_choices(
         std::memory_order_release);
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
     g_brightness_transition_disabled.store(true,std::memory_order_release);
-    g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1-original,2,3,4 brightness-transition=suppressed font-focus=static-0-video4-only enter-save-status=inert parent-options-preserved=1 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
+    g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1-original,2,3,4 brightness-transition=suppressed font-focus=static-0-video4-only video-animation=hidden-in-video4 enter-save-status=inert parent-options-preserved=1 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
     return true;
 }
 void restore_native_disabled_video_choices(
