@@ -22,6 +22,10 @@ struct NativeVideoDisablePlan {
 // loader relocation makes their values process-dependent. Individual
 // relevant operation and literal params must additionally match.
 constexpr NativeVideoDisablePlan kVideoDisablePlans[]{
+    // Script 1 also initializes the three enabled VIDEO choices.
+    // Its terminal display loop has no per-mode 'focused' literal.
+    {1u,324u,0x5dd56bd5973fe711ULL,{130u,135u,140u},
+                                  {0u,0u,0u}},
     {3u,430u,0xf4cc82cd7d6a21a4ULL,{254u,259u,264u},
                                   {292u,306u,320u}},
     {4u,517u,0xd6fbfd33f17ec60bULL,{214u,219u,224u},
@@ -73,13 +77,15 @@ inline bool disable_native_video_choices(
     for(unsigned row=1u;row<=3u;++row)
         if(!native_video_status_assignment(copy,p.count,
              p.initialized[row-1u],row,2u) ||
-           !native_video_status_assignment(copy,p.count,
-             p.highlighted[row-1u],row,3u))
+           (p.highlighted[row-1u]!=0u &&
+            !native_video_status_assignment(copy,p.count,
+               p.highlighted[row-1u],row,3u)))
             return false;
     // All checks precede any mutation; no partial patched copy on error.
     for(unsigned row=0u;row<3u;++row) {
         copy[p.initialized[row]].parameter=1u;
-        copy[p.highlighted[row]].parameter=1u;
+        if(p.highlighted[row]!=0u)
+            copy[p.highlighted[row]].parameter=1u;
     }
     return true;
 }
