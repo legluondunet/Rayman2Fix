@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <intrin.h>
 #include "rayman2fix/main_menu_site_policy.hpp"
 #include "rayman2fix/main_menu_site.hpp"
 #ifndef RAYMAN2FIX_VERSION
@@ -20,6 +21,9 @@
 namespace r2fix {
 namespace {
 constexpr std::uintptr_t kShellExecuteIatRva=0x0009C220u;
+// Unique original ShellExecuteA indirect CALL in the 1D7000-byte
+// approved executable: VA 0x587261 / return RVA 0x187267.
+constexpr std::uintptr_t kSiteOpenReturnRva=0x00187267u;
 constexpr unsigned kWebsiteHandle=362u;
 constexpr const char* kProjectUrl=
     "https://github.com/legluondunet/Rayman2Fix";
@@ -77,24 +81,29 @@ bool restore_iat(void* expected,void* replacement) noexcept {
     VirtualProtect(reinterpret_cast<void*>(slot),4u,old,&ignored);
     return found==expected || found==replacement;
 }
-HINSTANCE WINAPI website_shell_execute(
+__declspec(noinline) HINSTANCE WINAPI website_shell_execute(
     HWND owner,LPCSTR operation,LPCSTR file,LPCSTR parameters,
     LPCSTR directory,INT show) {
+    const auto caller=reinterpret_cast<std::uintptr_t>(_ReturnAddress());
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    const bool authenticated_site_action=
+        base!=0 && caller==base+kSiteOpenReturnRva;
     const auto original=g_original_shell.load(std::memory_order_acquire);
     if(!original)return reinterpret_cast<HINSTANCE>(SE_ERR_ACCESSDENIED);
-    // Never create a browser in a rendering or injected DLL callback:
-    // forward the user's already-triggered original ShellExecute event.
-    char safe_url[256]{};
-    bool is_rayman_url=false;
-    if(file && read_exact(reinterpret_cast<std::uintptr_t>(file),
-                        safe_url,sizeof(safe_url)-1u)) {
-        safe_url[sizeof(safe_url)-1u]=0;
-        is_rayman_url=site_redirect_approved_url(safe_url);
-    }
-    if(g_active.load(std::memory_order_acquire) && is_rayman_url) {
+    // The old hook required a 255-byte readable buffer AND one of four
+    // historical URLs; both may reject the game's authentic site action.
+    // The approved x86 EXE has a SINGLE original ShellExecuteA callsite.
+    // Redirect by that exact native return RVA instead, never by a URL
+    // prefix or guessed text. All unrelated calls forward unchanged.
+    if(g_active.load(std::memory_order_acquire) &&
+       authenticated_site_action) {
         if(g_logger)g_logger(
-          "RUNTIME-MENU-SITE: original-site-action=1 redirect=github opener=shell32-default-browser");
-        return original(owner,"open",kProjectUrl,nullptr,nullptr,SW_SHOWNORMAL);
+            "RUNTIME-MENU-SITE: original-site-action=1 caller-rva=0x187267 redirect=github default-browser=1");
+        const auto result=original(owner,"open",kProjectUrl,nullptr,
+                                   nullptr,SW_SHOWNORMAL);
+        if(reinterpret_cast<std::intptr_t>(result)<=32 && g_logger)
+            g_logger("RUNTIME-MENU-SITE: browser-open-failed result-leq-32");
+        return result;
     }
     return original(owner,operation,file,parameters,directory,show);
 }
@@ -118,8 +127,7 @@ bool install_main_menu_site(std::uintptr_t table,SiteLogger logger) noexcept {
     }
     // Original native text parser requires /C: for menu caption.
     std::snprintf(g_site_label,sizeof(g_site_label),
-        "/C:RayManFix %s-%.8s",
-        RAYMAN2FIX_VERSION,RAYMAN2FIX_BUILD_COMMIT);
+        "/C:Rayman2Fix");
     g_logger=logger;
     g_original_shell.store(original,std::memory_order_release);
     if(!replace_iat(reinterpret_cast<void*>(original),
@@ -140,7 +148,7 @@ bool install_main_menu_site(std::uintptr_t table,SiteLogger logger) noexcept {
     g_patched_table=table;
     g_original_text=source;
     g_active.store(true,std::memory_order_release);
-    logger("RUNTIME-MENU-SITE: status=installed handle=362 locales=5 label=RayManFix-version-commit url=github browser=ShellExecuteA-redirect");
+    logger("RUNTIME-MENU-SITE: status=installed handle=362 locales=5 label=Rayman2Fix url=github verified-native-return-rva=0x187267 browser=ShellExecuteA-redirect");
     return true;
 }
 void restore_main_menu_site() noexcept {
