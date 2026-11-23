@@ -50,6 +50,25 @@ constexpr bool graphics_info_readonly_video_page(
         selection_valid && selection==5 &&
         latch_valid && latch<=1u;
 }
+// All four-copy MENU guards are installed before the video entry.
+// Static source verification of the approved 638463-byte Menu.sna finds
+// the VIDEO-localization handles 379..385 exclusively in the controller
+// normal behaviors 3, 5, 13 and 19. The game's native renderer can
+// cache older strings BEFORE normal-3 is polled: preinstall once in the
+// approved MENU session rather than at the first normal-3 observation.
+// The characters do not affect input, mode selection, or other menus.
+// Return the original strings only when MENU unloads (or on rollback).
+constexpr bool graphics_info_pin_text_for_menu(
+    bool approved_exe,bool menu_loaded,bool guarded,
+    bool controller_valid,bool readonly_script_copies_active,
+    bool pointers_already_swapped) noexcept {
+    return approved_exe && menu_loaded && guarded && controller_valid &&
+        readonly_script_copies_active && !pointers_already_swapped;
+}
+constexpr bool graphics_info_restore_pinned_text(
+    bool menu_loaded,bool readonly_script_copies_active) noexcept {
+    return !menu_loaded || !readonly_script_copies_active;
+}
 // The approved Menu.sna's normal-3 setup script references the same
 // VIDEO text handles (379/381/382/383/380/385) as normal-5. Wine logs
 // show normal=3/reflex=0/V17=0 immediately before the VIDEO page.
