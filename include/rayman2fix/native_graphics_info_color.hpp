@@ -23,10 +23,12 @@ constexpr bool static_video_information_palette(
     const auto first_alpha=(source[0]>>24)&0xFFu;
     const auto second_alpha=(source[2]>>24)&0xFFu;
     if(first_alpha==0u || second_alpha!=first_alpha)return false;
-    // A constant white shade, with the original element alpha, makes
-    // text independent of the old resolution-choice highlight. Keep
-    // fades, transitions and translucent disabled source-row alpha.
-    const std::uint32_t uniform=source[0];
+    // Read-only information is not a disabled menu choice. The
+    // original OUTPUT row has alpha 0x5A because it came from an
+    // inactive native choice; preserving it makes the first line grey.
+    // Use the same fully opaque white as all other information rows.
+    // Never change the actual native glyph palette or unrelated UI.
+    const std::uint32_t uniform=0xFFFFFFFFu;
     for(auto& color:destination)color=uniform;
     return true;
 }
