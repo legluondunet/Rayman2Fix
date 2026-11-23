@@ -40,7 +40,7 @@ bool locate_verified_video_cursor_cell(
 }
 // A frozen cursor alone is too late: the original navigation command
 // already advanced once before the native flip. Change the native
-// selection UPPER BOUND to zero as soon as the verified VIDEO page
+// selection UPPER BOUND to one as soon as the verified VIDEO page
 // is active. Do not touch other MENU screens.
 template<class R32,class R8>
 bool locate_verified_video_selection_bounds(
@@ -56,6 +56,37 @@ bool locate_verified_video_selection_bounds(
         cursor=lower=upper=0;
         return false;
     }
+    return true;
+}
+// Original Menu.sna reflex-0/script-2 updates V70 (navigation target)
+// before copying it into V17. Repairing only V17 after the frame means
+// the focus interpolation still acts on the stale V70 target. We may
+// pin V70 to the verified VIDEO singleton only when the entire 27/7
+// MENU model is authenticated externally and the same DsgVar schema
+// validates V70 as scalar at source offset 0x22c.
+template<class R32,class R8>
+bool locate_verified_video_navigation_target_cell(
+    std::uintptr_t mind,R32 read32,R8 read8,
+    std::uintptr_t& target) noexcept {
+    target=0;
+    std::uintptr_t selection=0;
+    if(!locate_verified_video_cursor_cell(mind,read32,read8,selection))
+        return false;
+    std::uint32_t memory=0,ref=0,declaration=0,infos=0,values=0;
+    std::uint32_t offset=0,type=0;
+    if(!read32(mind+12u,memory) ||
+       !read32(std::uintptr_t(memory),ref) ||
+       !read32(std::uintptr_t(ref),declaration) ||
+       !read32(std::uintptr_t(declaration)+4u,infos) ||
+       !read32(std::uintptr_t(memory)+8u,values) ||
+       !menu_safe_ptr(infos,90u*16u) ||
+       !read32(std::uintptr_t(infos)+70u*16u,offset) ||
+       !read32(std::uintptr_t(infos)+70u*16u+4u,type) ||
+       offset!=0x22cu || type!=5u ||
+       std::uintptr_t(values)+0x144u!=selection ||
+       !menu_safe_ptr(std::uintptr_t(values)+offset))
+        return false;
+    target=std::uintptr_t(values)+offset;
     return true;
 }
 constexpr bool standalone_video_upper_bound_needs_reset(
