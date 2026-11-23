@@ -12,6 +12,14 @@ int main() {
     check(menu_scan_resume_cursor(0x17FF0000u,0x7FFF0000u)==0x17FF0000u);
     check(menu_scan_resume_cursor(0x7FFF0000u,0x7FFF0000u)==0x10000u);
     check(menu_scan_resume_cursor(0x0u,0x7FFF0000u)==0x10000u);
+    // A first miss must not delay validated graphics information by
+    // another full five seconds, as happened on Wine at ~7.9s.
+    using r2fix::menu_controller_retry_ms;
+    check(menu_controller_retry_ms(1u)==750u);
+    check(menu_controller_retry_ms(2u)==750u);
+    check(menu_controller_retry_ms(3u)==750u);
+    check(menu_controller_retry_ms(4u)==5000u);
+    check(menu_controller_retry_ms(18u)==5000u);
     using r2fix::menu_controller_worker_required;
     using r2fix::menu_passive_diagnostics_required;
     // Release default: Log=0; the VIDEO information feature and its
