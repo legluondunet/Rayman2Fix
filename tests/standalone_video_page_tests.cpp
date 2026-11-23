@@ -1,4 +1,5 @@
 #include "rayman2fix/standalone_video_page.hpp"
+#include "rayman2fix/standalone_video_layout_policy.hpp"
 #include <cstdlib>
 #include <initializer_list>
 #include <array>
@@ -6,6 +7,19 @@
 using namespace r2fix;
 static void check(bool yes){if(!yes)std::abort();}
 int main() {
+    // Both layouts share the same frame dimensions. Moving only the
+    // Pause panel makes space for the untouched native luciole, while
+    // the MENU panel and verified original title stay fixed.
+    check(video_info_panel_y(false)==224u);
+    check(video_info_panel_y(true)==280u);
+    check(video_info_panel_y(true)-video_info_panel_y(false)==56u);
+    check(kVideoInfoX==212u && kVideoInfoWidth==600u &&
+          kVideoInfoHeight==320u);
+    check(video_info_panel_y(true)+kVideoInfoHeight<
+          kVideoCanvasHeight);
+    check(kVideoInfoFontPreferredPx==19);
+    check(kVideoInfoFontMinPx>=12);
+    check(kVideoInfoValueRight-kVideoInfoValueLeft>=400);
     check(standalone_video_page_state(true,true,true,true,5,0));
     for(unsigned missing=0;missing<4;++missing)
         check(!standalone_video_page_state(missing!=0,missing!=1,
