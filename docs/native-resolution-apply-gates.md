@@ -434,7 +434,7 @@ Attached screenshot `image(20261123-071228).png` and log
   option was `0x5AFFFFFF` (alpha 0x5A), and the earlier invariant
   palette intentionally preserved that alpha. Fixed text is not a
   disabled choice, so all four rows now use the same opaque white
-  copy `0xFFFFFFFF`, never modifying the game's own palette.
+  copy `0x7FFFFFFF`, never modifying the game's own palette.
 - The native input focus still traverses `V17=1,2,3`, then enters
   brightness via `normal=18/reflex=5/V17=5`. All four rows can
   therefore still be targeted invisibly. The white palette removes
@@ -647,8 +647,8 @@ fingerprint of script 2 is `9902892c1e0da3c5`.
   the whole script-2 structural fingerprint, the exact
   `Cond_Equal(V17,5)` AST and the procedure-71 normal18/reflex5
   live target addresses. In the private script copy change **only**
-  the condition literal `5` to an unreachable unsigned index
-  `0xFFFFFFFF`. Original asset bytes and all butterfly actor
+  the condition literal `5` to an unreachable positive index
+  `0x7FFFFFFF`. Original asset bytes and all butterfly actor
   instructions remain unchanged; no background V17 forcing.
 - Keep the existing mode-write guards during CAS of all four script
   pointers and retarget script-3 child hooks to the new copy's address.
