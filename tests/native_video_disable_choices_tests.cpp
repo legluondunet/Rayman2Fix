@@ -60,6 +60,49 @@ static void check_script(unsigned script_index,const unsigned (&init)[3],
     check(!disable_native_video_choices(wrong.data(),plan));
     check(!disable_native_video_choices(nullptr,plan));
 }
+// Synthetic owner-script footprint. The real menu script must match
+// both the complete type/depth/padding shape AND this exact terminal
+// focus-dependent JFFTXT before the engine receives an inert copy.
+template<std::size_t N>
+void check_static_font(unsigned index,unsigned tail) {
+    std::array<NativeMenuScriptNode,N> before{};
+    for(auto& n:before)n={0u,0u,2u,12u};
+    before[tail]={506u,0u,3u,4u};
+    before[tail+1u]={17u,0u,4u,11u};
+    before[tail+2u]={1u,0u,4u,12u};
+    before[tail+3u]={0x3F800000u,0u,4u,13u};
+    before[N-1]={0u,0u,0u,8u};
+    const NativeVideoDisablePlan selection{
+        index,unsigned(N),
+        native_video_script_shape_hash(before.data(),unsigned(N)),
+        {0u,0u,0u},{0u,0u,0u}};
+    const NativeInfoStaticTextPlan font{
+        index,unsigned(N),tail,0u};
+    check(native_video_static_font_preflight(before.data(),
+        selection,font));
+    auto copy=before;
+    check(freeze_native_video_info_font(copy.data(),font));
+    for(unsigned i=0u;i<N;++i) {
+        check(copy[i].parameter==(i==tail+1u?0u:before[i].parameter));
+        check(copy[i].type==(i==tail+1u?12u:before[i].type));
+        check(copy[i].padding==before[i].padding);
+        check(copy[i].indent==before[i].indent);
+    }
+    auto bad=before;
+    bad[tail+1u].parameter=51u;
+    check(!native_video_static_font_preflight(bad.data(),selection,font));
+    check(!freeze_native_video_info_font(bad.data(),font));
+    bad=before;
+    bad[tail+1u].indent=3u;
+    check(!native_video_static_font_preflight(bad.data(),selection,font));
+    bad=before;
+    bad[8].type=4u;
+    check(!native_video_static_font_preflight(bad.data(),selection,font));
+    bad=before;
+    bad[tail].parameter=357u;
+    check(!native_video_static_font_preflight(bad.data(),selection,font));
+    check(!native_video_static_font_preflight(nullptr,selection,font));
+}
 int main(){
     static_assert(kVideoDisablePlans[0].script_index==1u);
     static_assert(kVideoDisablePlans[0].count==324u);
@@ -73,5 +116,7 @@ int main(){
                            kVideoDisablePlans[1].highlighted);
     check_script<517u>(4u,kVideoDisablePlans[2].initialized,
                            kVideoDisablePlans[2].highlighted);
+    check_static_font<324u>(1u,313u);
+    check_static_font<517u>(4u,512u);
     return 0;
 }
