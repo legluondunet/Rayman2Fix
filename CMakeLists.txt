@@ -110,14 +110,17 @@ if(WIN32)
       RAYMAN2FIX_GRAPHICS_INFO_PROTO=1)
   endif()
   if(RAYMAN2FIX_STANDALONE_VIDEO_PAGE)
-    target_sources(Rayman2FixRuntime PRIVATE src/runtime/standalone_video_page.cpp)
+    target_sources(Rayman2FixRuntime PRIVATE
+      src/runtime/standalone_video_page.cpp
+      src/runtime/main_menu_site.cpp)
     target_link_libraries(Rayman2FixRuntime PRIVATE gdi32 setupapi advapi32)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_STANDALONE_VIDEO_PAGE=1)
   endif()
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
     RAYMAN2FIX_ESC_MUSIC_FEATURE=1
-    RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}")
+    RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}"
+    RAYMAN2FIX_VERSION="${PROJECT_VERSION}")
   if(RAYMAN2FIX_RESEARCH_PROBES)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
   endif()
@@ -335,6 +338,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME standalone-video-direct-transition
     COMMAND standalone_video_transition_tests)
+  add_executable(main_menu_site_policy_tests
+    tests/main_menu_site_policy_tests.cpp)
+  target_include_directories(main_menu_site_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-main-menu-site-label-url-scoping
+    COMMAND main_menu_site_policy_tests)
   add_executable(standalone_video_cursor_policy_tests
     tests/standalone_video_cursor_policy_tests.cpp)
   target_include_directories(standalone_video_cursor_policy_tests PRIVATE

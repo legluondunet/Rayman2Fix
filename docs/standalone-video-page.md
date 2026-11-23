@@ -44,6 +44,26 @@ artifact from the draft PR #52, not the standard bootstrap EXE.
    butterfly, close the game and attach `Rayman2Fix.log`. No further
    interactive video option should be activated in an unstable state.
 
+## Main-menu Rayman website (research build)
+
+- Handle **362** was independently verified from the owner's original
+  `fix.sna` + `fix.rtb` for all five native languages, with the
+  exact original `/C:` text strings. In the original MENU only,
+  the one validated string-pointer slot is temporarily changed to
+  `/C:RayManFix <version>-<8-char-commit>`.
+- The original PC x86 executable imports ShellExecuteA from SHELL32 at
+  import RVA 0x9C220. When the import matches the real DLL procedure,
+  an exact IAT hook forwards only an old Rayman2 website URL to
+  `https://github.com/legluondunet/Rayman2Fix` via the operating
+  system's default browser. All other ShellExecute requests are
+  forwarded unchanged. If the IAT is unavailable or the original text
+  mismatches, NO label replacement is permitted. Both patches are
+  restored on MENU unload. The build does not inject URL requests on
+  the game's render thread.
+- The actual original Site Rayman action's IAT path has not yet been
+  exercised in a live game, so pressing Enter and observing the
+  default-browser navigation remains a necessary validation.
+
 ## Limitations and safeguards
 
 - Only the approved retail PC menu-script shapes are supported.

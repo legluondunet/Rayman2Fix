@@ -30,6 +30,7 @@
 #include "rayman2fix/standalone_video_page.hpp"
 #include "rayman2fix/standalone_video_transition.hpp"
 #include "rayman2fix/standalone_video_cursor_policy.hpp"
+#include "rayman2fix/main_menu_site.hpp"
 #endif
 
 #if !defined(_M_IX86)
@@ -854,6 +855,9 @@ DWORD WINAPI worker(void*) {
                 was_visible=false;
                 last_latch=~0u;
                 restore_text();
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+                restore_main_menu_site();
+#endif
                 restore_callbacks();
                 guarded=false;
                 attempts=0;
@@ -877,6 +881,10 @@ DWORD WINAPI worker(void*) {
                 } else if(attempts==1 || attempts%5u==0)
                     g_logger("RUNTIME-GRAPHICS-INFO: status=callbacks-unavailable original-menu-retained preflight-log=1");
             }
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+            if(guarded && controller_ready)
+                install_main_menu_site(text_slot_table(),g_logger);
+#endif
             if(guarded && controller_ready &&
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
                mind.normal!=3 && mind.normal!=5 &&
