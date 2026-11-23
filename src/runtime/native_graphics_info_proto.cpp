@@ -1178,6 +1178,26 @@ void native_graphics_info_stabilize_video_cursor_at_flip() noexcept {
                 g_logger("RUNTIME-STANDALONE-VIDEO: native-cursor-range-frozen=1..1 scope=verified-normal5 source=game-flip parent-options=untouched");
         }
     }
+    // V70 is the reflex-0 navigation interpolation target. Original
+    // code can animate the butterfly from V70 even after V17 was
+    // clamped to its singleton at the previous frame boundary.
+    // Scope to source-verified normal5/reflex0 and V70 scalar only.
+    std::uintptr_t target_cell=0;
+    if(locate_verified_video_navigation_target_cell(state.mind,
+           &read32,&read8,target_cell) && writable_slot(target_cell)) {
+        std::uint32_t target=0;
+        if(read32(target_cell,target) && target<=5u && target!=1u) {
+            const LONG prior=InterlockedCompareExchange(
+                reinterpret_cast<volatile LONG*>(target_cell),1,
+                static_cast<LONG>(target));
+            if(prior==static_cast<LONG>(target) && g_logger) {
+                static std::atomic<bool> logged_target{false};
+                if(!logged_target.exchange(true,
+                                          std::memory_order_relaxed))
+                    g_logger("RUNTIME-STANDALONE-VIDEO: navigation-target-V70-frozen=1 source=reflex0-script2 scope=verified-normal5 no-other-menu-changes");
+            }
+        }
+    }
     std::uint32_t selected=0;
     if(!read32(cell,selected) ||
        !standalone_video_cursor_needs_reset(selected))return;
