@@ -26,6 +26,9 @@
 #include "rayman2fix/native_graphics_static_text_policy.hpp"
 #include "rayman2fix/native_video_disable_choices.hpp"
 #include "rayman2fix/native_graphics_info_proto.hpp"
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+#include "rayman2fix/standalone_video_page.hpp"
+#endif
 
 #if !defined(_M_IX86)
 #error Experimental native graphics information requires Windows x86
@@ -586,6 +589,14 @@ bool install_native_disabled_video_choices(
                 copy,*font_plan)) {
             valid=false;reason="font-focus-assignment";break;
         }
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+        // Stop both old VIDEO widget scripts in validated PRIVATE clones;
+        // the independent fix.dll Glide panel now owns their presentation.
+        if(k>=2u && !standalone_remove_legacy_video_widgets(
+                  copy,plan.script_index,script_nodes)) {
+            valid=false;reason="standalone-script-termination";break;
+        }
+#endif
     }
     if(!valid) {
         for(auto& item:prepared)
@@ -659,7 +670,11 @@ bool install_native_disabled_video_choices(
         std::memory_order_release);
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
     g_brightness_transition_disabled.store(true,std::memory_order_release);
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    g_logger("RUNTIME-STANDALONE-VIDEO: old-widgets-not-constructed scripts=3,4 parent-options=untouched selection-dispatch=guarded");
+#else
     g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1-original,2,3,4 brightness-transition=suppressed font-focus=static-0-video4-only enter-save-status=inert parent-options-preserved=1 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
+#endif
     return true;
 }
 void restore_native_disabled_video_choices(
@@ -768,6 +783,9 @@ DWORD WINAPI worker(void*) {
         const DWORD now=GetTickCount();
         const bool in_menu=is_native_menu();
         if(!in_menu) {
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+            standalone_video_page_set_visible(false);
+#endif
             if(disabled_choices.ever_swapped)
                 restore_native_disabled_video_choices(disabled_choices);
             else
@@ -826,11 +844,13 @@ DWORD WINAPI worker(void*) {
             // pin the 7 VIDEO-only strings for this MENU lifetime.
             // Styling and input remain restricted to the verified VIDEO
             // state; strings are restored on MENU unload.
+#if !defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) || !RAYMAN2FIX_STANDALONE_VIDEO_PAGE
             if(graphics_info_pin_text_for_menu(
                    approved(),in_menu,guarded,controller_ready,
                    disabled_choices.active,g_language_table!=0) &&
                patch_text_table())
                 g_logger("RUNTIME-GRAPHICS-INFO: status=menu-video-text-pinned scope=verified-menu-controller before-video-entry=1 restored-on-menu-unload=1");
+#endif
             if(guarded && controller_ready && !disabled_choices.active &&
                g_guard_menu_video_dispatch.load(std::memory_order_acquire)) {
                 // Narrow to the four exact selection children and one save
@@ -853,6 +873,24 @@ DWORD WINAPI worker(void*) {
                 // though the final page identity needs visual validation.
                 const bool valid_controller=get_verified_menu_controller(
                         current_model,current);
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+                // The new page is independent of old native text handles,
+                // V17 selection, font quad remapping and VIDEO widgets.
+                const bool page=standalone_video_page_state(
+                    approved(),in_menu,valid_controller,
+                    disabled_choices.active,current.normal,current.reflex);
+                standalone_video_page_set_visible(page);
+                g_layout_active.store(false,std::memory_order_release);
+                g_video_prepare_active.store(false,std::memory_order_release);
+                g_cached_video_text_in_brightness.store(
+                    false,std::memory_order_release);
+                if(page!=was_visible) {
+                    g_logger(page ?
+                        "RUNTIME-STANDALONE-VIDEO: state=visible own-page=1 native-choice-script=disabled" :
+                        "RUNTIME-STANDALONE-VIDEO: state=hidden native-options-restored=1");
+                    was_visible=page;
+                }
+#else
                 const auto vars=valid_controller ?
                     observe_menu_selection(current.mind,&read32,&read8) :
                     MenuSelectionVars{};
@@ -975,6 +1013,7 @@ DWORD WINAPI worker(void*) {
                           NativeGraphicsTextTransition::restore_original_pointers)
                         restore_text();
                 }
+#endif
             }
         }
         if(static_cast<LONG>(now-next_report)>=0) {
@@ -1103,6 +1142,9 @@ void start_native_graphics_info_proto(GraphicsInfoLogger logger,
         return;
     }
     g_logger=logger;
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    standalone_video_page_configure(logger,output_width,output_height,classic_4_3);
+#endif
     logger("RUNTIME-GRAPHICS-INFO: status=started experimental=1 no-file-patch=1 fail-closed=1 native-menu=1");
     HANDLE t=CreateThread(nullptr,0,&worker,nullptr,0,nullptr);
     if(t)CloseHandle(t);
