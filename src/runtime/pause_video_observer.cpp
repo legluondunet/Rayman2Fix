@@ -120,7 +120,7 @@ struct PatchSlot {
     std::uintptr_t slot=0, original=0;
     NativeMenuScriptNode* clone=nullptr;
 };
-std::array<PatchSlot,4> g_scripts{};
+std::array<PatchSlot,5> g_scripts{};
 bool g_scripts_installed=false;
 bool g_preflight_failed=false;
 bool writable(std::uintptr_t at) noexcept {
@@ -137,13 +137,13 @@ bool install_pause_video_scripts(const PauseVideoModel& model) noexcept {
     if(g_scripts_installed)return true;
     if(g_preflight_failed)return false;
     if(!model.valid())return false;
-    std::array<PatchSlot,4> prepared{};
+    std::array<PatchSlot,5> prepared{};
     unsigned built=0u;
     const char* reason="unverified";
     bool valid=true;
     unsigned failed_plan=~0u;
     std::uint64_t observed_shape=0u;
-    for(unsigned k=0;k<4u;++k) {
+    for(unsigned k=0;k<5u;++k) {
         const auto& p=kPauseVideoPlans[k];
         const auto entries=model.normal_entries+p.behavior*12u;
         std::uint32_t list=0,original=0;
@@ -185,7 +185,7 @@ bool install_pause_video_scripts(const PauseVideoModel& model) noexcept {
                 VirtualFree(prepared[i].clone,0,MEM_RELEASE);
         if(g_log) {
             char msg[330]{};
-            const auto p=failed_plan<4u ? kPauseVideoPlans[failed_plan] :
+            const auto p=failed_plan<5u ? kPauseVideoPlans[failed_plan] :
                 PauseVideoScriptPlan{};
             std::snprintf(msg,sizeof(msg),
                 "RUNTIME-PAUSE-VIDEO-PAGE: status=preflight-refused reason=%s behavior=%u script=%u nodes=%u observed-shape=%08X%08X expected-shape=%08X%08X retry=next-scene-only no-patch=1",
@@ -224,7 +224,7 @@ bool install_pause_video_scripts(const PauseVideoModel& model) noexcept {
     g_scripts=prepared;
     g_scripts_installed=true;
     if(g_log)g_log(
-        "RUNTIME-PAUSE-VIDEO-PAGE: status=installed parent-Options-construction=original normal9-script1=retained-native-V16-back-state scripts2,3,4=inactive normal15-script2=inactive old-video-actions=unreachable original-title-retained=1");
+        "RUNTIME-PAUSE-VIDEO-PAGE: status=installed parent-Options-construction=original normal9-script1=V16-native+SetAGO-navigation-removed scripts2,3,4=inactive normal15-script2=inactive old-video-actions=unreachable original-title-retained=1");
     return true;
 }
 void restore_pause_video_scripts() noexcept {
