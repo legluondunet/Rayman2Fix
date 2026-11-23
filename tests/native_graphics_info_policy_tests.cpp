@@ -61,5 +61,31 @@ require(!graphics_info_brightness_with_panel(
     true,true,true,18,5,true,5,true,false)); // direct brightness
 require(!graphics_info_brightness_with_panel(
     true,true,true,18,5,true,5,false,true)); // no prior text
+// The normal-3 native MENU preparation script contains VIDEO text
+// handles. Install their new pointers before normal-5 caches glyphs.
+require(graphics_info_video_preparation(
+    true,true,true,3,0,true,0,true,0));
+require(graphics_info_video_preparation(
+    true,true,true,3,0,true,0,true,1));
+require(!graphics_info_video_preparation(
+    true,true,true,3,0,true,1,true,0));
+require(!graphics_info_video_preparation(
+    true,true,true,5,0,true,0,true,0));
+require(!graphics_info_video_preparation(
+    true,true,true,18,5,true,0,true,0));
+require(!graphics_info_video_preparation(
+    true,true,true,3,1,true,0,true,0));
+require(!graphics_info_video_preparation(
+    true,true,true,3,0,true,0,true,2));
+require(!graphics_info_video_preparation(
+    true,true,true,3,0,false,0,true,0));
+require(!graphics_info_video_preparation(
+    true,true,true,3,0,true,0,false,0));
+require(!graphics_info_video_preparation(
+    true,false,true,3,0,true,0,true,0));
+require(!graphics_info_video_preparation(
+    true,true,false,3,0,true,0,true,0));
+require(!graphics_info_video_preparation(
+    false,true,true,3,0,true,0,true,0));
 std::cout<<"Native video commands limited to exact validated menu nodes: PASS\n";
 }
