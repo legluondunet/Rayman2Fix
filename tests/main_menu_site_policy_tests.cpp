@@ -1,5 +1,6 @@
 #include "rayman2fix/main_menu_site_policy.hpp"
 #include <cstdlib>
+#include <initializer_list>
 using namespace r2fix;
 void check(bool b){if(!b)std::abort();}
 int main(){
