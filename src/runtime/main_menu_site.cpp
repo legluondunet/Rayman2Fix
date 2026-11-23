@@ -45,6 +45,13 @@ NativeMenuScriptNode* g_site_script_copy=nullptr;
 // already executing AI interpreter may still hold the old pointer.
 SiteLogger g_logger=nullptr;
 char g_site_label[96]{};
+bool read_site32(std::uintptr_t address,std::uint32_t& out) noexcept {
+    SIZE_T done=0;
+    return address>=0x10000u &&
+           ReadProcessMemory(GetCurrentProcess(),
+               reinterpret_cast<const void*>(address),
+               &out,4u,&done)!=FALSE && done==4u;
+}
 bool read_site_byte(std::uintptr_t address,std::uint8_t& out) noexcept {
     SIZE_T done=0;
     return address>=0x10000u &&
@@ -159,7 +166,7 @@ DWORD WINAPI site_input_worker(void*) noexcept {
         std::uintptr_t cell=0;
         std::uint32_t choice=0;
         if(!locate_verified_video_cursor_cell(state.mind,
-              &read_exact,&read_site_byte,cell) ||
+              &read_site32,&read_site_byte,cell) ||
            !read_exact(cell,&choice,sizeof(choice))) {
             Sleep(16);continue;
         }
