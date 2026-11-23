@@ -5,7 +5,7 @@ using namespace r2fix;
 void check(bool yes){if(!yes)std::abort();}
 int main() {
     for(std::uint32_t n=0;n<=6u;++n)
-        check(standalone_video_cursor_needs_reset(n)==(n>=1u && n<=3u));
+        check(standalone_video_cursor_needs_reset(n)==(n<=3u && n!=1u));
     constexpr std::uintptr_t mind=0x10000u;
     constexpr std::uintptr_t mem=0x11000u,ref=0x12000u;
     constexpr std::uintptr_t decl=0x13000u,info=0x14000u;
