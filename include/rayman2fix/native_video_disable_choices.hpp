@@ -291,32 +291,11 @@ inline bool restrict_native_video_navigation(
     }
     return true;
 }
-// A standalone VIDEO page has no selectable widgets. Normal-5 script1
-// still initializes the obsolete V17 cursor range V19=0 .. V20=3,
-// as proved by the maintainer's 23 Nov live log (V17=0,1,2,3 on arrows).
-// The same script's final JFFTXT(V17,1,1.0) applies selected-row motion.
-// Modify only a *verified private clone*, never the source SNA or the
-// independent normal-11 parent Options scripts. ESC remains native.
-// Passing approved_shape explicitly is for pure test fixtures ONLY;
-// the actual caller always uses the approved hash default.
-inline bool standalone_make_video_navigation_readonly(
-    NativeMenuScriptNode* copy,unsigned node_count,
-    std::uint64_t approved_shape=kVideoDisablePlans[0].original_shape_hash)
-    noexcept {
-    if(!copy || node_count!=324u ||
-       native_video_script_shape_hash(copy,node_count)!=approved_shape ||
-       !native_video_direct_assignment(copy,node_count,146u,17u,0u) ||
-       !native_video_direct_assignment(copy,node_count,149u,19u,0u) ||
-       !native_video_direct_assignment(copy,node_count,152u,20u,3u) ||
-       !native_video_font_tail_valid(copy,kNativeInfoTextPlans[0]))
-        return false;
-    // Preconditions are checked BEFORE all three writes.
-    copy[152].parameter=0u; // one-item [0,0] range; no arrow selection
-    copy[315].parameter=0u; // non-selected, non-pulsing JFFTXT mode
-    copy[316].parameter=0u; // 0.0 native animation strength
-    return true;
-}
-
+// Standalone VIDEO intentionally leaves the original normal-5 script1
+// unchanged. Its native JFFTXT call and V14 state also feed the parent
+// Options labels; altering them made "VIDEO" disappear intermittently.
+// Navigation is now scoped to the verified active VIDEO state at the
+// engine's own frame boundary instead (never on a polling worker).
 // The native normal-5 script #2 (33 nodes) is the *only*
 // brightness-page transition in the owner's original MENU behavior:
 // if (V17==5), SetAGO... and Proc_ChangeMyComportAndMyReflex

@@ -5713,7 +5713,7 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // Our own page text is rasterized into Glide's LFB and never
     // passes through this native glyph producer.
     if(producer==Native2DProducer::Glyph &&
-       r2fix::standalone_video_page_suppress_native_glyphs(
+       r2fix::standalone_video_page_filter_native_glyphs(
            xmin,ymin,xmax,ymax)) {
         static std::atomic<bool> reported{false};
         if(!reported.exchange(true,std::memory_order_relaxed))
@@ -6774,6 +6774,11 @@ constexpr uintptr_t kColorSpriteSlotRva = 0x104838; // VA 0x504838
 constexpr uintptr_t kStandaloneFlipSlotRva=0x104538;
 std::atomic<void*> g_standalone_flip_original{nullptr};
 void __cdecl standalone_video_flip() {
+    // The original game updates the MENU AI before this native flip.
+    // Clamp only the now-invisible VIDEO selection on the SAME game
+    // rendering thread, with complete model/mind/DsgMem validation.
+    // Never intercept keyboard messages or alter parent Options.
+    r2fix::native_graphics_info_stabilize_video_cursor_at_flip();
     r2fix::standalone_video_page_draw_before_flip();
     const auto original=reinterpret_cast<void (__cdecl*)()>(
         g_standalone_flip_original.load(std::memory_order_acquire));

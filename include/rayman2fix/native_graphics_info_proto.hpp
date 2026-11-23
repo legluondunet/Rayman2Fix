@@ -5,6 +5,11 @@ void start_native_graphics_info_proto(GraphicsInfoLogger logger,
                                       unsigned output_width,
                                       unsigned output_height,
                                       bool classic_4_3) noexcept;
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+// Only called synchronously at approved native GLI flip on its game
+// thread, never from the asynchronous 100-ms controller worker.
+void native_graphics_info_stabilize_video_cursor_at_flip() noexcept;
+#endif
 // Only called for the verified native game glyph producer, before 4:3
 // horizontal centering. Returns false without altering coordinates
 // outside the validated Resolution page.

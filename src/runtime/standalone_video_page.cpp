@@ -168,7 +168,7 @@ bool prepare_mask() noexcept {
     const auto prior=SelectObject(dc,bitmap);
     std::memset(bits,0,kW*kH*4u);
     SetBkMode(dc,TRANSPARENT);
-    SetTextColor(dc,RGB(241,245,222));
+    SetTextColor(dc,RGB(255,255,255));
     // The title uses the original Rayman 2 JFFTXT glyphs / animation,
     // not a GDI imitation. Only the data rows are rasterized here.
     HFONT font=CreateFontA(-23,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,
@@ -245,16 +245,17 @@ void standalone_video_page_configure(StandaloneVideoLogger logger,
 void standalone_video_page_set_visible(bool value) noexcept {
     g_visible.store(value,std::memory_order_release);
 }
-bool standalone_video_page_suppress_native_glyphs(float xmin,float ymin,float xmax,float ymax) noexcept {
+bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& xmax,float& ymax) noexcept {
     // Do not hide any native glyph before our replacement page has
     // successfully rendered at least once; unsupported Glide LFB
     // implementations keep the original UI visible, not a blank page.
     const bool visible=g_visible.load(std::memory_order_acquire);
     const bool drew=g_drew.load(std::memory_order_acquire);
-    const bool title=standalone_video_native_title_glyph(xmin,ymin,xmax,ymax);
+    const bool title=visible && drew &&
+        standalone_video_stabilize_native_title(xmin,ymin,xmax,ymax);
     if(visible && drew && title &&
        !g_title_preserved_logged.exchange(true) && g_log)
-        g_log("RUNTIME-STANDALONE-VIDEO: native-title-preserved=1 source=JFFTXT upper-title-band=video-only");
+        g_log("RUNTIME-STANDALONE-VIDEO: native-title-stabilized=1 source=JFFTXT title-row=20..25 video-page-only");
     return standalone_video_hide_native_glyphs(visible,drew,true,title);
 }
 bool standalone_video_page_draw_before_flip() noexcept {
@@ -279,7 +280,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
         auto pix=blend_565(g_pixels[i],0u,0u,0u,152u);
         const auto value=g_text_mask[i];
         const unsigned m=value&255u;
-        if(m)pix=blend_565(pix,235u,247u,219u,m);
+        if(m)pix=blend_565(pix,255u,255u,255u,m);
         g_pixels[i]=pix;
     }
     if(!g_write(kBackBuffer,kX,kY,kRgb565,kW,kH,

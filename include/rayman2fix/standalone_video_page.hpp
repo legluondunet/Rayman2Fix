@@ -32,8 +32,22 @@ constexpr bool standalone_video_hide_native_glyphs(
     return page_visible && already_drawn && verified_glyph &&
            !verified_title;
 }
-bool standalone_video_page_suppress_native_glyphs(
-    float xmin,float ymin,float xmax,float ymax) noexcept;
+// Freeze title glyph positions only inside the authenticated VIDEO
+// page, keeping the game's own font texture, colors and JFFTXT effects.
+// This is not a general-purpose Options or HUD coordinate correction.
+inline bool standalone_video_stabilize_native_title(
+    float& xmin,float& ymin,float& xmax,float& ymax) noexcept {
+    if(!standalone_video_native_title_glyph(xmin,ymin,xmax,ymax))
+        return false;
+    // Reference fixed Rayman 2 title row from source percent glyphs.
+    // Selected text pulsation changes these extents (~19.66..25.34);
+    // restore a fixed 5% high native header without touching materials.
+    ymin=20.0f;
+    ymax=25.0f;
+    return true;
+}
+bool standalone_video_page_filter_native_glyphs(
+    float& xmin,float& ymin,float& xmax,float& ymax) noexcept;
 // Invoked once per game buffer flip, on the owning Glide render thread.
 // Returns false without altering a pixel if any Glide probe fails.
 bool standalone_video_page_draw_before_flip() noexcept;

@@ -26,6 +26,12 @@ int main() {
     check(!standalone_video_native_title_glyph(35.3f,58.0f,39.5f,63.0f));
     check(!standalone_video_native_title_glyph(2.0f,20.0f,8.0f,25.0f));
     check(!standalone_video_native_title_glyph(35.3f,35.0f,39.5f,33.0f));
+    float x0=35.3f,y0=19.66f,x1=39.5f,y1=25.34f;
+    check(standalone_video_stabilize_native_title(x0,y0,x1,y1));
+    check(x0==35.3f && x1==39.5f && y0==20.f && y1==25.f);
+    x0=35.3f;y0=40.f;x1=39.5f;y1=45.f;
+    check(!standalone_video_stabilize_native_title(x0,y0,x1,y1));
+    check(y0==40.f && y1==45.f);
     check(standalone_video_hide_native_glyphs(true,true,true,false));
     std::array<NativeMenuScriptNode,430> a{};
     a[0]={0u,0u,1u,0u};

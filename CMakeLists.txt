@@ -335,6 +335,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME standalone-video-direct-transition
     COMMAND standalone_video_transition_tests)
+  add_executable(standalone_video_cursor_policy_tests
+    tests/standalone_video_cursor_policy_tests.cpp)
+  target_include_directories(standalone_video_cursor_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME standalone-video-cursor-memory-gate
+    COMMAND standalone_video_cursor_policy_tests)
   add_executable(standalone_video_device_policy_tests
     tests/standalone_video_device_policy_tests.cpp)
   target_include_directories(standalone_video_device_policy_tests PRIVATE

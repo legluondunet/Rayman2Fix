@@ -29,6 +29,7 @@
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
 #include "rayman2fix/standalone_video_page.hpp"
 #include "rayman2fix/standalone_video_transition.hpp"
+#include "rayman2fix/standalone_video_cursor_policy.hpp"
 #endif
 
 #if !defined(_M_IX86)
@@ -558,20 +559,11 @@ bool install_native_disabled_video_choices(
             g_logger(line);
             valid=false;reason="script-shape";break;
         }
-        // Script1 in normal-5 initializes V14 entries shared with
-        // Options. Keep those untouched, but remove its obsolete
-        // selection range and selected-row JFFTXT pulse for the
-        // independent VIDEO information page. No normal-11 script
-        // or global input handler is altered.
-        if(k==0u) {
-#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
-            if(!standalone_make_video_navigation_readonly(
-                    copy,script_nodes)) {
-                valid=false;reason="standalone-navigation";break;
-            }
-#endif
-            continue;
-        }
+        // Script 1 participates in native parent Options labels. It
+        // MUST be an identical, hash-approved private copy: rewriting
+        // its JFFTXT focus mode made VIDEO disappear from Options.
+        // Keep all V14, V17, V19, V20 and font instructions intact.
+        if(k==0u)continue;
         const auto* font_plan=k==3u ? &kNativeInfoTextPlans[1] : nullptr;
         if(font_plan && !native_video_static_font_preflight(
                 copy,plan,*font_plan)) {
@@ -728,7 +720,7 @@ bool install_native_disabled_video_choices(
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
     g_brightness_transition_disabled.store(true,std::memory_order_release);
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
-    g_logger("RUNTIME-STANDALONE-VIDEO: old-widgets-not-constructed normal3-script2=direct-video-open normal5-scripts3,4=terminated normal5-script1=single-selection-0-0+static-title other-options-branches=retained selection-dispatch=guarded");
+    g_logger("RUNTIME-STANDALONE-VIDEO: old-widgets-not-constructed normal3-script2=direct-video-open normal5-scripts3,4=terminated normal5-script1=original-untouched cursor=game-thread-guarded other-options-branches=retained selection-dispatch=guarded");
 #else
     g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1-original,2,3,4 brightness-transition=suppressed font-focus=static-0-video4-only enter-save-status=inert parent-options-preserved=1 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
 #endif
@@ -1101,6 +1093,33 @@ DWORD WINAPI worker(void*) {
     return 0;
 }
 } // namespace
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+void native_graphics_info_stabilize_video_cursor_at_flip() noexcept {
+    // Called ONLY on the game's approved native flip thread, never the
+    // asynchronous model monitor. The page has no selectable widgets.
+    if(!g_protected.load(std::memory_order_acquire) ||
+       !g_brightness_transition_disabled.load(std::memory_order_acquire) ||
+       !is_native_menu())return;
+    MenuAiModel model{};
+    MenuAiState state{};
+    if(!get_verified_menu_controller(model,state) ||
+       state.normal!=5 || state.reflex!=0)return;
+    std::uintptr_t cell=0;
+    if(!locate_verified_video_cursor_cell(state.mind,
+            &read32,&read8,cell) || !writable_slot(cell))return;
+    std::uint32_t selected=0;
+    if(!read32(cell,selected) ||
+       !standalone_video_cursor_needs_reset(selected))return;
+    const auto previous=InterlockedCompareExchange(
+        reinterpret_cast<volatile LONG*>(cell),0,
+        static_cast<LONG>(selected));
+    if(previous==static_cast<LONG>(selected)) {
+        static std::atomic<bool> logged{false};
+        if(!logged.exchange(true,std::memory_order_relaxed) && g_logger)
+            g_logger("RUNTIME-STANDALONE-VIDEO: obsolete-cursor-reset=1 scope=verified-normal5/reflex0 source=game-native-flip-only parent-options=untouched");
+    }
+}
+#endif
 int native_graphics_info_focus_row() noexcept {
     return g_layout_active.load(std::memory_order_acquire) ?
         g_info_focus_row.load(std::memory_order_acquire) : -1;
