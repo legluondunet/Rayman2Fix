@@ -315,12 +315,16 @@ bool install_main_menu_site(std::uintptr_t table,SiteLogger logger) noexcept {
         "/C:Rayman2Fix");
     g_logger=logger;
     g_original_shell.store(original,std::memory_order_release);
-    // Source-owned URL replacement also works when the original game
-    // never reaches its imported ShellExecute call before menu teardown.
-    if(!install_site_script_literal()) {
-        g_original_shell.store(nullptr,std::memory_order_release);
-        return refuse("site-script-validation");
-    }
+    // The original game can relocate or initialize its 1995-node
+    // website script differently after re-entering MENU. The legacy
+    // script URL patch is opportunistic ONLY: once the approved menu
+    // and ShellExecute import are authenticated, opening the project
+    // is owned by the explicit, verified-row input action. Do not
+    // drop the visible Rayman2Fix caption because an optional legacy
+    // website-script clone failed validation during a level reload.
+    const bool script_redirect=install_site_script_literal();
+    if(!script_redirect && g_logger)
+        g_logger("RUNTIME-MENU-SITE: native-site-script-unavailable optional=1 input-action=authenticated fallback-iat=1");
     if(!replace_iat(reinterpret_cast<void*>(original),
                     reinterpret_cast<void*>(&website_shell_execute))) {
         restore_site_script_literal();
@@ -342,7 +346,9 @@ bool install_main_menu_site(std::uintptr_t table,SiteLogger logger) noexcept {
     g_original_text=source;
     g_active.store(true,std::memory_order_release);
     start_site_input_worker();
-    logger("RUNTIME-MENU-SITE: status=installed handle=362 locales=5 label=Rayman2Fix url=github verified-native-return-rva=0x187267 browser=ShellExecuteA-redirect source-script=verified-url-literal");
+    logger(script_redirect ?
+        "RUNTIME-MENU-SITE: status=installed handle=362 label=Rayman2Fix url=github browser=verified-row-input+source-script+IAT scene-reload=1" :
+        "RUNTIME-MENU-SITE: status=installed handle=362 label=Rayman2Fix url=github browser=verified-row-input+IAT native-script=optional-unavailable scene-reload=1");
     return true;
 }
 void restore_main_menu_site() noexcept {
