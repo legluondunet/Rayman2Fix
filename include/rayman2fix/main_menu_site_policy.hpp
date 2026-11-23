@@ -17,6 +17,14 @@ inline bool approved_main_menu_site_text(const char* s) noexcept {
         if(std::strcmp(s,expected)==0)return true;
     return false;
 }
+inline bool approved_replaced_main_menu_site_text(const char* s) noexcept {
+    return s && std::strcmp(s,"/C:Rayman2Fix")==0;
+}
+// In the original shared Fix.sna (all five locales) the website caption
+// is longer than its replacement. Modifying the verified *live text
+// buffer* as well as the pointer ensures scene-local cached copies can
+// be built from the new caption, including when returning from gameplay.
+constexpr const char* kSiteCaptionReplacement="/C:Rayman2Fix";
 inline bool site_redirect_approved_url(const char* url) noexcept {
     // Redirect only the old Rayman2 site action, not other ShellExecute
     // operations, local files, mailto links, browser windows or games.
