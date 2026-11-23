@@ -490,6 +490,7 @@ DWORD WINAPI worker(void*) {
     bool reported_text_issue=false;
     bool was_visible=false;
     bool showed_information_in_menu=false;
+    bool reported_brightness_panel=false;
     unsigned last_latch=~0u;
     // Keep the guard active while the process lives. Revert script hooks
     // when the original Menu level is unloaded; never silently expose
@@ -505,6 +506,7 @@ DWORD WINAPI worker(void*) {
                 g_cached_video_text_in_brightness.store(
                     false,std::memory_order_release);
                 showed_information_in_menu=false;
+                reported_brightness_panel=false;
                 was_visible=false;
                 last_latch=~0u;
                 restore_text();
@@ -561,7 +563,12 @@ DWORD WINAPI worker(void*) {
                     current.normal,current.reflex,
                     vars.selection_valid,vars.selection,
                     vars.activate_valid,vars.activate);
+                const bool brightness_panel=graphics_info_brightness_with_panel(
+                    approved(),in_menu,valid_controller,current.normal,
+                    current.reflex,vars.selection_valid,vars.selection,
+                    g_language_table!=0,showed_information_in_menu);
                 if(video_page) {
+                    reported_brightness_panel=false;
                     g_info_focus_row.store(vars.selection,std::memory_order_release);
                     g_cached_video_text_in_brightness.store(
                         false,std::memory_order_release);
@@ -589,7 +596,22 @@ DWORD WINAPI worker(void*) {
                         was_visible=true;
                         last_latch=vars.activate;
                     }
+                } else if(brightness_panel) {
+                    // Keep the already-installed information pointers and
+                    // their 4:3 glyph reflow active. The native brightness
+                    // slider uses its own untouched localization handle
+                    // 385 and remains interactive. No V17 or script writes.
+                    // Keep the last authenticated VIDEO focus (1..4) only
+                    // for the static white palette, not navigation.
+                    g_cached_video_text_in_brightness.store(
+                        false,std::memory_order_release);
+                    g_layout_active.store(true,std::memory_order_release);
+                    if(!reported_brightness_panel) {
+                        reported_brightness_panel=true;
+                        g_logger("RUNTIME-GRAPHICS-INFO: status=brightness-information-panel-retained native=18,5 original-slider=1 original-butterfly=1 v17-unmodified=1");
+                    }
                 } else {
+                    reported_brightness_panel=false;
                     g_info_focus_row.store(-1,std::memory_order_release);
                     // The original MENU still retains rendered choices after
                     // a localization pointer restoration. Suppress ONLY
