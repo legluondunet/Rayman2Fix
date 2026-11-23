@@ -255,3 +255,39 @@ Three defects remain in this run:
 
 All these source-only experiments stay in draft PR #52; production
 `main` remains unchanged.
+
+## Owner log 17:58:09 — confirmed fixes and native 2D overlay findings
+
+On Wine (1920×1080, RX 6600M), the maintainer **validated** the
+Rayman2Fix GitHub action and persistence of that entry after gameplay.
+The latest log also confirms correct source-model discovery,
+`RUNTIME-PAUSE-VIDEO-PAGE: status=installed`, and
+`frame-rendered=1`, but the visual screenshot still shows **SON**
+behind the blue panel and **CONTROLES** beneath it. These are
+original **parent Options** captions, not just the abandoned resolution
+choices. The earlier normal6/script2 cut bypassed native parent Options
+construction and was associated with an empty return screen.
+
+The next prototype **does not patch normal6/script2**, preserving
+original ESC back/return navigation. Its five fail-closed VIDEO script
+copies still neutralize native resolution/mode/brightness writes.
+The approved JFFTXT glyph-render source hook now conditionally hides
+parent Options text only while authenticated in-game normal9/reflex2
+has rendered the blue Glide information panel at least once, retaining
+the original VIDEO title and returning immediately to normal drawing
+upon leaving this exact state. World sprites and the animated 3D
+butterfly are not filtered. The source-based filter avoids deleting
+text resources or unrelated menu branches.
+
+Despite a logged V70 target clamp, Down still moves the native
+MENU butterfly. Original Menu.sna source parsing confirmed that
+reflex0/script2 uses DsgVar index **69**, type=5,
+offset=0x228 as the interpolation **source**, then copies into V70
+(index70/type5/offset0x22c) and V17. The prototype validates all
+DsgVar index69 and index70 declarations, and clamps V69 alongside
+V70 and V17 during verified startup VIDEO only. It does not intercept
+global keyboard input, move any actor, or change other menus.
+This visual fix remains unconfirmed until an owner screenshot/test.
+
+All changes still require the experimental x86 CI and live validation;
+do not merge into `main` on static tests alone.
