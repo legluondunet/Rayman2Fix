@@ -1,5 +1,6 @@
 #include "rayman2fix/standalone_video_page.hpp"
 #include "rayman2fix/standalone_video_device_policy.hpp"
+#include "rayman2fix/standalone_video_layout_policy.hpp"
 #include "rayman2fix/video_navigation_input.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -20,11 +21,13 @@ namespace {
 // The approved Glide internal canvas is 1024x768, regardless of the
 // output desktop's aspect ratio or scaling (e.g. 1920x1200).
 // Center on the approved 1024x768 Glide frame, below the native VIDEO title.
-constexpr unsigned kW=600u,kH=320u;
-constexpr unsigned kX=(1024u-kW)/2u,kY=(768u-kH)/2u;
-static_assert(kX==212u && kY==224u,"VIDEO info panel centered");
-static_assert(kX+kW<=1024u && kY+kH<=768u,
-              "Standalone VIDEO panel must fit the original Glide canvas");
+constexpr unsigned kW=kVideoInfoWidth,kH=kVideoInfoHeight;
+constexpr unsigned kX=kVideoInfoX,kY=kVideoMainInfoY;
+static_assert(kX==212u && kY==224u,
+              "Approved MENU VIDEO panel position unchanged");
+static_assert(kX+kW<=kVideoCanvasWidth &&
+              video_info_panel_y(true)+kH<=kVideoCanvasHeight,
+              "Both VIDEO panel placements must fit the Glide canvas");
 constexpr int kBackBuffer=1,kRgb565=0;
 using GlideRead=std::int32_t (WINAPI*)(int,unsigned,unsigned,unsigned,
                                        unsigned,unsigned,void*);
@@ -176,9 +179,44 @@ bool prepare_mask() noexcept {
     SetTextColor(dc,RGB(255,255,255));
     // The title uses the original Rayman 2 JFFTXT glyphs / animation,
     // not a GDI imitation. Only the data rows are rasterized here.
-    HFONT font=CreateFontA(-23,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,
-        DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
-        ANTIALIASED_QUALITY,DEFAULT_PITCH|FF_SWISS,"Segoe UI");
+    // Fit one consistent font size to the actual longest GPU / driver
+    // string, using the active GDI font metrics (also valid under Wine).
+    // This avoids the previous truncated "AMD Radeon RX 6600M (RADV N..."
+    // while retaining the approved blue panel and five-row positions.
+    HFONT font=nullptr;
+    int font_px=0;
+    bool all_lines_fit=false;
+    for(int px=kVideoInfoFontPreferredPx;
+        px>=kVideoInfoFontMinPx;--px) {
+        HFONT candidate=CreateFontA(-px,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,
+            DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY,DEFAULT_PITCH|FF_SWISS,"Segoe UI");
+        if(!candidate)continue;
+        const auto previous=SelectObject(dc,candidate);
+        bool fits=true;
+        for(unsigned i=0;i<g_lines.size();++i) {
+            SIZE label_size{},value_size{};
+            const char* value=g_lines[i].data();
+            const int label_len=int(std::strlen(kRowLabels[i]));
+            const int value_len=int(std::strlen(value));
+            if(!GetTextExtentPoint32A(dc,kRowLabels[i],label_len,
+                                      &label_size) ||
+               !GetTextExtentPoint32A(dc,value,value_len,&value_size) ||
+               label_size.cx>kVideoInfoValueLeft-kVideoInfoLabelLeft-
+                                 kVideoInfoTextPadding ||
+               value_size.cx>kVideoInfoValueRight-kVideoInfoValueLeft-
+                                 kVideoInfoTextPadding)
+                fits=false;
+        }
+        SelectObject(dc,previous);
+        if(fits || px==kVideoInfoFontMinPx) {
+            font=candidate;
+            font_px=px;
+            all_lines_fit=fits;
+            break;
+        }
+        DeleteObject(candidate);
+    }
     if(!font) {
         SelectObject(dc,prior);DeleteObject(bitmap);DeleteDC(dc);
         ReleaseDC(nullptr,screen);
@@ -187,12 +225,27 @@ bool prepare_mask() noexcept {
     const auto old_font=SelectObject(dc,font);
     for(unsigned i=0;i<g_lines.size();++i) {
         const int y=42+int(i)*53;
-        RECT label{40,y,166,y+38};
-        RECT value{172,y,int(kW)-22,y+38};
+        RECT label{kVideoInfoLabelLeft,y,166,y+38};
+        RECT value{kVideoInfoValueLeft,y,kVideoInfoValueRight,y+38};
         DrawTextA(dc,kRowLabels[i],-1,&label,
                   DT_SINGLELINE|DT_NOPREFIX|DT_VCENTER);
-        DrawTextA(dc,g_lines[i].data(),-1,&value,
-                  DT_SINGLELINE|DT_NOPREFIX|DT_VCENTER|DT_END_ELLIPSIS);
+        if(all_lines_fit)
+            DrawTextA(dc,g_lines[i].data(),-1,&value,
+                      DT_SINGLELINE|DT_NOPREFIX|DT_VCENTER);
+        else
+            // Extra-long GPU descriptions can use two/three smaller
+            // lines rather than cutting off meaningful information.
+            DrawTextA(dc,g_lines[i].data(),-1,&value,
+                      DT_WORDBREAK|DT_NOPREFIX);
+    }
+    if(g_log) {
+        char msg[180]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-STANDALONE-VIDEO: info-font-px=%d value-column-width=%d "
+            "all-lines-single-row-fit=%u source=measured-GDI no-text-truncation=1",
+            font_px,kVideoInfoValueRight-kVideoInfoValueLeft,
+            unsigned(all_lines_fit));
+        g_log(msg);
     }
     SelectObject(dc,old_font);
     DeleteObject(font);
@@ -302,7 +355,8 @@ bool standalone_video_page_draw_before_flip() noexcept {
         return false;
     }
     if(!prepare_mask())return false;
-    if(!g_read(kBackBuffer,kX,kY,kW,kH,kW*2u,g_pixels.data()))
+    const unsigned panel_y=video_info_panel_y(pause);
+    if(!g_read(kBackBuffer,kX,panel_y,kW,kH,kW*2u,g_pixels.data()))
         return false;
     // Preserve the animated 3D scene behind a subtle translucent
     // midnight-blue panel. Glide2's LFB presents red/blue reversed:
@@ -324,7 +378,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
         if(m)pix=blend_565(pix,255u,255u,255u,m);
         g_pixels[i]=pix;
     }
-    if(!g_write(kBackBuffer,kX,kY,kRgb565,kW,kH,
+    if(!g_write(kBackBuffer,kX,panel_y,kRgb565,kW,kH,
                 int(kW*2u),g_pixels.data())) {
         if(!g_write_error.exchange(true) && g_log)
             g_log("RUNTIME-STANDALONE-VIDEO: LFB-write-refused original-flip-preserved=1");
@@ -335,7 +389,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
     if(pause)
         g_pause_drawn_this_visit.store(true,std::memory_order_release);
     if(pause && !g_pause_draw_reported.exchange(true) && g_log)
-        g_log("RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1 source=own-Glide-LFB state=verified-normal9-reflex2 background=translucent-midnight-blue original-scene=preserved");
+        g_log("RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1 source=own-Glide-LFB state=verified-normal9-reflex2 background=translucent-midnight-blue original-scene=preserved panel-y=280 native-luciole-space=+56 no-actor-transform=1");
     return true;
 }
 } // namespace r2fix
