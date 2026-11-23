@@ -70,15 +70,19 @@ option(RAYMAN2FIX_RESEARCH_PROBES
   "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
 option(RAYMAN2FIX_AUDIO_TRACE
   "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
+# Release-candidate: the owner validated MENU + ESC VIDEO information
+# panels against the original game under Wine. Enable them in the *normal*
+# single-EXE installer, not only in a separately named research artifact.
+# The switches remain available as an opt-out for troubleshooting.
 option(RAYMAN2FIX_GRAPHICS_INFO_PROTO
-  "Build experimental native in-menu graphics information and exact video-action guards" OFF)
+  "Build verified in-menu video-action guards for native VIDEO information pages" ON)
 option(RAYMAN2FIX_STANDALONE_VIDEO_PAGE
-  "Build research-only self-owned Glide2 information panel" OFF)
+  "Build verified shared Glide2 VIDEO information page in MENU and Pause" ON)
 if(RAYMAN2FIX_STANDALONE_VIDEO_PAGE AND NOT RAYMAN2FIX_GRAPHICS_INFO_PROTO)
   message(FATAL_ERROR "Standalone video page requires verified graphics action guards")
 endif()
 option(RAYMAN2FIX_GRAPHICS_MENU_TRACE
-  "Build separate passive native Resolution menu diagnostics (no mode hooks)" OFF)
+  "Build source-verified native MENU model locator needed by VIDEO page" ON)
 option(RAYMAN2FIX_ESC_MUSIC_PROTO
   "Build explicit opt-in, experimental native ESC music compensation for Wine testing" OFF)
 if(RAYMAN2FIX_GRAPHICS_INFO_PROTO AND NOT RAYMAN2FIX_GRAPHICS_MENU_TRACE)
