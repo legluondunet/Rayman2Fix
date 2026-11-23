@@ -391,3 +391,27 @@ must not be described as achieving non-selectability: V17 still changes
 with up/down on the native VIDEO page. A genuine static page requires
 separating the data from native selection widgets. Do not merge PR #51
 without visual verification under Wine and Windows.
+
+
+## Read-only script-preflight evidence (23 November 2026)
+
+The earlier two-script `JFFTXTProcedure` clone was rejected by a
+combined preflight. The exact predicate was never logged, and matching
+offline SNA fingerprints does not prove that all live pointers and
+memory protections are compatible. A new **read-only** diagnostic runs
+once per verified VIDEO visit, logs no process addresses, copies at most
+517 script nodes into temporary memory, and checks independently for
+the two original normal-5 scripts:
+
+- native script-list count and pointer validity;
+- slot writable protection (observed only);
+- 8-byte node array readability;
+- relocation-normalized complete script fingerprint;
+- exact terminal JFFTXT call shape.
+
+The `RUNTIME-STATIC-SCRIPT-DIAG` markers report
+`slot_write`, `ptr_valid`, `bytes`, `hash`, and `shape`.
+There are no game-state writes or swaps, and the old script-clone
+installation remains disabled. A future targeted correction must be
+based on observed individual failure predicates, not on weakening
+preflight as a whole.
