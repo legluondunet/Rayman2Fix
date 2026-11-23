@@ -411,18 +411,27 @@ void build_texts() noexcept {
     // The launcher knows whether the player requested 4:3 or Auto.
     // Do not infer this from the output dimensions: a physical 4:3
     // monitor can legitimately run in Auto as well.
-    std::snprintf(line,sizeof(line),"%ux%u %u:%u %s",
-                  render_w,render_h,x,y,
-                  g_classic_4_3.load(std::memory_order_acquire)?
-                      "4:3":"AUTO");
+    // OUTPUT is the launcher-approved display surface, not the 16-bit
+    // legacy Glide frame buffer. The bit depth read from Win32's
+    // active desktop mode is shown with OUTPUT only when available.
+    // "32BIT" is a compatibility desktop pixel format, not proof of
+    // 32-bit precision in the game's historical 3D rendering.
+    const char* aspect=g_classic_4_3.load(std::memory_order_acquire)?
+        "4:3":"AUTO";
+    if(depth)
+        std::snprintf(line,sizeof(line),"%ux%u %u:%u %s %uBIT",
+                      render_w,render_h,x,y,aspect,depth);
+    else
+        std::snprintf(line,sizeof(line),"%ux%u %u:%u %s",
+                      render_w,render_h,x,y,aspect);
     text_row(1,"OUTPUT:",line);
     text_row(2,"GPU:",adapter.data());
     text_row(3,"D3D9:",driver.data());
-    // Native handle 384 ("OTHER") is not drawn on the verified FR menu.
-    // Place both the native engine resolution and the desktop bit depth
-    // in handle 383, the fourth actually visible information row.
+    // The original Glide mode is separate from the desktop format:
+    // 1024x768x16 is the internal RGB565 legacy game rendering mode.
+    // Native handle 384 ("OTHER") is not drawn on the FR menu.
     std::snprintf(g_rows[4].data(),g_rows[4].size(),
-                  "GLIDE 1024x768x16 / DESKTOP %u",depth);
+                  "GLIDE: 1024x768x16");
     std::snprintf(g_rows[5].data(),g_rows[5].size()," ");
 }
 bool original_text_valid(std::uintptr_t p) noexcept {
