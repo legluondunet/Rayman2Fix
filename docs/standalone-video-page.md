@@ -291,3 +291,58 @@ This visual fix remains unconfirmed until an owner screenshot/test.
 
 All changes still require the experimental x86 CI and live validation;
 do not merge into `main` on static tests alone.
+
+## 23 November 18:16 Wine regression — in-game website and VIDEO back state
+
+The owner's `Rayman2Fix(20261123-181651).log` (runtime
+build `4910dba4`) confirms both a persistent MENU website caption
+failure after returning from gameplay and a real in-game VIDEO transition
+`normal7/reflex2 → normal6/reflex2 → normal9/reflex2` with
+`frame-rendered=1`. The source V69/70 clamp logged but the maintainer
+still observed one native butterfly movement from Down.
+
+The next prototype independently authenticates **the original Fix.sna
+normal7/script9**, 1282 nodes (source shape
+`0xa318b1055ee76c9f`), with the native website action proc369 at
+node1158 behind the verified DsgVar `V16=3` selector (86 declared
+variables, V16 scalar offset `0x110`). Enter only on that exact
+state and site row opens the Rayman2Fix GitHub homepage through
+ShellExecuteA; no global input capture or unrelated menu site actions.
+The original executable's unique authorized ShellExecuteA caller RVA
+0x187267 also redirects from Pause, with a shared 1.5-second debounce
+to avoid two browser tabs if the native action and source watcher both
+dispatch. Mouse-click support for this distinct Pause menu is not
+yet claimed.
+
+The shared five-locales Fix.sna website caption at handle362 is now
+replaced *in its verified live text buffer* as well as in the pointer
+table. This affects only RAM, not commercial assets on disk, and
+persists when returning from MENU into gameplay or into Pause. The
+in-place replacement is attempted only when the original localized
+string is authenticated and fits the smaller `/C:Rayman2Fix` buffer;
+otherwise the previous safe pointer-only path remains available.
+
+To avoid damaging the original ESC return logic, normal9/script1
+initialization (including V16 and V17) is no longer modified.
+Four separately source-signed mode/save/brightness action scripts
+continue to prevent obsolete resolution changes in Pause.
+
+The old Options labels in the paused VIDEO screen are partly rendered
+as native **3D TextSuperImposed** and were not affected by the 2D
+JFFTXT glyph filter. A second exact source filter is now applied only
+when the blue Pause VIDEO page has actually drawn, only for the game's
+approved UI viewport and original return RVAs 0x75C58 and 0x75C93,
+and only below the preserved VIDEO title band. It shifts those
+body-only native text vertices beyond the viewport without touching
+game/world geometry, butterfly actors, normal Options navigation or
+the new panel. This geometry and layout still need a real Wine test.
+
+For startup VIDEO, the source-verified normal5/script1 JFFTXT text
+focus argument has been changed to constant singleton index1 rather
+than a live V17 read; this is an additional purely presentational
+experiment and may still not suppress the butterfly movement until
+the owner visually confirms it.
+
+Everything remains opt-in to the draft research PR #52. The linked
+artifact must be the Windows **native-graphics-menu-prototype**, not
+the default bootstrap.
