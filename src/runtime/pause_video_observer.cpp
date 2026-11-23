@@ -120,6 +120,7 @@ struct PatchSlot {
 };
 std::array<PatchSlot,5> g_scripts{};
 bool g_scripts_installed=false;
+bool g_preflight_failed=false;
 bool writable(std::uintptr_t at) noexcept {
     if(!at || at%4u)return false;
     MEMORY_BASIC_INFORMATION info{};
@@ -132,11 +133,14 @@ bool writable(std::uintptr_t at) noexcept {
 }
 bool install_pause_video_scripts(const PauseVideoModel& model) noexcept {
     if(g_scripts_installed)return true;
+    if(g_preflight_failed)return false;
     if(!model.valid())return false;
     std::array<PatchSlot,5> prepared{};
     unsigned built=0u;
     const char* reason="unverified";
     bool valid=true;
+    unsigned failed_plan=~0u;
+    std::uint64_t observed_shape=0u;
     for(unsigned k=0;k<5u;++k) {
         const auto& p=kPauseVideoPlans[k];
         const auto entries=model.normal_entries+p.behavior*12u;
@@ -148,34 +152,44 @@ bool install_pause_video_scripts(const PauseVideoModel& model) noexcept {
            !menu_safe_ptr(list,4u*(unsigned(count))) ||
            !read32(std::uintptr_t(list)+4u*p.script,original) ||
            !menu_safe_ptr(original,p.count*sizeof(NativeMenuScriptNode))) {
-            valid=false;reason="script-layout";break;
+            valid=false;reason="script-layout";failed_plan=k;break;
         }
         const auto slot=std::uintptr_t(list)+4u*p.script;
-        if(!writable(slot)) {valid=false;reason="pointer-slot";break;}
+        if(!writable(slot)) {valid=false;reason="pointer-slot";failed_plan=k;break;}
         const SIZE_T bytes=p.count*sizeof(NativeMenuScriptNode);
         auto* clone=static_cast<NativeMenuScriptNode*>(
             VirtualAlloc(nullptr,bytes,MEM_COMMIT|MEM_RESERVE,
                          PAGE_READWRITE));
-        if(!clone) {valid=false;reason="clone-allocation";break;}
+        if(!clone) {valid=false;reason="clone-allocation";failed_plan=k;break;}
         prepared[k]={slot,original,clone};
         ++built;
         SIZE_T done=0;
         if(!ReadProcessMemory(GetCurrentProcess(),
                 reinterpret_cast<void*>(std::uintptr_t(original)),
-                clone,bytes,&done) || done!=bytes ||
-           !rewrite_pause_video_script(clone,p)) {
-            valid=false;reason="original-script-signature";break;
+                clone,bytes,&done) || done!=bytes) {
+            valid=false;reason="unreadable-script";failed_plan=k;break;
+        }
+        observed_shape=native_video_script_shape_hash(clone,p.count);
+        if(!rewrite_pause_video_script(clone,p)) {
+            valid=false;reason=observed_shape!=p.shape ?
+                "script-shape-mismatch" : "source-node-mismatch";
+            failed_plan=k;break;
         }
     }
     if(!valid) {
+        g_preflight_failed=true; // do not retry hundreds of times in one level
         for(unsigned i=0;i<built;++i)
             if(prepared[i].clone)
                 VirtualFree(prepared[i].clone,0,MEM_RELEASE);
         if(g_log) {
-            char msg[200]{};
+            char msg[330]{};
+            const auto p=failed_plan<5u ? kPauseVideoPlans[failed_plan] :
+                PauseVideoScriptPlan{};
             std::snprintf(msg,sizeof(msg),
-                "RUNTIME-PAUSE-VIDEO-PAGE: status=preflight-refused reason=%s no-patch=1",
-                reason);
+                "RUNTIME-PAUSE-VIDEO-PAGE: status=preflight-refused reason=%s behavior=%u script=%u nodes=%u observed-shape=%08X%08X expected-shape=%08X%08X retry=next-scene-only no-patch=1",
+                reason,p.behavior,p.script,p.count,
+                unsigned(observed_shape>>32),unsigned(observed_shape),
+                unsigned(p.shape>>32),unsigned(p.shape));
             g_log(msg);
         }
         return false;
@@ -222,6 +236,7 @@ void restore_pause_video_scripts() noexcept {
                 reinterpret_cast<PVOID>(entry.original),entry.clone);
     g_scripts={};
     g_scripts_installed=false;
+    g_preflight_failed=false;
     if(g_log)g_log(
         "RUNTIME-PAUSE-VIDEO-PAGE: status=scene-exit original-script-pointers-restored=attempted published-private-copies-retained=1");
 }
@@ -254,6 +269,7 @@ DWORD WINAPI worker(void*) {
             // The shared Fix scene may be recreated on return to MENU.
             if(in_menu) {
                 restore_pause_video_scripts();
+                g_preflight_failed=false;
                 state={};tries=0;next_scan=0;
             }
             Sleep(250);
@@ -266,7 +282,7 @@ DWORD WINAPI worker(void*) {
                 state={};
                 tries=0;
             } else {
-                if(!g_scripts_installed)
+                if(!g_scripts_installed && !g_preflight_failed)
                     install_pause_video_scripts(current);
                 const bool candidate=current.normal==9 && current.reflex==2;
                 standalone_video_page_set_pause_visible(
