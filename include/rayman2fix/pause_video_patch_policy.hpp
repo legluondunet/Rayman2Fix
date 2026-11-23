@@ -4,12 +4,14 @@
 // complete original script shape. No copyrighted data or source is shipped.
 #include <cstdint>
 #include "rayman2fix/native_video_disable_choices.hpp"
+#include "rayman2fix/pause_video_preparation_policy.hpp"
 namespace r2fix {
 struct PauseVideoScriptPlan {
     unsigned behavior,script,count;
     std::uint64_t shape;
 };
-constexpr PauseVideoScriptPlan kPauseVideoPlans[5]{
+constexpr PauseVideoScriptPlan kPauseVideoPlans[6]{
+    {6u,2u,kPauseVideoPrepOriginalNodes,kPauseVideoPrepOriginalShape},
     {9u,1u,304u,0x3184f1d2bf00dd9dULL},
     {9u,2u,424u,0xb6a5f08ae8ef7914ULL},
     {9u,3u,33u,0x9902892c1e0da3c5ULL},
@@ -18,7 +20,11 @@ constexpr PauseVideoScriptPlan kPauseVideoPlans[5]{
 };
 inline bool rewrite_pause_video_script(
     NativeMenuScriptNode* copy,const PauseVideoScriptPlan& p) noexcept {
-    if(!copy || native_video_script_shape_hash(copy,p.count)!=p.shape ||
+    if(!copy)return false;
+    if(p.behavior==6u && p.script==2u)
+        return p.count==kPauseVideoPrepOriginalNodes &&
+            pause_skip_obsolete_video_preparation(copy,p.count,p.shape);
+    if(native_video_script_shape_hash(copy,p.count)!=p.shape ||
        copy[p.count-1u].type!=8u ||
        copy[p.count-1u].indent!=0u)return false;
     if(p.behavior==9u && p.script==1u) {
