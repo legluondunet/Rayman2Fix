@@ -103,25 +103,29 @@ inline bool layout_graphics_info_quad(
     }
     return false;
 }
-// Rayman2Fix read-only VIDEO screen: source-identified obsolete native
-// brightness meter. The owner's Wine GLI trace identifies exactly TWO
-// ScreenImage producer quads at y=85..90, x=60..75.6 and 75.6..90.
-// This is deliberately NOT a generic bottom-screen suppression: unknown
-// quads, other screen-image producers, other menus and 3D butterfly
-// geometry must always pass through.
+// Rayman2Fix informational VIDEO: only the two source-identified
+// ScreenImage rectangles of the retired brightness bar. Exact outer
+// bounds are x=60..90 and y=85..90, whereas the central split varies
+// with the native brightness sample: 75.60 in the earlier Wine run,
+// 75.30 in the owner-provided 10:06 log. Do NOT compare a rounded
+// split against one frozen sample or filter unrelated menu images.
 inline bool readonly_video_brightness_meter_quad(
     bool verified_readonly_video,unsigned native_producer,
     const GraphicsInfoQuad& q) noexcept {
     if(!verified_readonly_video || native_producer!=1u ||
        !std::isfinite(q.left) || !std::isfinite(q.right) ||
-       !std::isfinite(q.top) || !std::isfinite(q.bottom))
-        return false;
-    constexpr float epsilon=0.12f;
-    if(std::fabs(q.top-85.0f)>epsilon ||
-       std::fabs(q.bottom-90.0f)>epsilon)return false;
-    return (std::fabs(q.left-60.0f)<=epsilon &&
-            std::fabs(q.right-75.6f)<=epsilon) ||
-           (std::fabs(q.left-75.6f)<=epsilon &&
-            std::fabs(q.right-90.0f)<=epsilon);
+       !std::isfinite(q.top) || !std::isfinite(q.bottom) ||
+       q.left>=q.right || q.top>=q.bottom)return false;
+    constexpr float edge_tolerance=0.12f;
+    constexpr float split_min=70.0f,split_max=80.0f;
+    if(std::fabs(q.top-85.0f)>edge_tolerance ||
+       std::fabs(q.bottom-90.0f)>edge_tolerance)return false;
+    const bool left_half=
+        std::fabs(q.left-60.0f)<=edge_tolerance &&
+        q.right>=split_min && q.right<=split_max;
+    const bool right_half=
+        std::fabs(q.right-90.0f)<=edge_tolerance &&
+        q.left>=split_min && q.left<=split_max;
+    return left_half || right_half;
 }
 } // namespace r2fix
