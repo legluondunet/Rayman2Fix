@@ -355,3 +355,39 @@ unchanged, butterfly present, unchanged internal resolution. Do
 not merge PR #51 without observing these properties and deciding
 whether the remaining internal V17 movements are acceptable or
 must be eliminated by a separate, verified input-state mechanism.
+
+
+## Experimental VIDEO information persistence during brightness (23 November 2026)
+
+Owner observation from `Rayman2Fix(20261123-062939).log` and the two
+screenshots taken at 06:28/06:29: the four rows are white and aligned
+in VIDEO, but keyboard up/down still changes the native V17 focus; all
+four information rows disappear on selection of LUMINOSITE.
+
+The disappearance was explicitly caused by the worker restoring
+localization handles 379..384 and disabling glyph reflow when the native
+intelligence switched from normal=5/reflex=0 to normal=18/reflex=5. This
+behavior was deliberately introduced after an earlier giant-glyph
+regression during brightness; the scoped stale-video-glyph filter
+subsequently prevented that regression.
+
+**Next guarded visual experiment:** if and only if VIDEO has already
+installed the six native information text pointers and the approved
+MENU controller validates normal=18/reflex=5/V17=5, leave those text
+pointers installed and keep the existing information glyph reflow and
+fixed-color palette enabled. Do not suppress these verified glyphs on
+this brightness behavior. The native brightness string handle 385,
+slider, input, actor/butterfly, and script logic are unchanged. The last
+validated VIDEO V17 (1..4) remains solely a *snapshot* for the font
+color path, not a game-state write. On any other menu state or level
+unload, restore the original text pointers and disable the panel. If
+the game fails to draw cached information glyphs during brightness,
+this change will not synthesize them and the panel remains absent.
+
+Diagnostic marker:
+`RUNTIME-GRAPHICS-INFO: status=brightness-information-panel-retained`.
+CTest covers all nine disqualifying conditions. The new experiment
+must not be described as achieving non-selectability: V17 still changes
+with up/down on the native VIDEO page. A genuine static page requires
+separating the data from native selection widgets. Do not merge PR #51
+without visual verification under Wine and Windows.
