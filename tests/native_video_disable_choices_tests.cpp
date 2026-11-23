@@ -217,14 +217,14 @@ void test_video_script1_only_range() {
     for(const unsigned at:{146u,149u,152u,165u,313u,314u,315u,316u}) {
         auto bad=before;bad[at].parameter^=1u;
         const auto unchanged=bad;
-        check(!standalone_video_script1_bound_zero(bad.data(),plan));
+        check(!standalone_video_script1_singleton(bad.data(),plan));
         for(unsigned i=0;i<before.size();++i)
             check(bad[i].parameter==unchanged[i].parameter);
     }
     auto bad=before;
     bad[17].type=9u;
-    check(!standalone_video_script1_bound_zero(bad.data(),plan));
-    check(!standalone_video_script1_bound_zero(nullptr,plan));
+    check(!standalone_video_script1_singleton(bad.data(),plan));
+    check(!standalone_video_script1_singleton(nullptr,plan));
 }
 
 int main(){
