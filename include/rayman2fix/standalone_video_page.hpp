@@ -52,6 +52,27 @@ inline bool standalone_video_stabilize_native_title(
     ymax=25.0f;
     return true;
 }
+// Fix.sna ESC Video places its original heading slightly above the
+// MENU.sna heading. The same 2D native font must remain visible in
+// both controllers; allow the verified Pause title band separately.
+inline bool standalone_video_stabilize_native_title_for_context(
+    bool in_game_pause,float& xmin,float& ymin,
+    float& xmax,float& ymax) noexcept {
+    if(standalone_video_stabilize_native_title(xmin,ymin,xmax,ymax))
+        return true;
+    if(!in_game_pause ||
+       !std::isfinite(xmin)||!std::isfinite(xmax)||
+       !std::isfinite(ymin)||!std::isfinite(ymax)||
+       xmin<28.0f || xmax>72.0f ||
+       ymin<12.0f || ymax>30.0f ||
+       xmin>=xmax || ymin>=ymax)
+        return false;
+    // Reuse MENU's verified title baseline and native glyph source;
+    // do not re-enable the original ESC resolution/brightness widgets.
+    ymin=20.0f;
+    ymax=25.0f;
+    return true;
+}
 bool standalone_video_page_filter_native_glyphs(
     float& xmin,float& ymin,float& xmax,float& ymax) noexcept;
 // Invoked once per game buffer flip, on the owning Glide render thread.
