@@ -103,4 +103,25 @@ inline bool layout_graphics_info_quad(
     }
     return false;
 }
+// Rayman2Fix read-only VIDEO screen: source-identified obsolete native
+// brightness meter. The owner's Wine GLI trace identifies exactly TWO
+// ScreenImage producer quads at y=85..90, x=60..75.6 and 75.6..90.
+// This is deliberately NOT a generic bottom-screen suppression: unknown
+// quads, other screen-image producers, other menus and 3D butterfly
+// geometry must always pass through.
+inline bool readonly_video_brightness_meter_quad(
+    bool verified_readonly_video,unsigned native_producer,
+    const GraphicsInfoQuad& q) noexcept {
+    if(!verified_readonly_video || native_producer!=1u ||
+       !std::isfinite(q.left) || !std::isfinite(q.right) ||
+       !std::isfinite(q.top) || !std::isfinite(q.bottom))
+        return false;
+    constexpr float epsilon=0.12f;
+    if(std::fabs(q.top-85.0f)>epsilon ||
+       std::fabs(q.bottom-90.0f)>epsilon)return false;
+    return (std::fabs(q.left-60.0f)<=epsilon &&
+            std::fabs(q.right-75.6f)<=epsilon) ||
+           (std::fabs(q.left-75.6f)<=epsilon &&
+            std::fabs(q.right-90.0f)<=epsilon);
+}
 } // namespace r2fix
