@@ -64,6 +64,7 @@ std::atomic<bool> g_brightness_transition_disabled{false};
 std::atomic<int> g_info_focus_row{-1}; // read-only V17 snapshot for material probe
 std::atomic<bool> g_cached_video_text_in_brightness{false};
 std::atomic<unsigned> g_brightness_ghost_glyphs_suppressed{0};
+std::atomic<unsigned> g_brightness_meter_quads_suppressed{0};
 std::atomic<unsigned> g_reflowed_glyphs{0};
 // 3 non-glyph routes, up to 8 distinct geometries per route.
 std::array<std::array<std::atomic<std::uint32_t>,8>,3> g_image_quad_samples{};
@@ -941,6 +942,22 @@ DWORD WINAPI worker(void*) {
 int native_graphics_info_focus_row() noexcept {
     return g_layout_active.load(std::memory_order_acquire) ?
         g_info_focus_row.load(std::memory_order_acquire) : -1;
+}
+bool suppress_readonly_video_brightness_meter(unsigned producer,
+    float xmin,float ymin,float xmax,float ymax) noexcept {
+    // Only while the approved game is in the stable, noninteractive
+    // VIDEO information page and exact native brightness entry
+    // suppression has been committed. The original 3D butterfly is
+    // independent of this two-quad ScreenImage producer.
+    const bool verified=g_layout_active.load(std::memory_order_acquire) &&
+        g_brightness_transition_disabled.load(std::memory_order_acquire);
+    if(!readonly_video_brightness_meter_quad(verified,producer,
+          {xmin,ymin,xmax,ymax}))return false;
+    const unsigned n=g_brightness_meter_quads_suppressed.fetch_add(
+        1,std::memory_order_relaxed);
+    if(n==0u && g_logger)
+        g_logger("RUNTIME-GRAPHICS-INFO: status=obsolete-brightness-meter-hidden route=verified-screen-image only=two-original-quads butterfly=untouched");
+    return true;
 }
 void observe_native_graphics_info_non_glyph(unsigned route,
     float xmin,float ymin,float xmax,float ymax) noexcept {
