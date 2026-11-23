@@ -415,3 +415,58 @@ There are no game-state writes or swaps, and the old script-clone
 installation remains disabled. A future targeted correction must be
 based on observed individual failure predicates, not on weakening
 preflight as a whole.
+
+
+## User regression #1643: late installation, dim output, focus still active (23 Nov 2026)
+
+Attached screenshot `image(20261123-071228).png` and log
+`Rayman2Fix(20261123-071343).log` (runtime build `235354b3`):
+
+- The original resolution menu is visibly shown for at least about
+  one second before the VIDEO information text takes its place.
+  The runtime log records `RUNTIME-MENU-AI: scan=1` without a match
+  and `controller-found scan=2` at `t_ms=7937`; only then do
+  `native-text-installed` and `video-page-visible` appear. The
+  former 5-second inter-scan delay explains a substantial part of
+  this delay (it does not yet prove flash-free startup).
+- The first OUTPUT row remains grey while GPU, D3D9 and GLIDE are
+  solid white: the source font palette for its old native disabled
+  option was `0x5AFFFFFF` (alpha 0x5A), and the earlier invariant
+  palette intentionally preserved that alpha. Fixed text is not a
+  disabled choice, so all four rows now use the same opaque white
+  copy `0xFFFFFFFF`, never modifying the game's own palette.
+- The native input focus still traverses `V17=1,2,3`, then enters
+  brightness via `normal=18/reflex=5/V17=5`. All four rows can
+  therefore still be targeted invisibly. The white palette removes
+  only their highlighted colors, NOT their selectable behavior.
+- `brightness-information-panel-retained` confirms the code keeps
+  information localization pointers during brightness, and the
+  screenshot shows the four lines remain visible above the native
+  slider. The butterfly remains present.
+- `RUNTIME-STATIC-SCRIPT-DIAG` proves both script slots writable,
+  node array pointers valid and all bytes readable, but reports
+  `hash=0 shape=0` for the two original scripts. The old
+  `shape` field conflated signature and tail validation: the
+  diagnostic now prints a separately computed terminal JFFTXT
+  `tail` flag, the normalized `observed_fingerprint`, and the
+  terminal opcode/typed argument, with no in-game writes and no
+  raw process addresses.
+- The internal renderer mode remains `1024x768x16`; the
+  intercept counters are zero, so no user-initiated mode changes
+  were attempted during this run.
+
+### Limited next prototype
+
+Only two behavior adjustments are applied: the first three
+bounded model-scan retries run at 750 ms rather than 5000 ms,
+and all four information rows render opaque white in copied
+GLI materials. The memory search budget (160 MiB), full script
+validation, native brightness and butterfly, and
+`VID_SelectResolution`/`VID_SaveCurrentResolution` protections
+are unchanged. CTests cover scan cadence and opaque palette.
+
+This reduces flash time and fixes the visually disabled first line,
+but neither change can remove native keyboard focus. Any future
+script/input modifications must await the expanded live preflight
+evidence, and must not be presented as a nonselectable UI before a
+real in-game validation.
