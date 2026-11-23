@@ -11,6 +11,10 @@ int main(){
         "/C:Sito di Rayman2","/C:Rayman2 - Webseite"}) {
         check(approved_main_menu_site_text(name));
     }
+    check(approved_replaced_main_menu_site_text("/C:Rayman2Fix"));
+    check(!approved_replaced_main_menu_site_text("/C:Site Rayman2"));
+    check(!approved_replaced_main_menu_site_text(nullptr));
+    check(std::strcmp(kSiteCaptionReplacement,"/C:Rayman2Fix")==0);
     check(!approved_main_menu_site_text("/C:VIDEO"));
     check(!approved_main_menu_site_text("/C:Site Rayman3"));
     check(!approved_main_menu_site_text(nullptr));
