@@ -28,6 +28,17 @@ static void check_script(unsigned script_index,const unsigned (&init)[3],
         {init[0],init[1],init[2]},
         {active[0],active[1],active[2]}};
     auto patched=before;
+    // Script 1's V14 rows belong to parent Options, not VIDEO.
+    // The modifier must reject it without changing even one byte.
+    if(script_index==1u) {
+        check(!disable_native_video_choices(patched.data(),plan));
+        for(unsigned i=0u;i<N;++i)
+            check(patched[i].parameter==before[i].parameter &&
+                  patched[i].type==before[i].type &&
+                  patched[i].indent==before[i].indent &&
+                  patched[i].padding==before[i].padding);
+        return;
+    }
     check(disable_native_video_choices(patched.data(),plan));
     for(unsigned i=0u;i<N;++i) {
         bool target=false;
@@ -78,6 +89,16 @@ void check_static_font(unsigned index,unsigned tail) {
         {0u,0u,0u},{0u,0u,0u}};
     const NativeInfoStaticTextPlan font{
         index,unsigned(N),tail,0u};
+    if(index==1u) {
+        check(!native_video_static_font_preflight(before.data(),
+            selection,font));
+        auto unchanged=before;
+        check(!freeze_native_video_info_font(unchanged.data(),font));
+        for(unsigned i=0u;i<N;++i)
+            check(unchanged[i].parameter==before[i].parameter &&
+                  unchanged[i].type==before[i].type);
+        return;
+    }
     check(native_video_static_font_preflight(before.data(),
         selection,font));
     auto copy=before;
