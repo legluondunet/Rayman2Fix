@@ -72,6 +72,11 @@ option(RAYMAN2FIX_AUDIO_TRACE
   "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
 option(RAYMAN2FIX_GRAPHICS_INFO_PROTO
   "Build experimental native in-menu graphics information and exact video-action guards" OFF)
+option(RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+  "Build research-only self-owned Glide2 information panel" OFF)
+if(RAYMAN2FIX_STANDALONE_VIDEO_PAGE AND NOT RAYMAN2FIX_GRAPHICS_INFO_PROTO)
+  message(FATAL_ERROR "Standalone video page requires verified graphics action guards")
+endif()
 option(RAYMAN2FIX_GRAPHICS_MENU_TRACE
   "Build separate passive native Resolution menu diagnostics (no mode hooks)" OFF)
 option(RAYMAN2FIX_ESC_MUSIC_PROTO
@@ -103,6 +108,11 @@ if(WIN32)
     target_sources(Rayman2FixRuntime PRIVATE src/runtime/native_graphics_info_proto.cpp)
     target_compile_definitions(Rayman2FixRuntime PRIVATE
       RAYMAN2FIX_GRAPHICS_INFO_PROTO=1)
+  endif()
+  if(RAYMAN2FIX_STANDALONE_VIDEO_PAGE)
+    target_sources(Rayman2FixRuntime PRIVATE src/runtime/standalone_video_page.cpp)
+    target_link_libraries(Rayman2FixRuntime PRIVATE gdi32)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_STANDALONE_VIDEO_PAGE=1)
   endif()
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
@@ -319,6 +329,10 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME native-menu-verified-static-text-script-copy
     COMMAND native_graphics_static_text_tests)
+  add_executable(standalone_video_page_tests
+    tests/standalone_video_page_tests.cpp)
+  target_include_directories(standalone_video_page_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME standalone-video-page-navigation-scope COMMAND standalone_video_page_tests)
   add_executable(native_video_disable_choices_tests
     tests/native_video_disable_choices_tests.cpp)
   target_include_directories(native_video_disable_choices_tests PRIVATE
