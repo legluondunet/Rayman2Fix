@@ -70,6 +70,10 @@ constexpr bool native_video_status_assignment(
 }
 inline bool disable_native_video_choices(
     NativeMenuScriptNode* copy,const NativeVideoDisablePlan& p) noexcept {
+    // Normal-5 script #1 initializes the PARENT Options menu.
+    // Its V14[0..2] are VIDEO, SOUND and OTHER OPTIONS, not resolution
+    // choices. Never disable them: that hid Options items on 23 Nov.
+    if(p.script_index==1u)return false;
     if(!copy || p.count<20u || p.count>1024u ||
        native_video_script_shape_hash(copy,p.count)!=p.original_shape_hash ||
        copy[p.count-1u].type!=8u || copy[p.count-1u].indent!=0u)
@@ -102,7 +106,11 @@ inline bool native_video_static_font_preflight(
     const NativeMenuScriptNode* copy,
     const NativeVideoDisablePlan& choices,
     const NativeInfoStaticTextPlan& font) noexcept {
-    return copy && choices.script_index==font.script_index &&
+    // Only script 4 belongs to the live VIDEO selection widget.
+    // Script 1 is the parent Options initialization and must retain
+    // its original focus-animation wiring and menu selection.
+    return copy && choices.script_index==4u &&
+        choices.script_index==font.script_index &&
         choices.count==font.node_count &&
         native_video_script_shape_hash(copy,choices.count)==
             choices.original_shape_hash &&
@@ -111,7 +119,8 @@ inline bool native_video_static_font_preflight(
 inline bool freeze_native_video_info_font(
     NativeMenuScriptNode* copy,
     const NativeInfoStaticTextPlan& font) noexcept {
-    if(!native_video_font_tail_valid(copy,font))return false;
+    if(font.script_index!=4u ||
+       !native_video_font_tail_valid(copy,font))return false;
     copy[font.jfftxt_node_index+1u].parameter=0u;
     copy[font.jfftxt_node_index+1u].type=12u; // immutable text index 0
     return true;
