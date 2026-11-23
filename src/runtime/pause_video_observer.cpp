@@ -13,6 +13,7 @@
 #include "rayman2fix/pause_video_model_policy.hpp"
 #include "rayman2fix/pause_video_observer.hpp"
 #include "rayman2fix/pause_video_patch_policy.hpp"
+#include "rayman2fix/pause_menu_site_policy.hpp"
 #include "rayman2fix/standalone_video_page.hpp"
 namespace r2fix {
 namespace {
@@ -240,6 +241,69 @@ void restore_pause_video_scripts() noexcept {
     if(g_log)g_log(
         "RUNTIME-PAUSE-VIDEO-PAGE: status=scene-exit original-script-pointers-restored=attempted published-private-copies-retained=1");
 }
+bool authenticate_pause_site_script(
+    const PauseVideoModel& model) noexcept {
+    if(!model.valid() || !menu_safe_ptr(model.normal_entries+7u*12u))
+        return false;
+    const auto entry=model.normal_entries+7u*12u;
+    std::uint32_t list=0,script=0;
+    std::uint8_t count=0;
+    if(!read32(entry,list) || !read8(entry+8u,count) ||
+       count!=10u || !menu_safe_ptr(list,10u*4u) ||
+       !read32(std::uintptr_t(list)+9u*4u,script) ||
+       !menu_safe_ptr(script,kPauseSiteOriginalScriptNodes*
+                              sizeof(NativeMenuScriptNode)))
+        return false;
+    std::array<NativeMenuScriptNode,kPauseSiteOriginalScriptNodes> source{};
+    SIZE_T done=0;
+    if(!ReadProcessMemory(GetCurrentProcess(),
+       reinterpret_cast<const void*>(std::uintptr_t(script)),
+       source.data(),sizeof(source),&done) || done!=sizeof(source) ||
+       !authenticated_pause_site_script(source.data(),source.size()))
+        return false;
+    constexpr char old_url[]="http://www.rayman2.com/";
+    char seen[sizeof(old_url)]{};
+    const auto url=source[kPauseSiteUrlNode].parameter;
+    return menu_safe_ptr(url,sizeof(seen)) &&
+           ReadProcessMemory(GetCurrentProcess(),
+             reinterpret_cast<const void*>(std::uintptr_t(url)),
+             seen,sizeof(seen),&done) && done==sizeof(seen) &&
+           std::memcmp(seen,old_url,sizeof(seen))==0;
+}
+bool current_pause_site_selected(const PauseVideoModel& model) noexcept {
+    std::uintptr_t slot=0;
+    std::uint32_t choice=0;
+    return locate_verified_pause_site_selection(
+        model.mind,&read32,&read8,slot) &&
+        read32(slot,choice) &&
+        pause_site_action_eligible(model.normal,model.reflex,choice);
+}
+bool game_is_foreground() noexcept {
+    const HWND window=GetForegroundWindow();
+    DWORD pid=0;
+    return window && GetWindowThreadProcessId(window,&pid) &&
+           pid==GetCurrentProcessId();
+}
+void launch_pause_site() noexcept {
+    const HMODULE shell=GetModuleHandleW(L"shell32.dll");
+    using ShellExecuteFn=HINSTANCE(WINAPI*)(
+        HWND,LPCSTR,LPCSTR,LPCSTR,LPCSTR,INT);
+    const auto original=reinterpret_cast<ShellExecuteFn>(
+        shell?GetProcAddress(shell,"ShellExecuteA"):nullptr);
+    if(!original) {
+        if(g_log)g_log(
+            "RUNTIME-PAUSE-SITE: browser=unavailable shell32-export=missing");
+        return;
+    }
+    if(g_log)g_log(
+        "RUNTIME-PAUSE-SITE: explicit-user-action=Enter source=verified-normal7-reflex2-V16=3 url=github");
+    const auto result=original(nullptr,"open",
+         "https://github.com/legluondunet/Rayman2Fix",
+         nullptr,nullptr,SW_SHOWNORMAL);
+    if(g_log)g_log(reinterpret_cast<std::intptr_t>(result)>32 ?
+         "RUNTIME-PAUSE-SITE: browser-launch-dispatched=1":
+         "RUNTIME-PAUSE-SITE: browser-launch-failed=1");
+}
 DWORD WINAPI worker(void*) {
     const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     if(!base || !g_log)return 0;
@@ -248,7 +312,13 @@ DWORD WINAPI worker(void*) {
     unsigned tries=0,reports=0;
     DWORD next_scan=0;
     int prior_normal=-100,prior_reflex=-100,prior_pause=-1;
+    bool site_script_checked=false,site_script_verified=false;
+    bool previous_enter=false;
+    DWORD last_website_launch=0;
     for(;;) {
+        const bool enter=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
+        const bool enter_edge=enter && !previous_enter;
+        previous_enter=enter;
         std::uint8_t flag=0;
         const bool in_menu=game_in_menu(base);
         const bool pause=!in_menu &&
@@ -271,6 +341,8 @@ DWORD WINAPI worker(void*) {
                 restore_pause_video_scripts();
                 g_preflight_failed=false;
                 state={};tries=0;next_scan=0;
+                site_script_checked=false;
+                site_script_verified=false;
             }
             Sleep(250);
             continue;
@@ -281,7 +353,26 @@ DWORD WINAPI worker(void*) {
                 restore_pause_video_scripts();
                 state={};
                 tries=0;
+                site_script_checked=false;
+                site_script_verified=false;
             } else {
+                if(!site_script_checked) {
+                    site_script_checked=true;
+                    site_script_verified=
+                        authenticate_pause_site_script(current);
+                    if(g_log)g_log(site_script_verified ?
+                        "RUNTIME-PAUSE-SITE: original-site-action=authenticated normal7-script9 proc369 V16=3 selection=typed source=Fix.sna" :
+                        "RUNTIME-PAUSE-SITE: original-site-action=unverified fail-closed=1");
+                }
+                if(site_script_verified && enter_edge &&
+                   game_is_foreground() &&
+                   current_pause_site_selected(current)) {
+                    const DWORD now=GetTickCount();
+                    if(DWORD(now-last_website_launch)>=1500u) {
+                        last_website_launch=now;
+                        launch_pause_site();
+                    }
+                }
                 if(!g_scripts_installed && !g_preflight_failed)
                     install_pause_video_scripts(current);
                 const bool candidate=current.normal==9 && current.reflex==2;
@@ -318,7 +409,7 @@ DWORD WINAPI worker(void*) {
                 g_log(msg);
             }
         }
-        Sleep(250);
+        Sleep(state.valid() ? 16u : 250u);
     }
     return 0;
 }
