@@ -49,8 +49,10 @@ int main() {
     b[27]={11u,0u,2u,2u};
     b.back()={0u,0u,0u,8u};
     check(standalone_remove_legacy_video_widgets(b.data(),4u,517u));
-    check(b[27].type==8u && b[3].parameter==503u);
-    b[27]={11u,0u,2u,2u};
+    // Script 4 now stops before the two source SetAGO butterfly moves.
+    check(b[0].type==8u && b[0].indent==0u &&
+          b[3].parameter==503u && b[27].type==2u);
+    b[0]={4u,0u,1u,0u};
     b[3].parameter=357u;
     check(!standalone_remove_legacy_video_widgets(b.data(),4u,517u));
     check(b[27].type==2u);
