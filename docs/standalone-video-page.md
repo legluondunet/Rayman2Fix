@@ -172,3 +172,43 @@ can be enabled. No in-game parity is claimed in the current build.
 
 These are **not** production release claims. The scripts and display
 are opt-in on draft PR #52 only; main stays untouched.
+
+## Owner regression log 16:25, 23 November 2026
+
+The owner confirms the startup VIDEO information panel and translucent
+dark-blue background, but reports three recurring issues and one new
+scene-reload failure: Down moves the original butterfly under the
+panel, the site link does not launch the default browser, Pause → Options
+→ VIDEO retains the native mutable options, and returning to main MENU
+restores the original "Site Rayman2" caption.
+
+The log identifies the shared 23/6 pause controller and actual in-game
+VIDEO normal=9/reflex=2, but **549** repeated
+`status=preflight-refused reason=original-script-signature` messages
+mean **no** pause scripts were installed. The research code now reports
+the exact failed behavior/script, expected and observed shape on the
+first refusal, then stays fail-closed until a new MENU scene to avoid
+noisy CPU/log loops. A second log is required to diagnose whether
+the runtime changes the signed-off static script shape or one of its
+guarded literals. Never weaken the source signature check blindly.
+
+The visual butterfly movement was traced to the two source SetAGO
+positioning commands (normal5/script4 nodes 3 and 15): the private
+VIDEO script4 now ends before both commands, rather than preserving
+their transforms under the info panel. Other menu scripts remain intact.
+Native butterfly visibility and fixed position still need visual
+validation.
+
+The main-menu site IAT bridge is left forwarding for the lifetime of
+the process and reauthenticated when a new MENU scene is loaded
+(the old restore/reinstall sequence could fail to reattach it).
+The site URL is still literal-redirected only in the script clone;
+a small input monitor additionally requires an exact authenticated
+main-menu 27/7 controller normal11/reflex0 and an explicit action:
+Enter with verified V17=4, or a mouse click inside the site caption
+band. It never launches on a hover, on another menu or while playing.
+This fixes the dependency on the old original URL/browser action, which
+did not reach the observed ShellExecuteA callback in the owner's tests.
+
+All these changes are experimental on draft PR #52 and require
+a single Windows manual validation with the next CI artifact.
