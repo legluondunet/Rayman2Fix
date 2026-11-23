@@ -1198,6 +1198,26 @@ void native_graphics_info_stabilize_video_cursor_at_flip() noexcept {
             }
         }
     }
+    // The approved SNA reflex0/script2 uses V69 to index the
+    // butterfly's interpolation position, then copies it to V70
+    // and V17. The previous V70-only clamp did not prevent visual
+    // Down navigation. Keep the *source* index in the same verified
+    // singleton, only while normal5/reflex0 owns the VIDEO page.
+    std::uintptr_t source_cell=0;
+    if(locate_verified_video_navigation_source_cell(state.mind,
+           &read32,&read8,source_cell) && writable_slot(source_cell)) {
+        std::uint32_t source=0;
+        if(read32(source_cell,source) && source<=5u && source!=1u) {
+            const LONG previous=InterlockedCompareExchange(
+                reinterpret_cast<volatile LONG*>(source_cell),1,
+                static_cast<LONG>(source));
+            if(previous==static_cast<LONG>(source) && g_logger) {
+                static std::atomic<bool> once{false};
+                if(!once.exchange(true,std::memory_order_relaxed))
+                    g_logger("RUNTIME-STANDALONE-VIDEO: source-navigation-V69-frozen=1 scope=verified-normal5/reflex0 parent-options=untouched");
+            }
+        }
+    }
     std::uint32_t selected=0;
     if(!read32(cell,selected) ||
        !standalone_video_cursor_needs_reset(selected))return;
