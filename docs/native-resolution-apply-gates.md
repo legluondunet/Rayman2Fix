@@ -528,3 +528,72 @@ explicit `disabled-patch-refused` / `script-shape-mismatch`.
 Do not merge PR #51 before validated screenshots, key traversal,
 brightness and return, and a log confirming that the game mode
 remains unchanged.
+
+
+## User validation of #1667 and one-entry VIDEO navigation follow-up (23 November 2026, 08:43)
+
+**User log:** `Rayman2Fix(20261123-084317).log`, build
+`73ed4850` (experimental native-menu CI #1667). There was no
+accompanying image or written visual verdict for this run.
+
+Observed evidence:
+
+- `controller-found scan=2` around t=3359ms; patch installation
+  succeeded at the verified native MENU controller in normal=6:
+  `disabled-options-copies-installed scripts=1,3,4`.
+  Therefore a missing or rejected script patch is **not** the cause
+  of the remaining navigation.
+- The replacement text pointers were installed at the true
+  normal=3/reflex=0/V17=0 preparation state (t=8406ms), before the
+  normal=5 VIDEO state (t=9406ms). This is a successful *code-path
+  observation*, not proof the transient original menu disappeared.
+- The native UI still traverses V17=1 and V17=3 (as well as
+  V17=5 in brightness normal=18/reflex=5). Disabling V14[1..3]
+  to state 1 in scripts 1,3,4 therefore does **not** make those
+  choices unreachable. The original brightness and return
+  transitions remain visible in the logs, and the video driver
+  stays 1024x768x16. Blocked mode/save counters stay zero:
+  no actual mode change was attempted, so guard interception
+  was not stress-tested.
+- The full script fingerprint diagnostic continues to mismatch in
+  **copied** scripts 1 and 4, while their terminal JFFTXT call
+  still validates. The full hashes are dynamic/relocated and are
+  not used to authorize this independently verified shape patch.
+
+**Offline SNA research:** In the user's original validated MENU scripts
+3 and 4, the assignments `V19=1`, `V20=5` bracket the
+native list of selectable entries. A separate original MENU script
+uses a valid `V19=V20=1` one-item range, showing equal bounds
+are an established native pattern. Both VIDEO scripts also assign
+`V17` to each detected/current resolution index 1,2,3, and
+script 4 restores a previous focus from `V73` upon re-entry.
+These are distinct from the V14 rendering/disabled-state bytes.
+
+**New experimental memory-copy policy:** on top of the existing
+V14 state-1 changes, apply strict AST-validated adjustments to
+scripts 3 and 4 only:
+
+- `V19=1` becomes `V19=5`; `V20=5` is checked and unchanged;
+- each of the six verified initial/current-resolution `V17=1/2/3`
+  assignments per script becomes `V17=5`;
+- script 4's verified `V17=V73` restore expression becomes the
+  constant `V17=5`, eliminating a stored old resolution choice.
+
+This does **not** run a background loop that forces V17; the native
+one-entry range and initial focus are authored entirely in private
+script copies. Their complete type/depth/padding shape hashes,
+all typed assignment opcodes, destinations, literal sources and
+nesting levels are validated before the first local copy mutation.
+The changes fail closed; original scripts remain on disk and in
+their original process memory unchanged. The brightness slider's
+native reflex behavior, the butterfly, return controls and the
+protected mode-selection dispatcher remain untouched.
+
+**Limitations:** We have not observed how the native Rayman 2 AI
+interpreter processes a `V19=V20=5` VIDEO state. CI only validates
+the script-copy transformation, *not* actual keyboard non-selection.
+The next single Wine test should verify no V17 transitions to 1..4
+after entering VIDEO, immediate Luminosity accessibility, proper
+return, and unchanged video mode. An unresponsive/hanging menu is
+a failure: revert the experiment and retain the #1652 visual
+baseline. PR #51 must not merge before this live validation.
