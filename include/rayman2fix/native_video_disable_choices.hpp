@@ -89,6 +89,33 @@ inline bool disable_native_video_choices(
     }
     return true;
 }
+// The original normal-5 scripts 1 and 4 end in a JFFTXT call whose
+// focus argument is live V17. Even after VIDEO is made read-only the
+// native widget still performs a one-shot focus animation on Enter.
+// The 10:18 log confirms no native VIDEO state/mode transition on Enter.
+// For the approved, shape-verified script copies only, keep the
+// existing font call but select its inert fixed index 0 instead of V17.
+// Do not modify keyboard input, title drawing or the butterfly actor.
+// This is a *separate* safety gate: validate BEFORE V14/V19/V20 patches
+// because script 4's V73 replacement changes its node type.
+inline bool native_video_static_font_preflight(
+    const NativeMenuScriptNode* copy,
+    const NativeVideoDisablePlan& choices,
+    const NativeInfoStaticTextPlan& font) noexcept {
+    return copy && choices.script_index==font.script_index &&
+        choices.count==font.node_count &&
+        native_video_script_shape_hash(copy,choices.count)==
+            choices.original_shape_hash &&
+        native_video_font_tail_valid(copy,font);
+}
+inline bool freeze_native_video_info_font(
+    NativeMenuScriptNode* copy,
+    const NativeInfoStaticTextPlan& font) noexcept {
+    if(!native_video_font_tail_valid(copy,font))return false;
+    copy[font.jfftxt_node_index+1u].parameter=0u;
+    copy[font.jfftxt_node_index+1u].type=12u; // immutable text index 0
+    return true;
+}
 // A separate, approved navigation-range experiment. The original
 // Rayman 2 menu scripts set V19=1,V20=5 (five navigable entries) and
 // other original MENU scripts use V19=V20=1 for a one-entry menu.
