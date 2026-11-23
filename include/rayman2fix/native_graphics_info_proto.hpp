@@ -19,6 +19,11 @@ bool suppress_cached_native_graphics_info_glyph(
 // Snapshot the verified native VIDEO focus (V17) for the scoped glyph
 // material diagnostic. Returns -1 for all other screens; no writes.
 int native_graphics_info_focus_row() noexcept;
+// Remove exactly the two verified native brightness-meter screen-image
+// quads while our authenticated information-only VIDEO page is active.
+// No caller may use this on other menus or for 3D butterfly rendering.
+bool suppress_readonly_video_brightness_meter(unsigned producer,
+    float xmin,float ymin,float xmax,float ymax) noexcept;
 // Read-only, bounded geometry evidence for each non-glyph producer in
 // the verified video information page: screen image, frame and other.
 // route values match Native2DProducer (1,2,3). Never draws or hides.
