@@ -9,8 +9,7 @@ struct PauseVideoScriptPlan {
     unsigned behavior,script,count;
     std::uint64_t shape;
 };
-constexpr PauseVideoScriptPlan kPauseVideoPlans[5]{
-    {9u,1u,304u,0x3184f1d2bf00dd9dULL},
+constexpr PauseVideoScriptPlan kPauseVideoPlans[4]{
     {9u,2u,424u,0xb6a5f08ae8ef7914ULL},
     {9u,3u,33u,0x9902892c1e0da3c5ULL},
     {9u,4u,497u,0x3f613086ca03920bULL},
@@ -22,18 +21,6 @@ inline bool rewrite_pause_video_script(
     if(native_video_script_shape_hash(copy,p.count)!=p.shape ||
        copy[p.count-1u].type!=8u ||
        copy[p.count-1u].indent!=0u)return false;
-    if(p.behavior==9u && p.script==1u) {
-        // Source V17 is the maximum selection and V16 is its cursor.
-        // The original 0..3 range is replaced by the known 1..1 native
-        // singleton pattern. Keep the script's title, SETAGO and
-        // all parent ESC/Options navigation byte-for-byte.
-        if(!native_video_direct_assignment(copy,p.count,143u,17u,3u) ||
-           !native_video_direct_assignment(copy,p.count,146u,16u,0u))
-            return false;
-        copy[143].parameter=1u;
-        copy[146].parameter=1u;
-        return true;
-    }
     if(p.behavior==9u && p.script==2u) {
         // Owns all 3 mutable VID_SelectResolution calls and save/labels.
         if(copy[0].type!=0u || copy[0].indent!=1u ||
