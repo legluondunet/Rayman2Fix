@@ -62,6 +62,6 @@ static void run(unsigned k) {
     check(!rewrite_pause_video_script(bad.data(),p));
 }
 int main() {
-    for(unsigned k=0;k<5u;++k)run(k);
+    for(unsigned k=1u;k<6u;++k)run(k); // normal6 prep has a separate 1303-node source test
     return 0;
 }
