@@ -451,17 +451,28 @@ void trace_native_static_script_preflight(const MenuAiModel& model) noexcept {
         std::array<NativeMenuScriptNode,517> local{};
         const bool bytes_ok=ptr_ok && read_bytes(original,local.data(),
            plan.node_count*sizeof(NativeMenuScriptNode));
+        const auto observed_hash=bytes_ok ?
+            native_menu_script_fingerprint(local.data(),plan.node_count):
+            0ULL;
         const bool hash_ok=bytes_ok &&
-           native_menu_script_fingerprint(local.data(),plan.node_count)==
-              plan.scene_fingerprint;
-        const bool shape_ok=bytes_ok &&
-           make_static_video_font_script(local.data(),plan);
-        char line[240]{};
+            observed_hash==plan.scene_fingerprint;
+        const bool tail_ok=bytes_ok &&
+            native_video_font_tail_valid(local.data(),plan);
+        // The compact tail opcode/argument probe distinguishes a wrong
+        // script-list slot from a matching terminal call whose unrelated
+        // absolute/relocated parameters invalidate its full fingerprint.
+        // No absolute process address or game text is logged.
+        const auto& command=local[plan.jfftxt_node_index];
+        const auto& value=local[plan.jfftxt_node_index+1u];
+        char line[300]{};
         std::snprintf(line,sizeof(line),
-            "RUNTIME-STATIC-SCRIPT-DIAG: script=%u nodes=%u slot_write=%u ptr_valid=%u bytes=%u hash=%u shape=%u read-only=1",
+            "RUNTIME-STATIC-SCRIPT-DIAG: script=%u nodes=%u slot_write=%u ptr_valid=%u bytes=%u hash=%u tail=%u observed_fingerprint=%08X%08X opcode=%u kind=%u argtype=%u argindex=%u read-only=1",
             plan.script_index,plan.node_count,
             unsigned(slot_writable),unsigned(ptr_ok),
-            unsigned(bytes_ok),unsigned(hash_ok),unsigned(shape_ok));
+            unsigned(bytes_ok),unsigned(hash_ok),unsigned(tail_ok),
+            unsigned(observed_hash>>32),unsigned(observed_hash),
+            unsigned(command.parameter),unsigned(command.type),
+            unsigned(value.type),unsigned(value.parameter));
         g_logger(line);
     }
 }
