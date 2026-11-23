@@ -291,14 +291,15 @@ inline bool restrict_native_video_navigation(
     }
     return true;
 }
-// Native script 1 establishes the VIDEO range as V19=0, V20=3
-// on every AI tick. A late frame-flip CAS on V20 was insufficient:
-/// the old AI already took a navigation step before that flip.
-// Patch ONLY the direct V20=3 literal in the verified *private clone*.
-// Preserve every V14 status and both original JFFTXT title parameters;
-// the earlier combined JFFTXT+range experiment made the parent VIDEO
-// label disappear intermittently. Nothing is written into disk SNA.
-inline bool standalone_video_script1_bound_zero(
+// The original script 1 constructs a [V19,V20]=[0,3] range with
+// V17=0. The [0,0] range is invalid to the native keyboard helper:
+// on the first Down it still advances to row 1, forcing a late reset.
+// Instead use the *original one-choice native range pattern* [1,1].
+// Pin the two source V17=0 initialization paths to the same index.
+// This keeps the original title glyph, V14 statuses and parent Options
+// menu untouched; two obsolete widget scripts are already terminated.
+// A valid singleton should not emit a movement event on Up/Down.
+inline bool standalone_video_script1_singleton(
     NativeMenuScriptNode* copy,const NativeVideoDisablePlan& plan) noexcept {
     if(!copy || plan.script_index!=1u || plan.count!=324u ||
        native_video_script_shape_hash(copy,plan.count)!=
@@ -306,9 +307,13 @@ inline bool standalone_video_script1_bound_zero(
        !native_video_direct_assignment(copy,plan.count,146u,17u,0u) ||
        !native_video_direct_assignment(copy,plan.count,149u,19u,0u) ||
        !native_video_direct_assignment(copy,plan.count,152u,20u,3u) ||
+       !native_video_direct_assignment(copy,plan.count,165u,17u,0u) ||
        !native_video_font_tail_valid(copy,kNativeInfoTextPlans[0]))
         return false;
-    copy[152].parameter=0u; // [0,0] before the native navigation tick
+    copy[146].parameter=1u;
+    copy[149].parameter=1u;
+    copy[152].parameter=1u;
+    copy[165].parameter=1u;
     return true;
 }
 // The native normal-5 script #2 (33 nodes) is the *only*
