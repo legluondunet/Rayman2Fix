@@ -216,10 +216,17 @@ void check_readonly_standalone_navigation() {
     check(modified[315].parameter==0u);
     check(modified[316].parameter==0u);
     const auto reject=[&](unsigned at,unsigned value) {
-        auto bad=initial;bad[at].parameter=value;
+        auto bad=initial;
+        bad[at].parameter=value;
+        const auto before=bad; // even the intentionally corrupted field
         check(!standalone_make_video_navigation_readonly(
             bad.data(),324u,shape));
-        check(bad[152].parameter==initial[152].parameter);
+        for(unsigned i=0;i<bad.size();++i) {
+            check(bad[i].parameter==before[i].parameter);
+            check(bad[i].type==before[i].type);
+            check(bad[i].indent==before[i].indent);
+            check(bad[i].padding==before[i].padding);
+        }
     };
     reject(146u,1u);
     reject(149u,1u);
