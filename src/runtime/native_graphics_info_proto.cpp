@@ -816,8 +816,10 @@ DWORD WINAPI worker(void*) {
             // pin the 7 VIDEO-only strings for this MENU lifetime.
             // Styling and input remain restricted to the verified VIDEO
             // state; strings are restored on MENU unload.
-            if(guarded && controller_ready && disabled_choices.active &&
-               !g_language_table && patch_text_table())
+            if(graphics_info_pin_text_for_menu(
+                   approved(),in_menu,guarded,controller_ready,
+                   disabled_choices.active,g_language_table!=0) &&
+               patch_text_table())
                 g_logger("RUNTIME-GRAPHICS-INFO: status=menu-video-text-pinned scope=verified-menu-controller before-video-entry=1 restored-on-menu-unload=1");
             if(guarded && controller_ready && !disabled_choices.active &&
                g_guard_menu_video_dispatch.load(std::memory_order_acquire)) {
@@ -938,8 +940,10 @@ DWORD WINAPI worker(void*) {
                     g_layout_active.store(false,std::memory_order_release);
                     g_video_prepare_active.store(false,std::memory_order_release);
                     const bool menu_pinned=
-                        g_brightness_transition_disabled.load(
-                            std::memory_order_acquire);
+                        !graphics_info_restore_pinned_text(
+                            in_menu,
+                            g_brightness_transition_disabled.load(
+                                std::memory_order_acquire));
                     if(was_visible && g_language_table)
                         g_logger(menu_pinned ?
                             "RUNTIME-GRAPHICS-INFO: status=video-page-exit pointers=pinned-until-menu-unload" :
