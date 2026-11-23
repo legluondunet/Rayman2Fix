@@ -46,8 +46,20 @@ inline bool remove_video_only_actor_moves(
            !ok(10u,32u,3u) || !ok(11u,12u,3u) ||
            copy[i+11u].parameter!=(count==324u?0u:3u))
             return false;
-        for(unsigned j:{3u,4u,5u,7u,8u,9u})
+        // Source verification against the owner's *decoded* 1999
+        // Menu.sna and Fix.sna: the SECOND SetAGO has a typed AI
+        // variable at argument +5, not a float literal. This was the
+        // exact cause of both 20:36 preflight refusals.
+        for(unsigned j:{3u,4u,7u,8u,9u})
             if(!ok(j,13u,4u))return false;
+        if(k==0u) {
+            if(!ok(5u,13u,4u) || copy[i+5u].parameter!=0u)
+                return false;
+        } else {
+            if(!ok(5u,11u,4u) ||
+               copy[i+5u].parameter!=(count==324u?50u:41u))
+                return false;
+        }
     }
     // Each SetAGO plus its 11 arguments occupies exactly 12 nodes.
     // Remove BOTH complete expression subtrees and compact all later
