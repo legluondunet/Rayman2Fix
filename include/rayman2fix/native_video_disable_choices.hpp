@@ -168,4 +168,52 @@ inline bool restrict_native_video_navigation(
     }
     return true;
 }
+// The native normal-5 script #2 (33 nodes) is the *only*
+// brightness-page transition in the owner's original MENU behavior:
+// if (V17==5), SetAGO... and Proc_ChangeMyComportAndMyReflex
+// (normal=18/reflex=5). It is not a setting we want to expose on the
+// new read-only VIDEO information page. Keep the original script and
+// butterfly scene actor intact; neutralize that specific *condition*
+// only in a private copy, without changing any other script opcode.
+constexpr unsigned kNativeBrightnessTransitionScript=2u;
+constexpr unsigned kNativeBrightnessTransitionNodes=33u;
+constexpr std::uint64_t kNativeBrightnessTransitionShape=
+    0x9902892c1e0da3c5ULL;
+inline bool suppress_native_video_brightness_transition(
+    NativeMenuScriptNode* copy,unsigned node_count,
+    std::uintptr_t expected_normal18,std::uintptr_t expected_reflex5)
+    noexcept {
+    if(!copy || node_count!=kNativeBrightnessTransitionNodes ||
+       native_video_script_shape_hash(copy,node_count)!=
+         kNativeBrightnessTransitionShape)return false;
+    const auto& branch=copy[0];
+    const auto& test=copy[1];
+    const auto& variable=copy[2];
+    const auto& selection=copy[3];
+    const auto& transition=copy[29];
+    const auto& next_normal=copy[30];
+    const auto& next_reflex=copy[31];
+    const auto& end=copy[32];
+    if(branch.type!=0u || branch.indent!=1u ||
+       test.type!=1u || test.parameter!=4u || test.indent!=2u ||
+       variable.type!=11u || variable.parameter!=17u ||
+       variable.indent!=3u || selection.type!=12u ||
+       selection.parameter!=5u || selection.indent!=3u ||
+       transition.type!=4u || transition.parameter!=71u ||
+       transition.indent!=2u || next_normal.type!=28u ||
+       next_normal.indent!=3u ||
+       std::uintptr_t(next_normal.parameter)!=expected_normal18 ||
+       next_reflex.type!=28u || next_reflex.indent!=3u ||
+       std::uintptr_t(next_reflex.parameter)!=expected_reflex5 ||
+       end.type!=8u || end.indent!=0u ||
+       branch.padding!=0u || test.padding!=0u ||
+       variable.padding!=0u || selection.padding!=0u ||
+       transition.padding!=0u || next_normal.padding!=0u ||
+       next_reflex.padding!=0u || end.padding!=0u)return false;
+    // No native menu entry can have the unsigned index 0xFFFFFFFF.
+    // The interpreter will not enter the brightness-specific branch.
+    // Other animation scripts and the animated butterfly are untouched.
+    copy[3].parameter=0xFFFFFFFFu;
+    return true;
+}
 } // namespace r2fix
