@@ -488,7 +488,7 @@ struct NativeChoicesPatch {
         std::uintptr_t original=0;
         NativeMenuScriptNode* copy=nullptr;
     };
-    std::array<Slot,3> slots{};
+    std::array<Slot,4> slots{};
     bool attempted=false;
     bool active=false;
     bool ever_swapped=false;
@@ -505,14 +505,19 @@ bool install_native_disabled_video_choices(
         g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=normal5-script-list read-only-original=1");
         return false;
     }
-    std::array<NativeChoicesPatch::Slot,3> prepared{};
+    std::array<NativeChoicesPatch::Slot,4> prepared{};
     bool valid=true;
     const char* reason="unverified";
     for(unsigned k=0u;k<prepared.size();++k) {
-        const auto& plan=kVideoDisablePlans[k];
-        const auto slot=std::uintptr_t(scripts)+4u*plan.script_index;
+        const bool is_brightness_transition=k==1u;
+        const auto& plan=kVideoDisablePlans[k==0u?0u:(k-1u)];
+        const unsigned script_index=is_brightness_transition ?
+            kNativeBrightnessTransitionScript : plan.script_index;
+        const unsigned script_nodes=is_brightness_transition ?
+            kNativeBrightnessTransitionNodes : plan.count;
+        const auto slot=std::uintptr_t(scripts)+4u*script_index;
         std::uint32_t original=0;
-        const SIZE_T bytes=SIZE_T(plan.count)*sizeof(NativeMenuScriptNode);
+        const SIZE_T bytes=SIZE_T(script_nodes)*sizeof(NativeMenuScriptNode);
         if(!writable_slot(slot) || !read32(slot,original) ||
            !menu_safe_ptr(original,unsigned(bytes))) {
             valid=false;reason="slot-or-script-pointer";break;
@@ -527,22 +532,34 @@ bool install_native_disabled_video_choices(
         if(!read_bytes(original,copy,bytes)) {
             valid=false;reason="unreadable-script";break;
         }
-        const auto observed=native_video_script_shape_hash(copy,plan.count);
-        if(observed!=plan.original_shape_hash) {
+        const auto observed=native_video_script_shape_hash(
+            copy,script_nodes);
+        const auto required_shape=is_brightness_transition ?
+            kNativeBrightnessTransitionShape : plan.original_shape_hash;
+        if(observed!=required_shape) {
             char line[220]{};
             std::snprintf(line,sizeof(line),
                 "RUNTIME-GRAPHICS-CHOICES: status=script-shape-mismatch script=%u observed=%08X%08X approved=%08X%08X no-write=1",
-                plan.script_index,unsigned(observed>>32),unsigned(observed),
-                unsigned(plan.original_shape_hash>>32),
-                unsigned(plan.original_shape_hash));
+                script_index,unsigned(observed>>32),unsigned(observed),
+                unsigned(required_shape>>32),
+                unsigned(required_shape));
             g_logger(line);
             valid=false;reason="script-shape";break;
+        }
+        if(is_brightness_transition) {
+            if(!suppress_native_video_brightness_transition(
+                 copy,script_nodes,
+                 model.normal_entries+18u*12u,
+                 model.reflex_entries+5u*12u)) {
+                valid=false;reason="brightness-transition-script";break;
+            }
+            continue;
         }
         if(!disable_native_video_choices(copy,plan)) {
             valid=false;reason="script-assignments";break;
         }
-        if(k>0u && !restrict_native_video_navigation(
-                copy,kVideoNavigationPlans[k-1u])) {
+        if(k>=2u && !restrict_native_video_navigation(
+                copy,kVideoNavigationPlans[k-2u])) {
             valid=false;reason="navigation-assignments";break;
         }
     }
@@ -604,20 +621,20 @@ bool install_native_disabled_video_choices(
     state.slots=prepared;
     state.ever_swapped=true;
     state.active=true;
-    // Script 3 is clone 1. Retarget its exact VID_SelectResolution and
+    // Script 3 is clone 2. Retarget its exact VID_SelectResolution and
     // VID_SaveCurrentResolution guarded children before dropping fallback.
-    // Script 1 and script 4 contain no protected video-mode call at these
+    // Script 1, script 2 and script 4 contain no video-mode call at these
     // offsets. The original normal-19 selection child is unchanged.
     static constexpr unsigned kSelectOffsets[3]{0x140u,0x190u,0x1E0u};
     for(unsigned i=0;i<3u;++i)
         g_select_children[i].store(
-            reinterpret_cast<std::uintptr_t>(prepared[1].copy)+
+            reinterpret_cast<std::uintptr_t>(prepared[2].copy)+
                 kSelectOffsets[i]+8u,std::memory_order_relaxed);
     g_save_child.store(
-        reinterpret_cast<std::uintptr_t>(prepared[1].copy)+0xD60u+8u,
+        reinterpret_cast<std::uintptr_t>(prepared[2].copy)+0xD60u+8u,
         std::memory_order_release);
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
-    g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-options-copies-installed scripts=1,3,4 options=1,2,3 native-disabled-state=1 navigation-range=5..5 scripted-focus=5 brightness=original runtime-v17-forcing=0 protected-dispatch-retargeted=1");
+    g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1,2,3,4 brightness-transition=suppressed original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
     return true;
 }
 void restore_native_disabled_video_choices(
@@ -642,7 +659,7 @@ void restore_native_disabled_video_choices(
     // interpreter quiescence guarantee that this experiment does not have.
     char line[170]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-GRAPHICS-CHOICES: status=script-copies-restore-attempt confirmed=%u/3 copied-buffers-retained=1",
+        "RUNTIME-GRAPHICS-CHOICES: status=script-copies-restore-attempt confirmed=%u/4 copied-buffers-retained=1",
         restored);
     g_logger(line);
     state=NativeChoicesPatch{};
