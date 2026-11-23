@@ -33,6 +33,7 @@
 #include "rayman2fix/native_graphics_info_proto.hpp"
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
 #include "rayman2fix/standalone_video_page.hpp"
+#include "rayman2fix/pause_video_text_filter_policy.hpp"
 #endif
 #include "rayman2fix/graphics_menu_glyph_layout.hpp"
 #include "rayman2fix/native_graphics_info_color.hpp"
@@ -5968,6 +5969,22 @@ void __cdecl centered_native_screen_to_vertex(
                     double(y),double(depth));
                 log_line(msg);
             }
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+            // Original pause UI text is a 3D TextSuperImposed object,
+            // not the JFFTXT 2D glyph path. The latter was already
+            // suppressed but still left SON/CONTROLES behind the panel.
+            // Use ONLY approved native callers 0x75C58/0x75C93,
+            // approved UI viewport and verified drawn Pause VIDEO state.
+            // Preserve the VIDEO title row and animated 3D butterfly.
+            if(r2fix::pause_video_hide_obsolete_native_text(
+                r2fix::standalone_video_page_pause_is_drawn(),
+                viewport==g_approved_overlay_viewport,route,y)) {
+                x+=8.0f; // shift original 3D text well outside viewport
+                static std::atomic<bool> reported{false};
+                if(!reported.exchange(true,std::memory_order_relaxed))
+                    log_line("RUNTIME-PAUSE-VIDEO-PAGE: native-3d-text-filter=active source=approved-TextSuperImposed-path-A-or-B only-body-band=1 native-title=preserved game-actors=untouched");
+            }
+#endif
         }
     }
     original(viewport,out_vertex,x,y,depth);
