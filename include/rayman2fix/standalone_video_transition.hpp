@@ -46,10 +46,8 @@ inline std::uint64_t standalone_script_shape_hash(
 // or game assets are written to disk.
 inline bool standalone_skip_legacy_video_open(
     NativeMenuScriptNode* nodes,unsigned count,
-    std::uint32_t expected_normal5_reference,
     std::uint64_t approved_shape=kStandaloneNormal3Script2Shape) noexcept {
     if(!nodes || count!=kStandalonePreparationOriginalNodes ||
-       !expected_normal5_reference ||
        standalone_script_shape_hash(nodes,count)!=approved_shape)
         return false;
     const auto matches=[&](unsigned i,std::uint8_t type,
@@ -70,7 +68,12 @@ inline bool standalone_skip_legacy_video_open(
        nodes[519].padding!=0u ||
        nodes[519].parameter<0x10000u ||
        !matches(520,4u,3u,69u) ||
-       !matches(521,28u,4u,expected_normal5_reference) ||
+       nodes[521].type!=28u || nodes[521].indent!=4u ||
+       nodes[521].padding!=0u || nodes[521].parameter<0x10000u ||
+       // Original scene nodes 519/521 both refer into module 13/1.
+       // Check their relocation-INVARIANT relative offset, without
+       // guessing runtime AIModel table layout or absolute pointers.
+       nodes[519].parameter-nodes[521].parameter!=0x354D0u ||
        !matches(522,0u,2u,0u) ||
        !matches(count-1u,8u,0u,0u))
         return false;

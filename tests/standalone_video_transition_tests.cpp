@@ -30,7 +30,7 @@ int main() {
     const auto hash=standalone_script_shape_hash(a.data(),unsigned(a.size()));
     require(hash!=0);
     require(standalone_skip_legacy_video_open(a.data(),unsigned(a.size()),
-        0x07921948u,hash));
+        hash));
     for(unsigned n=0;n<10u;++n) {
         require(a[n].parameter==old[n].parameter);
         require(a[n].type==old[n].type);
@@ -46,19 +46,19 @@ int main() {
     require(a[14].parameter==0u && a[14].type==0u);
     require(a[kStandalonePreparationNewNodes-1u].type==8u);
     require(!standalone_skip_legacy_video_open(a.data(),1383u,
-        0x07921948u,hash)); // not valid twice
+        hash)); // not valid twice
     for(unsigned changed : {7u,518u,520u,521u,522u}) {
         auto corrupt=old;
         corrupt[changed].parameter^=1u;
         require(!standalone_skip_legacy_video_open(corrupt.data(),
-            unsigned(corrupt.size()),0x07921948u,hash));
+            unsigned(corrupt.size()),hash));
         require(corrupt[518].parameter==
                 (changed==518u?71u:70u)); // no half-patch
     }
     require(!standalone_skip_legacy_video_open(nullptr,1383u,
-        0x07921948u,hash));
+        hash));
     auto unchanged=old;
     require(!standalone_skip_legacy_video_open(unchanged.data(),100u,
-        0x07921948u,hash));
+        hash));
     return 0;
 }

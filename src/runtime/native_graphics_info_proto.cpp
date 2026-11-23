@@ -617,18 +617,18 @@ bool install_native_disabled_video_choices(
         const std::uintptr_t n3=model.normal_entries+3u*12u;
         std::uint32_t list=0,script=0;
         std::uint8_t count=0;
-        const std::uintptr_t expected_target=
-            model.normal_entries+5u*12u+4u;
-        if(!read32(n3+4u,list) || !read8(n3+8u,count) ||
-           count!=3u || !menu_safe_ptr(list,3u*4u)) {
+        // Use the verified *runtime* behavior entry layout (script-list
+        // pointer at +0, count at +8). This differs from the encoded
+        // CD scene descriptor layout, so no guessed direct pointer.
+        if(!read32(n3,list) || !read8(n3+8u,count) ||
+           count<3u || count>4u || !menu_safe_ptr(list,3u*4u)) {
             valid=false;reason="normal3-script-list";
         } else {
             const auto slot=std::uintptr_t(list)+2u*4u;
             const SIZE_T bytes=SIZE_T(kStandalonePreparationOriginalNodes)*
                 sizeof(NativeMenuScriptNode);
             if(!writable_slot(slot) || !read32(slot,script) ||
-               !menu_safe_ptr(script,unsigned(bytes)) ||
-               expected_target>0xFFFFFFFFu) {
+               !menu_safe_ptr(script,unsigned(bytes))) {
                 valid=false;reason="normal3-script-slot";
             } else {
                 auto* copy=static_cast<NativeMenuScriptNode*>(
@@ -640,8 +640,7 @@ bool install_native_disabled_video_choices(
                     prepared[4]={slot,script,copy};
                     if(!read_bytes(script,copy,bytes) ||
                        !standalone_skip_legacy_video_open(
-                           copy,kStandalonePreparationOriginalNodes,
-                           std::uint32_t(expected_target))) {
+                           copy,kStandalonePreparationOriginalNodes)) {
                         valid=false;reason="normal3-video-open-shape";
                     }
                 }
