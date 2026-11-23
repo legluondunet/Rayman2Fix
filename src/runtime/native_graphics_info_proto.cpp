@@ -541,6 +541,10 @@ bool install_native_disabled_video_choices(
         if(!disable_native_video_choices(copy,plan)) {
             valid=false;reason="script-assignments";break;
         }
+        if(k>0u && !restrict_native_video_navigation(
+                copy,kVideoNavigationPlans[k-1u])) {
+            valid=false;reason="navigation-assignments";break;
+        }
     }
     if(!valid) {
         for(auto& item:prepared)
@@ -613,7 +617,7 @@ bool install_native_disabled_video_choices(
         reinterpret_cast<std::uintptr_t>(prepared[1].copy)+0xD60u+8u,
         std::memory_order_release);
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
-    g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-options-copies-installed scripts=1,3,4 options=1,2,3 native-disabled-state=1 brightness=original v17=untouched protected-dispatch-retargeted=1");
+    g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-options-copies-installed scripts=1,3,4 options=1,2,3 native-disabled-state=1 navigation-range=5..5 scripted-focus=5 brightness=original runtime-v17-forcing=0 protected-dispatch-retargeted=1");
     return true;
 }
 void restore_native_disabled_video_choices(
