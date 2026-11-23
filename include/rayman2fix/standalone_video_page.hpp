@@ -13,6 +13,8 @@ constexpr bool standalone_video_page_state(
 void standalone_video_page_configure(StandaloneVideoLogger logger,
     unsigned output_width,unsigned output_height,bool classic_4_3) noexcept;
 void standalone_video_page_set_visible(bool visible) noexcept;
+// Separate ESC in-game model, never inferred from the MENU controller.
+void standalone_video_page_set_pause_visible(bool visible) noexcept;
 // The native 2D percent sprite dispatcher identifies JFFTXT glyphs
 // by the verified exact renderer return address, not screen geometry.
 // Preserve only the original CENTERED VIDEO title in the known native
