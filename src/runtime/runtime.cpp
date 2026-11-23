@@ -5701,6 +5701,13 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     const unsigned route=static_cast<unsigned>(producer);
     g_native_2d_producers[route].fetch_add(
         1,std::memory_order_relaxed);
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    // SOURCE-SCOPED only: the original two screen-image rectangles
+    // of the obsolete brightness meter. Never filter generic quads
+    // by screen position, or the original animated 3D butterfly.
+    if(r2fix::suppress_readonly_video_brightness_meter(
+           route,xmin,ymin,xmax,ymax))return;
+#endif
     record_bottom_2d_geometry(route,xmin,ymin,xmax,ymax);
     if(route==0u)
         probe_native_glyph_after_frame(xmin,ymin,xmax,ymax);
