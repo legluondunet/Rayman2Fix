@@ -112,7 +112,8 @@ if(WIN32)
   if(RAYMAN2FIX_STANDALONE_VIDEO_PAGE)
     target_sources(Rayman2FixRuntime PRIVATE
       src/runtime/standalone_video_page.cpp
-      src/runtime/main_menu_site.cpp)
+      src/runtime/main_menu_site.cpp
+      src/runtime/pause_video_observer.cpp)
     target_link_libraries(Rayman2FixRuntime PRIVATE gdi32 setupapi advapi32)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_STANDALONE_VIDEO_PAGE=1)
   endif()
