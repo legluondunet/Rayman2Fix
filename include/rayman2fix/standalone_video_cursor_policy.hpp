@@ -6,8 +6,8 @@
 namespace r2fix {
 constexpr bool standalone_video_cursor_needs_reset(
     std::uint32_t selected) noexcept {
-    // Only obsolete resolution rows 1..3; leave all other states alone.
-    return selected>=1u && selected<=3u;
+    // [1,1] is the only valid inert row. Reset unexpected [0,2,3].
+    return selected<=3u && selected!=1u;
 }
 template<class R32,class R8>
 bool locate_verified_video_cursor_cell(
@@ -60,7 +60,7 @@ bool locate_verified_video_selection_bounds(
 }
 constexpr bool standalone_video_upper_bound_needs_reset(
     std::uint32_t lower,std::uint32_t upper) noexcept {
-    // Only the known retail VIDEO range [0..3], and [0..0] is inert.
+    // Only the known retail VIDEO range [0..3], never another menu.
     return lower==0u && upper==3u;
 }
 } // namespace r2fix
