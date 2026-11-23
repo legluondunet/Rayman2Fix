@@ -274,10 +274,9 @@ bool standalone_video_page_draw_before_flip() noexcept {
     // animated butterfly are never intercepted.
     for(unsigned y=0;y<kH;++y)for(unsigned x=0;x<kW;++x) {
         const unsigned i=y*kW+x;
-        auto pix=g_pixels[i];
-        const bool edge=x<2u || y<2u || x>=kW-2u || y>=kH-2u;
-        pix=blend_565(pix,edge?113u:5u,edge?173u:23u,
-                      edge?188u:33u,edge?195u:128u);
+        // The live background is uniformly darkened with BLACK.
+        // There is no colored border, edge stroke or golden tint.
+        auto pix=blend_565(g_pixels[i],0u,0u,0u,152u);
         const auto value=g_text_mask[i];
         const unsigned m=value&255u;
         if(m)pix=blend_565(pix,235u,247u,219u,m);
@@ -290,7 +289,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
         return false;
     }
     if(!g_drew.exchange(true) && g_log)
-        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=preserved-native-3D controls=Escape-only");
+        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=uniform-black-alpha152 border=none controls=Escape-only");
     return true;
 }
 } // namespace r2fix

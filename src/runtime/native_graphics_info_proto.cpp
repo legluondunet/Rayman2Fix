@@ -558,13 +558,20 @@ bool install_native_disabled_video_choices(
             g_logger(line);
             valid=false;reason="script-shape";break;
         }
-        // MENU normal-5 script 1 initializes the parent Options
-        // menu. Its text handles 371/372/373/370 are VIDEO, SOUND,
-        // OTHER OPTIONS and LANGUAGE; V14[0..2] are parent entries.
-        // Do not alter its state assignments or JFFTXT focus.
-        // Keep the identical verified private copy for atomic
-        // script-list publication; only VIDEO script 4 may freeze text.
-        if(k==0u)continue;
+        // Script1 in normal-5 initializes V14 entries shared with
+        // Options. Keep those untouched, but remove its obsolete
+        // selection range and selected-row JFFTXT pulse for the
+        // independent VIDEO information page. No normal-11 script
+        // or global input handler is altered.
+        if(k==0u) {
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+            if(!standalone_make_video_navigation_readonly(
+                    copy,script_nodes)) {
+                valid=false;reason="standalone-navigation";break;
+            }
+#endif
+            continue;
+        }
         const auto* font_plan=k==3u ? &kNativeInfoTextPlans[1] : nullptr;
         if(font_plan && !native_video_static_font_preflight(
                 copy,plan,*font_plan)) {
@@ -721,7 +728,7 @@ bool install_native_disabled_video_choices(
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
     g_brightness_transition_disabled.store(true,std::memory_order_release);
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
-    g_logger("RUNTIME-STANDALONE-VIDEO: old-widgets-not-constructed normal3-script2=direct-video-open normal5-scripts3,4=terminated other-options-branches=retained selection-dispatch=guarded");
+    g_logger("RUNTIME-STANDALONE-VIDEO: old-widgets-not-constructed normal3-script2=direct-video-open normal5-scripts3,4=terminated normal5-script1=single-selection-0-0+static-title other-options-branches=retained selection-dispatch=guarded");
 #else
     g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1-original,2,3,4 brightness-transition=suppressed font-focus=static-0-video4-only enter-save-status=inert parent-options-preserved=1 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
 #endif

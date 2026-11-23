@@ -182,6 +182,61 @@ void check_enter_status(unsigned script_index,unsigned enabled) {
         nodes.data(),parent));
 }
 
+void check_readonly_standalone_navigation() {
+    std::array<NativeMenuScriptNode,324> initial{};
+    for(auto& n:initial)n={0u,0u,2u,12u};
+    const auto assignment=[&](unsigned at,unsigned variable,unsigned value) {
+        initial[at-2u]={11u,0u,2u,2u};
+        initial[at-1u]={variable,0u,3u,11u};
+        initial[at]={value,0u,3u,12u};
+    };
+    assignment(146u,17u,0u);
+    assignment(149u,19u,0u);
+    assignment(152u,20u,3u);
+    initial[313]={506u,0u,3u,4u};
+    initial[314]={17u,0u,4u,11u};
+    initial[315]={1u,0u,4u,12u};
+    initial[316]={0x3F800000u,0u,4u,13u};
+    initial.back()={0u,0u,0u,8u};
+    const auto shape=native_video_script_shape_hash(initial.data(),324u);
+    auto modified=initial;
+    check(standalone_make_video_navigation_readonly(
+        modified.data(),324u,shape));
+    for(unsigned i=0;i<324u;++i) {
+        const bool changed=(i==152u || i==315u || i==316u);
+        check(modified[i].parameter==(changed?0u:initial[i].parameter));
+        check(modified[i].type==initial[i].type);
+        check(modified[i].indent==initial[i].indent);
+        check(modified[i].padding==initial[i].padding);
+    }
+    // The native parent Options entries V14 remain unchanged.
+    check(modified[146].parameter==0u);
+    check(modified[149].parameter==0u);
+    check(modified[152].parameter==0u);
+    check(modified[315].parameter==0u);
+    check(modified[316].parameter==0u);
+    const auto reject=[&](unsigned at,unsigned value) {
+        auto bad=initial;bad[at].parameter=value;
+        check(!standalone_make_video_navigation_readonly(
+            bad.data(),324u,shape));
+        check(bad[152].parameter==initial[152].parameter);
+    };
+    reject(146u,1u);
+    reject(149u,1u);
+    reject(152u,7u);
+    reject(313u,357u);
+    reject(314u,51u);
+    reject(315u,2u);
+    reject(316u,0x3F000000u);
+    auto changed_type=initial;
+    changed_type[14].type=4u;
+    check(!standalone_make_video_navigation_readonly(
+        changed_type.data(),324u,shape));
+    check(!standalone_make_video_navigation_readonly(nullptr,324u,shape));
+    check(!standalone_make_video_navigation_readonly(
+        initial.data(),323u,shape));
+}
+
 int main(){
     static_assert(kVideoDisablePlans[0].script_index==1u);
     static_assert(kVideoDisablePlans[0].count==324u);
@@ -199,5 +254,6 @@ int main(){
     check_static_font<517u>(4u,512u);
     check_enter_status<430u>(3u,373u);
     check_enter_status<517u>(4u,333u);
+    check_readonly_standalone_navigation();
     return 0;
 }

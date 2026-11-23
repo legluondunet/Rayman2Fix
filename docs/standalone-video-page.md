@@ -60,6 +60,13 @@ artifact from the draft PR #52, not the standard bootstrap EXE.
   installed DriverVersion only when there is one unique VEN/DEV match.
   Under Wine the host graphics driver version is reported as
   unavailable, never guessed from the Win32 emulation layer.
+- The verified normal-5 script1 now initializes V19=V20=0 rather
+  than V19=0/V20=3. The original JFFTXT selected focus animation is
+  requested in non-selected mode at zero strength. This is restricted
+  to the VIDEO clone; normal-11 Options, native keyboard input and ESC
+  return are untouched. The CD resources remain unmodified.
+- The centered panel is a uniform black, 152/255 alpha darkening
+  of the live 3D background, without an outline or chromatic tint.
 - The GameFrame LFB read/write ABI is based on Glide2's documented
   eight- and seven-parameter exports, and must be checked under Windows
   and Wine before a release. On unsupported exports the original flip
