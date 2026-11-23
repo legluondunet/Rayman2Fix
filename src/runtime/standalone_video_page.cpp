@@ -22,9 +22,9 @@ namespace {
 // output desktop's aspect ratio or scaling (e.g. 1920x1200).
 // Center on the approved 1024x768 Glide frame, below the native VIDEO title.
 constexpr unsigned kW=kVideoInfoWidth,kH=kVideoInfoHeight;
-constexpr unsigned kX=kVideoInfoX,kY=kVideoMainInfoY;
-static_assert(kX==212u && kY==224u,
-              "Approved MENU VIDEO panel position unchanged");
+constexpr unsigned kX=kVideoInfoX,kY=kVideoInfoY;
+static_assert(kX==212u && kY==280u,
+              "Both VIDEO panels use the same lower geometry");
 static_assert(kX+kW<=kVideoCanvasWidth &&
               video_info_panel_y(true)+kH<=kVideoCanvasHeight,
               "Both VIDEO panel placements must fit the Glide canvas");
@@ -390,7 +390,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
     if(pause)
         g_pause_drawn_this_visit.store(true,std::memory_order_release);
     if(pause && !g_pause_draw_reported.exchange(true) && g_log)
-        g_log("RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1 source=own-Glide-LFB state=verified-normal9-reflex2 background=translucent-midnight-blue original-scene=preserved panel-y=280 native-luciole-space=+56 no-actor-transform=1");
+        g_log("RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1 source=own-Glide-LFB state=verified-normal9-reflex2 background=translucent-midnight-blue original-scene=preserved panel-y=280 layout=shared-with-MENU native-luciole-space=+56 no-actor-transform=1");
     return true;
 }
 } // namespace r2fix
