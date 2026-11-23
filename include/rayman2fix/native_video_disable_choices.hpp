@@ -7,6 +7,7 @@
 // executable's disk assets. This file validates copied ScriptNodes.
 #include <cstdint>
 #include "rayman2fix/native_graphics_static_text_policy.hpp"
+#include "rayman2fix/video_actor_motion_policy.hpp"
 
 namespace r2fix {
 struct NativeVideoDisablePlan {
@@ -312,19 +313,21 @@ inline bool standalone_video_script1_singleton(
        !native_video_direct_assignment(copy,plan.count,165u,17u,0u) ||
        !native_video_font_tail_valid(copy,kNativeInfoTextPlans[0]))
         return false;
+    // Suppress the two exact, source-authenticated SetAGO navigation
+    // transforms, which operate on the 3D butterfly separately from
+    // V17/V69/V70. The original ESC and parent Options statements
+    // following them are retained by the compacted script clone.
+    if(!remove_video_only_actor_moves(copy,plan.count,176u,
+                                      plan.original_shape_hash))
+        return false;
     copy[146].parameter=1u;
     copy[149].parameter=1u;
     copy[152].parameter=1u;
     copy[165].parameter=1u;
-    // The source JFFTXT focus argument at node314 still read live
-    // V17: during one native DOWN processing step it briefly advanced
-    // despite the verified [1,1] range and late V69/V70/V17 guards.
-    // Pass the same fixed singleton selection *as an expression
-    // literal* in this private VIDEO script before the AI runs.
-    // This changes only presentation focus; native ESC, menu widgets,
-    // sound, parent Options and 3D butterfly actor remain original.
-    copy[314].parameter=1u;
-    copy[314].type=12u;
+    // Original node314 is relocated by 24 complete SetAGO nodes.
+    // Keep its original native JFFTXT title procedure, but pin focus.
+    copy[290].parameter=1u;
+    copy[290].type=12u;
     return true;
 }
 // The native normal-5 script #2 (33 nodes) is the *only*
