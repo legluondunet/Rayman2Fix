@@ -14,6 +14,7 @@
 #include "rayman2fix/pause_video_observer.hpp"
 #include "rayman2fix/pause_video_patch_policy.hpp"
 #include "rayman2fix/pause_menu_site_policy.hpp"
+#include "rayman2fix/main_menu_site.hpp"
 #include "rayman2fix/standalone_video_page.hpp"
 namespace r2fix {
 namespace {
@@ -368,7 +369,8 @@ DWORD WINAPI worker(void*) {
                    game_is_foreground() &&
                    current_pause_site_selected(current)) {
                     const DWORD now=GetTickCount();
-                    if(DWORD(now-last_website_launch)>=1500u) {
+                    if(DWORD(now-last_website_launch)>=1500u &&
+                       claim_project_site_dispatch()) {
                         last_website_launch=now;
                         launch_pause_site();
                     }
