@@ -345,6 +345,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME native-main-menu-site-label-url-scoping
     COMMAND main_menu_site_policy_tests)
+  add_executable(pause_video_model_policy_tests
+    tests/pause_video_model_policy_tests.cpp)
+  target_include_directories(pause_video_model_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME pause-video-model-23x6-fingerprint
+    COMMAND pause_video_model_policy_tests)
   add_executable(standalone_video_cursor_policy_tests
     tests/standalone_video_cursor_policy_tests.cpp)
   target_include_directories(standalone_video_cursor_policy_tests PRIVATE
