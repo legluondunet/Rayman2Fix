@@ -44,5 +44,22 @@ require(!graphics_info_video_page(true,true,true,5,1,true,1,true,1));
 for(unsigned i=0;i<5;++i)
  require(!graphics_info_video_page(i!=0,i!=1,i!=2,5,0,
                                      i!=3,1,i!=4,1));
+// Information is cached by the native MENU text widget. Retain it
+// only during the exact brightness behavior after a verified VIDEO visit.
+// This does not change V17 or the original brightness control.
+require(graphics_info_brightness_with_panel(
+    true,true,true,18,5,true,5,true,true));
+for(int i=0;i<9;++i) {
+ const bool ok=graphics_info_brightness_with_panel(
+    i!=0,i!=1,i!=2,i==3?19:18,i==4?0:5,
+    i!=5,i==6?4:5,i!=7,i!=8);
+ require(!ok);
+}
+require(!graphics_info_brightness_with_panel(
+    true,true,true,5,0,true,5,true,true)); // video normal
+require(!graphics_info_brightness_with_panel(
+    true,true,true,18,5,true,5,true,false)); // direct brightness
+require(!graphics_info_brightness_with_panel(
+    true,true,true,18,5,true,5,false,true)); // no prior text
 std::cout<<"Native video commands limited to exact validated menu nodes: PASS\n";
 }
