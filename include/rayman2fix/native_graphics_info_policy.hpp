@@ -32,6 +32,24 @@ constexpr bool graphics_info_video_page(
            selection_valid && selection>=1 && selection<=4 &&
            latch_valid && latch<=1u;
 }
+// In the new VIDEO information-only variant, script #2 no longer
+// enters native brightness at V17=5. V17=5 is therefore still part
+// of the same read-only page. This extension is valid ONLY after
+// the exact transition-suppression script copy has been installed.
+// Without that proof, 5 remains the obsolete native brightness entry.
+constexpr bool graphics_info_readonly_video_page(
+    bool approved_exe,bool menu_level,bool controller_valid,
+    int normal,int reflex,bool selection_valid,int selection,
+    bool latch_valid,unsigned latch,
+    bool brightness_transition_disabled) noexcept {
+    if(graphics_info_video_page(approved_exe,menu_level,controller_valid,
+        normal,reflex,selection_valid,selection,latch_valid,latch))
+        return true;
+    return brightness_transition_disabled && approved_exe && menu_level &&
+        controller_valid && normal==5 && reflex==0 &&
+        selection_valid && selection==5 &&
+        latch_valid && latch<=1u;
+}
 // The approved Menu.sna's normal-3 setup script references the same
 // VIDEO text handles (379/381/382/383/380/385) as normal-5. Wine logs
 // show normal=3/reflex=0/V17=0 immediately before the VIDEO page.
