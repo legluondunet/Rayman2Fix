@@ -38,34 +38,6 @@ bool locate_verified_video_cursor_cell(
     if(!menu_safe_ptr(cell)) {cell=0;return false;}
     return true;
 }
-// Approved original Menu.sna DsgVar declarations: V69 (the active
-// interpolation row used by reflex0/script2) is a typed 32-bit scalar
-// at offset 0x228, immediately before V70 at 0x22c. It must not be
-// overwritten in any parent Options or gameplay behavior.
-template<class R32,class R8>
-bool locate_verified_video_navigation_source_cell(
-    std::uintptr_t mind,R32 read32,R8 read8,
-    std::uintptr_t& source) noexcept {
-    source=0;
-    std::uintptr_t target=0;
-    if(!locate_verified_video_navigation_target_cell(
-        mind,read32,read8,target))return false;
-    std::uint32_t memory=0,ref=0,declaration=0,infos=0,values=0;
-    std::uint32_t offset=0,type=0;
-    if(!read32(mind+12u,memory) ||
-       !read32(std::uintptr_t(memory),ref) ||
-       !read32(std::uintptr_t(ref),declaration) ||
-       !read32(std::uintptr_t(declaration)+4u,infos) ||
-       !read32(std::uintptr_t(memory)+8u,values) ||
-       !read32(std::uintptr_t(infos)+69u*16u,offset) ||
-       !read32(std::uintptr_t(infos)+69u*16u+4u,type) ||
-       offset!=0x228u || type!=5u ||
-       target!=std::uintptr_t(values)+0x22cu ||
-       !menu_safe_ptr(std::uintptr_t(values)+offset))
-        return false;
-    source=std::uintptr_t(values)+offset;
-    return true;
-}
 // A frozen cursor alone is too late: the original navigation command
 // already advanced once before the native flip. Change the native
 // selection UPPER BOUND to one as soon as the verified VIDEO page
@@ -115,6 +87,34 @@ bool locate_verified_video_navigation_target_cell(
        !menu_safe_ptr(std::uintptr_t(values)+offset))
         return false;
     target=std::uintptr_t(values)+offset;
+    return true;
+}
+// Approved original Menu.sna DsgVar declarations: V69 (the active
+// interpolation row used by reflex0/script2) is a typed 32-bit scalar
+// at offset 0x228, immediately before V70 at 0x22c. It must not be
+// overwritten in any parent Options or gameplay behavior.
+template<class R32,class R8>
+bool locate_verified_video_navigation_source_cell(
+    std::uintptr_t mind,R32 read32,R8 read8,
+    std::uintptr_t& source) noexcept {
+    source=0;
+    std::uintptr_t target=0;
+    if(!locate_verified_video_navigation_target_cell(
+        mind,read32,read8,target))return false;
+    std::uint32_t memory=0,ref=0,declaration=0,infos=0,values=0;
+    std::uint32_t offset=0,type=0;
+    if(!read32(mind+12u,memory) ||
+       !read32(std::uintptr_t(memory),ref) ||
+       !read32(std::uintptr_t(ref),declaration) ||
+       !read32(std::uintptr_t(declaration)+4u,infos) ||
+       !read32(std::uintptr_t(memory)+8u,values) ||
+       !read32(std::uintptr_t(infos)+69u*16u,offset) ||
+       !read32(std::uintptr_t(infos)+69u*16u+4u,type) ||
+       offset!=0x228u || type!=5u ||
+       target!=std::uintptr_t(values)+0x22cu ||
+       !menu_safe_ptr(std::uintptr_t(values)+offset))
+        return false;
+    source=std::uintptr_t(values)+offset;
     return true;
 }
 constexpr bool standalone_video_upper_bound_needs_reset(
