@@ -7,7 +7,6 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-#include <d3d9.h>
 #include <array>
 #include <atomic>
 #include <algorithm>
@@ -344,7 +343,6 @@ void text_row(unsigned n,const char* prefix,const char* value) noexcept {
 void build_texts() noexcept {
     wchar_t wide_name[128]{};
     std::array<char,96> adapter{};
-    std::array<char,96> driver{};
     unsigned screen_w=unsigned(GetSystemMetrics(SM_CXSCREEN));
     unsigned screen_h=unsigned(GetSystemMetrics(SM_CYSCREEN));
     unsigned depth=0;
@@ -364,25 +362,12 @@ void build_texts() noexcept {
         }
         break;
     }
-    // Fallback: D3D9 can report a compatibility-layer adapter/driver,
-    // not necessarily the underlying Linux RADV/Mesa physical driver.
-    const auto module=LoadLibraryW(L"d3d9.dll");
-    if(module) {
-        using Factory=IDirect3D9* (WINAPI*)(UINT);
-        auto api_fun=reinterpret_cast<Factory>(GetProcAddress(module,"Direct3DCreate9"));
-        IDirect3D9* api=api_fun?api_fun(D3D_SDK_VERSION):nullptr;
-        if(api) {
-            D3DADAPTER_IDENTIFIER9 id{};
-            if(SUCCEEDED(api->GetAdapterIdentifier(0,0,&id))) {
-                std::snprintf(driver.data(),driver.size(),"%s",id.Driver);
-                if(!wide_name[0])
-                    MultiByteToWideChar(CP_ACP,0,id.Description,-1,wide_name,128);
-            }
-            api->Release();
-        }
-        FreeLibrary(module);
-    }
-    if(!driver[0])std::snprintf(driver.data(),driver.size(),"Win32/Glide");
+    // Obtain the display adapter label from Win32/Wine only. The game
+    // renders through GameFrame's Glide2 wrapper; a D3D9 adapter probe
+    // reported atidxloader32.dll (AMD's D3D driver) even though this is
+    // NOT the renderer. Never load d3d9.dll just to populate this page.
+    // Under Wine the reported display adapter may be virtual/translated
+    // and is not proof of the host's Mesa/RADV/NVIDIA driver version.
     const int n=WideCharToMultiByte(CP_ACP,0,wide_name,-1,
                 adapter.data(),static_cast<int>(adapter.size()),nullptr,nullptr);
     if(n<=0 || !adapter[0])
@@ -407,7 +392,7 @@ void build_texts() noexcept {
     if(x==8u && y==5u){x=16u;y=10u;}
     // The original VIDEO heading remains in the scene. The original
     // RESOLUTION label shares a text row with a native video choice;
-    // repeating a second information title collides with D3D9.
+    // repeating a second information title collides with the rows below.
     std::snprintf(g_rows[0].data(),g_rows[0].size()," ");
     char line[100]{};
     // The launcher knows whether the player requested 4:3 or Auto.
@@ -428,7 +413,7 @@ void build_texts() noexcept {
                       render_w,render_h,x,y,aspect);
     text_row(1,"OUTPUT:",line);
     text_row(2,"GPU:",adapter.data());
-    text_row(3,"D3D9:",driver.data());
+    text_row(3,"RENDER:", "GAMEFRAME GLIDE2");
     // The original Glide mode is separate from the desktop format:
     // 1024x768x16 is the internal RGB565 legacy game rendering mode.
     // Native handle 384 ("OTHER") is not drawn on the FR menu.
