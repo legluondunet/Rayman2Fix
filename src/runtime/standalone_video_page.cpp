@@ -226,7 +226,8 @@ bool prepare_mask() noexcept {
     for(unsigned i=0;i<g_lines.size();++i) {
         const int y=42+int(i)*53;
         RECT label{kVideoInfoLabelLeft,y,166,y+38};
-        RECT value{kVideoInfoValueLeft,y,kVideoInfoValueRight,y+38};
+        RECT value{kVideoInfoValueLeft,y,kVideoInfoValueRight,
+                   y+(all_lines_fit?38:48)};
         DrawTextA(dc,kRowLabels[i],-1,&label,
                   DT_SINGLELINE|DT_NOPREFIX|DT_VCENTER);
         if(all_lines_fit)
@@ -242,7 +243,7 @@ bool prepare_mask() noexcept {
         char msg[180]{};
         std::snprintf(msg,sizeof(msg),
             "RUNTIME-STANDALONE-VIDEO: info-font-px=%d value-column-width=%d "
-            "all-lines-single-row-fit=%u source=measured-GDI no-text-truncation=1",
+            "all-lines-single-row-fit=%u source=measured-GDI fallback=word-wrap",
             font_px,kVideoInfoValueRight-kVideoInfoValueLeft,
             unsigned(all_lines_fit));
         g_log(msg);
