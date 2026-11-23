@@ -254,6 +254,10 @@ void standalone_video_page_set_pause_visible(bool value) noexcept {
                                             std::memory_order_release);
     g_pause_visible.store(value,std::memory_order_release);
 }
+bool standalone_video_page_pause_is_drawn() noexcept {
+    return g_pause_visible.load(std::memory_order_acquire) &&
+           g_pause_drawn_this_visit.load(std::memory_order_acquire);
+}
 bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& xmax,float& ymax) noexcept {
     // Do not hide any native glyph before our replacement page has
     // successfully rendered at least once; unsupported Glide LFB
