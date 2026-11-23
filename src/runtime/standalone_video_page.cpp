@@ -37,6 +37,8 @@ std::atomic<bool> g_drew{false};
 std::atomic<bool> g_glide_missing{false};
 std::atomic<bool> g_write_error{false};
 std::atomic<bool> g_pause_draw_reported{false};
+std::atomic<bool> g_pause_drawn_this_visit{false};
+std::atomic<bool> g_pause_native_glyphs_suppressed{false};
 GlideRead g_read=nullptr;
 GlideWrite g_write=nullptr;
 std::array<std::array<char,128>,5> g_lines{};
@@ -248,19 +250,31 @@ void standalone_video_page_set_visible(bool value) noexcept {
     g_visible.store(value,std::memory_order_release);
 }
 void standalone_video_page_set_pause_visible(bool value) noexcept {
+    if(!value)g_pause_drawn_this_visit.store(false,
+                                            std::memory_order_release);
     g_pause_visible.store(value,std::memory_order_release);
 }
 bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& xmax,float& ymax) noexcept {
     // Do not hide any native glyph before our replacement page has
     // successfully rendered at least once; unsupported Glide LFB
     // implementations keep the original UI visible, not a blank page.
-    const bool visible=g_visible.load(std::memory_order_acquire);
-    const bool drew=g_drew.load(std::memory_order_acquire);
-    const bool title=visible && drew &&
+    const bool menu=g_visible.load(std::memory_order_acquire);
+    const bool pause=g_pause_visible.load(std::memory_order_acquire);
+    const bool drew=menu ? g_drew.load(std::memory_order_acquire) :
+                          g_pause_drawn_this_visit.load(std::memory_order_acquire);
+    const bool visible=(menu||pause) && drew;
+    const bool title=visible &&
         standalone_video_stabilize_native_title(xmin,ymin,xmax,ymax);
-    if(visible && drew && title &&
+    if(menu && title &&
        !g_title_preserved_logged.exchange(true) && g_log)
         g_log("RUNTIME-STANDALONE-VIDEO: native-title-stabilized=1 source=JFFTXT title-row=20..25 video-page-only");
+    if(pause && visible && !title &&
+       !g_pause_native_glyphs_suppressed.exchange(true) && g_log)
+        g_log("RUNTIME-PAUSE-VIDEO-PAGE: source-glyph-suppressed=1 source=verified-native-JFFTXT scope=only-normal9-reflex2 parent-Options-untouched=1 title=preserved");
+    // This callback is reached only by the approved JFFTXT source
+    // renderer. Suppress menu Options glyphs (SON / CONTROLES) while
+    // the read-only Pause VIDEO panel is visible, but preserve VIDEO
+    // itself, all game/world objects and the return-to-Options screen.
     return standalone_video_hide_native_glyphs(visible,drew,true,title);
 }
 bool standalone_video_page_draw_before_flip() noexcept {
@@ -304,6 +318,8 @@ bool standalone_video_page_draw_before_flip() noexcept {
     }
     if(!g_drew.exchange(true) && g_log)
         g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=translucent-midnight-blue alpha=100/255 blue-outline=verified-BGR565-blue border-width=2 controls=Escape-only source=MENU-or-verified-ESC-script");
+    if(pause)
+        g_pause_drawn_this_visit.store(true,std::memory_order_release);
     if(pause && !g_pause_draw_reported.exchange(true) && g_log)
         g_log("RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1 source=own-Glide-LFB state=verified-normal9-reflex2 background=translucent-midnight-blue original-scene=preserved");
     return true;
