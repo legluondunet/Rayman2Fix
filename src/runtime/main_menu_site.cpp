@@ -76,6 +76,35 @@ bool writable(std::uintptr_t address) noexcept {
     return flags==PAGE_READWRITE || flags==PAGE_WRITECOPY ||
            flags==PAGE_EXECUTE_READWRITE || flags==PAGE_EXECUTE_WRITECOPY;
 }
+bool replace_verified_source_caption(std::uintptr_t text,
+    const char* label) noexcept {
+    if(!text || !label || !approved_main_menu_site_text(label))
+        return false;
+    const std::size_t original_len=std::strlen(label);
+    const std::size_t new_len=std::strlen(kSiteCaptionReplacement);
+    if(original_len<new_len || original_len>63u)return false;
+    MEMORY_BASIC_INFORMATION info{};
+    if(VirtualQuery(reinterpret_cast<const void*>(text),&info,
+                    sizeof(info))!=sizeof(info) ||
+       info.State!=MEM_COMMIT ||
+       (info.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;
+    const DWORD access=info.Protect&0xFFu;
+    if(access!=PAGE_READWRITE && access!=PAGE_WRITECOPY &&
+       access!=PAGE_EXECUTE_READWRITE &&
+       access!=PAGE_EXECUTE_WRITECOPY)return false;
+    const auto base=reinterpret_cast<std::uintptr_t>(info.BaseAddress);
+    if(text<base || text-base>info.RegionSize ||
+       new_len+1u>info.RegionSize-(text-base))return false;
+    char current[64]{};
+    if(!read_exact(text,current,original_len+1u) ||
+       std::strcmp(current,label)!=0)return false;
+    // Runtime-owned live localization text ONLY. Original files stay
+    // untouched; do not expand strings, change metadata or write past
+    // the old terminator. Keep text usable on scene reload and Pause.
+    std::memcpy(reinterpret_cast<void*>(text),
+                kSiteCaptionReplacement,new_len+1u);
+    return true;
+}
 bool replace_iat(void* expected,void* replacement) noexcept {
     const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     const auto slot=base+kShellExecuteIatRva;
@@ -307,12 +336,19 @@ bool install_main_menu_site(std::uintptr_t table,SiteLogger logger) noexcept {
     char original_label[48]{};
     if(!read_exact(slot,&source,4u) || source<0x10000u ||
        !read_exact(source,original_label,sizeof(original_label)-1u) ||
-       !approved_main_menu_site_text(original_label)) {
+       !(approved_main_menu_site_text(original_label) ||
+         approved_replaced_main_menu_site_text(original_label))) {
         return refuse("original-menu-label-mismatch");
     }
+    const bool source_caption_replaced=
+        approved_replaced_main_menu_site_text(original_label) ||
+        replace_verified_source_caption(source,original_label);
+    if(g_logger)g_logger(source_caption_replaced ?
+        "RUNTIME-MENU-SITE: live-source-caption=Rayman2Fix source=verified-handle362 reuse=MENU+Pause no-disk-write=1" :
+        "RUNTIME-MENU-SITE: live-source-caption=unavailable pointer-only-backup=1");
     // Original native text parser requires /C: for menu caption.
     std::snprintf(g_site_label,sizeof(g_site_label),
-        "/C:Rayman2Fix");
+        "%s",kSiteCaptionReplacement);
     g_logger=logger;
     g_original_shell.store(original,std::memory_order_release);
     // The original game can relocate or initialize its 1995-node
