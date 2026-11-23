@@ -145,43 +145,6 @@ inline bool neutralize_native_video_enter_save_status(
     return true;
 }
 
-// Two extra JFFTXT calls in the validated normal-5 VIDEO script #4
-// produce the legacy enlarged/animated selection text (scale 3 then
-// scale 2). Keeping only its terminal static JFFTXT was insufficient:
-// Enter still produced a one-frame text flash in the user's 10:59 run.
-// On the approved private VIDEO-script copy, redirect those animated
-// text indices 7 to the known empty VIDEO placeholder index 0. This
-// does not modify the parent Options script #1, input or focus values,
-// the title, or any game resource on disk.
-inline bool neutralize_native_video_text_animations(
-    NativeMenuScriptNode* copy,const NativeVideoDisablePlan& plan)
-    noexcept {
-    if(!copy || plan.script_index!=4u || plan.count!=517u ||
-       native_video_script_shape_hash(copy,plan.count)!=
-           plan.original_shape_hash)return false;
-    constexpr unsigned calls[2]{495u,505u};
-    constexpr std::uint32_t sizes[2]{0x40400000u,0x40000000u};
-    for(unsigned i=0u;i<2u;++i) {
-        const unsigned j=calls[i];
-        const auto& cmd=copy[j];
-        const auto& source=copy[j+1u];
-        const auto& index=copy[j+2u];
-        const auto& size=copy[j+3u];
-        if(cmd.type!=4u || cmd.parameter!=506u ||
-           source.type!=11u || source.parameter!=72u ||
-           index.type!=12u || index.parameter!=7u ||
-           size.type!=13u || size.parameter!=sizes[i] ||
-           cmd.padding || source.padding || index.padding ||
-           size.padding || source.indent!=cmd.indent+1u ||
-           index.indent!=source.indent || size.indent!=source.indent)
-            return false;
-    }
-    // All exact source-node checks precede any mutation.
-    for(const unsigned j:calls)
-        copy[j+2u].parameter=0u;
-    return true;
-}
-
 // The original normal-5 scripts 1 and 4 end in a JFFTXT call whose
 // focus argument is live V17. Even after VIDEO is made read-only the
 // native widget still performs a one-shot focus animation on Enter.

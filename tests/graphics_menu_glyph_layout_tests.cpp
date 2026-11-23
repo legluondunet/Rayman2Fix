@@ -71,12 +71,12 @@ int main() {
     expect(graphics_info_source_row({8,84,11,89})==0u);
     expect(graphics_info_source_row({NAN,45,50,50})==0u);
     expect(graphics_info_source_row({55,50,54,55})==0u);
-    // Hide only the old resolution options during verified VIDEO
-    // preparation, never on unrelated Options screens. The parent
-    // Options script now remains unchanged and does not need masking.
-    expect(legacy_resolution_preparation_glyph(
+    // Regression, screenshot 11:18: even in normal-3 preparation,
+    // geometry alone cannot distinguish Options labels from VIDEO
+    // choices. Fail closed for every legacy-resolution-sized quad.
+    expect(!legacy_resolution_preparation_glyph(
         true,{55.0f,31.0f,60.0f,36.0f}));
-    expect(legacy_resolution_preparation_glyph(
+    expect(!legacy_resolution_preparation_glyph(
         true,{47.0f,64.0f,51.0f,69.0f}));
     expect(!legacy_resolution_preparation_glyph(
         true,{41.0f,34.0f,44.0f,39.0f}));

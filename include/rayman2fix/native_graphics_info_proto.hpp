@@ -19,9 +19,9 @@ bool suppress_cached_native_graphics_info_glyph(
 // Snapshot the verified native VIDEO focus (V17) for the scoped glyph
 // material diagnostic. Returns -1 for all other screens; no writes.
 int native_graphics_info_focus_row() noexcept;
-// While the authenticated MENU enters VIDEO through normal-3,
- // discard cached legacy resolution-choice font glyphs rather than
- // showing the old list before the read-only information is ready.
+// This compatibility entry point intentionally never hides glyphs:
+ // normal-3 also renders the parent Options menu. Position-only
+ // filtering previously removed legitimate Options labels.
 bool suppress_legacy_video_preparation_glyph(
     float xmin,float ymin,float xmax,float ymax) noexcept;
 // Remove exactly the two verified native brightness-meter screen-image

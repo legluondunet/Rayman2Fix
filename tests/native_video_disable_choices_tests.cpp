@@ -182,56 +182,6 @@ void check_enter_status(unsigned script_index,unsigned enabled) {
         nodes.data(),parent));
 }
 
-// The exact two script-4 animations are not needed on a read-only
-// information panel. Their JFFTXT indices must be hidden atomically;
-// native Options script-1 (including its animation) must be untouched.
-void check_video_animation_suppression() {
-    std::array<NativeMenuScriptNode,517> nodes{};
-    for(auto& n:nodes)n={0u,0u,2u,12u};
-    const unsigned calls[2]{495u,505u};
-    const std::uint32_t sizes[2]{0x40400000u,0x40000000u};
-    for(unsigned i=0;i<2u;++i) {
-        const auto j=calls[i];
-        const std::uint8_t d=i==0u?5u:6u;
-        nodes[j]={506u,0u,d,4u};
-        nodes[j+1u]={72u,0u,static_cast<std::uint8_t>(d+1u),11u};
-        nodes[j+2u]={7u,0u,static_cast<std::uint8_t>(d+1u),12u};
-        nodes[j+3u]={sizes[i],0u,static_cast<std::uint8_t>(d+1u),13u};
-    }
-    nodes.back()={0u,0u,0u,8u};
-    NativeVideoDisablePlan plan{4u,517u,
-        native_video_script_shape_hash(nodes.data(),517u),
-        {0u,0u,0u},{0u,0u,0u}};
-    auto patched=nodes;
-    check(neutralize_native_video_text_animations(patched.data(),plan));
-    for(unsigned i=0u;i<nodes.size();++i) {
-        const bool transformed=i==497u || i==507u;
-        check(patched[i].parameter==(transformed?0u:nodes[i].parameter));
-        check(patched[i].type==nodes[i].type &&
-              patched[i].indent==nodes[i].indent &&
-              patched[i].padding==nodes[i].padding);
-    }
-    check(!neutralize_native_video_text_animations(patched.data(),plan));
-    auto refused=nodes;
-    refused[497].parameter=6u;
-    check(!neutralize_native_video_text_animations(refused.data(),plan));
-    check(refused[507].parameter==7u);
-    refused=nodes;
-    refused[505].parameter=357u;
-    check(!neutralize_native_video_text_animations(refused.data(),plan));
-    check(refused[497].parameter==7u);
-    refused=nodes;
-    refused[508].parameter=0x3F800000u;
-    check(!neutralize_native_video_text_animations(refused.data(),plan));
-    refused=nodes;
-    refused[10].type=4u;
-    check(!neutralize_native_video_text_animations(refused.data(),plan));
-    auto parent=plan;
-    parent.script_index=1u;
-    check(!neutralize_native_video_text_animations(nodes.data(),parent));
-    check(nodes[497].parameter==7u);
-    check(!neutralize_native_video_text_animations(nullptr,plan));
-}
 int main(){
     static_assert(kVideoDisablePlans[0].script_index==1u);
     static_assert(kVideoDisablePlans[0].count==324u);
@@ -249,6 +199,5 @@ int main(){
     check_static_font<517u>(4u,512u);
     check_enter_status<430u>(3u,373u);
     check_enter_status<517u>(4u,333u);
-    check_video_animation_suppression();
     return 0;
 }
