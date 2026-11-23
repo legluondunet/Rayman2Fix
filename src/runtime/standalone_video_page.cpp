@@ -31,6 +31,7 @@ using GlideWrite=std::int32_t (WINAPI*)(int,unsigned,unsigned,int,unsigned,
                                         unsigned,int,void*);
 StandaloneVideoLogger g_log=nullptr;
 std::atomic<bool> g_visible{false};
+std::atomic<bool> g_pause_visible{false};
 std::atomic<bool> g_configured{false};
 std::atomic<bool> g_drew{false};
 std::atomic<bool> g_glide_missing{false};
@@ -245,6 +246,9 @@ void standalone_video_page_configure(StandaloneVideoLogger logger,
 void standalone_video_page_set_visible(bool value) noexcept {
     g_visible.store(value,std::memory_order_release);
 }
+void standalone_video_page_set_pause_visible(bool value) noexcept {
+    g_pause_visible.store(value,std::memory_order_release);
+}
 bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& xmax,float& ymax) noexcept {
     // Do not hide any native glyph before our replacement page has
     // successfully rendered at least once; unsupported Glide LFB
@@ -259,7 +263,9 @@ bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& x
     return standalone_video_hide_native_glyphs(visible,drew,true,title);
 }
 bool standalone_video_page_draw_before_flip() noexcept {
-    if(!g_visible.load(std::memory_order_acquire) ||
+    const bool menu=g_visible.load(std::memory_order_acquire);
+    const bool pause=g_pause_visible.load(std::memory_order_acquire);
+    if(!(menu || pause) ||
        !g_configured.load(std::memory_order_acquire))return false;
     if(!find_glide()) {
         if(!g_glide_missing.exchange(true) && g_log)
@@ -296,7 +302,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
         return false;
     }
     if(!g_drew.exchange(true) && g_log)
-        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=translucent-midnight-blue alpha=100/255 blue-outline=verified-BGR565-blue border-width=2 controls=Escape-only");
+        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=translucent-midnight-blue alpha=100/255 blue-outline=verified-BGR565-blue border-width=2 controls=Escape-only source=MENU-or-verified-ESC-script");
     return true;
 }
 } // namespace r2fix
