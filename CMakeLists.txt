@@ -358,6 +358,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME pause-video-fix-sna-readonly-script-patches
     COMMAND pause_video_patch_policy_tests)
+  add_executable(video_navigation_input_policy_tests
+    tests/video_navigation_input_policy_tests.cpp)
+  target_include_directories(video_navigation_input_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME source-directinput-video-navigation-only
+    COMMAND video_navigation_input_policy_tests)
   add_executable(pause_video_text_filter_policy_tests
     tests/pause_video_text_filter_policy_tests.cpp)
   target_include_directories(pause_video_text_filter_policy_tests PRIVATE
