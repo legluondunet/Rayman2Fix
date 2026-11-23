@@ -101,8 +101,10 @@ int main() {
             std::uint32_t fixed[4]{};
             expect(static_video_information_palette(
                 palette,fixed,true,native_row,native_focus));
-            const std::uint32_t expected=palette[0];
-            for(unsigned i=0;i<4;++i)expect(fixed[i]==expected);
+            // All four rows are static labels, including the formerly
+            // grey/translucent OUTPUT row (old native alpha 0x5A).
+            for(unsigned i=0;i<4;++i)expect(fixed[i]==0xFFFFFFFFu);
+            for(unsigned i=0;i<4;++i)expect(palette[i]==samples_font[native_row-1][i]);
         }
     }
     const std::uint32_t glyph_colors[4]={
