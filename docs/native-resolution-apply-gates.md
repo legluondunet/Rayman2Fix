@@ -303,3 +303,55 @@ to validate that the four info lines remain visible, fixed and
 unhighlighted, that brightness/return work, and that exit/reentry
 restores the exact original menu behavior. If anything is abnormal,
 revert this experiment rather than manipulating V17 or a cursor actor.
+
+
+## User Wine #1634 results and safer palette-only follow-up (23 November 2026)
+
+User screenshots `image(20261123-055759).png` and
+`image(20261123-060026).png`, runtime log
+`Rayman2Fix(20261123-060109).log` (build `77fe3ac1`):
+
+- VIDEO shows the correct OUTPUT/GPU/D3D9/GLIDE information grid, but
+  the original yellow/blue/pink choice colors still change with
+  up/down selection. The butterfly is visible.
+- LUMINOSITE is clean, without giant cached VIDEO text. The slider and
+  butterfly are present, and the internal mode stays `1024x768x16`.
+- The script-clone path **refused preflight** once:
+  `status=static-information-script-preflight-refused`. Therefore
+  `static-information-script-copies-installed` was never emitted;
+  no visual outcome can be attributed to that experiment. The exact
+  preflight subcondition remains unobserved; do NOT weaken guards
+  or assume the cause. No video mode changes were attempted (blocked
+  selection/save counters remain zero).
+- The material trace confirms the separately transmitted colored-GLI
+  palette: for focus 1..3, a glyph's unselected edge color is typically
+  `0xFF6EBEFF`, while the native focused row uses `0xFFFFFF78`.
+  The native red row has `0xFFFA4646`; the OUTPUT row uses
+  `0x5A` source alpha. The opaque-white *vertex-only* tint was
+  ineffective because the downstream color pointer supplies these
+  colors independently.
+
+**Active follow-up in the experimental special artifact**:
+the script-clone installation was **reverted from the runtime**.
+The source-level script fingerprint policy stays as offline research
+with synthetic tests but is not called in production or experimental
+runtime. Instead the approved GLI colored-glyph hook copies the
+observed four-element secondary palette into a local stack array
+and replaces the four colors with one uniform white source-edge
+color, preserving its original alpha. Scope is verified MENU VIDEO
+information glyphs, one of four source rows, a validated native
+V17 focus 1..4, the existing reflowed-glyph TLS provenance, and
+an observed identical-pair color structure. Anything else is passed
+through untouched. First successful marker is
+`RUNTIME-GRAPHICS-STYLE: status=static-information-palette-active`.
+
+This color transformation does **not** suppress the game's underlying
+V17 navigation. The prior `VID_SelectResolution` / save guards
+remain, so selecting a fake option should not apply a resolution,
+but full keyboard non-selection cannot be claimed solely from
+the rendered static palette. The next Wine test should check:
+constant text tint across up/down, native brightness and return
+unchanged, butterfly present, unchanged internal resolution. Do
+not merge PR #51 without observing these properties and deciding
+whether the remaining internal V17 movements are acceptable or
+must be eliminated by a separate, verified input-state mechanism.
