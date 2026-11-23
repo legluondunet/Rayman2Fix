@@ -1,6 +1,7 @@
 #include "rayman2fix/pause_video_text_filter_policy.hpp"
 #include <cstdlib>
 #include <limits>
+#include <initializer_list>
 using namespace r2fix;
 static void ck(bool b){if(!b)std::abort();}
 int main(){
