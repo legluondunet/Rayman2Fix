@@ -124,6 +124,64 @@ void check_static_font(unsigned index,unsigned tail) {
     check(!native_video_static_font_preflight(bad.data(),selection,font));
     check(!native_video_static_font_preflight(nullptr,selection,font));
 }
+// A source-shaped synthetic normal-5 VIDEO script: V51 branches
+// switch the obsolete SAVE RESOLUTION status V14[4] from 1 to 2.
+// The read-only page must not visually react to Enter.
+template<std::size_t N>
+void check_enter_status(unsigned script_index,unsigned enabled) {
+    std::array<NativeMenuScriptNode,N> nodes{};
+    for(auto& node:nodes)node={0u,0u,2u,12u};
+    const unsigned d=script_index==3u?4u:3u;
+    nodes[enabled-7u]={0u,0u,static_cast<std::uint8_t>(d-1u),0u};
+    nodes[enabled-6u]={51u,0u,static_cast<std::uint8_t>(d),11u};
+    nodes[enabled-5u]={8u,0u,static_cast<std::uint8_t>(d-1u),0u};
+    nodes[enabled+1u]={9u,0u,static_cast<std::uint8_t>(d-1u),0u};
+    const auto put=[&](unsigned at,unsigned status) {
+        nodes[at-4u]={11u,0u,static_cast<std::uint8_t>(d),2u};
+        nodes[at-3u]={26u,0u,static_cast<std::uint8_t>(d+1u),2u};
+        nodes[at-2u]={14u,0u,static_cast<std::uint8_t>(d+2u),11u};
+        nodes[at-1u]={4u,0u,static_cast<std::uint8_t>(d+2u),12u};
+        nodes[at]={status,0u,static_cast<std::uint8_t>(d+1u),12u};
+    };
+    put(enabled,2u);
+    put(enabled+6u,1u);
+    nodes[N-1u]={0u,0u,0u,8u};
+    const NativeVideoDisablePlan plan{script_index,unsigned(N),
+       native_video_script_shape_hash(nodes.data(),unsigned(N)),
+       {0u,0u,0u},{0u,0u,0u}};
+    auto patched=nodes;
+    check(neutralize_native_video_enter_save_status(patched.data(),plan));
+    for(unsigned i=0u;i<N;++i) {
+        const unsigned expected=i==enabled?1u:nodes[i].parameter;
+        check(patched[i].parameter==expected);
+        check(patched[i].type==nodes[i].type);
+        check(patched[i].indent==nodes[i].indent);
+    }
+    check(patched[enabled-6u].parameter==51u); // input untouched
+    check(patched[enabled+6u].parameter==1u);  // idle unchanged
+    auto invalid=nodes;
+    invalid[enabled-6u].parameter=17u; // not the Enter latch
+    check(!neutralize_native_video_enter_save_status(
+        invalid.data(),plan));
+    invalid=nodes;
+    invalid[enabled+6u].parameter=2u; // incorrect else arm
+    check(!neutralize_native_video_enter_save_status(
+        invalid.data(),plan));
+    invalid=nodes;
+    invalid[enabled-1u].parameter=3u; // not SAVE RESOLUTION
+    check(!neutralize_native_video_enter_save_status(
+        invalid.data(),plan));
+    invalid=nodes;
+    invalid[9].type=4u; // incorrect shape
+    check(!neutralize_native_video_enter_save_status(
+        invalid.data(),plan));
+    check(!neutralize_native_video_enter_save_status(nullptr,plan));
+    auto parent=plan;
+    parent.script_index=1u;
+    check(!neutralize_native_video_enter_save_status(
+        nodes.data(),parent));
+}
+
 int main(){
     static_assert(kVideoDisablePlans[0].script_index==1u);
     static_assert(kVideoDisablePlans[0].count==324u);
@@ -139,5 +197,7 @@ int main(){
                            kVideoDisablePlans[2].highlighted);
     check_static_font<324u>(1u,313u);
     check_static_font<517u>(4u,512u);
+    check_enter_status<430u>(3u,373u);
+    check_enter_status<517u>(4u,333u);
     return 0;
 }
