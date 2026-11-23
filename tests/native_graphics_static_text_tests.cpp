@@ -28,6 +28,7 @@ void check_copy_patch(unsigned jff) {
         1u,static_cast<unsigned>(N),jff,
         native_menu_script_fingerprint(original.data(),static_cast<unsigned>(N))};
     auto copy=original;
+    verify(native_video_font_tail_valid(copy.data(),plan));
     verify(make_static_video_font_script(copy.data(),plan));
     verify(copy[jff+1u].parameter==0u);
     verify(copy[jff+1u].type==12u);
@@ -49,6 +50,7 @@ void check_copy_patch(unsigned jff) {
     verify(!make_static_video_font_script(refused.data(),plan));
     refused=original;
     refused[10].parameter^=1u; // reject wrong full-script fingerprint
+    verify(native_video_font_tail_valid(refused.data(),plan));
     verify(!make_static_video_font_script(refused.data(),plan));
     refused=original;
     refused[N-1u].type=12u;
