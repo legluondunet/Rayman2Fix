@@ -63,7 +63,7 @@ from the bootstrap MENU-only CI test.
   `fix.sna` + `fix.rtb` for all five native languages, with the
   exact original `/C:` text strings. In the original MENU only,
   the one validated string-pointer slot is temporarily changed to
-  `/C:RayManFix <version>-<8-char-commit>`.
+  `/C:Rayman2Fix` (no version/commit suffix).
 - The original PC x86 executable imports ShellExecuteA from SHELL32 at
   import RVA 0x9C220. When the import matches the real DLL procedure,
   an exact IAT hook forwards only an old Rayman2 website URL to
@@ -73,9 +73,13 @@ from the bootstrap MENU-only CI test.
   mismatches, NO label replacement is permitted. Both patches are
   restored on MENU unload. The build does not inject URL requests on
   the game's render thread.
-- The actual original Site Rayman action's IAT path has not yet been
-  exercised in a live game, so pressing Enter and observing the
-  default-browser navigation remains a necessary validation.
+- The site handler was revised in commit cff151c8 to check the
+  hash-verified EXE's exact ShellExecuteA **caller return RVA 0x187267**
+  rather than reading a legacy website URL. The 15:01 owner log reports
+  runtime build 9aab8139, which predates this revision; that log cannot
+  validate the corrected action. Pressing Enter or clicking Rayman2Fix
+  and observing the default-browser navigation is still required on the
+  latest experimental artifact.
 
 ## Limitations and safeguards
 
@@ -105,10 +109,12 @@ from the bootstrap MENU-only CI test.
   Y bounds only during the standalone page, retaining original textures
   and colors without the selected-row bobbing. Data rows now use
   RGB(255,255,255) in both GDI and Glide RGB565 composition.
-- The information page has no background fill: the game continues
-  drawing its live 3D scene. A 2px transparent blue outline (sampled
-  median RGB 145,206,255 from the native title) surrounds the white
-  text; no colored or dark rectangular panel.
+- The information page now composites a subtle translucent midnight-blue
+  background (alpha 100/255, 39%) over the live 3D scene using the
+  approved Glide2 LFB read/write path. A crisp 2px title-blue border
+  surrounds the white text; no asset files, butterfly actor or scene
+  geometry are modified. The color and transparency are pending visual
+  validation under Windows/Wine.
 - The verified normal-5 script 1 now limits V20 to zero **in the
   original AI execution path**, before any navigation step. The
   original JFFTXT focus parameters and every V14 Options label stay
@@ -125,3 +131,27 @@ from the bootstrap MENU-only CI test.
 - Native UI scene actor and Escape independence require in-game tests.
   CI compiles code and validates preflight policy; it cannot validate
   actual rendering or input under Rayman 2.
+
+## In-game Pause graphics model discovery — 23 November 2026
+
+The owner-supplied, SHA-verified original `Fix.sna` / `Fix.rtb` includes
+a **distinct shared graphics controller**, with 23 normal and 6 reflex
+behaviors, unlike the validated MENU controller with 27/7. Static
+read-only inspection identifies the original normal-9 script-2 as
+containing three `VID_SelectResolution` commands (procedure 356)
+at nodes 40/50/60 plus video text handles 379 and 371 at nodes
+71/101. Normal-15 script-2 has a separate guarded 356 call.
+
+The experimental `pause_video_observer.cpp` now scans only committed
+writable private process memory when the generic ESC menu flag is active
+outside MENU. It accepts exactly one model only after matching normal
+and reflex counts, each of these original script signatures, and
+the reciprocal Mind/Intelligence pointers. It logs any verified
+normal/reflex transitions, including a normal-9/reflex-0 candidate.
+Its results are **observations, not proof of the actual on-screen
+Pause → Options → VIDEO UI**. The probe never edits memory, intercepts
+input, changes the display mode, or draws an information page.
+
+A log from entering the actual in-game Pause → Options → VIDEO page
+is required before a separate, script-verified read-only replacement
+can be enabled. No in-game parity is claimed in the current build.
