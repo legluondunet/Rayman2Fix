@@ -41,19 +41,14 @@ inline unsigned graphics_info_source_row(const GraphicsInfoQuad& in) noexcept {
            mid<kGraphicsInfoRows[i].last_y)return i+1u;
     return 0u;
 }
-// The engine can render cached original RESOLUTION / SAVE RESOLUTION
-// glyphs while normal-3 prepares VIDEO, despite the information
-// localization pointers already being pinned at MENU load. Suppress
-// *only* old selectable native font bands during this verified
-// pre-VIDEO state. The VIDEO title (y~20), unrelated Options pages,
-// screen images, and 3D butterfly never enter this predicate.
+// IMPORTANT (23 Nov screenshot): native normal-3 can also draw the
+// parent Options menu. A quad's X/Y band does NOT identify the source
+// VIDEO widget. The former geometry-only suppression was unsafe and
+// removed from the renderer. Until the glyph producer is independently
+// verified, no normal-3 glyph may be hidden by geometry alone.
 inline bool legacy_resolution_preparation_glyph(
-    bool verified_readonly_video_preparation,
-    const GraphicsInfoQuad& in) noexcept {
-    return verified_readonly_video_preparation &&
-        std::isfinite(in.left) && std::isfinite(in.right) &&
-        in.left>=35.0f && in.right<=210.0f &&
-        graphics_info_source_row(in)!=0u;
+    bool, const GraphicsInfoQuad&) noexcept {
+    return false;
 }
 // At most one material sample per (source glyph row, native focus).
 // Returning zero rejects the unknown MENU/brightness states. The 16
