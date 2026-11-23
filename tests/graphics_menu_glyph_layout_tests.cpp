@@ -134,6 +134,16 @@ int main() {
     const GraphicsInfoQuad meter_right{75.6f,85.0f,90.0f,90.0f};
     expect(readonly_video_brightness_meter_quad(true,1,meter_left));
     expect(readonly_video_brightness_meter_quad(true,1,meter_right));
+    // Regression, real 10:06 user log: the split is 75.30 rather
+    // than 75.60. Both halves MUST be suppressed on both visits.
+    expect(readonly_video_brightness_meter_quad(
+        true,1,{60.0f,85.0f,75.3f,90.0f}));
+    expect(readonly_video_brightness_meter_quad(
+        true,1,{75.3f,85.0f,90.0f,90.0f}));
+    expect(readonly_video_brightness_meter_quad(
+        true,1,{60.0f,85.0f,74.8f,90.0f}));
+    expect(readonly_video_brightness_meter_quad(
+        true,1,{74.8f,85.0f,90.0f,90.0f}));
     expect(!readonly_video_brightness_meter_quad(false,1,meter_left));
     expect(!readonly_video_brightness_meter_quad(true,0,meter_left));
     expect(!readonly_video_brightness_meter_quad(true,2,meter_left));
@@ -142,8 +152,13 @@ int main() {
         true,1,{59.0f,85.0f,75.6f,90.0f}));
     expect(!readonly_video_brightness_meter_quad(
         true,1,{60.0f,83.0f,75.6f,88.0f}));
-    expect(!readonly_video_brightness_meter_quad(
+    // A varying central split is valid; unrelated geometry is not.
+    expect(readonly_video_brightness_meter_quad(
         true,1,{60.0f,85.0f,76.0f,90.0f}));
+    expect(!readonly_video_brightness_meter_quad(
+        true,1,{60.0f,85.0f,69.9f,90.0f}));
+    expect(!readonly_video_brightness_meter_quad(
+        true,1,{80.1f,85.0f,90.0f,90.0f}));
     expect(!readonly_video_brightness_meter_quad(
         true,1,{50.0f,85.0f,90.0f,90.0f}));
     expect(!readonly_video_brightness_meter_quad(
