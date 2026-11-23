@@ -364,7 +364,7 @@ void build_texts() noexcept {
     }
     // Obtain the display adapter label from Win32/Wine only. The game
     // renders through GameFrame's Glide2 wrapper; a D3D9 adapter probe
-    // reported atidxloader32.dll (AMD's D3D driver) even though this is
+    // reported atidx9loader32.dll (AMD's D3D driver) even though this is
     // NOT the renderer. Never load d3d9.dll just to populate this page.
     // Under Wine the reported display adapter may be virtual/translated
     // and is not proof of the host's Mesa/RADV/NVIDIA driver version.
