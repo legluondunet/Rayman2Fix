@@ -66,6 +66,7 @@ std::atomic<int> g_info_focus_row{-1}; // read-only V17 snapshot for material pr
 std::atomic<bool> g_cached_video_text_in_brightness{false};
 std::atomic<unsigned> g_brightness_ghost_glyphs_suppressed{0};
 std::atomic<unsigned> g_brightness_meter_quads_suppressed{0};
+std::atomic<unsigned> g_pre_video_old_glyphs_suppressed{0};
 std::atomic<unsigned> g_reflowed_glyphs{0};
 // 3 non-glyph routes, up to 8 distinct geometries per route.
 std::array<std::array<std::atomic<std::uint32_t>,8>,3> g_image_quad_samples{};
@@ -870,10 +871,17 @@ DWORD WINAPI worker(void*) {
                     approved(),in_menu,valid_controller,current.normal,
                     current.reflex,vars.selection_valid,vars.selection,
                     g_language_table!=0,showed_information_in_menu);
-                const bool video_prepare=graphics_info_video_preparation(
-                    approved(),in_menu,valid_controller,current.normal,
-                    current.reflex,vars.selection_valid,vars.selection,
-                    vars.activate_valid,vars.activate);
+                const bool video_prepare=
+                    graphics_info_readonly_preparation(
+                        approved(),in_menu,valid_controller,
+                        current.normal,current.reflex,
+                        vars.selection_valid,vars.selection,
+                        vars.activate_valid,vars.activate,readonly_page) ||
+                    graphics_info_video_preparation(
+                        approved(),in_menu,valid_controller,
+                        current.normal,current.reflex,
+                        vars.selection_valid,vars.selection,
+                        vars.activate_valid,vars.activate);
                 if(video_page || video_prepare) {
                     if(video_page && !reported_static_script_preflight) {
                         reported_static_script_preflight=true;
@@ -995,6 +1003,19 @@ DWORD WINAPI worker(void*) {
 int native_graphics_info_focus_row() noexcept {
     return g_layout_active.load(std::memory_order_acquire) ?
         g_info_focus_row.load(std::memory_order_acquire) : -1;
+}
+bool suppress_legacy_video_preparation_glyph(
+    float xmin,float ymin,float xmax,float ymax) noexcept {
+    const bool verified=
+        g_video_prepare_active.load(std::memory_order_acquire) &&
+        g_brightness_transition_disabled.load(std::memory_order_acquire);
+    if(!legacy_resolution_preparation_glyph(
+           verified,{xmin,ymin,xmax,ymax}))return false;
+    const auto n=g_pre_video_old_glyphs_suppressed.fetch_add(
+        1,std::memory_order_relaxed);
+    if(n==0u && g_logger)
+        g_logger("RUNTIME-GRAPHICS-INFO: status=pre-video-legacy-glyph-hidden scope=verified-normal3-resolutions only=old-font-bands video-title=untouched butterfly=untouched");
+    return true;
 }
 bool suppress_readonly_video_brightness_meter(unsigned producer,
     float xmin,float ymin,float xmax,float ymax) noexcept {
