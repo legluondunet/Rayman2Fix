@@ -11,6 +11,7 @@ static void check_script(unsigned script_index,const unsigned (&init)[3],
     for(auto& n:before){n.type=12u;n.parameter=0u;n.padding=0u;}
     for(unsigned row=1u;row<=3u;++row) {
         for(const auto index:{init[row-1u],active[row-1u]}) {
+            if(index==0u)continue;
             const bool initial=index==init[row-1u];
             const std::uint8_t indent=initial?3u:4u;
             before[index-4u]={11u,0u,indent,2u};
@@ -57,13 +58,17 @@ static void check_script(unsigned script_index,const unsigned (&init)[3],
     check(!disable_native_video_choices(nullptr,plan));
 }
 int main(){
-    static_assert(kVideoDisablePlans[0].script_index==3u);
-    static_assert(kVideoDisablePlans[0].count==430u);
-    static_assert(kVideoDisablePlans[1].script_index==4u);
-    static_assert(kVideoDisablePlans[1].count==517u);
-    check_script<430u>(3u,kVideoDisablePlans[0].initialized,
+    static_assert(kVideoDisablePlans[0].script_index==1u);
+    static_assert(kVideoDisablePlans[0].count==324u);
+    static_assert(kVideoDisablePlans[1].script_index==3u);
+    static_assert(kVideoDisablePlans[1].count==430u);
+    static_assert(kVideoDisablePlans[2].script_index==4u);
+    static_assert(kVideoDisablePlans[2].count==517u);
+    check_script<324u>(1u,kVideoDisablePlans[0].initialized,
                            kVideoDisablePlans[0].highlighted);
-    check_script<517u>(4u,kVideoDisablePlans[1].initialized,
+    check_script<430u>(3u,kVideoDisablePlans[1].initialized,
                            kVideoDisablePlans[1].highlighted);
+    check_script<517u>(4u,kVideoDisablePlans[2].initialized,
+                           kVideoDisablePlans[2].highlighted);
     return 0;
 }
