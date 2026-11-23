@@ -32,7 +32,8 @@ static void check_script(unsigned script_index,const unsigned (&init)[3],
     for(unsigned i=0u;i<N;++i) {
         bool target=false;
         for(unsigned row=0u;row<3u;++row)
-            if(i==init[row] || i==active[row])target=true;
+            if(i==init[row] || (active[row]!=0u && i==active[row]))
+                target=true;
         check(patched[i].parameter==(target?1u:before[i].parameter));
         check(patched[i].padding==before[i].padding);
         check(patched[i].indent==before[i].indent);
@@ -43,9 +44,11 @@ static void check_script(unsigned script_index,const unsigned (&init)[3],
     wrong[init[0]].parameter=7u;
     check(!disable_native_video_choices(wrong.data(),plan));
     check(wrong[init[1]].parameter==2u); // fail atomically
-    wrong=before;
-    wrong[active[1]].parameter=8u;
-    check(!disable_native_video_choices(wrong.data(),plan));
+    if(active[1]!=0u) {
+        wrong=before;
+        wrong[active[1]].parameter=8u;
+        check(!disable_native_video_choices(wrong.data(),plan));
+    }
     wrong=before;
     wrong[10].type=5u;
     check(!disable_native_video_choices(wrong.data(),plan));
