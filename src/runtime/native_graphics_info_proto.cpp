@@ -60,6 +60,7 @@ std::atomic<bool> g_protected{false};
 // the model is resolved. This prevents early user mode changes.
 std::atomic<bool> g_guard_menu_video_dispatch{false};
 std::atomic<bool> g_layout_active{false};
+std::atomic<bool> g_video_prepare_active{false}; // validated normal-3 pre-VIDEO state
 std::atomic<bool> g_brightness_transition_disabled{false};
 std::atomic<int> g_info_focus_row{-1}; // read-only V17 snapshot for material probe
 std::atomic<bool> g_cached_video_text_in_brightness{false};
@@ -766,6 +767,7 @@ DWORD WINAPI worker(void*) {
             if(guarded) {
                 g_protected.store(false,std::memory_order_release);
                 g_layout_active.store(false,std::memory_order_release);
+                g_video_prepare_active.store(false,std::memory_order_release);
                 g_info_focus_row.store(-1,std::memory_order_release);
                 g_cached_video_text_in_brightness.store(
                     false,std::memory_order_release);
@@ -805,6 +807,18 @@ DWORD WINAPI worker(void*) {
                 // before the first VIDEO entry, avoiding startup races.
                 install_native_disabled_video_choices(disabled_choices,model);
             }
+            // All 379..385 JFFTXT references in the approved Menu.sna
+            // belong to the VIDEO preparation/choice/return behaviors
+            // (normal 3, 5, 13 and 19). Installing the replacement
+            // pointers only after entering normal 3 lets the native widget
+            // render its original labels for a frame before it caches the
+            // new ones. Once the four verified scripts are installed,
+            // pin the 7 VIDEO-only strings for this MENU lifetime.
+            // Styling and input remain restricted to the verified VIDEO
+            // state; strings are restored on MENU unload.
+            if(guarded && controller_ready && disabled_choices.active &&
+               !g_language_table && patch_text_table())
+                g_logger("RUNTIME-GRAPHICS-INFO: status=menu-video-text-pinned scope=verified-menu-controller before-video-entry=1 restored-on-menu-unload=1");
             if(guarded && controller_ready && !disabled_choices.active &&
                g_guard_menu_video_dispatch.load(std::memory_order_acquire)) {
                 // Narrow to the four exact selection children and one save
@@ -873,6 +887,10 @@ DWORD WINAPI worker(void*) {
                             g_logger("RUNTIME-GRAPHICS-INFO: status=text-table-unverified no-replacement");
                         }
                     }
+                    g_video_prepare_active.store(
+                        video_prepare && readonly_page &&
+                            g_language_table!=0,
+                        std::memory_order_release);
                     g_layout_active.store(
                         video_page && g_language_table!=0,
                         std::memory_order_release);
@@ -896,6 +914,8 @@ DWORD WINAPI worker(void*) {
                     // for the static white palette, not navigation.
                     g_cached_video_text_in_brightness.store(
                         false,std::memory_order_release);
+                    g_video_prepare_active.store(false,
+                        std::memory_order_release);
                     g_layout_active.store(true,std::memory_order_release);
                     if(!reported_brightness_panel) {
                         reported_brightness_panel=true;
@@ -916,12 +936,19 @@ DWORD WINAPI worker(void*) {
                     // Preserve all other Options screens: restore the
                     // original localized POINTERS when leaving VIDEO.
                     g_layout_active.store(false,std::memory_order_release);
+                    g_video_prepare_active.store(false,std::memory_order_release);
+                    const bool menu_pinned=
+                        g_brightness_transition_disabled.load(
+                            std::memory_order_acquire);
                     if(was_visible && g_language_table)
-                        g_logger("RUNTIME-GRAPHICS-INFO: status=video-page-exit original-label-pointers-restored=1");
+                        g_logger(menu_pinned ?
+                            "RUNTIME-GRAPHICS-INFO: status=video-page-exit pointers=pinned-until-menu-unload" :
+                            "RUNTIME-GRAPHICS-INFO: status=video-page-exit original-label-pointers-restored=1");
                     was_visible=false;
                     last_latch=~0u;
-                    if(native_graphics_text_transition(false,g_language_table!=0)==
-                       NativeGraphicsTextTransition::restore_original_pointers)
+                    if(!menu_pinned &&
+                       native_graphics_text_transition(false,g_language_table!=0)==
+                          NativeGraphicsTextTransition::restore_original_pointers)
                         restore_text();
                 }
             }
@@ -958,14 +985,16 @@ bool suppress_readonly_video_brightness_meter(unsigned producer,
     // VIDEO information page and exact native brightness entry
     // suppression has been committed. The original 3D butterfly is
     // independent of this two-quad ScreenImage producer.
-    const bool verified=g_layout_active.load(std::memory_order_acquire) &&
+    const bool verified=
+        (g_layout_active.load(std::memory_order_acquire) ||
+         g_video_prepare_active.load(std::memory_order_acquire)) &&
         g_brightness_transition_disabled.load(std::memory_order_acquire);
     if(!readonly_video_brightness_meter_quad(verified,producer,
           {xmin,ymin,xmax,ymax}))return false;
     const unsigned n=g_brightness_meter_quads_suppressed.fetch_add(
         1,std::memory_order_relaxed);
     if(n==0u && g_logger)
-        g_logger("RUNTIME-GRAPHICS-INFO: status=obsolete-brightness-meter-hidden route=verified-screen-image only=two-original-quads butterfly=untouched");
+        g_logger("RUNTIME-GRAPHICS-INFO: status=obsolete-brightness-meter-hidden route=verified-screen-image split=variable between=70..80 prep-or-video=1 butterfly=untouched");
     return true;
 }
 void observe_native_graphics_info_non_glyph(unsigned route,
