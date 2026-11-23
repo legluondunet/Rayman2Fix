@@ -786,29 +786,41 @@ DWORD WINAPI worker(void*) {
                     approved(),in_menu,valid_controller,current.normal,
                     current.reflex,vars.selection_valid,vars.selection,
                     g_language_table!=0,showed_information_in_menu);
-                if(video_page) {
-                    if(!reported_static_script_preflight) {
+                const bool video_prepare=graphics_info_video_preparation(
+                    approved(),in_menu,valid_controller,current.normal,
+                    current.reflex,vars.selection_valid,vars.selection,
+                    vars.activate_valid,vars.activate);
+                if(video_page || video_prepare) {
+                    if(video_page && !reported_static_script_preflight) {
                         reported_static_script_preflight=true;
                         trace_native_static_script_preflight(current_model);
                     }
                     reported_brightness_panel=false;
-                    g_info_focus_row.store(vars.selection,std::memory_order_release);
+                    // During the normal-3 preparation stage, V17=0
+                    // denotes no active choice. Never invent a focus
+                    // value merely to tint the four information lines.
+                    g_info_focus_row.store(
+                        video_page ? vars.selection : -1,
+                        std::memory_order_release);
                     g_cached_video_text_in_brightness.store(
                         false,std::memory_order_release);
                     if(native_graphics_text_transition(true,g_language_table!=0)==
                        NativeGraphicsTextTransition::install_information_pointers) {
                         if(patch_text_table()) {
                             showed_information_in_menu=true;
-                            g_logger("RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched scope=verified-video-page content=information pointer-swap=1");
+                            g_logger(video_prepare ?
+                              "RUNTIME-GRAPHICS-INFO: status=pre-video-information-text-installed scope=verified-normal3-preparation handles=379..384 brightness385=untouched" :
+                              "RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched scope=verified-video-page content=information pointer-swap=1");
                         } else if(!reported_text_issue &&
                                   DWORD(now-began)>7000u) {
                             reported_text_issue=true;
                             g_logger("RUNTIME-GRAPHICS-INFO: status=text-table-unverified no-replacement");
                         }
                     }
-                    g_layout_active.store(g_language_table!=0,
-                                          std::memory_order_release);
-                    if(g_language_table &&
+                    g_layout_active.store(
+                        video_page && g_language_table!=0,
+                        std::memory_order_release);
+                    if(video_page && g_language_table &&
                        (!was_visible || last_latch!=vars.activate)) {
                         char event[180]{};
                         std::snprintf(event,sizeof(event),
