@@ -41,14 +41,21 @@ inline unsigned graphics_info_source_row(const GraphicsInfoQuad& in) noexcept {
            mid<kGraphicsInfoRows[i].last_y)return i+1u;
     return 0u;
 }
-// IMPORTANT (23 Nov screenshot): native normal-3 can also draw the
-// parent Options menu. A quad's X/Y band does NOT identify the source
-// VIDEO widget. The former geometry-only suppression was unsafe and
-// removed from the renderer. Until the glyph producer is independently
-// verified, no normal-3 glyph may be hidden by geometry alone.
+// The native normal-3 VIDEO-entry phase may draw the obsolete cached
+// resolution choices before the information layout is ready. The owner
+// confirmed the old-menu flash returned after this scoped filter was
+// removed. Re-enable only while the authenticated VIDEO preparation
+// predicate is active, and constrain to the actual old selection glyph
+// bands (x>=45), excluding the centered Options headings. Unlike the
+// previous regression, normal-5 script 1 now preserves all parent
+// Options state and text. Still experimental: validate in-game.
 inline bool legacy_resolution_preparation_glyph(
-    bool, const GraphicsInfoQuad&) noexcept {
-    return false;
+    bool verified_readonly_video_preparation,
+    const GraphicsInfoQuad& in) noexcept {
+    return verified_readonly_video_preparation &&
+        std::isfinite(in.left) && std::isfinite(in.right) &&
+        in.left>=45.0f && in.right<=210.0f &&
+        graphics_info_source_row(in)!=0u;
 }
 // At most one material sample per (source glyph row, native focus).
 // Returning zero rejects the unknown MENU/brightness states. The 16
