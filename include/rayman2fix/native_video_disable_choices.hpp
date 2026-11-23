@@ -316,6 +316,15 @@ inline bool standalone_video_script1_singleton(
     copy[149].parameter=1u;
     copy[152].parameter=1u;
     copy[165].parameter=1u;
+    // The source JFFTXT focus argument at node314 still read live
+    // V17: during one native DOWN processing step it briefly advanced
+    // despite the verified [1,1] range and late V69/V70/V17 guards.
+    // Pass the same fixed singleton selection *as an expression
+    // literal* in this private VIDEO script before the AI runs.
+    // This changes only presentation focus; native ESC, menu widgets,
+    // sound, parent Options and 3D butterfly actor remain original.
+    copy[314].parameter=1u;
+    copy[314].type=12u;
     return true;
 }
 // The native normal-5 script #2 (33 nodes) is the *only*
