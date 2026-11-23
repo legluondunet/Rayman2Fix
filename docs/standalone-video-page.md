@@ -72,8 +72,15 @@ artifact from the draft PR #52, not the standard bootstrap EXE.
   Y bounds only during the standalone page, retaining original textures
   and colors without the selected-row bobbing. Data rows now use
   RGB(255,255,255) in both GDI and Glide RGB565 composition.
-- The centered panel is a uniform black, 152/255 alpha darkening
-  of the live 3D background, without an outline or chromatic tint.
+- The information page has no background fill: the game continues
+  drawing its live 3D scene. A 2px transparent blue outline (sampled
+  median RGB 145,206,255 from the native title) surrounds the white
+  text; no colored or dark rectangular panel.
+- The verified normal-5 selection range is constrained to V19=V20=0
+  at the native render boundary, before the next key evaluation, in
+  addition to the already validated V17 correction. This is limited
+  to the retail VIDEO range 0..3; all unrelated Options behaviors
+  remain untouched.
 - The GameFrame LFB read/write ABI is based on Glide2's documented
   eight- and seven-parameter exports, and must be checked under Windows
   and Wine before a release. On unsupported exports the original flip

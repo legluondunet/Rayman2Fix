@@ -269,15 +269,18 @@ bool standalone_video_page_draw_before_flip() noexcept {
     if(!prepare_mask())return false;
     if(!g_read(kBackBuffer,kX,kY,kW,kH,kW*2u,g_pixels.data()))
         return false;
-    // Read the actual animated menu background and darken it in-place.
-    // All native text glyphs except the original VIDEO title are
-    // suppressed at the verified font producer. The live 3D scene and
-    // animated butterfly are never intercepted.
+    // Transparent information page: retain original live 3D pixels
+    // throughout. Only a native blue outline and the white text
+    // are composited over the scene; no opaque or dark overlay.
     for(unsigned y=0;y<kH;++y)for(unsigned x=0;x<kW;++x) {
         const unsigned i=y*kW+x;
-        // The live background is uniformly darkened with BLACK.
-        // There is no colored border, edge stroke or golden tint.
-        auto pix=blend_565(g_pixels[i],0u,0u,0u,152u);
+        // Source screenshot of the title's blue gradient: median
+        // RGB(145,206,255), sampled from native title glyphs.
+        // This is a 2px outline, not a filled rectangle.
+        constexpr unsigned kBlueR=145u,kBlueG=206u,kBlueB=255u;
+        const bool outline=x<2u || y<2u || x>=kW-2u || y>=kH-2u;
+        auto pix=outline?blend_565(g_pixels[i],
+            kBlueR,kBlueG,kBlueB,240u):g_pixels[i];
         const auto value=g_text_mask[i];
         const unsigned m=value&255u;
         if(m)pix=blend_565(pix,255u,255u,255u,m);
@@ -290,7 +293,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
         return false;
     }
     if(!g_drew.exchange(true) && g_log)
-        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=uniform-black-alpha152 border=none controls=Escape-only");
+        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=untouched-3D blue-outline=145,206,255 border-width=2 controls=Escape-only");
     return true;
 }
 } // namespace r2fix

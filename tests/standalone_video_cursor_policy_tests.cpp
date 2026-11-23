@@ -41,5 +41,17 @@ int main() {
     }
     check(!locate_verified_video_cursor_cell(0u,read32,read8,cell));
     check(cell==0u);
+    std::uintptr_t lower=0,upper=0;
+    check(locate_verified_video_selection_bounds(mind,read32,read8,
+        cell,lower,upper));
+    check(cell==values+0x144u && lower==values+0x14cu &&
+          upper==values+0x150u);
+    check(standalone_video_upper_bound_needs_reset(0u,3u));
+    check(!standalone_video_upper_bound_needs_reset(0u,0u));
+    check(!standalone_video_upper_bound_needs_reset(1u,3u));
+    check(!standalone_video_upper_bound_needs_reset(0u,5u));
+    check(!locate_verified_video_selection_bounds(0u,read32,read8,
+        cell,lower,upper));
+    check(cell==0u && lower==0u && upper==0u);
     return 0;
 }

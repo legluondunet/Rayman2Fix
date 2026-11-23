@@ -1104,9 +1104,23 @@ void native_graphics_info_stabilize_video_cursor_at_flip() noexcept {
     MenuAiState state{};
     if(!get_verified_menu_controller(model,state) ||
        state.normal!=5 || state.reflex!=0)return;
-    std::uintptr_t cell=0;
-    if(!locate_verified_video_cursor_cell(state.mind,
-            &read32,&read8,cell) || !writable_slot(cell))return;
+    std::uintptr_t cell=0,lower_cell=0,upper_cell=0;
+    if(!locate_verified_video_selection_bounds(state.mind,
+            &read32,&read8,cell,lower_cell,upper_cell) ||
+       !writable_slot(cell) || !writable_slot(upper_cell))return;
+    std::uint32_t lower=0,upper=0;
+    if(!read32(lower_cell,lower) || !read32(upper_cell,upper))return;
+    // Bound the native selector *before its next input evaluation*:
+    // V17 resetting after each processed key was not sufficient.
+    if(standalone_video_upper_bound_needs_reset(lower,upper)) {
+        const LONG prior=InterlockedCompareExchange(
+            reinterpret_cast<volatile LONG*>(upper_cell),0,3);
+        if(prior==3 && g_logger) {
+            static std::atomic<bool> logged_bounds{false};
+            if(!logged_bounds.exchange(true,std::memory_order_relaxed))
+                g_logger("RUNTIME-STANDALONE-VIDEO: native-cursor-range-frozen=0..0 scope=verified-normal5 source=game-flip parent-options=untouched");
+        }
+    }
     std::uint32_t selected=0;
     if(!read32(cell,selected) ||
        !standalone_video_cursor_needs_reset(selected))return;
