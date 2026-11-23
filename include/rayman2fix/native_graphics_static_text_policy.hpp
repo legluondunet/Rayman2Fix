@@ -54,26 +54,34 @@ inline std::uint64_t native_menu_script_fingerprint(
     }
     return hash;
 }
+// Check the actual terminal instruction shape independently of the
+// complete script fingerprint. The original preflight combined both,
+// making "shape=0" misleading when only unrelated relocated nodes
+// differ. This helper is read-only and never relaxes patch approval.
+inline bool native_video_font_tail_valid(
+    const NativeMenuScriptNode* nodes,const NativeInfoStaticTextPlan& plan)
+    noexcept {
+    if(!nodes || plan.node_count<8u || plan.node_count>1024u ||
+       plan.jfftxt_node_index+4u>=plan.node_count)return false;
+    const auto& command=nodes[plan.jfftxt_node_index];
+    const auto& value=nodes[plan.jfftxt_node_index+1u];
+    const auto& mode=nodes[plan.jfftxt_node_index+2u];
+    const auto& amount=nodes[plan.jfftxt_node_index+3u];
+    const auto& end=nodes[plan.node_count-1u];
+    return command.type==4u && command.parameter==506u &&
+           command.indent==3u && command.padding==0u &&
+           value.type==11u && value.parameter==17u &&
+           value.indent==4u && value.padding==0u &&
+           mode.type==12u && mode.parameter==1u &&
+           mode.indent==4u && mode.padding==0u &&
+           amount.type==13u && amount.parameter==0x3F800000u &&
+           amount.indent==4u && amount.padding==0u &&
+           end.type==8u && end.indent==0u && end.padding==0u;
+}
 inline bool make_static_video_font_script(
     NativeMenuScriptNode* copied_nodes,const NativeInfoStaticTextPlan& plan)
     noexcept {
-    if(!copied_nodes || plan.node_count<8u ||
-       plan.node_count>1024u ||
-       plan.jfftxt_node_index+4u>=plan.node_count)return false;
-    const auto& command=copied_nodes[plan.jfftxt_node_index];
-    const auto& value=copied_nodes[plan.jfftxt_node_index+1u];
-    const auto& mode=copied_nodes[plan.jfftxt_node_index+2u];
-    const auto& amount=copied_nodes[plan.jfftxt_node_index+3u];
-    const auto& end=copied_nodes[plan.node_count-1u];
-    if(command.type!=4u || command.parameter!=506u ||
-       command.indent!=3u || command.padding!=0u ||
-       value.type!=11u || value.parameter!=17u ||
-       value.indent!=4u || value.padding!=0u ||
-       mode.type!=12u || mode.parameter!=1u ||
-       mode.indent!=4u || mode.padding!=0u ||
-       amount.type!=13u || amount.parameter!=0x3F800000u ||
-       amount.indent!=4u || amount.padding!=0u ||
-       end.type!=8u || end.indent!=0u || end.padding!=0u ||
+    if(!native_video_font_tail_valid(copied_nodes,plan) ||
        native_menu_script_fingerprint(copied_nodes,plan.node_count)!=
            plan.scene_fingerprint)return false;
     // Zero identifies the title/blanked VIDEO text handle, outside
