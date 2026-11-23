@@ -242,13 +242,16 @@ void restore_pause_video_scripts() noexcept {
     if(g_log)g_log(
         "RUNTIME-PAUSE-VIDEO-PAGE: status=scene-exit original-script-pointers-restored=attempted published-private-copies-retained=1");
 }
-bool authenticate_pause_site_script(
-    const PauseVideoModel& model) noexcept {
+bool authenticate_pause_site_script(const PauseVideoModel& model,
+    const char*& reason,bool& full_shape) noexcept {
+    reason="invalid-model";
+    full_shape=false;
     if(!model.valid() || !menu_safe_ptr(model.normal_entries+7u*12u))
         return false;
     const auto entry=model.normal_entries+7u*12u;
     std::uint32_t list=0,script=0;
     std::uint8_t count=0;
+    reason="script-list";
     if(!read32(entry,list) || !read8(entry+8u,count) ||
        count!=10u || !menu_safe_ptr(list,10u*4u) ||
        !read32(std::uintptr_t(list)+9u*4u,script) ||
@@ -257,19 +260,48 @@ bool authenticate_pause_site_script(
         return false;
     std::array<NativeMenuScriptNode,kPauseSiteOriginalScriptNodes> source{};
     SIZE_T done=0;
+    reason="script-unreadable";
     if(!ReadProcessMemory(GetCurrentProcess(),
        reinterpret_cast<const void*>(std::uintptr_t(script)),
-       source.data(),sizeof(source),&done) || done!=sizeof(source) ||
-       !authenticated_pause_site_script(source.data(),source.size()))
+       source.data(),sizeof(source),&done) || done!=sizeof(source))
+        return false;
+    // The independent website branch (normal7/script9 nodes1153..1159)
+    // is strong enough to approve only the fixed project site action.
+    // Other original AI branches can be relocated or altered by the
+    // engine; still report the WHOLE shape for troubleshooting.
+    full_shape=authenticated_pause_site_script(
+        source.data(),source.size());
+    reason="site-branch-mismatch";
+    if(!authenticated_pause_site_branch(source.data(),source.size()))
         return false;
     constexpr char old_url[]="http://www.rayman2.com/";
-    char seen[sizeof(old_url)]{};
+    constexpr char new_url[]="https://github.com/legluondunet/Rayman2Fix";
     const auto url=source[kPauseSiteUrlNode].parameter;
-    return menu_safe_ptr(url,sizeof(seen)) &&
-           ReadProcessMemory(GetCurrentProcess(),
+    char old_seen[sizeof(old_url)]{};
+    reason="native-url-unreadable";
+    if(!menu_safe_ptr(url,sizeof(old_seen)) ||
+       !ReadProcessMemory(GetCurrentProcess(),
              reinterpret_cast<const void*>(std::uintptr_t(url)),
-             seen,sizeof(seen),&done) && done==sizeof(seen) &&
-           std::memcmp(seen,old_url,sizeof(seen))==0;
+             old_seen,sizeof(old_seen),&done) ||
+       done!=sizeof(old_seen))
+        return false;
+    if(std::memcmp(old_seen,old_url,sizeof(old_seen))==0) {
+        reason="verified-original-url";
+        return true;
+    }
+    // An already redirected in-memory original action remains valid.
+    char redirected[sizeof(new_url)]{};
+    reason="native-url-mismatch";
+    if(menu_safe_ptr(url,sizeof(redirected)) &&
+       ReadProcessMemory(GetCurrentProcess(),
+             reinterpret_cast<const void*>(std::uintptr_t(url)),
+             redirected,sizeof(redirected),&done) &&
+       done==sizeof(redirected) &&
+       std::memcmp(redirected,new_url,sizeof(redirected))==0) {
+        reason="verified-redirected-url";
+        return true;
+    }
+    return false;
 }
 bool current_pause_site_selected(const PauseVideoModel& model) noexcept {
     std::uintptr_t slot=0;
@@ -313,7 +345,9 @@ DWORD WINAPI worker(void*) {
     unsigned tries=0,reports=0;
     DWORD next_scan=0;
     int prior_normal=-100,prior_reflex=-100,prior_pause=-1;
-    bool site_script_checked=false,site_script_verified=false;
+    bool site_script_verified=false;
+    unsigned site_auth_tries=0;
+    DWORD site_next_auth=0;
     bool previous_enter=false;
     DWORD last_website_launch=0;
     for(;;) {
@@ -342,8 +376,9 @@ DWORD WINAPI worker(void*) {
                 restore_pause_video_scripts();
                 g_preflight_failed=false;
                 state={};tries=0;next_scan=0;
-                site_script_checked=false;
                 site_script_verified=false;
+                site_auth_tries=0;
+                site_next_auth=0;
             }
             Sleep(250);
             continue;
@@ -354,16 +389,27 @@ DWORD WINAPI worker(void*) {
                 restore_pause_video_scripts();
                 state={};
                 tries=0;
-                site_script_checked=false;
                 site_script_verified=false;
+                site_auth_tries=0;
+                site_next_auth=0;
             } else {
-                if(!site_script_checked) {
-                    site_script_checked=true;
+                const DWORD site_now=GetTickCount();
+                if(!site_script_verified && site_auth_tries<4u &&
+                   static_cast<LONG>(site_now-site_next_auth)>=0) {
+                    ++site_auth_tries;
+                    site_next_auth=site_now+300u;
+                    const char* reason="unverified";
+                    bool full=false;
                     site_script_verified=
-                        authenticate_pause_site_script(current);
-                    if(g_log)g_log(site_script_verified ?
-                        "RUNTIME-PAUSE-SITE: original-site-action=authenticated normal7-script9 proc369 V16=3 selection=typed source=Fix.sna" :
-                        "RUNTIME-PAUSE-SITE: original-site-action=unverified fail-closed=1");
+                        authenticate_pause_site_script(current,reason,full);
+                    if(g_log) {
+                        char msg[260]{};
+                        std::snprintf(msg,sizeof(msg),
+                            "RUNTIME-PAUSE-SITE: original-site-action=%s reason=%s full-script-shape=%u authenticated-branch=normal7/script9/V16-3 retry=%u",
+                            site_script_verified?"authenticated":"unverified",
+                            reason,unsigned(full),site_auth_tries);
+                        g_log(msg);
+                    }
                 }
                 if(site_script_verified && enter_edge &&
                    game_is_foreground() &&
