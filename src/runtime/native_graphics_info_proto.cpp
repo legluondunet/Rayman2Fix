@@ -24,7 +24,6 @@
 #include "rayman2fix/graphics_menu_controller_model.hpp"
 #include "rayman2fix/graphics_menu_controller_vars.hpp"
 #include "rayman2fix/native_graphics_info_policy.hpp"
-#include "rayman2fix/native_graphics_static_text_policy.hpp"
 #include "rayman2fix/native_graphics_info_proto.hpp"
 
 #if !defined(_M_IX86)
@@ -260,108 +259,6 @@ void restore_callbacks() noexcept {
             reinterpret_cast<PVOID>(base+kFuncSaveRva),
             reinterpret_cast<PVOID>(&protected_save));
 }
-// Two scene-script clones provide informational-only JFFTXT styling.
-// This does NOT edit V17, keyboard input, the resolution selector, the
-// brightness AI or any original game/script bytes. Clone allocations are
-// deliberately retained for the life of the process after *any* swap:
-// the game may still be executing a just-restored script in another thread.
-struct NativeStaticScriptSlot {
-    std::uintptr_t slot=0;
-    std::uintptr_t original=0;
-    NativeMenuScriptNode* clone=nullptr;
-};
-struct NativeStaticScripts {
-    std::array<NativeStaticScriptSlot,2> items{};
-    bool prepared=false;
-    bool active=false;
-    bool failed=false;
-    bool ever_swapped=false;
-};
-bool prepare_static_information_scripts(NativeStaticScripts& state,
-                                        const MenuAiModel& model) noexcept {
-    if(!model.valid() || !approved() ||
-       !menu_safe_ptr(model.normal_entries+5u*12u,12u))
-        return false;
-    std::uint32_t list=0;
-    std::uint8_t count=0;
-    if(!read32(model.normal_entries+5u*12u,list) ||
-       !read8(model.normal_entries+5u*12u+8u,count) ||
-       count!=5u || !menu_safe_ptr(list,5u*4u))return false;
-    std::array<NativeStaticScriptSlot,2> prepared{};
-    for(unsigned i=0;i<prepared.size();++i) {
-        const auto& plan=kNativeInfoTextPlans[i];
-        const std::uintptr_t slot=std::uintptr_t(list)+plan.script_index*4u;
-        std::uint32_t original=0;
-        if(!writable_slot(slot) || !read32(slot,original) ||
-           !menu_safe_ptr(original,plan.node_count*8u))break;
-        const SIZE_T bytes=plan.node_count*sizeof(NativeMenuScriptNode);
-        void* memory=VirtualAlloc(nullptr,bytes,MEM_RESERVE|MEM_COMMIT,
-                                  PAGE_READWRITE);
-        if(!memory)break;
-        prepared[i]={slot,original,
-              static_cast<NativeMenuScriptNode*>(memory)};
-        if(!read_bytes(original,memory,bytes) ||
-           !make_static_video_font_script(
-                static_cast<NativeMenuScriptNode*>(memory),plan))
-            break;
-        if(i+1u==prepared.size()) {
-            state.items=prepared;
-            state.prepared=true;
-            return true;
-        }
-    }
-    // No pointers were swapped, so these allocations can be freed.
-    for(auto& item:prepared)
-        if(item.clone)VirtualFree(item.clone,0,MEM_RELEASE);
-    return false;
-}
-bool install_static_information_scripts(NativeStaticScripts& state) noexcept {
-    if(!state.prepared || state.active || state.failed)return false;
-    // Two-phase apply, with conditional rollback if the second compare-
-    // exchange cannot be completed. Never dereference an untyped slot.
-    if(!swap_slot(state.items[0].slot,state.items[0].original,
-                  state.items[0].clone))
-        return false;
-    state.ever_swapped=true;
-    if(!swap_slot(state.items[1].slot,state.items[1].original,
-                  state.items[1].clone)) {
-        // A partial installation must never lose rollback ownership.
-        // Keep active=true if the first slot cannot be restored now;
-        // the worker will retry restoration at VIDEO exit/MENU unload.
-        state.active=true;
-        if(writable_slot(state.items[0].slot)) {
-            const auto observed=InterlockedCompareExchangePointer(
-                reinterpret_cast<PVOID volatile*>(state.items[0].slot),
-                reinterpret_cast<PVOID>(state.items[0].original),
-                reinterpret_cast<PVOID>(state.items[0].clone));
-            if(observed==reinterpret_cast<PVOID>(state.items[0].clone) ||
-               observed==reinterpret_cast<PVOID>(state.items[0].original))
-                state.active=false;
-        }
-        return false;
-    }
-    state.active=true;
-    return true;
-}
-bool restore_static_information_scripts(NativeStaticScripts& state) noexcept {
-    if(!state.active)return true;
-    bool success=true;
-    for(auto& item:state.items) {
-        if(!writable_slot(item.slot)) {
-            success=false;
-            continue;
-        }
-        const auto observed=InterlockedCompareExchangePointer(
-            reinterpret_cast<PVOID volatile*>(item.slot),
-            reinterpret_cast<PVOID>(item.original),
-            reinterpret_cast<PVOID>(item.clone));
-        if(observed!=reinterpret_cast<PVOID>(item.clone) &&
-           observed!=reinterpret_cast<PVOID>(item.original))
-            success=false;
-    }
-    state.active=false;
-    return success;
-}
 bool install_callbacks(const MenuAiModel* model) noexcept {
     const auto base=exe_base();
     if(!approved() || !base)return rejected("executable-not-approved");
@@ -593,7 +490,6 @@ DWORD WINAPI worker(void*) {
     bool reported_text_issue=false;
     bool was_visible=false;
     bool showed_information_in_menu=false;
-    NativeStaticScripts static_text_scripts{};
     unsigned last_latch=~0u;
     // Keep the guard active while the process lives. Revert script hooks
     // when the original Menu level is unloaded; never silently expose
@@ -602,18 +498,6 @@ DWORD WINAPI worker(void*) {
         const DWORD now=GetTickCount();
         const bool in_menu=is_native_menu();
         if(!in_menu) {
-            if(static_text_scripts.active) {
-                const bool restored=restore_static_information_scripts(
-                    static_text_scripts);
-                if(g_logger)
-                    g_logger(restored ?
-                      "RUNTIME-GRAPHICS-INFO: status=static-information-scripts-restored cause=menu-unloaded" :
-                      "RUNTIME-GRAPHICS-INFO: status=static-information-scripts-restore-unverified cause=menu-unloaded");
-            }
-            // Retain any swapped clone's backing storage: an in-flight
-            // native script may still hold a pointer to it. Only reset
-            // metadata for the next MENU instance.
-            static_text_scripts=NativeStaticScripts{};
             if(guarded) {
                 g_protected.store(false,std::memory_order_release);
                 g_layout_active.store(false,std::memory_order_release);
@@ -694,19 +578,6 @@ DWORD WINAPI worker(void*) {
                     }
                     g_layout_active.store(g_language_table!=0,
                                           std::memory_order_release);
-                    if(g_language_table && !static_text_scripts.failed &&
-                       !static_text_scripts.active) {
-                        if((static_text_scripts.prepared ||
-                            prepare_static_information_scripts(
-                                static_text_scripts,current_model)) &&
-                           install_static_information_scripts(
-                               static_text_scripts)) {
-                            g_logger("RUNTIME-GRAPHICS-INFO: status=static-information-script-copies-installed verified=2 menu-only=1 v17-untouched=1 brightness=untouched");
-                        } else {
-                            static_text_scripts.failed=true;
-                            g_logger("RUNTIME-GRAPHICS-INFO: status=static-information-script-preflight-refused unchanged-or-rolled-back=1");
-                        }
-                    }
                     if(g_language_table &&
                        (!was_visible || last_latch!=vars.activate)) {
                         char event[180]{};
@@ -719,15 +590,6 @@ DWORD WINAPI worker(void*) {
                         last_latch=vars.activate;
                     }
                 } else {
-                    if(static_text_scripts.active) {
-                        const bool restored=restore_static_information_scripts(
-                            static_text_scripts);
-                        if(g_logger)
-                            g_logger(restored ?
-                              "RUNTIME-GRAPHICS-INFO: status=static-information-scripts-restored cause=video-page-exit" :
-                              "RUNTIME-GRAPHICS-INFO: status=static-information-scripts-restore-unverified cause=video-page-exit");
-                        if(!restored)static_text_scripts.failed=true;
-                    }
                     g_info_focus_row.store(-1,std::memory_order_release);
                     // The original MENU still retains rendered choices after
                     // a localization pointer restoration. Suppress ONLY
