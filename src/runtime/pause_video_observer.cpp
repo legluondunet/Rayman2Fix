@@ -348,12 +348,16 @@ DWORD WINAPI worker(void*) {
     bool site_script_verified=false;
     unsigned site_auth_tries=0;
     DWORD site_next_auth=0;
-    bool previous_enter=false;
+    bool previous_enter=false,previous_space=false;
+    DWORD last_site_selected_tick=0;
     DWORD last_website_launch=0;
     for(;;) {
         const bool enter=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
-        const bool enter_edge=enter && !previous_enter;
+        const bool space=(GetAsyncKeyState(VK_SPACE)&0x8000)!=0;
+        const bool enter_edge=(enter && !previous_enter) ||
+                              (space && !previous_space);
         previous_enter=enter;
+        previous_space=space;
         std::uint8_t flag=0;
         const bool in_menu=game_in_menu(base);
         const bool pause=!in_menu &&
@@ -379,6 +383,7 @@ DWORD WINAPI worker(void*) {
                 site_script_verified=false;
                 site_auth_tries=0;
                 site_next_auth=0;
+                last_site_selected_tick=0;
             }
             Sleep(250);
             continue;
@@ -392,6 +397,7 @@ DWORD WINAPI worker(void*) {
                 site_script_verified=false;
                 site_auth_tries=0;
                 site_next_auth=0;
+                last_site_selected_tick=0;
             } else {
                 const DWORD site_now=GetTickCount();
                 if(!site_script_verified && site_auth_tries<4u &&
@@ -411,16 +417,29 @@ DWORD WINAPI worker(void*) {
                         g_log(msg);
                     }
                 }
+                const DWORD selected_now=GetTickCount();
+                const bool website_row=
+                    current_pause_site_selected(current);
+                if(website_row)last_site_selected_tick=selected_now;
+                // The original engine may consume Enter and transition
+                // away from normal7 in the same 16-ms tick. Only a
+                // directly authenticated website row from the preceding
+                // 100 ms can survive that exact normal behavior switch.
+                const bool just_left_website_row=
+                    current.normal!=7 &&
+                    last_site_selected_tick!=0u &&
+                    DWORD(selected_now-last_site_selected_tick)<=100u;
                 if(site_script_verified && enter_edge &&
                    game_is_foreground() &&
-                   current_pause_site_selected(current)) {
-                    const DWORD now=GetTickCount();
-                    if(DWORD(now-last_website_launch)>=1500u &&
+                   (website_row || just_left_website_row)) {
+                    if(DWORD(selected_now-last_website_launch)>=1500u &&
                        claim_project_site_dispatch()) {
-                        last_website_launch=now;
+                        last_website_launch=selected_now;
                         launch_pause_site();
                     }
                 }
+                if(!website_row && !just_left_website_row)
+                    last_site_selected_tick=0u;
                 if(!g_scripts_installed && !g_preflight_failed)
                     install_pause_video_scripts(current);
                 const bool candidate=current.normal==9 && current.reflex==2;
