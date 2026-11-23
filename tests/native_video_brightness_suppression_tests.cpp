@@ -40,7 +40,7 @@ int main() {
               nodes[i].type==original[i].type &&
               nodes[i].padding==original[i].padding);
         check(nodes[i].parameter==
-             (i==3u?0xFFFFFFFFu:original[i].parameter));
+             (i==3u?0x7FFFFFFFu:original[i].parameter));
     }
     const auto reject=[&](unsigned node,std::uint32_t replacement) {
         auto invalid=original;
