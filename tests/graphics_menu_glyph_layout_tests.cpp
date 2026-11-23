@@ -71,6 +71,27 @@ int main() {
     expect(graphics_info_source_row({8,84,11,89})==0u);
     expect(graphics_info_source_row({NAN,45,50,50})==0u);
     expect(graphics_info_source_row({55,50,54,55})==0u);
+    // Regression, user session 10:18: normal-3 can show the
+    // native old resolution choices before the static VIDEO panel.
+    // The source-verified old choice bands are safe to drop ONLY in
+    // the authenticated pre-VIDEO state; never the VIDEO title,
+    // previous Options page or the animated 3D butterfly.
+    expect(legacy_resolution_preparation_glyph(
+        true,{55.0f,31.0f,60.0f,36.0f}));
+    expect(legacy_resolution_preparation_glyph(
+        true,{47.0f,64.0f,51.0f,69.0f}));
+    expect(!legacy_resolution_preparation_glyph(
+        false,{55.0f,31.0f,60.0f,36.0f}));
+    expect(!legacy_resolution_preparation_glyph(
+        true,{35.3f,20.0f,39.5f,25.0f}));
+    expect(!legacy_resolution_preparation_glyph(
+        true,{5.0f,45.0f,9.0f,50.0f}));
+    expect(!legacy_resolution_preparation_glyph(
+        true,{48.0f,85.0f,52.0f,90.0f}));
+    expect(!legacy_resolution_preparation_glyph(
+        true,{NAN,43.0f,55.0f,50.0f}));
+    expect(!legacy_resolution_preparation_glyph(
+        true,{55.0f,50.0f,54.0f,55.0f}));
     // The raw material diagnostic may log exactly 16 distinct pairs,
     // never outside the four verified VIDEO rows and four native focus
     // values. Reject unknown focus or brightness, with no navigation edits.
