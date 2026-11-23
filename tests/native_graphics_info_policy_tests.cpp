@@ -61,6 +61,31 @@ require(!graphics_info_brightness_with_panel(
     true,true,true,18,5,true,5,true,false)); // direct brightness
 require(!graphics_info_brightness_with_panel(
     true,true,true,18,5,true,5,false,true)); // no prior text
+// Legacy V17=5 remains outside the verified VIDEO info page.
+require(!graphics_info_readonly_video_page(
+    true,true,true,5,0,true,5,true,0,false));
+// Only a successfully installed script-2 transition suppression
+// admits V17=5 as a static read-only VIDEO information state.
+require(graphics_info_readonly_video_page(
+    true,true,true,5,0,true,5,true,0,true));
+require(graphics_info_readonly_video_page(
+    true,true,true,5,0,true,5,true,1,true));
+require(graphics_info_readonly_video_page(
+    true,true,true,5,0,true,3,true,0,true));
+require(!graphics_info_readonly_video_page(
+    true,true,true,18,5,true,5,true,0,true));
+require(!graphics_info_readonly_video_page(
+    true,true,true,5,0,true,6,true,0,true));
+require(!graphics_info_readonly_video_page(
+    true,true,true,5,0,true,5,true,2,true));
+require(!graphics_info_readonly_video_page(
+    true,true,true,5,0,false,5,true,0,true));
+require(!graphics_info_readonly_video_page(
+    false,true,true,5,0,true,5,true,0,true));
+require(!graphics_info_readonly_video_page(
+    true,false,true,5,0,true,5,true,0,true));
+require(!graphics_info_readonly_video_page(
+    true,true,false,5,0,true,5,true,0,true));
 // The normal-3 native MENU preparation script contains VIDEO text
 // handles. Install their new pointers before normal-5 caches glyphs.
 require(graphics_info_video_preparation(
