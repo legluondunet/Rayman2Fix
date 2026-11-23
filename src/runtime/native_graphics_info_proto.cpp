@@ -573,8 +573,8 @@ bool install_native_disabled_video_choices(
         // selection and must instead be 0 BEFORE the AI consumes Down.
         if(k==0u) {
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
-            if(!standalone_video_script1_bound_zero(copy,plan)) {
-                valid=false;reason="video-script1-range-only";break;
+            if(!standalone_video_script1_singleton(copy,plan)) {
+                valid=false;reason="video-script1-singleton";break;
             }
 #endif
             continue;
@@ -735,7 +735,7 @@ bool install_native_disabled_video_choices(
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
     g_brightness_transition_disabled.store(true,std::memory_order_release);
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
-    g_logger("RUNTIME-STANDALONE-VIDEO: old-widgets-not-constructed normal3-script2=direct-video-open normal5-scripts3,4=terminated normal5-script1=V20-literal-zero-JFFTXT-unchanged cursor=game-thread-guarded other-options-branches=retained selection-dispatch=guarded");
+    g_logger("RUNTIME-STANDALONE-VIDEO: old-widgets-not-constructed normal3-script2=direct-video-open normal5-scripts3,4=terminated normal5-script1=singleton1..1-JFFTXT-unchanged cursor=game-thread-guarded other-options-branches=retained selection-dispatch=guarded");
 #else
     g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1-original,2,3,4 brightness-transition=suppressed font-focus=static-0-video4-only enter-save-status=inert parent-options-preserved=1 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
 #endif
@@ -1158,25 +1158,31 @@ void native_graphics_info_stabilize_video_cursor_at_flip() noexcept {
     std::uintptr_t cell=0,lower_cell=0,upper_cell=0;
     if(!locate_verified_video_selection_bounds(state.mind,
             &read32,&read8,cell,lower_cell,upper_cell) ||
-       !writable_slot(cell) || !writable_slot(upper_cell))return;
+       !writable_slot(cell) || !writable_slot(lower_cell) ||
+       !writable_slot(upper_cell))return;
     std::uint32_t lower=0,upper=0;
     if(!read32(lower_cell,lower) || !read32(upper_cell,upper))return;
+    // Source-clone uses valid [1,1] at AI execution time; fallback
+    // only for unexpected original [0,3] ranges in the same submenu.
     // Bound the native selector *before its next input evaluation*:
     // V17 resetting after each processed key was not sufficient.
     if(standalone_video_upper_bound_needs_reset(lower,upper)) {
         const LONG prior=InterlockedCompareExchange(
-            reinterpret_cast<volatile LONG*>(upper_cell),0,3);
+            reinterpret_cast<volatile LONG*>(upper_cell),1,3);
+        if(prior==3)
+            InterlockedCompareExchange(
+                reinterpret_cast<volatile LONG*>(lower_cell),1,0);
         if(prior==3 && g_logger) {
             static std::atomic<bool> logged_bounds{false};
             if(!logged_bounds.exchange(true,std::memory_order_relaxed))
-                g_logger("RUNTIME-STANDALONE-VIDEO: native-cursor-range-frozen=0..0 scope=verified-normal5 source=game-flip parent-options=untouched");
+                g_logger("RUNTIME-STANDALONE-VIDEO: native-cursor-range-frozen=1..1 scope=verified-normal5 source=game-flip parent-options=untouched");
         }
     }
     std::uint32_t selected=0;
     if(!read32(cell,selected) ||
        !standalone_video_cursor_needs_reset(selected))return;
     const auto previous=InterlockedCompareExchange(
-        reinterpret_cast<volatile LONG*>(cell),0,
+        reinterpret_cast<volatile LONG*>(cell),1,
         static_cast<LONG>(selected));
     if(previous==static_cast<LONG>(selected)) {
         static std::atomic<bool> logged{false};
