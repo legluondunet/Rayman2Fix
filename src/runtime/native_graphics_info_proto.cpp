@@ -31,6 +31,7 @@
 #include "rayman2fix/standalone_video_transition.hpp"
 #include "rayman2fix/standalone_video_cursor_policy.hpp"
 #include "rayman2fix/main_menu_site.hpp"
+#include "rayman2fix/pause_video_observer.hpp"
 #endif
 
 #if !defined(_M_IX86)
@@ -1290,6 +1291,7 @@ void start_native_graphics_info_proto(GraphicsInfoLogger logger,
     g_logger=logger;
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
     standalone_video_page_configure(logger,output_width,output_height,classic_4_3);
+    start_pause_video_observer(logger); // separate verified model; read-only
 #endif
     logger("RUNTIME-GRAPHICS-INFO: status=started experimental=1 no-file-patch=1 fail-closed=1 native-menu=1");
     HANDLE t=CreateThread(nullptr,0,&worker,nullptr,0,nullptr);
