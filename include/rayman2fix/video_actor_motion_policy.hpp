@@ -5,14 +5,30 @@
 // and original game files remain intact.
 #include <cstdint>
 #include <cstring>
-#include "rayman2fix/native_video_disable_choices.hpp"
+#include <initializer_list>
+#include "rayman2fix/native_graphics_static_text_policy.hpp"
 namespace r2fix {
+inline std::uint64_t video_actor_motion_shape(
+    const NativeMenuScriptNode* nodes,unsigned count) noexcept {
+    if(!nodes || (count!=304u && count!=324u))return 0u;
+    std::uint64_t h=14695981039346656037ULL;
+    for(unsigned i=0u;i<count;++i) {
+        const auto& n=nodes[i];
+        for(unsigned b=0u;b<2u;++b){
+            h^=(n.padding>>(b*8u))&255u;
+            h*=1099511628211ULL;
+        }
+        h^=n.indent;h*=1099511628211ULL;
+        h^=n.type;h*=1099511628211ULL;
+    }
+    return h;
+}
 inline bool remove_video_only_actor_moves(
     NativeMenuScriptNode* copy,unsigned count,
     unsigned first,std::uint64_t expected_shape) noexcept {
     if(!copy || (count!=324u && count!=304u) ||
        first!=(count==324u?176u:157u) ||
-       native_video_script_shape_hash(copy,count)!=expected_shape ||
+       video_actor_motion_shape(copy,count)!=expected_shape ||
        copy[count-1u].type!=8u || copy[count-1u].indent!=0u)
         return false;
     for(unsigned k=0u;k<2u;++k) {
