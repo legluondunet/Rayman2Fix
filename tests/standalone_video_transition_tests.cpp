@@ -7,7 +7,7 @@ using namespace r2fix;
 void require(bool value) {if(!value)std::abort();}
 int main() {
     static_assert(kStandalonePreparationNewNodes==876u,
-                  "VIDEO source branch should shrink to 875 nodes");
+                  "VIDEO source branch should shrink to 876 nodes");
     std::array<NativeMenuScriptNode,kStandalonePreparationOriginalNodes> a{};
     for(auto& n:a)n={0u,0u,3u,12u};
     a[0]={0u,0u,1u,0u};
@@ -36,7 +36,10 @@ int main() {
         require(a[n].type==old[n].type);
         require(a[n].indent==old[n].indent);
     }
-    for(unsigned n=10u;n<kStandalonePreparationNewNodes;++n) {
+    // Node 10 is the preserved VIDEO conditional delimiter. All
+    // relocated instruction comparisons therefore start at node 11.
+    for(unsigned n=kStandaloneVideoBranchBody;
+        n<kStandalonePreparationNewNodes;++n) {
         const auto& before=old[n+518u-11u];
         require(a[n].parameter==before.parameter);
         require(a[n].type==before.type);
