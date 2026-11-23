@@ -36,6 +36,7 @@ std::atomic<bool> g_configured{false};
 std::atomic<bool> g_drew{false};
 std::atomic<bool> g_glide_missing{false};
 std::atomic<bool> g_write_error{false};
+std::atomic<bool> g_pause_draw_reported{false};
 GlideRead g_read=nullptr;
 GlideWrite g_write=nullptr;
 std::array<std::array<char,128>,5> g_lines{};
@@ -303,6 +304,8 @@ bool standalone_video_page_draw_before_flip() noexcept {
     }
     if(!g_drew.exchange(true) && g_log)
         g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=translucent-midnight-blue alpha=100/255 blue-outline=verified-BGR565-blue border-width=2 controls=Escape-only source=MENU-or-verified-ESC-script");
+    if(pause && !g_pause_draw_reported.exchange(true) && g_log)
+        g_log("RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1 source=own-Glide-LFB state=verified-normal9-reflex2 background=translucent-midnight-blue original-scene=preserved");
     return true;
 }
 } // namespace r2fix
