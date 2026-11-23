@@ -89,4 +89,83 @@ inline bool disable_native_video_choices(
     }
     return true;
 }
+// A separate, approved navigation-range experiment. The original
+// Rayman 2 menu scripts set V19=1,V20=5 (five navigable entries) and
+// other original MENU scripts use V19=V20=1 for a one-entry menu.
+// Here the three former resolution entries are informational-only,
+// and only the native brightness choice (index 5) must be reachable.
+// Do not change V17 asynchronously from the runtime worker.
+struct NativeVideoNavigationPlan {
+    unsigned script_index;
+    unsigned count;
+    std::uint64_t original_shape_hash;
+    unsigned first_selectable_literal;
+    unsigned last_selectable_literal;
+    unsigned current_mode_selection_literals[6];
+    unsigned restore_selection_operand; // 0 means none
+};
+constexpr NativeVideoNavigationPlan kVideoNavigationPlans[]{
+    {3u,430u,0xf4cc82cd7d6a21a4ULL,412u,415u,
+        {295u,309u,323u,333u,346u,359u},0u},
+    {4u,517u,0xd6fbfd33f17ec60bULL,372u,375u,
+        {255u,269u,283u,293u,306u,319u},388u}
+};
+// For a fixed, typed source expression:
+//
+// Operator_Affect (kind 2, param 11)
+//   Variable(V19, V20 or V17; kind 11)
+//   Integer(expected; kind 12)
+//
+inline bool native_video_direct_assignment(
+    const NativeMenuScriptNode* nodes,unsigned count,unsigned operand,
+    unsigned variable,std::uint32_t expected,unsigned expected_kind=12u)
+    noexcept {
+    if(!nodes || operand<2u || operand>=count)return false;
+    const auto& operation=nodes[operand-2u];
+    const auto& destination=nodes[operand-1u];
+    const auto& source=nodes[operand];
+    return operation.type==2u && operation.parameter==11u &&
+        destination.type==11u && destination.parameter==variable &&
+        source.type==expected_kind && source.parameter==expected &&
+        operation.padding==0u && destination.padding==0u &&
+        source.padding==0u &&
+        destination.indent==source.indent &&
+        operation.indent+1u==destination.indent;
+}
+inline bool restrict_native_video_navigation(
+    NativeMenuScriptNode* copy,const NativeVideoNavigationPlan& plan)
+    noexcept {
+    if(!copy || plan.count<20u || plan.count>1024u ||
+       copy[plan.count-1u].type!=8u ||
+       copy[plan.count-1u].indent!=0u ||
+       native_video_script_shape_hash(copy,plan.count)!=
+          plan.original_shape_hash ||
+       !native_video_direct_assignment(copy,plan.count,
+          plan.first_selectable_literal,19u,1u) ||
+       !native_video_direct_assignment(copy,plan.count,
+          plan.last_selectable_literal,20u,5u))
+        return false;
+    constexpr std::uint32_t sources[6]{1u,2u,3u,3u,2u,1u};
+    for(unsigned i=0;i<6u;++i)
+        if(!native_video_direct_assignment(copy,plan.count,
+             plan.current_mode_selection_literals[i],17u,sources[i]))
+            return false;
+    if(plan.restore_selection_operand!=0u &&
+       !native_video_direct_assignment(copy,plan.count,
+           plan.restore_selection_operand,17u,73u,11u))
+        return false;
+    // Every expected opcode, destination, operand and AST nesting was
+    // checked above. Mutate ONLY the private copy's literal indices.
+    // V19=V20=5 uses the native one-item range pattern found elsewhere
+    // in this approved Menu.sna; leave its brightness procedure intact.
+    copy[plan.first_selectable_literal].parameter=5u;
+    for(unsigned i=0;i<6u;++i)
+        copy[plan.current_mode_selection_literals[i]].parameter=5u;
+    if(plan.restore_selection_operand!=0u) {
+        auto& restored=copy[plan.restore_selection_operand];
+        restored.parameter=5u;
+        restored.type=12u; // literal 5 rather than saved V73
+    }
+    return true;
+}
 } // namespace r2fix
