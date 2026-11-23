@@ -1,5 +1,6 @@
 #include "rayman2fix/standalone_video_transition.hpp"
 #include <array>
+#include <initializer_list>
 #include <cstdlib>
 #include <cstdint>
 using namespace r2fix;
@@ -56,7 +57,8 @@ int main() {
     }
     require(!standalone_skip_legacy_video_open(nullptr,1383u,
         0x07921948u,hash));
-    require(!standalone_skip_legacy_video_open(old.data(),100u,
+    auto unchanged=old;
+    require(!standalone_skip_legacy_video_open(unchanged.data(),100u,
         0x07921948u,hash));
     return 0;
 }
