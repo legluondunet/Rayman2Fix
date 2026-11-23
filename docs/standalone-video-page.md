@@ -44,6 +44,19 @@ artifact from the draft PR #52, not the standard bootstrap EXE.
    butterfly, close the game and attach `Rayman2Fix.log`. No further
    interactive video option should be activated in an unstable state.
 
+## In-game ESC Pause menu
+
+The ESC menu inside a playable level is **not established as the same
+native AI model** as the startup MENU scene. The first version of this
+research build therefore never patches any in-game pause scripts by
+accident: it emits a bounded passive transition marker
+`RUNTIME-PAUSE-VIDEO: generic-esc-menu=...` with the level identifier.
+A maintainer log and screenshot from ESC → Options → Vidéo in a saved
+game are required to identify the actual pause-side controller and
+port the same **read-only** page without affecting gameplay, audio,
+save slots or normal ESC navigation. No pause-menu parity is claimed
+from the bootstrap MENU-only CI test.
+
 ## Main-menu Rayman website (research build)
 
 - Handle **362** was independently verified from the owner's original

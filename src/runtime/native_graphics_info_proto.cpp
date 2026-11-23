@@ -46,6 +46,12 @@ constexpr unsigned kScriptEvalRva=0x80B90u;
 constexpr unsigned kTextTableDirRva=0x10026Cu;
 constexpr unsigned kLanguageIndexRva=0x100FA8u;
 constexpr unsigned kLevelNameRva=0x100381u;
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+// The native ESC pause belongs to a different scene/controller than
+// the approved Menu.sna normal-5 page. Treat its generic-menu flag
+// as a diagnostic ONLY, never permission to rewrite scene scripts.
+constexpr unsigned kGenericEscMenuFlagRva=0x0B9BC8u;
+#endif
 constexpr BYTE kProcSignature[]{0x8B,0x4C,0x24,0x08,0x8B,0x54,0x24,0x04,
     0x83,0xEC,0x10,0x8D,0x44,0x24,0x00};
 constexpr BYTE kSaveSignature[]{0xE8,0xEB,0x76,0xFA,0xFF,0x8B,0x4C,0x24,
@@ -826,12 +832,41 @@ DWORD WINAPI worker(void*) {
     bool reported_static_script_preflight=false;
     NativeChoicesPatch disabled_choices{};
     unsigned last_latch=~0u;
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    int prev_pause=-1;
+    unsigned pause_reports=0u;
+#endif
     // Keep the guard active while the process lives. Revert script hooks
     // when the original Menu level is unloaded; never silently expose
     // the original clickable settings after a diagnostic timeout.
     for(;;) {
         const DWORD now=GetTickCount();
         const bool in_menu=is_native_menu();
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+        if(!in_menu && pause_reports<16u) {
+            std::uint8_t generic_pause=0;
+            if(approved() &&
+               read8(exe_base()+kGenericEscMenuFlagRva,generic_pause)) {
+                const int state=generic_pause!=0u?1:0;
+                if(state!=prev_pause) {
+                    char level[16]{};
+                    read_bytes(exe_base()+kLevelNameRva,level,15u);
+                    for(char& ch:level)
+                        if(ch && (static_cast<unsigned char>(ch)<32u ||
+                                  static_cast<unsigned char>(ch)>126u))
+                            ch='_';
+                    char line[260]{};
+                    std::snprintf(line,sizeof(line),
+                       "RUNTIME-PAUSE-VIDEO: status=observed generic-esc-menu=%d level=%.15s scope=passive-diagnostic-only no-pause-menu-patch=1",
+                       state,level[0]?level:"unknown");
+                    g_logger(line);
+                    ++pause_reports;
+                    prev_pause=state;
+                }
+            }
+        }
+        if(in_menu) prev_pause=-1;
+#endif
         if(!in_menu) {
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
             standalone_video_page_set_visible(false);
