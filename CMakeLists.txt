@@ -331,6 +331,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME native-menu-fixed-brightness-navigation-copy
     COMMAND native_video_navigation_tests)
+  add_executable(native_video_brightness_suppression_tests
+    tests/native_video_brightness_suppression_tests.cpp)
+  target_include_directories(native_video_brightness_suppression_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-menu-readonly-no-brightness-transition
+    COMMAND native_video_brightness_suppression_tests)
   add_executable(graphics_menu_cursor_actor_anchor_tests
     tests/graphics_menu_cursor_actor_anchor_tests.cpp)
   target_include_directories(graphics_menu_cursor_actor_anchor_tests PRIVATE
