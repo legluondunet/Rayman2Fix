@@ -73,7 +73,8 @@ std::atomic<bool> g_classic_4_3{false};
 std::array<std::atomic<std::uintptr_t>,4> g_select_children{};
 std::atomic<std::uintptr_t> g_save_child{0};
 std::array<std::array<char,56>,6> g_rows{};
-std::array<std::uintptr_t,6> g_old_text{};
+std::array<std::uintptr_t,7> g_old_text{};
+char g_hidden_brightness_label[2]{' ',0};
 std::uintptr_t g_language_table=0;
 GraphicsInfoLogger g_logger=nullptr;
 std::atomic<unsigned> g_select_suppressed{0};
@@ -664,39 +665,39 @@ void restore_native_disabled_video_choices(
     g_logger(line);
     state=NativeChoicesPatch{};
 }
+// The seventh VIDEO localization entry (385) is the obsolete
+// Luminosité label. It must disappear from the informational page,
+// without touching any original game resource or the 3D butterfly.
 bool patch_text_table() noexcept {
     if(g_language_table)return true;
     const auto table=text_slot_table();
     if(!table)return false;
-    std::array<std::uintptr_t,6> originals{};
-    for(unsigned i=0;i<6;++i) {
+    std::array<std::uintptr_t,7> originals{};
+    for(unsigned i=0;i<7u;++i) {
         const auto slot=table+(379u+i)*4u;
         std::uint32_t p=0;
         if(!writable_slot(slot) || !read32(slot,p) ||
            !menu_safe_ptr(p) || !original_text_valid(p))return false;
         originals[i]=p;
     }
-    // Experimental Wine result 2026-11-22: staging ORIGINAL content in
-    // replacement buffers before page entry displays the original labels
-    // even after swapping buffer contents to info. The native JFFTXT
-    // widget appears to cache its glyph string at construction.
-    // Change the localization slot to the information pointer only
-    // during the verified video-page behavior and restore on exit.
     unsigned patched=0;
-    for(unsigned i=0;i<6;++i) {
+    for(unsigned i=0;i<7u;++i) {
         const auto slot=table+(379u+i)*4u;
-        if(!swap_slot(slot,originals[i],
-              static_cast<void*>(g_rows[i].data())))break;
+        void* replacement=i==6u ?
+            static_cast<void*>(g_hidden_brightness_label) :
+            static_cast<void*>(g_rows[i].data());
+        if(!swap_slot(slot,originals[i],replacement))break;
         ++patched;
     }
-    if(patched!=6u) {
+    if(patched!=7u) {
         for(unsigned i=0;i<patched;++i) {
             const auto slot=table+(379u+i)*4u;
             if(writable_slot(slot))
                 InterlockedCompareExchangePointer(
                     reinterpret_cast<PVOID volatile*>(slot),
                     reinterpret_cast<PVOID>(originals[i]),
-                    static_cast<PVOID>(g_rows[i].data()));
+                    i==6u ? static_cast<PVOID>(g_hidden_brightness_label) :
+                             static_cast<PVOID>(g_rows[i].data()));
         }
         return false;
     }
@@ -706,13 +707,14 @@ bool patch_text_table() noexcept {
 }
 void restore_text() noexcept {
     if(!g_language_table)return;
-    for(unsigned i=0;i<6;++i) {
+    for(unsigned i=0;i<7u;++i) {
         const auto slot=g_language_table+(379u+i)*4u;
         if(writable_slot(slot))
             InterlockedCompareExchangePointer(
                 reinterpret_cast<PVOID volatile*>(slot),
                 reinterpret_cast<PVOID>(g_old_text[i]),
-                static_cast<void*>(g_rows[i].data()));
+                i==6u ? static_cast<PVOID>(g_hidden_brightness_label) :
+                         static_cast<PVOID>(g_rows[i].data()));
     }
     g_language_table=0;
 }
