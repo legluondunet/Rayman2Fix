@@ -36,6 +36,7 @@ std::atomic<ShellExecuteFn> g_original_shell{nullptr};
 std::atomic<bool> g_active{false};
 std::atomic<bool> g_input_worker_started{false};
 std::atomic<unsigned> g_site_install_attempts{0};
+std::atomic<DWORD> g_last_site_launch_tick{0};
 std::uintptr_t g_patched_table=0;
 std::uintptr_t g_original_text=0;
 std::uintptr_t g_site_script_slot=0;
@@ -151,10 +152,14 @@ __declspec(noinline) HINSTANCE WINAPI website_shell_execute(
     // The approved x86 EXE has a SINGLE original ShellExecuteA callsite.
     // Redirect by that exact native return RVA instead, never by a URL
     // prefix or guessed text. All unrelated calls forward unchanged.
-    if(g_active.load(std::memory_order_acquire) &&
-       authenticated_site_action) {
+    if(authenticated_site_action) {
+        // The original native Proc369 website path is common to
+        // startup MENU and in-game Pause. The already installed exact
+        // IAT bridge must redirect both even after MENU unload.
+        if(!claim_project_site_dispatch())
+            return reinterpret_cast<HINSTANCE>(33);
         if(g_logger)g_logger(
-            "RUNTIME-MENU-SITE: original-site-action=1 caller-rva=0x187267 redirect=github default-browser=1");
+            "RUNTIME-MENU-SITE: original-site-action=1 caller-rva=0x187267 redirect=github default-browser=1 scope=MENU-or-Pause");
         const auto result=original(owner,"open",kProjectUrl,nullptr,
                                    nullptr,SW_SHOWNORMAL);
         if(reinterpret_cast<std::intptr_t>(result)<=32 && g_logger)
@@ -164,6 +169,15 @@ __declspec(noinline) HINSTANCE WINAPI website_shell_execute(
     return original(owner,operation,file,parameters,directory,show);
 }
 } // namespace
+bool claim_project_site_dispatch() noexcept {
+    const DWORD now=GetTickCount();
+    DWORD prior=g_last_site_launch_tick.load(std::memory_order_relaxed);
+    do {
+        if(prior && DWORD(now-prior)<1500u)return false;
+    } while(!g_last_site_launch_tick.compare_exchange_weak(
+        prior,now,std::memory_order_acq_rel,std::memory_order_relaxed));
+    return true;
+}
 // The original Rayman2 website action (proc369) was never observed to
 // reach ShellExecuteA in the owner's logs, even after replacing its
 // original URL literal. Reuse native main-menu selection and OS input
@@ -226,7 +240,8 @@ DWORD WINAPI site_input_worker(void*) noexcept {
             Sleep(16);continue;
         }
         const DWORD now=GetTickCount();
-        if(DWORD(now-last_open)<1500u) {Sleep(16);continue;}
+        if(DWORD(now-last_open)<1500u ||
+           !claim_project_site_dispatch()) {Sleep(16);continue;}
         last_open=now;
         const auto original=g_original_shell.load(std::memory_order_acquire);
         if(!original) {Sleep(16);continue;}
