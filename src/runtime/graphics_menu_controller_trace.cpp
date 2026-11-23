@@ -29,7 +29,8 @@ constexpr unsigned kMemoryBudget=160u*1024u*1024u;
 constexpr unsigned kMaxScans=18u;
 constexpr unsigned kSeconds=180u;
 constexpr unsigned kMaxReports=160u;
-constexpr unsigned kScanPeriodMs=5000u;
+// Retry cadence is defined in graphics_menu_start_policy.hpp so tests
+// cover early acquisition and the later conservative retry.
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
 constexpr bool kPersistentMenuController=true;
 #else
@@ -257,8 +258,8 @@ DWORD WINAPI worker(void*) {
            menu_controller_scan_allowed(kPersistentMenuController,
                 in_menu,tries,kMaxScans) &&
            static_cast<LONG>(now-next_scan)>=0) {
-            next_scan=now+kScanPeriodMs;
             ++tries;
+            next_scan=now+menu_controller_retry_ms(tries);
             const auto scanned=locate_controller(scan_cursor,candidate_hint);
             if(scanned.matches==1u && scanned.mind.valid()) {
                 model=scanned.model;
