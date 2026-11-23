@@ -61,7 +61,7 @@ constexpr bool native_video_status_assignment(
         value.type==12u && value.parameter==native_state &&
         index.padding==0u && value.padding==0u &&
         var.indent==index.indent &&
-        index.indent==value.indent && op.indent+1u==array.indent &&
+        value.indent==array.indent && op.indent+1u==array.indent &&
         array.indent+1u==var.indent;
 }
 inline bool disable_native_video_choices(
