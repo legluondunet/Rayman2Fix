@@ -43,6 +43,8 @@ std::atomic<bool> g_write_error{false};
 std::atomic<bool> g_pause_draw_reported{false};
 std::atomic<bool> g_pause_drawn_this_visit{false};
 std::atomic<bool> g_pause_native_glyphs_suppressed{false};
+std::atomic<bool> g_pause_title_restored_logged{false};
+std::atomic<bool> g_pause_title_band_sampled{false};
 GlideRead g_read=nullptr;
 GlideWrite g_write=nullptr;
 std::array<std::array<char,128>,5> g_lines{};
@@ -331,11 +333,32 @@ bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& x
     const bool drew=menu ? g_drew.load(std::memory_order_acquire) :
                           g_pause_drawn_this_visit.load(std::memory_order_acquire);
     const bool visible=(menu||pause) && drew;
+    const float source_ymin=ymin,source_ymax=ymax;
     const bool title=visible &&
-        standalone_video_stabilize_native_title(xmin,ymin,xmax,ymax);
+        standalone_video_stabilize_native_title_for_context(
+            pause,xmin,ymin,xmax,ymax);
     if(menu && title &&
        !g_title_preserved_logged.exchange(true) && g_log)
         g_log("RUNTIME-STANDALONE-VIDEO: native-title-stabilized=1 source=JFFTXT title-row=20..25 video-page-only");
+    if(pause && visible && title &&
+       !g_pause_title_restored_logged.exchange(true) && g_log) {
+        char msg[240]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-PAUSE-VIDEO-PAGE: native-VIDEO-title-restored=1 source=verified-JFFTXT original-y=%.2f..%.2f shared-title-y=20..25 no-game-assets=1",
+            double(source_ymin),double(source_ymax));
+        g_log(msg);
+    }
+    if(pause && visible && !title &&
+       !g_pause_title_band_sampled.exchange(true) && g_log &&
+       xmin>25.0f && xmax<75.0f &&
+       source_ymin>=8.0f && source_ymax<=34.0f) {
+        char msg[240]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-PAUSE-VIDEO-PAGE: original-heading-candidate-unmatched=1 source=JFFTXT x=%.2f..%.2f y=%.2f..%.2f",
+            double(xmin),double(xmax),
+            double(source_ymin),double(source_ymax));
+        g_log(msg);
+    }
     if(pause && visible && !title &&
        !g_pause_native_glyphs_suppressed.exchange(true) && g_log)
         g_log("RUNTIME-PAUSE-VIDEO-PAGE: source-glyph-suppressed=1 source=verified-native-JFFTXT scope=only-normal9-reflex2 parent-Options-untouched=1 title=preserved");
