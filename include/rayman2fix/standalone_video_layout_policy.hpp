@@ -9,7 +9,7 @@ constexpr unsigned kVideoCanvasHeight=768u;
 constexpr unsigned kVideoInfoWidth=600u;
 constexpr unsigned kVideoInfoHeight=320u;
 constexpr unsigned kVideoInfoX=(kVideoCanvasWidth-kVideoInfoWidth)/2u;
-constexpr unsigned kVideoInfoY=280u; // +56 vs previous MENU layout
+constexpr unsigned kVideoInfoY=304u; // +24 on both pages; leaves extra clearance above frame
 constexpr unsigned video_info_panel_y(bool /*in_game_pause*/) noexcept {
     return kVideoInfoY; // identical geometry for MENU and in-game ESC
 }
