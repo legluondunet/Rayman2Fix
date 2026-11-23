@@ -357,6 +357,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME pause-video-fix-sna-readonly-script-patches
     COMMAND pause_video_patch_policy_tests)
+  add_executable(pause_menu_site_policy_tests
+    tests/pause_menu_site_policy_tests.cpp)
+  target_include_directories(pause_menu_site_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME pause-site-script-and-selection
+    COMMAND pause_menu_site_policy_tests)
   add_executable(pause_video_model_policy_tests
     tests/pause_video_model_policy_tests.cpp)
   target_include_directories(pause_video_model_policy_tests PRIVATE
