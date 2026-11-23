@@ -206,12 +206,13 @@ void test_video_script1_only_range() {
     check(standalone_video_script1_singleton(changed.data(),plan));
     for(unsigned i=0;i<before.size();++i) {
         check(changed[i].parameter==
-            ((i==146u||i==149u||i==152u||i==165u)?1u:before[i].parameter));
-        check(changed[i].type==before[i].type);
+            ((i==146u||i==149u||i==152u||i==165u||i==314u)?1u:
+                before[i].parameter));
+        check(changed[i].type==(i==314u?12u:before[i].type));
         check(changed[i].indent==before[i].indent);
         check(changed[i].padding==before[i].padding);
     }
-    // The native heading JFFTXT remains exactly as original.
+    // Native JFFTXT procedure/geometry unchanged; focus is a fixed 1.
     check(changed[315].parameter==1u &&
           changed[316].parameter==0x3f800000u);
     for(const unsigned at:{146u,149u,152u,165u,313u,314u,315u,316u}) {
