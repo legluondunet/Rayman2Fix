@@ -319,6 +319,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME native-menu-verified-static-text-script-copy
     COMMAND native_graphics_static_text_tests)
+  add_executable(native_video_disable_choices_tests
+    tests/native_video_disable_choices_tests.cpp)
+  target_include_directories(native_video_disable_choices_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-menu-disable-resolution-choice-copy
+    COMMAND native_video_disable_choices_tests)
   add_executable(graphics_menu_cursor_actor_anchor_tests
     tests/graphics_menu_cursor_actor_anchor_tests.cpp)
   target_include_directories(graphics_menu_cursor_actor_anchor_tests PRIVATE
