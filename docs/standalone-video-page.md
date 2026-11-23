@@ -212,3 +212,46 @@ did not reach the observed ShellExecuteA callback in the owner's tests.
 
 All these changes are experimental on draft PR #52 and require
 a single Windows manual validation with the next CI artifact.
+
+## Owner log 16:49:31 — site action validated; paused VIDEO overlay regression
+
+The maintainer visually validated the GitHub browser opening. The log
+confirms `site-user-action=1` followed by
+`browser-launch-dispatched=1`: **do not regress this**.
+
+Three defects remain in this run:
+
+1. In MENU VIDEO, pressing Down moves the animated butterfly behind the
+   blue information panel, even though V17 is clamped to singleton 1.
+   Original `Menu.sna` reflex0/script2 has the interpolated V70
+   selection target (DsgVar scalar index70 offset0x22c). The new game-
+   flip fallback checks the original 90-variable schema and clamps
+   both V17 and V70 to 1, only while the verified MENU normal5/reflex0
+   is active. Not yet visually validated.
+2. Pause → Options → VIDEO shows the blue Glide page on top of the native
+   VIDEO widgets (BASSE/RESOLUTION/HAUTE/SAUVER RESOLUTION/LUMINOSITE).
+   The log confirms `RUNTIME-PAUSE-VIDEO-PAGE: status=installed`, so
+   the former signature error was **not** the cause this time.
+   Read-only original `Fix.sna` inspection revealed those widgets were
+   already instantiated earlier by the distinct normal6/script2
+   preparation branch, *before* normal9/reflex2 enters the page.
+   The experimental branch now validates all 1303 nodes of this
+   script (shape `0xd201f1c8bc668803`) and skips only the
+   V16=0 VIDEO preparation sub-branch, preserving existing native
+   normal9 behavior transition commands and all subsequent Options
+   branches. The installation is atomic with the five prior script
+   clones, with original bytes never modified. The manual test must
+   check no old items remain and that ESC/return visits never show an
+   empty VIDEO menu.
+3. Returning to MENU after gameplay restores the original "Site Rayman2"
+   caption. The log pinpoints `install-refused reason=site-script-validation`
+   on every retry. The validated native row + system browser input
+   monitor is already independent from legacy URL script cloning.
+   The installer now treats the 1995-node old browser-script patch as
+   optional, while installing the authenticated visible label and
+   ShellExecuteA hook on each verified MENU reload. The old URL may
+   still be intercepted and redirected by exact EXE callsite. Manual
+   confirmation of returning to MENU and clicking the link is required.
+
+All these source-only experiments stay in draft PR #52; production
+`main` remains unchanged.
