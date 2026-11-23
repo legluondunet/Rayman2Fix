@@ -560,6 +560,15 @@ bool install_native_disabled_video_choices(
             g_logger(line);
             valid=false;reason="script-shape";break;
         }
+        // Scripts 1 and 4 contain the native focus-sensitive
+        // terminal JFFTXT command. Validate their exact original
+        // structure before any local V14/navigation modifications.
+        const auto* font_plan=k==0u ? &kNativeInfoTextPlans[0] :
+                              k==3u ? &kNativeInfoTextPlans[1] : nullptr;
+        if(font_plan && !native_video_static_font_preflight(
+                copy,plan,*font_plan)) {
+            valid=false;reason="font-focus-preflight";break;
+        }
         if(is_brightness_transition) {
             if(!suppress_native_video_brightness_transition(
                  copy,script_nodes,
@@ -575,6 +584,10 @@ bool install_native_disabled_video_choices(
         if(k>=2u && !restrict_native_video_navigation(
                 copy,kVideoNavigationPlans[k-2u])) {
             valid=false;reason="navigation-assignments";break;
+        }
+        if(font_plan && !freeze_native_video_info_font(
+                copy,*font_plan)) {
+            valid=false;reason="font-focus-assignment";break;
         }
     }
     if(!valid) {
@@ -649,7 +662,7 @@ bool install_native_disabled_video_choices(
         std::memory_order_release);
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
     g_brightness_transition_disabled.store(true,std::memory_order_release);
-    g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1,2,3,4 brightness-transition=suppressed original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
+    g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1,2,3,4 brightness-transition=suppressed font-focus=static-0 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
     return true;
 }
 void restore_native_disabled_video_choices(
