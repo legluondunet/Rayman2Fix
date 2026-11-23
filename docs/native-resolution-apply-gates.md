@@ -759,3 +759,66 @@ CTest includes strict positive/negative geometry checks for the two
 bar pieces and rejects all other producers, similar bottom-screen
 images, NaNs, and unknown menu states. The experiment must still be
 validated by a real Wine/Windows screenshot before merging PR #51.
+
+
+## 23 November 2026 — reported flicker after #1698 (user log 10:18)
+
+Owner's `Rayman2Fix(20261123-101855).log` reports:
+- On **Enter** inside the informational VIDEO panel, the text blinks once.
+- The original RESOLUTION menu appears very briefly upon opening
+  before being replaced by the four graphics-information rows.
+
+**Confirmed from the log (build `b7df02df`, prototype #1698):**
+- The four script copies were approved and installed by t≈3.83s,
+  and `status=menu-video-text-pinned` immediately followed. The old
+  panel's brief appearance is therefore **not explained by a late
+  localization-pointer swap** alone.
+- The brightness-bar filter actually triggers:
+  `status=obsolete-brightness-meter-hidden` at t≈6.84s.
+- The first active VIDEO state is `normal=5/reflex=0/V17=5`
+  (t≈6.98s) and stays there until t≈57.6s, without mode changes,
+  brightness transition or `V51` changes. Thus the one-shot visual
+  reaction to Enter is **not** a whole MENU state change. Its
+  association with the original JFFTXT focus call is a hypothesis,
+  not yet visually proven.
+- The second entry follows `normal=3/reflex=0/V17=0` at ~71.2s,
+  then **V17=1 at ~72.2s**, then V17=0 at ~72.6s, before
+  normal-5/V17=5 at ~73.0s. Previous preparatory suppression only
+  covered V17=0, leaving an uncovered intermediate state. The
+  original four choice-font glyph bands are the likely native
+  transient draw; the title and 3D butterfly are separate routes.
+- Save/select-mode guard counters remain at zero; the output/Glide
+  resolution is unchanged.
+
+**New controlled, fail-closed experiment (#1708):**
+1. `graphics_info_readonly_preparation` admits only the approved
+   normal-3/reflex-0/V17=0 **or 1**, after four authenticated script
+   copies have been installed. The source-verified native **glyph**
+   producer drops the old resolution-choice bands (y≈31..75,
+   bounded x) during that preparation, never the heading (y≈20),
+   unrelated Options screens, or any non-glyph/3D butterfly draw.
+2. The owner-approved original normal-5 scripts 1 and 4 each end in
+   `JFFTXT(V17,1,1.0)`. Their terminal node AST is verified along
+   with the **entire original structural shape** before other
+   script-copy mutations. In the **private copied scripts only**,
+   freeze this render-only JFFTXT focus to integer index zero
+   (`JFFTXT(0,1,1.0)`). That is not a keyboard interception and
+   does not change V17, the native ESC/back transition, the
+   brightness-entry guard, the four information labels or actor
+   position. This should prevent the old native selection highlight
+   from reacting to Enter, but needs a real-game test.
+3. Synthetic CI regressions check both approved terminal calls,
+   exact copy-only operand mutation, denial of unknown script shapes,
+   the normal-3 V17=0/1 scope and the preservation of heading,
+   other menu glyphs, bar and butterfly routes.
+
+**Important distinction:** this reduces *visible* cached-font
+flicker; it does not yet replace all old native scripting. The
+preparation may remain blank until the info page draws, and a
+rendered frame before the worker discovers normal-3 can still
+escape the filter. There is no claim of a visually perfect result
+until a screenshot/log from the owner confirms it.
+
+Butterfly vertical reposition remains pending exact transform
+ownership verification; not changed by this experiment. Do not
+merge PR #51 until the visual test.
