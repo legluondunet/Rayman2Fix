@@ -470,3 +470,61 @@ but neither change can remove native keyboard focus. Any future
 script/input modifications must await the expanded live preflight
 evidence, and must not be presented as a nonselectable UI before a
 real in-game validation.
+
+
+## Native VIDEO disabled-choice experiment — 23 November 2026
+
+The maintainer's #1652 screenshot (07:55) confirms the four
+information rows render uniformly white and the 750-ms scan retries
+locate MENU AI at ~3.84 s instead of ~7.94 s. The original menu still
+appears briefly before the information pointers are installed; do
+not assert flash-free startup. `V17` still walks 1→2→3: the screen
+is not nonselectable.
+
+The approved `menu.sna` defines normal-5 script #3 (430 ScriptNodes)
+and script #4 (517 ScriptNodes). Both initialize the native
+`V14[1..3]` resolution choice states to value **2** (enabled) and
+later assign **3** (highlighted) to the current resolution entry.
+The native Save resolution choice has been observed in state **1**
+(disabled, drawn grey and skipped in actual user input). A new
+memory-only, **shape-locked experiment** replaces exactly the six
+2/3 state literals for V14[1..3] in each of the two script COPIES
+with state **1**. The native Luminosity entry V14[5] is left in
+its original state, all `V17` inputs remain native, and no text
+buffer or butterfly instruction is rewritten.
+
+The two full script structure fingerprints (each node's 16-bit
+padding, nesting depth and kind; excluding pointer/scalar values
+that relocate in memory) must match the source-approved originals:
+script3 `f4cc82cd7d6a21a4`, script4 `d6fbfd33f17ec60b`.
+Each target also validates its exact `Operator_Affect ->
+Operator_Array V14[index] -> Int(2 or 3)` typed AST, index and
+indent, and terminator, *before any copy is changed*. If any
+check fails, the original game runs unchanged. The worker attempts
+script-list CAS only when the verified native controller is **outside
+normal-5** execution. The copied allocations stay alive to avoid
+in-flight interpreter use-after-free. If a swap partially fails,
+the old script-list pointer is conditionally restored and broader
+VIDEO 356/F261 dispatcher guards remain until safe completion.
+
+**Critical video-write safety:** script #3's `VID_SelectResolution`
+and `VID_SaveCurrentResolution` child pointers move when cloned.
+The hook's exact child references are updated to the cloned
+addresses before removing the temporary broad MENU dispatch guard;
+the original normal-19 resolution mode hook is untouched. Without
+this retargeting, cloning the script would have created a dangerous
+mode-write bypass.
+
+**This is a hypothesis-driven test, not yet a validated fix.**
+It assumes that state 1 is used by the engine to exclude unavailable
+options from keyboard selection (as seen on the original grayed
+Save item). Whether all three choices are skipped in the native
+menu, whether Luminosity remains reachable and whether the initial
+text replacement transition stays clean require a Wine game test.
+The preceding `JFFTXTProcedure` full-script hash mismatch is
+not treated as proof that this different six-literal patch works.
+Expected markers are `disabled-options-copies-installed` or the
+explicit `disabled-patch-refused` / `script-shape-mismatch`.
+Do not merge PR #51 before validated screenshots, key traversal,
+brightness and return, and a log confirming that the game mode
+remains unchanged.
