@@ -24,6 +24,7 @@
 #include "rayman2fix/graphics_menu_controller_model.hpp"
 #include "rayman2fix/graphics_menu_controller_vars.hpp"
 #include "rayman2fix/native_graphics_info_policy.hpp"
+#include "rayman2fix/native_graphics_static_text_policy.hpp"
 #include "rayman2fix/native_graphics_info_proto.hpp"
 
 #if !defined(_M_IX86)
@@ -428,6 +429,42 @@ bool original_text_valid(std::uintptr_t p) noexcept {
     }
     return terminated;
 }
+// The previous memory-only script-clone preflight was rejected under Wine.
+// Report WHICH validation gate disagrees, without cloning, swapping or
+// writing ANY game byte. Use the hash-locked approved normal-5 model only.
+void trace_native_static_script_preflight(const MenuAiModel& model) noexcept {
+    if(!model.valid() || !approved() || !g_logger)return;
+    const auto behavior=model.normal_entries+5u*12u;
+    std::uint32_t list=0;
+    std::uint8_t count=0;
+    if(!read32(behavior,list) || !read8(behavior+8u,count) ||
+       count!=5u || !menu_safe_ptr(list,20u)) {
+        g_logger("RUNTIME-STATIC-SCRIPT-DIAG: status=normal5-list-unverified read-only=1");
+        return;
+    }
+    for(const auto& plan:kNativeInfoTextPlans) {
+        const auto slot=std::uintptr_t(list)+plan.script_index*4u;
+        std::uint32_t original=0;
+        const bool slot_writable=writable_slot(slot);
+        const bool ptr_ok=read32(slot,original) &&
+            menu_safe_ptr(original,plan.node_count*8u);
+        std::array<NativeMenuScriptNode,517> local{};
+        const bool bytes_ok=ptr_ok && read_bytes(original,local.data(),
+           plan.node_count*sizeof(NativeMenuScriptNode));
+        const bool hash_ok=bytes_ok &&
+           native_menu_script_fingerprint(local.data(),plan.node_count)==
+              plan.scene_fingerprint;
+        const bool shape_ok=bytes_ok &&
+           make_static_video_font_script(local.data(),plan);
+        char line[240]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-STATIC-SCRIPT-DIAG: script=%u nodes=%u slot_write=%u ptr_valid=%u bytes=%u hash=%u shape=%u read-only=1",
+            plan.script_index,plan.node_count,
+            unsigned(slot_writable),unsigned(ptr_ok),
+            unsigned(bytes_ok),unsigned(hash_ok),unsigned(shape_ok));
+        g_logger(line);
+    }
+}
 bool patch_text_table() noexcept {
     if(g_language_table)return true;
     const auto table=text_slot_table();
@@ -491,6 +528,7 @@ DWORD WINAPI worker(void*) {
     bool was_visible=false;
     bool showed_information_in_menu=false;
     bool reported_brightness_panel=false;
+    bool reported_static_script_preflight=false;
     unsigned last_latch=~0u;
     // Keep the guard active while the process lives. Revert script hooks
     // when the original Menu level is unloaded; never silently expose
@@ -507,6 +545,7 @@ DWORD WINAPI worker(void*) {
                     false,std::memory_order_release);
                 showed_information_in_menu=false;
                 reported_brightness_panel=false;
+                reported_static_script_preflight=false;
                 was_visible=false;
                 last_latch=~0u;
                 restore_text();
@@ -568,6 +607,10 @@ DWORD WINAPI worker(void*) {
                     current.reflex,vars.selection_valid,vars.selection,
                     g_language_table!=0,showed_information_in_menu);
                 if(video_page) {
+                    if(!reported_static_script_preflight) {
+                        reported_static_script_preflight=true;
+                        trace_native_static_script_preflight(current_model);
+                    }
                     reported_brightness_panel=false;
                     g_info_focus_row.store(vars.selection,std::memory_order_release);
                     g_cached_video_text_in_brightness.store(
