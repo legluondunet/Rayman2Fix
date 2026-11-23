@@ -47,6 +47,25 @@ int main() {
     check(!standalone_video_stabilize_native_title(x0,y0,x1,y1));
     check(y0==40.f && y1==45.f);
     check(standalone_video_hide_native_glyphs(true,true,true,false));
+    // Original Fix.sna heading occupies a slightly higher glyph
+    // band than the Menu.sna title; restore it on the *same* baseline.
+    float px0=35.3f,py0=13.6f,px1=39.5f,py1=19.2f;
+    check(standalone_video_stabilize_native_title_for_context(
+        true,px0,py0,px1,py1));
+    check(px0==35.3f && px1==39.5f &&
+          py0==20.0f && py1==25.0f);
+    px0=35.3f;py0=13.6f;px1=39.5f;py1=19.2f;
+    check(!standalone_video_stabilize_native_title_for_context(
+        false,px0,py0,px1,py1));
+    check(py0==13.6f && py1==19.2f);
+    for(float bad_y:{4.0f,33.0f,42.0f,65.0f}) {
+        px0=35.3f;py0=bad_y;px1=39.5f;py1=bad_y+5.0f;
+        check(!standalone_video_stabilize_native_title_for_context(
+            true,px0,py0,px1,py1));
+    }
+    px0=5.0f;py0=13.6f;px1=9.0f;py1=19.2f;
+    check(!standalone_video_stabilize_native_title_for_context(
+        true,px0,py0,px1,py1));
     std::array<NativeMenuScriptNode,430> a{};
     a[0]={0u,0u,1u,0u};
     a[1]={45u,0u,2u,1u};
