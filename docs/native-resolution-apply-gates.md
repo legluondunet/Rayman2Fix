@@ -679,3 +679,27 @@ butterfly is animated, and Escape returns normally. No merge of PR
 #51 until this validation. If another path still enters normal18,
 investigate it separately; do not hide all UI or suppress unknown
 GLI quads by generic geometry.
+
+
+### Additional static-panel focus guard
+
+The first no-brightness prototype review revealed another source of
+flicker: the earlier `graphics_info_video_page` policy deliberately
+excluded `normal=5/reflex=0/V17=5` because V17=5 previously led to
+brightness. With the verified script-2 branch suppressed, **V17=5 is
+still inside the informational page**. Otherwise the worker would
+restore original text pointers every time the native selection visited
+5, producing the same old-label flash even without a brightness
+transition.
+
+New `graphics_info_readonly_video_page` admits V17=5 **only when**
+`g_brightness_transition_disabled=true`, and exclusively for
+normal=5/reflex=0 with an approved menu controller/latch. No other
+submenu is broadened. In this informational state, the GLI font
+palette receives a constant, valid **render-only focus=1** instead
+of inheriting V17. The game variable and input stream are not touched.
+The other four information lines remain opaque white as before.
+
+The synthetic regression tests cover this opt-in V17=5 path, fail-
+closed rejection of normal18/reflex5 and unexpected V17/latch/menu
+states, and the old verified V17=1..4 behavior.
