@@ -114,9 +114,11 @@ inline bool standalone_remove_legacy_video_widgets(
         copy[0]={0u,0u,0u,8u};
         return true;
     }
-    // Preserve the first two native SetAGO scene-position operations,
-    // which may own the animated menu butterfly. Stop before ANY
-    // V11 text-handle assignments and selection-status widget creation.
+    // The two original SetAGO calls (nodes 3 and 15) move the native
+    // butterfly downward even when the V17 selection is frozen. Once
+    // the standalone panel owns VIDEO, terminate the entire *private*
+    // behavior before those transforms. The butterfly remains owned by
+    // the original parent scene; other menus retain their own scripts.
     if(copy[0].type!=0u || copy[0].parameter!=4u ||
        copy[1].type!=12u || copy[1].parameter!=1u ||
        copy[3].type!=4u || copy[3].parameter!=503u ||
@@ -124,7 +126,7 @@ inline bool standalone_remove_legacy_video_widgets(
        copy[26].type!=12u || copy[26].parameter!=21u ||
        copy[27].type!=2u || copy[27].parameter!=11u)
         return false;
-    copy[27]={0u,0u,0u,8u};
+    copy[0]={0u,0u,0u,8u}; // no SetAGO drift behind the panel
     return true;
 }
 
