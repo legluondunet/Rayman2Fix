@@ -820,11 +820,13 @@ DWORD WINAPI worker(void*) {
                 const auto vars=valid_controller ?
                     observe_menu_selection(current.mind,&read32,&read8) :
                     MenuSelectionVars{};
-                const bool video_page=graphics_info_video_page(
+                const bool readonly_page=g_brightness_transition_disabled.load(
+                    std::memory_order_acquire);
+                const bool video_page=graphics_info_readonly_video_page(
                     approved(),in_menu,valid_controller,
                     current.normal,current.reflex,
                     vars.selection_valid,vars.selection,
-                    vars.activate_valid,vars.activate);
+                    vars.activate_valid,vars.activate,readonly_page);
                 const bool brightness_panel=graphics_info_brightness_with_panel(
                     approved(),in_menu,valid_controller,current.normal,
                     current.reflex,vars.selection_valid,vars.selection,
@@ -839,11 +841,12 @@ DWORD WINAPI worker(void*) {
                         trace_native_static_script_preflight(current_model);
                     }
                     reported_brightness_panel=false;
-                    // During the normal-3 preparation stage, V17=0
-                    // denotes no active choice. Never invent a focus
-                    // value merely to tint the four information lines.
+                    // The frozen information panel is not a choice
+                    // list. Give the downstream material renderer one
+                    // stable, valid focus ID, unrelated to the native
+                    // V17 cursor. No game-state or input value is written.
                     g_info_focus_row.store(
-                        video_page ? vars.selection : -1,
+                        video_page ? (readonly_page?1:vars.selection) : -1,
                         std::memory_order_release);
                     g_cached_video_text_in_brightness.store(
                         false,std::memory_order_release);
