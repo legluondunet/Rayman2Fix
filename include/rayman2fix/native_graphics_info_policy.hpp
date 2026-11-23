@@ -32,6 +32,20 @@ constexpr bool graphics_info_video_page(
            selection_valid && selection>=1 && selection<=4 &&
            latch_valid && latch<=1u;
 }
+// Keep the same read-only information glyphs visible while the native
+// BRIGHTNESS slider is selected after a verified VIDEO visit. The previous
+// implementation restored the text immediately, leaving no information
+// above the slider. The independent brightness text handle (385) must
+// remain intact. Only the exact normal=18/reflex=5/V17=5 state qualifies.
+// Do not infer this from an arbitrary V17=5 or an unknown menu screen.
+constexpr bool graphics_info_brightness_with_panel(
+    bool approved_exe,bool menu_level,bool controller_valid,
+    int normal,int reflex,bool selection_valid,int selection,
+    bool video_text_installed,bool previously_showed_information) noexcept {
+    return approved_exe && menu_level && controller_valid &&
+        normal==18 && reflex==5 && selection_valid && selection==5 &&
+        video_text_installed && previously_showed_information;
+}
 constexpr bool graphics_info_text_handle(unsigned id) noexcept {
     return id>=379u && id<=384u;
 }
