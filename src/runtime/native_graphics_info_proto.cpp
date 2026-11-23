@@ -28,6 +28,7 @@
 #include "rayman2fix/native_graphics_info_proto.hpp"
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
 #include "rayman2fix/standalone_video_page.hpp"
+#include "rayman2fix/standalone_video_transition.hpp"
 #endif
 
 #if !defined(_M_IX86)
@@ -491,7 +492,14 @@ struct NativeChoicesPatch {
         std::uintptr_t original=0;
         NativeMenuScriptNode* copy=nullptr;
     };
-    std::array<Slot,4> slots{};
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    // Four normal-5 script copies plus exactly one verified normal-3
+    // VIDEO-open script. All are preflighted before any slot is swapped.
+    static constexpr unsigned kSlotCount=5u;
+#else
+    static constexpr unsigned kSlotCount=4u;
+#endif
+    std::array<Slot,kSlotCount> slots{};
     bool attempted=false;
     bool active=false;
     bool ever_swapped=false;
@@ -508,10 +516,11 @@ bool install_native_disabled_video_choices(
         g_logger("RUNTIME-GRAPHICS-CHOICES: status=disabled-patch-refused reason=normal5-script-list read-only-original=1");
         return false;
     }
-    std::array<NativeChoicesPatch::Slot,4> prepared{};
+    std::array<NativeChoicesPatch::Slot,NativeChoicesPatch::kSlotCount>
+        prepared{};
     bool valid=true;
     const char* reason="unverified";
-    for(unsigned k=0u;k<prepared.size();++k) {
+    for(unsigned k=0u;k<4u;++k) {
         const bool is_brightness_transition=k==1u;
         const auto& plan=kVideoDisablePlans[k==0u?0u:(k-1u)];
         const unsigned script_index=is_brightness_transition ?
@@ -598,6 +607,48 @@ bool install_native_disabled_video_choices(
         }
 #endif
     }
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    if(valid) {
+        // SOURCE-LEVEL VIDEO entry replacement. Normal-3 script 2
+        // is also used by parent Options: its V17!=0 branches are
+        // retained byte-for-byte. Only V17==0 is shortened to its
+        // original native normal-5 transition calls. The source SNA
+        // (1,383 nodes) is authenticated before ANY live pointer CAS.
+        const std::uintptr_t n3=model.normal_entries+3u*12u;
+        std::uint32_t list=0,script=0;
+        std::uint8_t count=0;
+        const std::uintptr_t expected_target=
+            model.normal_entries+5u*12u+4u;
+        if(!read32(n3+4u,list) || !read8(n3+8u,count) ||
+           count!=3u || !menu_safe_ptr(list,3u*4u)) {
+            valid=false;reason="normal3-script-list";
+        } else {
+            const auto slot=std::uintptr_t(list)+2u*4u;
+            const SIZE_T bytes=SIZE_T(kStandalonePreparationOriginalNodes)*
+                sizeof(NativeMenuScriptNode);
+            if(!writable_slot(slot) || !read32(slot,script) ||
+               !menu_safe_ptr(script,unsigned(bytes)) ||
+               expected_target>0xFFFFFFFFu) {
+                valid=false;reason="normal3-script-slot";
+            } else {
+                auto* copy=static_cast<NativeMenuScriptNode*>(
+                    VirtualAlloc(nullptr,bytes,MEM_RESERVE|MEM_COMMIT,
+                                 PAGE_READWRITE));
+                if(!copy) {
+                    valid=false;reason="normal3-script-allocation";
+                } else {
+                    prepared[4]={slot,script,copy};
+                    if(!read_bytes(script,copy,bytes) ||
+                       !standalone_skip_legacy_video_open(
+                           copy,kStandalonePreparationOriginalNodes,
+                           std::uint32_t(expected_target))) {
+                        valid=false;reason="normal3-video-open-shape";
+                    }
+                }
+            }
+        }
+    }
+#endif
     if(!valid) {
         for(auto& item:prepared)
             if(item.copy)VirtualFree(item.copy,0,MEM_RELEASE);
@@ -671,7 +722,7 @@ bool install_native_disabled_video_choices(
     g_guard_menu_video_dispatch.store(false,std::memory_order_release);
     g_brightness_transition_disabled.store(true,std::memory_order_release);
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
-    g_logger("RUNTIME-STANDALONE-VIDEO: old-widgets-not-constructed scripts=3,4 parent-options=untouched selection-dispatch=guarded");
+    g_logger("RUNTIME-STANDALONE-VIDEO: old-widgets-not-constructed normal3-script2=direct-video-open normal5-scripts3,4=terminated other-options-branches=retained selection-dispatch=guarded");
 #else
     g_logger("RUNTIME-GRAPHICS-CHOICES: status=readonly-video-script-copies-installed scripts=1-original,2,3,4 brightness-transition=suppressed font-focus=static-0-video4-only enter-save-status=inert parent-options-preserved=1 original-butterfly=untouched navigation-range=5..5 protected-dispatch-retargeted=1");
 #endif
@@ -700,8 +751,8 @@ void restore_native_disabled_video_choices(
     // interpreter quiescence guarantee that this experiment does not have.
     char line[170]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-GRAPHICS-CHOICES: status=script-copies-restore-attempt confirmed=%u/4 copied-buffers-retained=1",
-        restored);
+        "RUNTIME-GRAPHICS-CHOICES: status=script-copies-restore-attempt confirmed=%u/%u copied-buffers-retained=1",
+        restored,unsigned(state.slots.size()));
     g_logger(line);
     state=NativeChoicesPatch{};
 }
@@ -829,10 +880,16 @@ DWORD WINAPI worker(void*) {
                     g_logger("RUNTIME-GRAPHICS-INFO: status=callbacks-unavailable original-menu-retained preflight-log=1");
             }
             if(guarded && controller_ready &&
-               mind.normal!=5 && !disabled_choices.attempted) {
-                // Never exchange script pointers during normal-5 execution.
-                // Controller discovery on the parent menu normally occurs
-                // before the first VIDEO entry, avoiding startup races.
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+               mind.normal!=3 && mind.normal!=5 &&
+#else
+               mind.normal!=5 &&
+#endif
+               !disabled_choices.attempted) {
+                // Never replace an actively executing script: the
+                // independent build also replaces verified normal-3
+                // script-2 BEFORE its V17==0 VIDEO opening branch.
+                // An all-or-nothing five-script preflight precedes CAS.
                 install_native_disabled_video_choices(disabled_choices,model);
             }
             // All 379..385 JFFTXT references in the approved Menu.sna
