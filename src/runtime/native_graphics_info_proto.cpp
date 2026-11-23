@@ -852,8 +852,8 @@ DWORD WINAPI worker(void*) {
                         if(patch_text_table()) {
                             showed_information_in_menu=true;
                             g_logger(video_prepare ?
-                              "RUNTIME-GRAPHICS-INFO: status=pre-video-information-text-installed scope=verified-normal3-preparation handles=379..384 brightness385=untouched" :
-                              "RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 brightness385=untouched scope=verified-video-page content=information pointer-swap=1");
+                              "RUNTIME-GRAPHICS-INFO: status=pre-video-information-text-installed scope=verified-normal3-preparation handles=379..384 obsolete-brightness385=hidden-if-verified" :
+                              "RUNTIME-GRAPHICS-INFO: status=native-text-installed handles=379..384 obsolete-brightness385=hidden-if-verified scope=verified-video-page content=information pointer-swap=1");
                         } else if(!reported_text_issue &&
                                   DWORD(now-began)>7000u) {
                             reported_text_issue=true;
