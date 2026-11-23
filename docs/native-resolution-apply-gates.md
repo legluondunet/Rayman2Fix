@@ -703,3 +703,59 @@ The other four information lines remain opaque white as before.
 The synthetic regression tests cover this opt-in V17=5 path, fail-
 closed rejection of normal18/reflex5 and unexpected V17/latch/menu
 states, and the old verified V17=1..4 behavior.
+
+
+## 23 November 2026 — user validation and 09:48 log after #1687
+
+User-approved scope for the next pass:
+
+1. Raise the original animated butterfly (without replacing/hiding it).
+2. Remove the obsolete brightness **bar** (its label and action are already
+   suppressed in the preceding experimental four-script prototype).
+3. Keep four static information rows, but clearly distinguish the
+   output/desktop mode from Rayman 2's 16-bit internal Glide mode.
+
+**Grounded log:** `Rayman2Fix(20261123-094810).log`, build `adf458b5`.
+The approved four copies (normal-5 scripts 1/2/3/4) installed:
+`brightness-transition=suppressed`. Localization was installed already
+in normal-3 at t≈5.14s. Normal-5 is observed at t≈5.94s and remains
+active with `V17=5` through t≈131s; there is no observed normal-18 /
+reflex-5 brightness transition. Native VIDEO exits normally around
+t≈134.4s, restoring original labels. Engine mode remains
+`1024x768x16` and no mode-changing call is observed. This supports
+the preceding experiment, though it is not proof for every edition.
+
+**Original slider owner identified at native source:** the owner log
+shows two `screen-image` quads, at `x=60..75.60` and
+`75.60..90`, both `y=85..90`, viewport 1024×768, matching the
+two colored halves of the obsolete bar in the screenshot. They are
+produced by the original 2D screen-image route of
+`GLI_vDraw2DSpriteWithPercent`; the butterfly does **not** use this
+identified source. The next experiment refuses to draw **only these
+two exactly matching quads** if, and only if, the authenticated
+read-only VIDEO panel is active *and* script-2 brightness entry
+suppression succeeded. All 3D content and other native 2D quads pass
+through unmodified. No generic lower-screen mask.
+
+**Clarified labels:** `OUTPUT: 1920x1200 16:10 AUTO 32BIT` for a
+1920×1200, 32-bit Win32 desktop with launcher-selected Auto output;
+`GLIDE: 1024x768x16` for the legacy internal 16-bit Glide buffer.
+The Win32 depth is read via `EnumDisplaySettings` (or an explicit
+GDI fallback), never guessed from Glide. If no depth is detected, it
+is omitted rather than invented. The other two rows remain GPU and
+D3D9 (Win32/Wine-reported).
+
+**Butterfly placement is NOT changed in this revision.** Earlier
+offline analysis found the validated named cursor actor chain and
+action/family links, but specifically did not establish that its
+live transform belongs to the visible butterfly, nor which runtime
+matrix is safe to adjust. Do not modify a guessed SuperObject matrix,
+clamp sprite rectangles or alter V17 to fake a vertical move: all
+could disturb menu input, unrelated sprites, or the animation.
+Research its exact live render ownership before shifting its Y
+coordinate. The original butterfly remains animated and visible.
+
+CTest includes strict positive/negative geometry checks for the two
+bar pieces and rejects all other producers, similar bottom-screen
+images, NaNs, and unknown menu states. The experiment must still be
+validated by a real Wine/Windows screenshot before merging PR #51.
