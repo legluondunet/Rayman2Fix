@@ -193,6 +193,7 @@ void test_video_script1_only_range() {
     put(146u,17u,0u);
     put(149u,19u,0u);
     put(152u,20u,3u);
+    put(165u,17u,0u);
     before[313]={506u,0u,3u,4u};
     before[314]={17u,0u,4u,11u};
     before[315]={1u,0u,4u,12u};
@@ -202,10 +203,10 @@ void test_video_script1_only_range() {
         1u,324u,native_video_script_shape_hash(before.data(),324u),
         {0u,0u,0u},{0u,0u,0u}};
     auto changed=before;
-    check(standalone_video_script1_bound_zero(changed.data(),plan));
+    check(standalone_video_script1_singleton(changed.data(),plan));
     for(unsigned i=0;i<before.size();++i) {
         check(changed[i].parameter==
-            (i==152u?0u:before[i].parameter));
+            ((i==146u||i==149u||i==152u||i==165u)?1u:before[i].parameter));
         check(changed[i].type==before[i].type);
         check(changed[i].indent==before[i].indent);
         check(changed[i].padding==before[i].padding);
@@ -213,7 +214,7 @@ void test_video_script1_only_range() {
     // The native heading JFFTXT remains exactly as original.
     check(changed[315].parameter==1u &&
           changed[316].parameter==0x3f800000u);
-    for(const unsigned at:{146u,149u,152u,313u,314u,315u,316u}) {
+    for(const unsigned at:{146u,149u,152u,165u,313u,314u,315u,316u}) {
         auto bad=before;bad[at].parameter^=1u;
         const auto unchanged=bad;
         check(!standalone_video_script1_bound_zero(bad.data(),plan));
