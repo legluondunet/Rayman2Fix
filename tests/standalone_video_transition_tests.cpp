@@ -6,7 +6,7 @@
 using namespace r2fix;
 void require(bool value) {if(!value)std::abort();}
 int main() {
-    static_assert(kStandalonePreparationNewNodes==875u,
+    static_assert(kStandalonePreparationNewNodes==876u,
                   "VIDEO source branch should shrink to 875 nodes");
     std::array<NativeMenuScriptNode,kStandalonePreparationOriginalNodes> a{};
     for(auto& n:a)n={0u,0u,3u,12u};
@@ -31,19 +31,26 @@ int main() {
     require(hash!=0);
     require(standalone_skip_legacy_video_open(a.data(),unsigned(a.size()),
         hash));
-    for(unsigned n=0;n<10u;++n) {
+    for(unsigned n=0;n<11u;++n) {
         require(a[n].parameter==old[n].parameter);
         require(a[n].type==old[n].type);
         require(a[n].indent==old[n].indent);
     }
     for(unsigned n=10u;n<kStandalonePreparationNewNodes;++n) {
-        const auto& before=old[n+518u-10u];
+        const auto& before=old[n+518u-11u];
         require(a[n].parameter==before.parameter);
         require(a[n].type==before.type);
         require(a[n].indent==before.indent);
     }
-    require(a[10].parameter==70u && a[12].parameter==69u);
-    require(a[14].parameter==0u && a[14].type==0u);
+    // The conditional VIDEO branch must still have its original
+    // body delimiter. Without this, Video fails to open and choosing
+    // Son/Contrôles/Langue can instead open the new page.
+    require(a[10].parameter==8u && a[10].indent==2u &&
+            a[10].type==0u);
+    require(a[11].parameter==70u && a[11].indent==3u);
+    require(a[13].parameter==69u && a[13].indent==3u);
+    require(a[15].parameter==0u && a[15].indent==2u &&
+            a[15].type==0u);
     require(a[kStandalonePreparationNewNodes-1u].type==8u);
     require(!standalone_skip_legacy_video_open(a.data(),1383u,
         hash)); // not valid twice

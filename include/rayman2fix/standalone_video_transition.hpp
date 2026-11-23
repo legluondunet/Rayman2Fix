@@ -7,7 +7,7 @@
 #include <cstring>
 namespace r2fix {
 constexpr unsigned kStandalonePreparationOriginalNodes=1383u;
-constexpr unsigned kStandaloneVideoBranchBody=10u;
+constexpr unsigned kStandaloneVideoBranchBody=11u;
 constexpr unsigned kStandaloneVideoBranchTransfer=518u;
 constexpr unsigned kStandalonePreparationNewNodes=
     kStandaloneVideoBranchBody+
@@ -39,10 +39,17 @@ inline std::uint64_t standalone_script_shape_hash(
 // The *last* two native menu calls in the same branch (nodes 518-521)
 // transition to the verified normal-5 behavior. Branches for SOUND,
 // CONTROLS and LANGUAGE follow at original node 522 and are untouched.
-// Keep the normal-3 entry condition and move its already-verified
-// transition calls and all other branches up before the old widgets.
-// The END remains at original tail and becomes node 874. The game's
-// interpreter uses END to delimit a script. None of the original bytes
+// Critically PRESERVE node 10 (native type=0, value=8, indent=2):
+// it is the conditional body delimiter for the V17==0 VIDEO branch.
+// The previous experimental version overwrote this node and turned the
+// branch into a malformed structure. As the maintainer's live log
+// showed, VIDEO V17=0 then remained in normal-3 while choosing other
+// entries V17=1..3 could incorrectly reach normal-5.
+// Keep the predicate AND its body delimiter intact, and relocate only
+// the two existing native transfer calls (518..521) to nodes 11..14.
+// Keep all subsequent branches byte-for-byte from original node 522
+// onward. The END moves to node 875. The interpreter uses END to
+// delimit the script. None of the original bytes
 // or game assets are written to disk.
 inline bool standalone_skip_legacy_video_open(
     NativeMenuScriptNode* nodes,unsigned count,
@@ -78,6 +85,7 @@ inline bool standalone_skip_legacy_video_open(
        !matches(count-1u,8u,0u,0u))
         return false;
     // All verification is completed before this single private write.
+    // Node 10 is the VIDEO branch delimiter and is NOT overwritten.
     std::memmove(nodes+kStandaloneVideoBranchBody,
                  nodes+kStandaloneVideoBranchTransfer,
                  (count-kStandaloneVideoBranchTransfer)*
