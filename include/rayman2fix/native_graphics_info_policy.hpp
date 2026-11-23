@@ -32,6 +32,20 @@ constexpr bool graphics_info_video_page(
            selection_valid && selection>=1 && selection<=4 &&
            latch_valid && latch<=1u;
 }
+// The approved Menu.sna's normal-3 setup script references the same
+// VIDEO text handles (379/381/382/383/380/385) as normal-5. Wine logs
+// show normal=3/reflex=0/V17=0 immediately before the VIDEO page.
+// Install the replacement localization pointers in this verified
+// preparation state, BEFORE native text widgets cache the old labels.
+// Never treat another normal behavior as a VIDEO entry from V17 alone.
+constexpr bool graphics_info_video_preparation(
+    bool approved_exe,bool menu_level,bool controller_valid,
+    int normal,int reflex,bool selection_valid,int selection,
+    bool latch_valid,unsigned latch) noexcept {
+    return approved_exe && menu_level && controller_valid &&
+        normal==3 && reflex==0 && selection_valid && selection==0 &&
+        latch_valid && latch<=1u;
+}
 // Keep the same read-only information glyphs visible while the native
 // BRIGHTNESS slider is selected after a verified VIDEO visit. The previous
 // implementation restored the text immediately, leaving no information
