@@ -28,11 +28,14 @@ inline std::uint64_t pause_site_script_shape(
     }
     return h;
 }
-inline bool authenticated_pause_site_script(
-    const NativeMenuScriptNode* nodes,unsigned count,
-    std::uint64_t expected=kPauseSiteOriginalScriptShape) noexcept {
-    if(!nodes || count!=kPauseSiteOriginalScriptNodes ||
-       pause_site_script_shape(nodes,count)!=expected)return false;
+// Runtime can have a different shape in other, unrelated AI branches
+// than the disc-original 1282-node script, but the website action
+// itself is independently authenticated by a complete native condition
+// plus its exact procedure and URL-source tree. Never inspect user
+// cursor coordinates or accept an unrelated normal behavior.
+inline bool authenticated_pause_site_branch(
+    const NativeMenuScriptNode* nodes,unsigned count) noexcept {
+    if(!nodes || count!=kPauseSiteOriginalScriptNodes)return false;
     const auto at=[&](unsigned i,std::uint32_t p,
                       std::uint8_t depth,std::uint8_t type) noexcept {
         const auto& node=nodes[i];
@@ -50,6 +53,12 @@ inline bool authenticated_pause_site_script(
         nodes[kPauseSiteUrlNode].padding==0u &&
         menu_safe_ptr(nodes[kPauseSiteUrlNode].parameter) &&
         at(count-1u,0u,0u,8u);
+}
+inline bool authenticated_pause_site_script(
+    const NativeMenuScriptNode* nodes,unsigned count,
+    std::uint64_t expected=kPauseSiteOriginalScriptShape) noexcept {
+    return authenticated_pause_site_branch(nodes,count) &&
+           pause_site_script_shape(nodes,count)==expected;
 }
 inline bool pause_site_action_eligible(int normal,int reflex,
                                        std::uint32_t selection) noexcept {
