@@ -7864,8 +7864,13 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
             settings->output_width,settings->output_height,
             settings->classic_4_3!=0);
 #endif
+#if defined(RAYMAN2FIX_RESEARCH_PROBES) && RAYMAN2FIX_RESEARCH_PROBES
+        // The legacy passive resolution trace is research-only. The
+        // authenticated controller and the production VIDEO feature
+        // above remain independent of this gate and of Debug.Log.
         if(r2fix::menu_passive_diagnostics_required(g_log))
             r2fix::start_graphics_menu_trace(&log_line);
+#endif
 #endif
         // Apply game EXE icon in its own process, independently of ESC audio.
         r2fix::start_game_window_icon_worker(&log_line);
