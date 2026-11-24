@@ -17,6 +17,7 @@
 #include <vector>
 
 namespace r2fix {
+bool pause_video_live_active() noexcept;
 namespace {
 // Keep the independent page below the animated native 3D butterfly.
 // The approved Glide internal canvas is 1024x768, regardless of the
@@ -98,6 +99,10 @@ std::vector<std::uint8_t> g_text_mask;
 std::vector<PanelCoverage> g_panel_mask;
 bool g_prepared=false;
 bool g_prepare_failed=false;
+bool g_native_windows=false;
+DISPLAY_DEVICEA g_primary_display{};
+thread_local bool g_pause_frame_checked=false,g_pause_frame_active=false;
+thread_local bool g_pause_early_failed=false;
 
 FARPROC find_export(HMODULE module,const char* name,
                     const char* decorated) noexcept {
@@ -197,9 +202,60 @@ void primary_display_driver(const DISPLAY_DEVICEA& primary,
     if(matched_version[0])
         std::snprintf(version,version_capacity,"%s",matched_version);
 }
+// Resolve the GPU from GameFrame's own live OpenGL context, not from
+// the primary desktop adapter (which can be a different GPU).
+void update_native_renderer_name() noexcept {
+    if(!g_native_windows)return;
+    char key[64]{},renderer[128]{};
+    std::snprintf(key,sizeof(key),"RAYMAN2FIX_GL_RENDERER_%lu",
+                  static_cast<unsigned long>(GetCurrentProcessId()));
+    const DWORD n=GetEnvironmentVariableA(key,renderer,DWORD(sizeof(renderer)));
+    if(!n || n>=sizeof(renderer))return;
+    DISPLAY_DEVICEA matched{};
+    unsigned matches=0;
+    for(DWORD i=0;i<32u;++i) {
+        DISPLAY_DEVICEA d{};d.cb=sizeof(d);
+        if(!EnumDisplayDevicesA(nullptr,i,&d,0))break;
+        if(d.DeviceID[0] && lstrcmpiA(d.DeviceString,renderer)==0) {
+            matched=d;++matches;
+        }
+    }
+    char friendly[128]{},version[96]{};
+    if(matches==1u)
+        primary_display_driver(matched,friendly,unsigned(sizeof(friendly)),
+                               version,unsigned(sizeof(version)));
+    if(version[0])
+        std::snprintf(g_lines[2].data(),128,"%s",version);
+    else if(g_lines[2][0] && lstrcmpiA(g_lines[1].data(),renderer)!=0) {
+        // No exact association: keep the existing display driver
+        // version explicitly labelled as display, not renderer.
+        char value[128]{};
+        std::snprintf(value,sizeof(value),"%.100s (ecran)",g_lines[2].data());
+        std::snprintf(g_lines[2].data(),128,"%s",value);
+    }
+    std::snprintf(g_lines[1].data(),128,"%s",renderer);
+    // Some drivers expose only a family name even via GL_RENDERER.
+    // A uniquely matched PCI identifier is useful without guessing SKU.
+    if(matches==1u &&
+       (lstrcmpiA(renderer,"AMD Radeon(TM) Graphics")==0 ||
+        lstrcmpiA(renderer,"AMD Radeon Graphics")==0)) {
+        const auto v=pci_token(matched.DeviceID,"VEN_");
+        const auto d=pci_token(matched.DeviceID,"DEV_");
+        if(v && d)std::snprintf(g_lines[1].data(),128,
+            "%s [%.4s:%.4s]",renderer,v,d);
+    }
+    if(g_log) {
+        char msg[330]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-VIDEO-GPU: source=GameFrame-GL_RENDERER name=%s driver-matched=%u display-name=%s",
+            g_lines[1].data(),unsigned(version[0]!=0),g_primary_display.DeviceString);
+        g_log(msg);
+    }
+}
 bool prepare_mask() noexcept {
     if(g_prepared)return true;
     if(g_prepare_failed)return false;
+    update_native_renderer_name();
     HDC screen=GetDC(nullptr);
     if(!screen){g_prepare_failed=true;return false;}
     HDC dc=CreateCompatibleDC(screen);
@@ -348,6 +404,8 @@ void standalone_video_page_configure(StandaloneVideoLogger logger,
         const HMODULE ntdll=GetModuleHandleW(L"ntdll.dll");
         return ntdll && GetProcAddress(ntdll,"wine_get_version")!=nullptr;
     }();
+    g_native_windows=!wine;
+    g_primary_display=primary;
     if(!wine) {
         primary_display_driver(primary,gpu,unsigned(sizeof(gpu)),
                                driver_version,unsigned(sizeof(driver_version)));
@@ -411,14 +469,24 @@ bool standalone_video_page_owns_navigation(bool& main,
     return g_configured.load(std::memory_order_acquire) &&
            (main||pause);
 }
+// Same render-thread frame as the native UI. Only the previously
+// authenticated, installed Pause model may enable early suppression.
+bool standalone_video_page_pause_render_ready() noexcept {
+    if(!g_pause_frame_checked) {
+        g_pause_frame_checked=true;
+        g_pause_frame_active=pause_video_live_active();
+    }
+    return g_pause_frame_active && !g_pause_early_failed &&
+           g_configured.load(std::memory_order_acquire) &&
+           find_glide() && prepare_mask();
+}
 bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& xmax,float& ymax) noexcept {
-    // Do not hide any native glyph before our replacement page has
-    // successfully rendered at least once; unsupported Glide LFB
-    // implementations keep the original UI visible, not a blank page.
+    // MENU retains its existing successful-draw guard. Pause samples
+    // live state before native drawing and preflights the replacement
+    // resources; a failed LFB draw disables early filtering next frame.
     const bool menu=g_visible.load(std::memory_order_acquire);
-    const bool pause=g_pause_visible.load(std::memory_order_acquire);
-    const bool drew=menu ? g_drew.load(std::memory_order_acquire) :
-                          g_pause_drawn_this_visit.load(std::memory_order_acquire);
+    const bool pause=!menu && standalone_video_page_pause_render_ready();
+    const bool drew=menu ? g_drew.load(std::memory_order_acquire) : pause;
     const bool visible=(menu||pause) && drew;
     const float source_ymin=ymin,source_ymax=ymax;
     const bool title=visible &&
@@ -457,7 +525,11 @@ bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& x
 }
 bool standalone_video_page_draw_before_flip() noexcept {
     const bool menu=g_visible.load(std::memory_order_acquire);
-    const bool pause=g_pause_visible.load(std::memory_order_acquire);
+    const bool pause=!menu && pause_video_live_active();
+    g_pause_frame_checked=false;
+    g_pause_frame_active=false;
+    standalone_video_page_set_pause_visible(pause);
+    if(!pause)g_pause_early_failed=false;
     if(!(menu || pause) ||
        !g_configured.load(std::memory_order_acquire))return false;
     if(!find_glide()) {
@@ -467,8 +539,10 @@ bool standalone_video_page_draw_before_flip() noexcept {
     }
     if(!prepare_mask())return false;
     const unsigned panel_y=video_info_panel_y(pause);
-    if(!g_read(kBackBuffer,kX,panel_y,kW,kH,kW*2u,g_pixels.data()))
+    if(!g_read(kBackBuffer,kX,panel_y,kW,kH,kW*2u,g_pixels.data())) {
+        if(pause)g_pause_early_failed=true;
         return false;
+    }
     // Preserve the animated 3D scene behind a subtle translucent
     // midnight-blue panel. Glide2's LFB presents red/blue reversed:
     // input (74,38,18) is the desired visual RGB(18,38,74).
@@ -501,6 +575,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
     }
     if(!g_write(kBackBuffer,kX,panel_y,kRgb565,kW,kH,
                 int(kW*2u),g_pixels.data())) {
+        if(pause)g_pause_early_failed=true;
         if(!g_write_error.exchange(true) && g_log)
             g_log("RUNTIME-STANDALONE-VIDEO: LFB-write-refused original-flip-preserved=1");
         return false;
@@ -508,6 +583,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
     if(!g_drew.exchange(true) && g_log)
         g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=translucent-midnight-blue alpha=100/255 blue-outline=verified-BGR565-blue border-width=2 controls=Escape-only source=MENU-or-verified-ESC-script corner-radius=12 coverage=4x text-supersampling=4x");
     if(pause) {
+        g_pause_early_failed=false;
         g_pause_drawn_this_visit.store(true,std::memory_order_release);
         g_pause_gauge_leak_guard.store(true,std::memory_order_release);
     }
