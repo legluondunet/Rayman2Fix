@@ -1,5 +1,6 @@
 #include "rayman2fix/gamepad_input_policy.hpp"
 #include "rayman2fix/gamepad_control_info.hpp"
+#include "rayman2fix/gamepad_menu_bridge.hpp"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -164,5 +165,33 @@ int main() {
         pad_back_label(PadLabelFamily::xbox) == "B" &&
         pad_back_label(PadLabelFamily::generic) == "East",
         "physical east labeling");
+    // Native DirectInput keyboard merge never replaces physical keyboard
+    // state or changes failed reads, unauthenticated contexts or background.
+    std::uint8_t keys[256]{};
+    keys[0x39] = 0x80; // unrelated physical Space
+    keys[0xC8] = 0x80; // physical Up
+    const auto menu_actions = pad_action_bit(PadAction::up) |
+        pad_action_bit(PadAction::down) | pad_action_bit(PadAction::confirm) |
+        pad_action_bit(PadAction::cancel) | pad_action_bit(PadAction::jump);
+    check(!merge_pad_menu_keys(PadContext::inactive, true, 0, 256, keys, menu_actions),
+          "unknown scene cannot inject");
+    check(!merge_pad_menu_keys(PadContext::gameplay, true, 0, 256, keys, menu_actions),
+          "gameplay not routed through menu bridge");
+    check(!merge_pad_menu_keys(PadContext::menu, false, 0, 256, keys, menu_actions),
+          "background cannot inject");
+    check(!merge_pad_menu_keys(PadContext::menu, true, -1, 256, keys, menu_actions) &&
+          !merge_pad_menu_keys(PadContext::menu, true, 0, 255, keys, menu_actions),
+          "invalid native keyboard read cannot inject");
+    check(!keys[0x1C] && !keys[0x01] && !keys[0xD0] && keys[0x39] == 0x80,
+          "refused buffers untouched");
+    check(merge_pad_menu_keys(PadContext::menu, true, 0, 256, keys, menu_actions) == 3 &&
+          keys[0xC8] == 0x80 && keys[0xD0] == 0x80 &&
+          keys[0x1C] == 0x80 && keys[0x01] == 0x80 && keys[0x39] == 0x80,
+          "merge preserves existing physical state and adds menu-only keys");
+    std::uint8_t video_keys[256]{};
+    check(merge_pad_menu_keys(PadContext::video, true, 0, 256, video_keys, menu_actions) == 1 &&
+          video_keys[0x01] == 0x80 && !video_keys[0x1C] &&
+          !video_keys[0xC8] && !video_keys[0xD0], "VIDEO receives only back");
+
     std::cout << "SDL3 Dreamcast mapping / focus / hotplug policy: OK\n";
 }
