@@ -5729,13 +5729,25 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // additionally apply its verified 60..90 x 85..90 source geometry
     // while the authenticated in-game Pause VIDEO page is drawn.
     // No rounded region masks or 3D actor filtering.
+    // The owner observed the two source-authenticated ScreenImage halves
+    // surviving ESC -> resume. The HUD renderer still submits them after
+    // normal9/reflex2 has gone away. The latch is armed only by an actual
+    // verified Pause VIDEO frame (not by mere menu entry), and the match
+    // stays exact; unrelated textures, glyphs and world sprites pass.
     if(producer==Native2DProducer::ScreenImage &&
        r2fix::readonly_video_brightness_meter_quad(
-           r2fix::standalone_video_page_pause_is_drawn(),route,
-           {xmin,ymin,xmax,ymax})) {
-        static std::atomic<bool> once{false};
-        if(!once.exchange(true,std::memory_order_relaxed))
-            log_line("RUNTIME-PAUSE-VIDEO-PAGE: native-brightness-gauge-suppressed=1 source=ScreenImage exact-halves=60..90/85..90 scene=verified-normal9/reflex2");
+           r2fix::standalone_video_page_pause_is_drawn() ||
+           r2fix::standalone_video_page_suppress_leaked_gauge(),
+           route,{xmin,ymin,xmax,ymax})) {
+        const bool returned_to_game=
+            !r2fix::standalone_video_page_pause_is_drawn();
+        static std::atomic<bool> once_in_menu{false};
+        static std::atomic<bool> once_after_menu{false};
+        auto& marker=returned_to_game?once_after_menu:once_in_menu;
+        if(!marker.exchange(true,std::memory_order_relaxed))
+            log_line(returned_to_game?
+                "RUNTIME-PAUSE-VIDEO-PAGE: leaked-brightness-gauge-suppressed=1 source=ScreenImage exact-halves=60..90/85..90 state=after-verified-pause-video gameplay-HUD=untouched":
+                "RUNTIME-PAUSE-VIDEO-PAGE: native-brightness-gauge-suppressed=1 source=ScreenImage exact-halves=60..90/85..90 scene=verified-normal9/reflex2");
         return;
     }
 #endif
