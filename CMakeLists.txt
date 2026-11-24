@@ -227,6 +227,11 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  if(WIN32)
+    # Explicit CI smoke test against an audited absolute DLL path.
+    # No link dependency on SDL3 in the launcher or game runtime yet.
+    add_executable(sdl3_x86_smoke tests/sdl3_x86_smoke.cpp)
+  endif()
   # SDL3 phase 0: pure focus/hotplug transition policy, no runtime input.
   add_executable(gamepad_input_policy_tests tests/gamepad_input_policy_tests.cpp)
   target_include_directories(gamepad_input_policy_tests PRIVATE
