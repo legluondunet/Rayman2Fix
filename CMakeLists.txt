@@ -214,6 +214,9 @@ if(WIN32)
       message(FATAL_ERROR "SDL3 x86 or zlib notice does not match audited release 3.4.20")
     endif()
     target_compile_definitions(Rayman2Fix PRIVATE RAYMAN2FIX_BUNDLED_SDL3=1)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_BUNDLED_SDL3=1)
+    target_sources(Rayman2FixRuntime PRIVATE src/runtime/sdl_gamepads.cpp)
+    target_link_libraries(Rayman2FixRuntime PRIVATE rayman2_crypto)
     file(GENERATE
       OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_sdl3.rc"
       CONTENT "1107 RCDATA \"${SDL3_DLL}\"\n1108 RCDATA \"${SDL3_NOTICE}\"\n")
@@ -253,7 +256,8 @@ if(BUILD_TESTING)
   if(WIN32)
     # Explicit CI smoke test against an audited absolute DLL path.
     # No link dependency on SDL3 in the launcher or game runtime yet.
-    add_executable(sdl3_x86_smoke tests/sdl3_x86_smoke.cpp)
+    add_executable(sdl3_x86_smoke tests/sdl3_x86_smoke.cpp src/runtime/sdl_gamepads.cpp)
+    target_link_libraries(sdl3_x86_smoke PRIVATE rayman2_crypto)
   endif()
   # SDL3 phase 0: pure focus/hotplug transition policy, no runtime input.
   add_executable(gamepad_input_policy_tests tests/gamepad_input_policy_tests.cpp)
