@@ -1,6 +1,6 @@
 # Rayman2Fix — SDL3 manettes, étape 0 : politique de focus et hotplug
 
-Statut : **base de tests uniquement**. Ce patch ne fait **pas encore fonctionner une manette dans Rayman 2**. L’exécutable, le runtime, les ressources embarquées et le comportement du clavier sont inchangés.
+Statut : **acquisition SDL3 en lecture seule**. Le lanceur embarque SDL3, et le runtime prépare les échantillons d'une manette active sans les transmettre au moteur. Les entrées clavier/DirectInput et les menus natifs restent inchangés.
 
 ## Pourquoi commencer ici ?
 
@@ -149,6 +149,36 @@ Windows CI 45411813631 verified the official SDL 3.4.20 x86 dependency:
 - SDL3.dll SHA-256: `6d7e653aa9c762ceda4fffc054a504dcce273e016eb9f1fe079b6409a058a9f7`
 - Original zlib notice SHA-256: `1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd`
 
-Standard x86 CI supplies the audited directory to CMake. Both extracted hashes are pinned at configure time. RCDATA 1107 contains SDL3.dll and 1108 contains its original license. Normal provisioning compares installed bytes with the embedded payload, stages exclusively and replaces atomically if necessary. Deployment targets `game/SDL3.dll` and `docs/SDL3-LICENSE.txt`, per maintainer preference. The fresh-install workspace permits the DLL, and atomic CD publication copies and verifies its pinned SHA-256 separately from the CD receipt. `mods/` remains reserved for mod assets, not runtime DLLs. The notice is provisioned first, without altering the GPLv3 or GameFrame notices. No download or configuration by the user, no permanent backup, no global DLL installation. Unbundled developer builds remain possible. The DLL is not yet loaded by the game. Later runtime initialization must use the absolute installation-owned path, verify provenance and fail back to native keyboard input if unavailable. Do not load from the process search path.
+Standard x86 CI supplies the audited directory to CMake. Both extracted hashes are pinned at configure time. RCDATA 1107 contains SDL3.dll and 1108 contains its original license. Normal provisioning compares installed bytes with the embedded payload, stages exclusively and replaces atomically if necessary. Deployment targets `game/SDL3.dll` and `docs/SDL3-LICENSE.txt`, per maintainer preference. The fresh-install workspace permits the DLL, and atomic CD publication copies and verifies its pinned SHA-256 separately from the CD receipt. `mods/` remains reserved for mod assets, not runtime DLLs. The notice is provisioned first, without altering the GPLv3 or GameFrame notices. No download or configuration by the user, no permanent backup, no global DLL installation. Unbundled developer builds remain possible. The read-only runtime now uses the absolute game-local path and verifies the pinned SHA-256 before loading SDL3. Native keyboard/DirectInput remain unchanged. No global DLL search or replacement of engine input is allowed.
 
 Tests exercise initial deployment, repeat provisioning, replacement of corrupt DLL and notice, and preservation across atomic CD publication. This is packaging only, not proof of physical controller functionality.
+
+## In-game acquisition (phase 2, read-only)
+
+`SdlGamepads` binds the verified x86 ABI, initializes only GAMEPAD, disables
+gamepad event delivery, manually updates and polls the active controller,
+and selects the first successfully opened device by instance ID. The active
+device is retained until disconnected. Scans are spaced 500 ms apart, and
+disconnect publishes a neutral sample before reassignment. SDL family IDs
+2/3 indicate Xbox, 4/5/6 PlayStation; others use the generic labels.
+No gamepad buttons or axes are read for foreground=false.
+
+The standalone smoke uses the actual acquisition implementation, checks
+refusal of nonabsolute/missing DLL paths, focus-neutral sampling, explicit
+shutdown and reinitialization. In the game, initialization is deferred to
+the existing authenticated camera/window thread, after existing audio and
+intro decisions. The game instance has process lifetime; do not unload
+SDL under DllMain. Explicit same-thread shutdown is tested by the smoke.
+The logs `RUNTIME-SDL3:` and `RUNTIME-SDL3-SAMPLE:` report initialization,
+connection/disconnection, focus and bounded abstract mapping samples.
+The latter uses the gameplay policy for diagnostics only, not proof of
+the current native context or any game control injection.
+
+The transition gate independently requires physical neutral input on
+initial attach, focus return, device change and context change. It also
+suppresses analog movement while blocked, including radial diagonals and
+buttons ignored on information screens. CI covers these cases. Native
+action bindings, analog engine input, safe removal of duplicate native
+controller input and menu replacement still need source verification.
+A diagnostic build must be clearly identified as read-only until those
+are implemented.
