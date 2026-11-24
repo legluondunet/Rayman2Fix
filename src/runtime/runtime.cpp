@@ -5111,7 +5111,7 @@ int intro_next_level_status(std::uintptr_t base) {
     if(name[0]==0)return 0; // none
     return std::strcmp(name,kAfterIntroLevel)==0 ? 1 : 2; // expected / other
 }
-void poll_second_intro_skip() {
+void poll_second_intro_skip(bool pad_skip_down = false) {
     if(!g_skip_cinematics)return;
     const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
     if (!native_change || !g_current_level) return;
@@ -5165,7 +5165,7 @@ void poll_second_intro_skip() {
     const bool down = foreground &&
         ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0 ||
          (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0 ||
-         (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
+         (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0 || pad_skip_down);
     if(in_intro) {
         ++input_polls;
         if(down)++down_polls;
@@ -5271,12 +5271,59 @@ void poll_second_intro_skip() {
 }
 
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
-// Read-only first in-game acquisition phase. Start only on the authenticated
-// game camera/window thread, never on the remote initializer or HUD worker.
-// SDL's state is deliberately not merged into DirectInput yet. No action,
-// including intro skip, is sent to the native game in this phase.
-void poll_sdl3_readonly() noexcept {
+// Cache is owned exclusively by the authenticated original game thread.
+std::atomic<DWORD> g_sdl_input_owner{0};
+r2fix::PadContext g_sdl_input_context = r2fix::PadContext::inactive;
+std::uint32_t g_sdl_input_actions = 0;
+DWORD g_sdl_input_tick = 0;
+
+r2fix::PadContext sdl_native_context() noexcept {
+    using r2fix::PadContext;
+    if (g_game_camera_thread_id.load(std::memory_order_acquire) != GetCurrentThreadId())
+        return PadContext::inactive;
+    char level[30]{};
+    SIZE_T copied = 0;
+    const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    if (!base || !ReadProcessMemory(GetCurrentProcess(),
+        reinterpret_cast<const void*>(base + kLevelNameRva), level, sizeof(level), &copied) ||
+        copied != sizeof(level) || !std::memchr(level, 0, sizeof(level)))
+        return PadContext::inactive;
+    if (g_skip_cinematics && r2fix::is_second_intro(level))
+        return PadContext::cinematic;
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    bool main_video = false, pause_video = false;
+    const bool video = r2fix::standalone_video_page_owns_navigation(main_video, pause_video);
+    if (video && pause_video) return PadContext::video;
+#endif
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+    if (_stricmp(level, "menu") == 0) {
+        r2fix::MenuAiModel model{};
+        r2fix::MenuAiState state{};
+        if (r2fix::get_verified_menu_controller(model, state) &&
+            state.normal >= 0 && state.reflex >= 0) {
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+            if (video && main_video) return PadContext::video;
+            if (state.normal == 5) return PadContext::inactive;
+#endif
+            return PadContext::menu;
+        }
+    }
+#endif
+    return PadContext::inactive;
+}
+std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept {
+    if (g_sdl_input_owner.load(std::memory_order_acquire) != GetCurrentThreadId() ||
+        !game_window_is_foreground() || g_sdl_input_context != expected ||
+        DWORD(GetTickCount() - g_sdl_input_tick) > 100u ||
+        sdl_native_context() != expected)
+        return 0;
+    return g_sdl_input_actions;
+}
+
+// First scoped native routes: authenticated MENU/VIDEO and Jail_20 only.
+void poll_sdl3_native() noexcept {
     static r2fix::SdlGamepads pads;
+    static r2fix::PadTransitionGate gate;
     static bool attempted = false;
     static bool initialized = false;
     static DWORD owner = 0;
@@ -5310,11 +5357,18 @@ void poll_sdl3_readonly() noexcept {
         }
     }
     if (!initialized || owner != tid) return;
-    // Use gameplay context ONLY to exercise the abstract mapping in logs.
-    // This does not assert the native scene is gameplay.
-    const auto sample = pads.poll(foreground, r2fix::PadContext::gameplay);
-    const auto buttons = r2fix::pad_actions(sample);
-    const auto motion = r2fix::pad_movement(sample);
+    const auto context = sdl_native_context();
+    const auto sample = pads.poll(foreground, context);
+    const auto transitions = gate.update(sample);
+    g_sdl_input_context = context;
+    g_sdl_input_actions = transitions.held;
+    g_sdl_input_tick = GetTickCount();
+    g_sdl_input_owner.store(tid, std::memory_order_release);
+    // Abstract gameplay diagnostics only; native output stays scoped.
+    auto diagnostic = sample;
+    diagnostic.context = r2fix::PadContext::gameplay;
+    const auto buttons = r2fix::pad_actions(diagnostic);
+    const auto motion = r2fix::pad_movement(diagnostic);
     const bool moving = motion.x != 0 || motion.y != 0;
     const DWORD now = GetTickCount();
     const bool changed = sample.device_id != last_device || foreground != last_focus ||
@@ -5323,9 +5377,10 @@ void poll_sdl3_readonly() noexcept {
     if (g_log && changed && reports < 128 && (!reports || DWORD(now-last_report)>=50)) {
         char msg[256]{};
         std::snprintf(msg, sizeof(msg),
-            "RUNTIME-SDL3-SAMPLE: id=%u foreground=%u actions=0x%04x lx=%d ly=%d rx=%d lt=%d rt=%d native-input=unchanged",
+            "RUNTIME-SDL3-SAMPLE: id=%u foreground=%u actions=0x%04x lx=%d ly=%d rx=%d lt=%d rt=%d context=%u native-actions=0x%04x",
             unsigned(sample.device_id), unsigned(foreground), unsigned(buttons),
-            sample.left_x, sample.left_y, sample.right_x, sample.left_trigger, sample.right_trigger);
+            sample.left_x, sample.left_y, sample.right_x, sample.left_trigger, sample.right_trigger,
+            unsigned(context), unsigned(transitions.held));
         log_line(msg);
         last_device = sample.device_id;
         last_focus = foreground;
@@ -5376,7 +5431,12 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     const bool first_fallback=fallback_bit &&
         !(g_render_poll_fallback_reported.fetch_or(
               fallback_bit,std::memory_order_relaxed)&fallback_bit);
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    poll_second_intro_skip((sdl_fresh_actions(r2fix::PadContext::cinematic) &
+        r2fix::pad_action_bit(r2fix::PadAction::skip)) != 0);
+#else
     poll_second_intro_skip();
+#endif
 #if RAYMAN2FIX_AUDIO_HOOKS
     poll_audio_pause_trace();
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
@@ -5396,7 +5456,7 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     poll_learn_intro_skip();
 #endif
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
-    poll_sdl3_readonly();
+    poll_sdl3_native();
 #endif
     if(first_fallback && g_log) {
         char msg[220]{};
@@ -7771,6 +7831,13 @@ void start_hud_monitor() {
     CloseHandle(thread);
 }
 } // namespace
+
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept {
+    return sdl_fresh_actions(video ? r2fix::PadContext::video :
+                                     r2fix::PadContext::menu);
+}
+#endif
 
 extern "C" __declspec(dllexport) unsigned int __cdecl Rayman2Fix_RuntimeApiVersion() {
     return 2;
