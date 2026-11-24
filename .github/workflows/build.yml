@@ -2,12 +2,20 @@ name: Build Rayman2Fix bootstrap
 
 on:
   push:
-    branches: [ main, feat/bootstrap-cd-images, integration/video-pages-release-candidate ]
+    branches: [ main ]
   pull_request:
-    # Standalone VIDEO research is stacked on the unmerged graphics-info
-    # study, so its draft PR targets this research branch, not main.
-    branches: [ main, research/native-resolution-menu-state ]
+    branches: [ main ]
   workflow_dispatch:
+    inputs:
+      research:
+        description: Optional additional research executable (manual only)
+        type: choice
+        default: none
+        options:
+          - none
+          - audio-trace
+          - esc-music
+          - resolution-menu
 
 permissions:
   contents: read
@@ -425,7 +433,7 @@ jobs:
           name: Rayman2Fix-Windows-x86-bootstrap
           path: package/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
       - name: Verify standard x86 runtime has no audio research hooks
         shell: pwsh
         run: |
@@ -452,7 +460,7 @@ jobs:
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Standard DLL included research probes' }
       - name: Build separate research-only audio trace launcher
-        if: github.event_name != 'pull_request' || (github.head_ref != 'research/native-resolution-menu-state' && github.head_ref != 'research/standalone-video-page')
+        if: github.event_name == 'workflow_dispatch' && inputs.research == 'audio-trace'
         shell: pwsh
         run: |
           # Reuse the pinned already-built GameFrame resources. No original
@@ -474,7 +482,7 @@ jobs:
           if (!(Test-Path audio-trace/Rayman2Fix.exe)) { throw 'Audio trace launcher not produced' }
           $global:LASTEXITCODE = 0
       - name: Verify the research EXE deploys the exact corrected DLL
-        if: github.event_name != 'pull_request' || (github.head_ref != 'research/native-resolution-menu-state' && github.head_ref != 'research/standalone-video-page')
+        if: github.event_name == 'workflow_dispatch' && inputs.research == 'audio-trace'
         shell: pwsh
         run: |
           # Checking the DLL on disk before packaging is not enough:
@@ -509,16 +517,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Embedded corrected audio trace marker check failed' }
           $global:LASTEXITCODE = 0
       - name: Upload optional sound-pause research build
-        if: github.event_name != 'pull_request' || (github.head_ref != 'research/native-resolution-menu-state' && github.head_ref != 'research/standalone-video-page')
+        if: github.event_name == 'workflow_dispatch' && inputs.research == 'audio-trace'
         uses: actions/upload-artifact@v4
         with:
           name: Rayman2Fix-Windows-x86-audio-trace
           path: audio-trace/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 1
 
       - name: Build separately gated ESC music Wine prototype
-        if: github.event_name != 'pull_request' || (github.head_ref != 'research/native-resolution-menu-state' && github.head_ref != 'research/standalone-video-page')
+        if: github.event_name == 'workflow_dispatch' && inputs.research == 'esc-music'
         shell: pwsh
         run: |
           # This is not a user-facing release. The output contains only our
@@ -545,7 +553,7 @@ jobs:
           Copy-Item build/Release/Rayman2Fix.exe esc-prototype/Rayman2Fix.exe
           $global:LASTEXITCODE = 0
       - name: Verify ESC prototype EXE contains the exact new injected DLL
-        if: github.event_name != 'pull_request' || (github.head_ref != 'research/native-resolution-menu-state' && github.head_ref != 'research/standalone-video-page')
+        if: github.event_name == 'workflow_dispatch' && inputs.research == 'esc-music'
         shell: pwsh
         run: |
           New-Item -Path esc-prototype-smoke -ItemType Directory -Force | Out-Null
@@ -566,16 +574,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Prototype DLL marker missing after deployment' }
           $global:LASTEXITCODE = 0
       - name: Upload opt-in experimental ESC music launcher
-        if: github.event_name != 'pull_request' || (github.head_ref != 'research/native-resolution-menu-state' && github.head_ref != 'research/standalone-video-page')
+        if: github.event_name == 'workflow_dispatch' && inputs.research == 'esc-music'
         uses: actions/upload-artifact@v4
         with:
           name: Rayman2Fix-Windows-x86-esc-music-prototype
           path: esc-prototype/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
       - name: Build isolated Resolution menu research launcher
-        if: github.event_name == 'pull_request' && (github.head_ref == 'research/native-resolution-menu-state' || github.head_ref == 'research/standalone-video-page')
+        if: github.event_name == 'workflow_dispatch' && inputs.research == 'resolution-menu'
         shell: pwsh
         run: |
           # The normal artifact is already uploaded. Reuse pinned GameFrame
@@ -614,13 +622,13 @@ jobs:
           }
           $global:LASTEXITCODE = 0
       - name: Upload opt-in Resolution menu research build
-        if: github.event_name == 'pull_request' && (github.head_ref == 'research/native-resolution-menu-state' || github.head_ref == 'research/standalone-video-page')
+        if: github.event_name == 'workflow_dispatch' && inputs.research == 'resolution-menu'
         uses: actions/upload-artifact@v4
         with:
           name: Rayman2Fix-Windows-x86-native-graphics-menu-prototype
           path: resolution-trace/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
   linux-tests:
     runs-on: ubuntu-latest
