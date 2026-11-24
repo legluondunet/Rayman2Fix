@@ -5341,16 +5341,19 @@ void observe_native_ipt_readonly(r2fix::PadContext context) noexcept {
     if(!g_log || !game_window_is_foreground()) return;
     using namespace r2fix;
     static DWORD last=0;
-    static unsigned attempts=0, reports=0;
+    static unsigned attempts=0;
+    static unsigned reports[3][kIptObservedActions]{};
+    static bool exhausted=false;
+    static unsigned layouts=0;
     static IptTableHeader prior_header{};
     static IptReadbacks prior{};
     static IptNames names{};
-    static PadContext prior_context=PadContext::inactive;
+    static unsigned prior_scope=3u;
     static bool have_names=false;
     const DWORD now=GetTickCount();
     if(last && DWORD(now-last)<125u)return;
     last=now;
-    if(reports>=128u)return;
+    if(exhausted)return;
     const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     const auto read=[](std::uintptr_t addr,void* out,SIZE_T size) {
         SIZE_T got=0;
@@ -5361,6 +5364,11 @@ void observe_native_ipt_readonly(r2fix::PadContext context) noexcept {
     IptTableHeader h{},after{};
     IptReadbacks rows{};
     const auto header=base+kIptCandidateRva+kIptTableHeaderOffset;
+    // Reserve separate samples for the actual playable scene. Early MENU
+    // and loading counters must not exhaust the later movement budget.
+    const unsigned scope=(context==PadContext::menu || context==PadContext::video) ? 0u :
+        (context==PadContext::inactive && g_learn_handover &&
+         intro_native_engine_mode(base)==int(kIntroEnginePlaying)) ? 2u : 1u;
     const auto refuse=[&](const char* reason) {
         have_names=false;
         if(attempts++<3u) {
@@ -5384,6 +5392,7 @@ void observe_native_ipt_readonly(r2fix::PadContext context) noexcept {
         identity_changed=identity_changed || rows[i].name!=prior[i].name;
     }
     if(identity_changed) {
+        if(layouts>=4u) { exhausted=true; return; }
         IptNames observed{};
         for(unsigned i=0;i<rows.size();++i) {
             auto& n=observed[i];
@@ -5394,6 +5403,7 @@ void observe_native_ipt_readonly(r2fix::PadContext context) noexcept {
         }
         names=observed;
         have_names=true;
+        ++layouts;
         const unsigned anchors=ipt_reference_anchors(names);
         char msg[160]{};
         std::snprintf(msg,sizeof(msg),
@@ -5409,26 +5419,28 @@ void observe_native_ipt_readonly(r2fix::PadContext context) noexcept {
         // Require all four independent reference names before recording
         // any changing native values. Names alone never authorize writes.
         if(anchors!=15u) {
-            reports=128u;
+            exhausted=true;
             log_line("RUNTIME-IPT-PROBE: reference-anchors-unconfirmed observation-stopped=1");
             return;
         }
     }
-    const bool context_changed=prior_context!=context;
-    for(unsigned i=0;i<rows.size() && reports<128u;++i) {
-        if(!identity_changed && !context_changed && !ipt_entry_changed(rows[i],prior[i]))continue;
+    const bool scope_changed=prior_scope!=scope;
+    for(unsigned i=0;i<rows.size();++i) {
+        const unsigned limit=scope==2u ? 8u : 2u;
+        if(reports[scope][i]>=limit)continue;
+        if(!identity_changed && !scope_changed && !ipt_entry_changed(rows[i],prior[i]))continue;
         // Raw bits deliberately avoid assuming float or integer representation.
         char msg[200]{};
         std::snprintf(msg,sizeof(msg),
-            "RUNTIME-IPT-STATE: context=%u entry=%u name=%s state=%ld analog-bits=0x%08X active=%u",
-            unsigned(context),i,names[i].data(),long(rows[i].state),
+            "RUNTIME-IPT-STATE: scope=%u context=%u entry=%u name=%s state=%ld analog-bits=0x%08X active=%u",
+            scope,unsigned(context),i,names[i].data(),long(rows[i].state),
             unsigned(rows[i].analog_bits),unsigned(rows[i].active));
         log_line(msg);
-        ++reports;
+        ++reports[scope][i];
     }
     prior_header=h;
     prior=rows;
-    prior_context=context;
+    prior_scope=scope;
 }
 
 // First scoped native routes: authenticated MENU/VIDEO and Jail_20 only.

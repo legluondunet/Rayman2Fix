@@ -227,7 +227,10 @@ and analog values. Candidate first indices 0/1 (axes), 10/11 (jump/fire).
 The new Log=1 read-only observation uses the already verified game thread,
 bounds and double-reads the table header, checks layout and all names,
 and checks those four independent name anchors before logging changing
-native state signs and raw analog bits. It logs at most 128 state entries,
+native state signs and raw analog bits. It reserves per-entry budgets for
+MENU, loading/cinematics, and post-Learn_10 playable-scene candidates
+(maximum 336 state entries and four candidate layouts), so earlier menu
+navigation cannot exhaust the later analog observation budget. It
 does not report pointer values, and never writes to the table or calls a
 candidate engine function. Keyboard controls and SDL menu routes remain
 unchanged. A candidate match must be confirmed against the approved CD
