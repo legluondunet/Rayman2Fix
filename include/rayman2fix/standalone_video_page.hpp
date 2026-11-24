@@ -16,6 +16,12 @@ void standalone_video_page_set_visible(bool visible) noexcept;
 // Separate ESC in-game model, never inferred from the MENU controller.
 void standalone_video_page_set_pause_visible(bool visible) noexcept;
 bool standalone_video_page_pause_is_drawn() noexcept;
+// A verified VIDEO visit can leave its two obsolete native brightness
+// images visible after returning to Options or gameplay. This scope is
+// calculated by the authenticated Pause model observer; never suppress
+// unrelated sound/options controls or native gameplay HUD in fresh runs.
+void standalone_video_page_set_leaked_gauge_visible(bool suppress) noexcept;
+bool standalone_video_page_suppress_leaked_gauge() noexcept;
 // True only when this own-panel has rendered in an authenticated
 // MENU or Pause VIDEO scene. Inputs in all other scenes are untouched.
 bool standalone_video_page_owns_navigation(bool& main,bool& pause) noexcept;
