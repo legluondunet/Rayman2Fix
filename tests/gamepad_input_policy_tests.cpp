@@ -18,6 +18,9 @@ int main() {
     a.south = true;
     auto e = gate.update({});
     check(!e.eligible && !e.held && !e.pressed, "no pad neutral");
+    check(!gate.update(a).held, "initial held button suppressed");
+    a.south = false; check(!gate.update(a).held, "initial neutral rearms");
+    a.south = true;
     e = gate.update(a);
     check(e.eligible && has(e.pressed, PadAction::jump), "south jumps");
     e = gate.update(a);
@@ -27,16 +30,22 @@ int main() {
     check(!e.eligible && has(e.released, PadAction::jump) && !e.held, "focus release");
     check(!gate.update(a).released, "no duplicate release");
     a.foreground = true;
-    check(has(gate.update(a).pressed, PadAction::jump), "focus restored");
+    check(!gate.update(a).held, "focus restored with held button suppressed");
+    a.south = false; gate.update(a);
+    a.south = true; check(has(gate.update(a).pressed, PadAction::jump), "fresh focus press");
     a.connected = false;
     check(has(gate.update(a).released, PadAction::jump), "unplug release");
     check(!gate.update(a).released, "unplug once");
     a.connected = true; a.device_id = 8;
-    check(has(gate.update(a).pressed, PadAction::jump), "reconnect");
+    check(!gate.update(a).held, "reconnected held button suppressed");
+    a.south = false; gate.update(a);
+    a.south = true; check(has(gate.update(a).pressed, PadAction::jump), "fresh reconnect press");
     a.device_id = 9;
     e = gate.update(a);
-    check(!e.eligible && has(e.released, PadAction::jump), "switch releases");
-    check(has(gate.update(a).pressed, PadAction::jump), "fresh owner");
+    check(e.eligible && !e.held && has(e.released, PadAction::jump), "switch releases");
+    check(!gate.update(a).held, "new owner held suppressed");
+    a.south = false; gate.update(a);
+    a.south = true; check(has(gate.update(a).pressed, PadAction::jump), "fresh owner press");
     a.device_id = 0;
     check(!gate.update(a).eligible, "invalid device");
 
@@ -97,7 +106,7 @@ int main() {
     check(!pad_actions(a), "unknown context fail closed");
 
     PadTransitionGate contexts;
-    a = active(PadContext::menu); a.south = true;
+    a = active(PadContext::menu); contexts.update(a); a.south = true;
     check(has(contexts.update(a).pressed, PadAction::confirm), "menu confirm");
     a.context = PadContext::cinematic;
     e = contexts.update(a);
@@ -119,6 +128,23 @@ int main() {
         "controller info only back");
     a.foreground = false;
     check(!pad_actions(a), "controller info background ignores back");
+
+    // Held input ignored by an info screen must not become a jump later.
+    PadTransitionGate info;
+    a = active(PadContext::controller_info); info.update(a);
+    a.south = true; check(!info.update(a).held, "info ignores held south");
+    a.context = PadContext::gameplay;
+    check(!info.update(a).held && !info.update(a).held, "ignored button cannot leak");
+    a.south = false; a.left_x = a.left_y = 7000;
+    check(!info.update(a).movement.x, "diagonal still outside radial deadzone");
+    a.left_x = a.left_y = 0; info.update(a);
+    a.left_x = 16000;
+    check(info.update(a).movement.x > 0, "fresh movement accepted");
+    a.foreground = false;
+    check(!info.update(a).movement.x, "unfocused analog neutral");
+    a.foreground = true;
+    check(!info.update(a).movement.x && !info.update(a).movement.x,
+          "held analog cannot cross focus boundary");
 
     check(kPadControlRows.size() == 11, "all approved controls presented");
     for (const auto& row : kPadControlRows) {
