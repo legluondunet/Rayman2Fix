@@ -104,3 +104,41 @@ pas encore reliées aux commandes natives. L'identité des actions
 Connaissance du monde / Murphy et le comportement exact en nage restent
 à vérifier sur le moteur PC ; ne pas les simuler avec des touches
 arbitraires.
+
+## Menu Contrôleur — contrat approuvé
+
+Le mapping Dreamcast enrichi est unique, sans remapping, profil ni option
+INI pour cette première release. Le menu natif Contrôleur devient une
+page informative en lecture seule, accessible au clavier même si aucune
+manette n'est connectée.
+
+- Conserver le titre, les transitions et les éléments décoratifs natifs
+  lorsque leur identité est vérifiée. Réutiliser la présentation du panneau
+  VIDEO (bleu nuit, opacité 40 %, contour bleu, angles arrondis, texte lissé,
+  proportions 4:3) plutôt que créer une fenêtre externe.
+- Une silhouette originale générique de manette à gauche, les commandes
+  à droite. La silhouette ne doit pas reprendre des images commerciales.
+  Les onze lignes du modèle `gamepad_control_info.hpp` sont la référence
+  des libellés; les actions et libellés génériques seront localisés dans
+  la langue du jeu. Vérifier leur lisibilité avant de figer la géométrie.
+- En-tête : famille de la manette active, identifiée via SDL3 (Xbox,
+  PlayStation, générique). Si aucune manette : afficher explicitement
+  « Aucune manette connectée » et les positions physiques génériques,
+  sans masquer la page. Ne pas inférer les symboles physiques d'une
+  manette inconnue à partir d'un nom de périphérique.
+- Actualiser les libellés sur connexion, déconnexion ou changement de
+  manette active. Ne jamais modifier le mapping sous-jacent.
+- Aucun curseur de sélection ni édition; retour via Échap ou bouton
+  East (B / Rond / bouton droit). Les autres commandes sont neutralisées
+  uniquement pendant la page authentifiée.
+- Préserver le clavier natif, les autres menus, la musique ESC et le
+  focus. Appliquer le remplacement aux menus Contrôleur effectivement
+  présents, après identification de leurs contrôleurs natifs; ne pas
+  supposer que les structures MENU et Pause sont identiques.
+
+La politique sémantique possède un contexte `controller_info` et un
+modèle de présentation séparé. Les tests vérifient les libellés par famille,
+le cas sans manette et l'isolation de la navigation. Le dessin, la détection
+SDL3 réelle de la famille, la localisation et la substitution du menu
+natif restent à implémenter. L'écran ne doit pas annoncer des commandes
+non opérationnelles dans une compilation distribuée.
