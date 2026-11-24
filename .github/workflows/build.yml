@@ -370,6 +370,16 @@ jobs:
             throw 'Expected runtime deployment log: unchanged backups_removed=0'
           }
           Write-Host 'Single authoritative game/fix.dll replacement, no backup: PASS'
+          $sdl = 'package-smoke/game/SDL3.dll'
+          $sdlNotice = 'package-smoke/docs/SDL3-LICENSE.txt'
+          if (!(Test-Path $sdl) -or !(Test-Path $sdlNotice) -or (Test-Path 'package-smoke/mods/SDL3.dll')) {
+            throw 'SDL3 must deploy beside the game executable, with its notice in docs/'
+          }
+          if ((Get-FileHash $sdl -Algorithm SHA256).Hash.ToLowerInvariant() -cne '6d7e653aa9c762ceda4fffc054a504dcce273e016eb9f1fe079b6409a058a9f7' -or
+              (Get-FileHash $sdlNotice -Algorithm SHA256).Hash.ToLowerInvariant() -cne '1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd') {
+            throw 'Deployed SDL3 payload differs from audited dependency'
+          }
+
           if (!(Test-Path package-smoke/game/glide2x.dll) -or
               !(Test-Path package-smoke/docs/GameFrame-LICENSE-APACHE.txt) -or
               (Test-Path package-smoke/game/GameFrame-LICENSE-APACHE.txt)) {
@@ -437,7 +447,7 @@ jobs:
             throw 'Verified GameFrame must preserve its previous backup'
           }
           Remove-Item package-smoke -Recurse -Force
-          if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix_installer.log,fix.dll,glide2x.dll) {
+          if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix_installer.log,fix.dll,glide2x.dll,SDL3.dll) {
             throw 'One-file build must never include generated INI, logs or DLL sidecars'
           }
           $global:LASTEXITCODE = 0
