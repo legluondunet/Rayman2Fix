@@ -27,6 +27,7 @@
 #include "rayman2fix/render_poll_gate.hpp"
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
 #include "rayman2fix/sdl_gamepads.hpp"
+#include "rayman2fix/native_ipt_probe.hpp"
 #endif
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
 #include "rayman2fix/graphics_menu_trace.hpp"
@@ -5332,6 +5333,104 @@ std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept {
     return g_sdl_input_actions;
 }
 
+// Candidate IPT layout from RayTools' documented PC reference.
+// No writes, hooks, native function calls or raw pointers in diagnostics.
+// Only the authenticated camera thread, only when Log=1. Read the
+// descriptor again after the array; refuse unstable or implausible data.
+void observe_native_ipt_readonly(r2fix::PadContext context) noexcept {
+    if(!g_log || !game_window_is_foreground()) return;
+    using namespace r2fix;
+    static DWORD last=0;
+    static unsigned attempts=0, reports=0;
+    static IptTableHeader prior_header{};
+    static IptReadbacks prior{};
+    static IptNames names{};
+    static PadContext prior_context=PadContext::inactive;
+    static bool have_names=false;
+    const DWORD now=GetTickCount();
+    if(last && DWORD(now-last)<125u)return;
+    last=now;
+    if(reports>=128u)return;
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    const auto read=[](std::uintptr_t addr,void* out,SIZE_T size) {
+        SIZE_T got=0;
+        return addr>=0x10000u && addr<=0xffffffffu-size &&
+            ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(addr),
+                              out,size,&got) && got==size;
+    };
+    IptTableHeader h{},after{};
+    IptReadbacks rows{};
+    const auto header=base+kIptCandidateRva+kIptTableHeaderOffset;
+    const auto refuse=[&](const char* reason) {
+        have_names=false;
+        if(attempts++<3u) {
+            char msg[140]{};
+            std::snprintf(msg,sizeof(msg),"RUNTIME-IPT-PROBE: candidate-refused=%s read-only=1",reason);
+            log_line(msg);
+        }
+    };
+    if(!base || !read(header,&h,sizeof(h)) || !ipt_header_plausible(h)) {
+        refuse("header"); return;
+    }
+    if(!read(h.table,rows.data(),sizeof(rows)) ||
+       !read(header,&after,sizeof(after)) ||
+       h.count!=after.count || h.table!=after.table) {
+        refuse("unstable-table"); return;
+    }
+    bool identity_changed=!have_names || h.table!=prior_header.table ||
+        h.count!=prior_header.count;
+    for(unsigned i=0;i<rows.size();++i) {
+        if(!ipt_entry_plausible(rows[i])) { refuse("entry-layout"); return; }
+        identity_changed=identity_changed || rows[i].name!=prior[i].name;
+    }
+    if(identity_changed) {
+        IptNames observed{};
+        for(unsigned i=0;i<rows.size();++i) {
+            auto& n=observed[i];
+            if(!read(rows[i].name,n.data(),n.size())) {
+                refuse("entry-name-unreadable"); return;
+            }
+            if(!ipt_name_plausible(n)) { refuse("entry-name-format"); return; }
+        }
+        names=observed;
+        have_names=true;
+        const unsigned anchors=ipt_reference_anchors(names);
+        char msg[160]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-IPT-PROBE: table-candidate count=%u anchors=0x%X expected=0xF read-only=1",
+            unsigned(h.count),anchors);
+        log_line(msg);
+        for(unsigned i=0;i<rows.size();++i) {
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-IPT-PROBE: entry=%u name=%s active=%u keyword-count=%u",
+                i,names[i].data(),unsigned(rows[i].active),unsigned(rows[i].keyword_count));
+            log_line(msg);
+        }
+        // Require all four independent reference names before recording
+        // any changing native values. Names alone never authorize writes.
+        if(anchors!=15u) {
+            reports=128u;
+            log_line("RUNTIME-IPT-PROBE: reference-anchors-unconfirmed observation-stopped=1");
+            return;
+        }
+    }
+    const bool context_changed=prior_context!=context;
+    for(unsigned i=0;i<rows.size() && reports<128u;++i) {
+        if(!identity_changed && !context_changed && !ipt_entry_changed(rows[i],prior[i]))continue;
+        // Raw bits deliberately avoid assuming float or integer representation.
+        char msg[200]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-IPT-STATE: context=%u entry=%u name=%s state=%ld analog-bits=0x%08X active=%u",
+            unsigned(context),i,names[i].data(),long(rows[i].state),
+            unsigned(rows[i].analog_bits),unsigned(rows[i].active));
+        log_line(msg);
+        ++reports;
+    }
+    prior_header=h;
+    prior=rows;
+    prior_context=context;
+}
+
 // First scoped native routes: authenticated MENU/VIDEO and Jail_20 only.
 void poll_sdl3_native() noexcept {
     static r2fix::SdlGamepads pads;
@@ -5410,6 +5509,7 @@ void poll_sdl3_native() noexcept {
         log_line(msg);
     }
     const auto transitions = gate.update(sample);
+    observe_native_ipt_readonly(context);
     g_sdl_input_context = context;
     g_sdl_input_actions = transitions.held;
     g_sdl_input_tick = GetTickCount();

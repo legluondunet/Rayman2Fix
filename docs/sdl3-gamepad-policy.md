@@ -116,8 +116,8 @@ manette n'est connectée.
   lorsque leur identité est vérifiée. Réutiliser la présentation du panneau
   VIDEO (bleu nuit, opacité 40 %, contour bleu, angles arrondis, texte lissé,
   proportions 4:3) plutôt que créer une fenêtre externe.
-- Une silhouette originale générique de manette à gauche, les commandes
-  à droite. La silhouette ne doit pas reprendre des images commerciales.
+- Une silhouette originale de manette au centre, les symboles intégrés aux boutons
+  et des flèches fines vers les actions autour de la manette, dans le cadre 4:3. La silhouette ne doit pas reprendre des images commerciales.
   Les onze lignes du modèle `gamepad_control_info.hpp` sont la référence
   des libellés; les actions et libellés génériques seront localisés dans
   la langue du jeu. Vérifier leur lisibilité avant de figer la géométrie.
@@ -209,3 +209,29 @@ This is a scoped test candidate, not complete gamepad support. Native
 DirectInput joystick duplicate handling is still unresolved; gameplay
 and unverified menus are deliberately not mapped. Do not claim support
 for movement, camera, shooting or Learn_10 from this build.
+
+## Native input discovery after Wine validation
+
+Build 0660075e confirmed SDL 3.4.20 initialization under Wine, PlayStation
+type=5, MENU DirectInput merge, and two VIDEO returns. The original camera
+thread and foreground HWND owner differ; retain the same-process focus and
+original-camera-thread guards. Jail_20 and Learn_10 transitions worked,
+but SDL-origin skip was not proved by that log.
+
+RayTools' MIT-licensed ACP_Ray2 documentation is a **reference only**, not
+evidence of CD offsets: https://github.com/raytools/ACP_Ray2/tree/master/src/IPT
+(IPT.c, IPT.h, IPT_Const.h; copyright (c) 2021 RayTools).
+It identifies an input table candidate at RVA 0x109E60 with count/table
+descriptor at +0x700, 24-byte entry descriptors, names, native counters
+and analog values. Candidate first indices 0/1 (axes), 10/11 (jump/fire).
+The new Log=1 read-only observation uses the already verified game thread,
+bounds and double-reads the table header, checks layout and all names,
+and checks those four independent name anchors before logging changing
+native state signs and raw analog bits. It logs at most 128 state entries,
+does not report pointer values, and never writes to the table or calls a
+candidate engine function. Keyboard controls and SDL menu routes remain
+unchanged. A candidate match must be confirmed against the approved CD
+binary and action behavior before any gameplay write, hook, or override.
+
+The controller illustration contract now uses a central controller and
+arrows toward labels, following the maintainer's approved 4:3 reference.

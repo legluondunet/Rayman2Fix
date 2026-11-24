@@ -1,6 +1,7 @@
 #include "rayman2fix/gamepad_input_policy.hpp"
 #include "rayman2fix/gamepad_control_info.hpp"
 #include "rayman2fix/gamepad_menu_bridge.hpp"
+#include "rayman2fix/native_ipt_probe.hpp"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -192,6 +193,30 @@ int main() {
     check(merge_pad_menu_keys(PadContext::video, true, 0, 256, video_keys, menu_actions) == 1 &&
           video_keys[0x01] == 0x80 && !video_keys[0x1C] &&
           !video_keys[0xC8] && !video_keys[0xD0], "VIDEO receives only back");
+
+    // Candidate retail IPT inspection rejects implausible addresses/layouts.
+    check(!ipt_header_plausible({0,0}) &&
+          !ipt_header_plausible({513,0x10000}) &&
+          !ipt_header_plausible({28,0xfffffffcu}) &&
+          !ipt_header_plausible({28,0x10001}) &&
+          ipt_header_plausible({128,0x10000}), "bounded candidate table");
+    check(!ipt_entry_plausible({1,0,0x10000,0,0,1}) &&
+          !ipt_entry_plausible({1,0x10000,0x10000,0,0,2}) &&
+          ipt_entry_plausible({1,0x10000,0x10000,1,0,1}), "candidate entry bounds");
+    IptNames native_names{};
+    for(auto& n:native_names) std::strcpy(n.data(),"candidate");
+    std::strcpy(native_names[0].data(),"Pad_AxeX");
+    std::strcpy(native_names[1].data(),"Pad_AxeY");
+    std::strcpy(native_names[10].data(),"Action_Sauter");
+    std::strcpy(native_names[11].data(),"Action_Tirer");
+    check(ipt_reference_anchors(native_names)==15u,"four distinct name anchors");
+    native_names[11].fill('x');
+    check(!ipt_name_plausible(native_names[11]) && !ipt_reference_anchors(native_names),
+          "unterminated name refuses candidate");
+    check(!ipt_entry_changed({0,0,0,1,0,1},{0,0,0,12,0,1}) &&
+           ipt_entry_changed({0,0,0,1,0,1},{0,0,0,-1,0,1}) &&
+           ipt_entry_changed({0,0,0,1,0,1},{0,0,0,1,0x3f000000,1}),
+           "probe ignores age counters, records sign or analog changes");
 
     std::cout << "SDL3 Dreamcast mapping / focus / hotplug policy: OK\n";
 }
