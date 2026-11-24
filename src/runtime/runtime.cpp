@@ -5737,11 +5737,11 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // stays exact; unrelated textures, glyphs and world sprites pass.
     if(producer==Native2DProducer::ScreenImage &&
        r2fix::readonly_video_brightness_meter_quad(
-           r2fix::standalone_video_page_pause_is_drawn() ||
+           r2fix::standalone_video_page_pause_render_ready() ||
            r2fix::standalone_video_page_suppress_leaked_gauge(),
            route,{xmin,ymin,xmax,ymax})) {
         const bool returned_to_game=
-            !r2fix::standalone_video_page_pause_is_drawn();
+            !r2fix::standalone_video_page_pause_render_ready();
         static std::atomic<bool> once_in_menu{false};
         static std::atomic<bool> once_after_menu{false};
         auto& marker=returned_to_game?once_after_menu:once_in_menu;
@@ -6040,7 +6040,7 @@ void __cdecl centered_native_screen_to_vertex(
             // world rendering retain their original source geometry.
             const float original_y=y;
             if(r2fix::lift_pause_video_companion(
-                r2fix::standalone_video_page_pause_is_drawn(),
+                r2fix::standalone_video_page_pause_render_ready(),
                 viewport==g_approved_overlay_viewport,
                 route,before,y,depth)) {
                 static std::atomic<bool> reported{false};
@@ -6059,7 +6059,7 @@ void __cdecl centered_native_screen_to_vertex(
             // approved UI viewport and verified drawn Pause VIDEO state.
             // Preserve the VIDEO title row and animated 3D butterfly.
             if(r2fix::pause_video_hide_obsolete_native_text(
-                r2fix::standalone_video_page_pause_is_drawn(),
+                r2fix::standalone_video_page_pause_render_ready(),
                 viewport==g_approved_overlay_viewport,route,y)) {
                 x+=8.0f; // shift original 3D text well outside viewport
                 static std::atomic<bool> reported{false};
