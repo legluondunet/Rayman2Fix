@@ -9,14 +9,22 @@ static void check(bool yes){if(!yes)std::abort();}
 int main() {
     // Identical main-menu and Pause geometry keeps both native
     // creatures visible above the panel without transforming either.
-    check(video_info_panel_y(false)==304u);
-    check(video_info_panel_y(true)==304u);
+    check(video_info_panel_y(false)==284u);
+    check(video_info_panel_y(true)==284u);
     check(video_info_panel_y(false)==video_info_panel_y(true));
-    check(kVideoInfoY==304u);
+    check(kVideoInfoY==284u);
     check(kVideoInfoX==212u && kVideoInfoWidth==600u &&
-          kVideoInfoHeight==320u);
+          kVideoInfoHeight==368u);
     check(video_info_panel_y(true)+kVideoInfoHeight<
           kVideoCanvasHeight);
+    check(kVideoInfoRowCount==6u);
+    check(kVideoInfoPanelAlpha==102u);
+    check(kVideoInfoPanelAlpha*5u==255u*2u);
+    check(video_info_row_y(0)==42);
+    for(unsigned row=1;row<kVideoInfoRowCount;++row)
+        check(video_info_row_y(row)-video_info_row_y(row-1)==53);
+    check(video_info_row_y(kVideoInfoRowCount-1)+kVideoInfoWrappedRowHeight
+          <int(kVideoInfoHeight)-2);
     check(kVideoInfoFontPreferredPx==19);
     check(kVideoInfoFontMinPx>=12);
     check(kVideoInfoValueRight-kVideoInfoValueLeft>=400);
