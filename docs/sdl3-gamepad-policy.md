@@ -1,6 +1,6 @@
 # Rayman2Fix — SDL3 manettes, étape 0 : politique de focus et hotplug
 
-Statut : **acquisition SDL3 en lecture seule**. Le lanceur embarque SDL3, et le runtime prépare les échantillons d'une manette active sans les transmettre au moteur. Les entrées clavier/DirectInput et les menus natifs restent inchangés.
+Statut : **premières routes SDL3 natives, à valider sur matériel**. Le lanceur embarque SDL3 ; le runtime acquiert les entrées et limite leur transmission aux menus authentifiés et à Jail_20. Le gameplay analogique, Learn_10, les autres menus Pause et la neutralisation des anciennes manettes DirectInput restent à implémenter.
 
 ## Pourquoi commencer ici ?
 
@@ -149,7 +149,7 @@ Windows CI 45411813631 verified the official SDL 3.4.20 x86 dependency:
 - SDL3.dll SHA-256: `6d7e653aa9c762ceda4fffc054a504dcce273e016eb9f1fe079b6409a058a9f7`
 - Original zlib notice SHA-256: `1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd`
 
-Standard x86 CI supplies the audited directory to CMake. Both extracted hashes are pinned at configure time. RCDATA 1107 contains SDL3.dll and 1108 contains its original license. Normal provisioning compares installed bytes with the embedded payload, stages exclusively and replaces atomically if necessary. Deployment targets `game/SDL3.dll` and `docs/SDL3-LICENSE.txt`, per maintainer preference. The fresh-install workspace permits the DLL, and atomic CD publication copies and verifies its pinned SHA-256 separately from the CD receipt. `mods/` remains reserved for mod assets, not runtime DLLs. The notice is provisioned first, without altering the GPLv3 or GameFrame notices. No download or configuration by the user, no permanent backup, no global DLL installation. Unbundled developer builds remain possible. The read-only runtime now uses the absolute game-local path and verifies the pinned SHA-256 before loading SDL3. Native keyboard/DirectInput remain unchanged. No global DLL search or replacement of engine input is allowed.
+Standard x86 CI supplies the audited directory to CMake. Both extracted hashes are pinned at configure time. RCDATA 1107 contains SDL3.dll and 1108 contains its original license. Normal provisioning compares installed bytes with the embedded payload, stages exclusively and replaces atomically if necessary. Deployment targets `game/SDL3.dll` and `docs/SDL3-LICENSE.txt`, per maintainer preference. The fresh-install workspace permits the DLL, and atomic CD publication copies and verifies its pinned SHA-256 separately from the CD receipt. `mods/` remains reserved for mod assets, not runtime DLLs. The notice is provisioned first, without altering the GPLv3 or GameFrame notices. No download or configuration by the user, no permanent backup, no global DLL installation. Unbundled developer builds remain possible. The read-only runtime now uses the absolute game-local path and verifies the pinned SHA-256 before loading SDL3. The original keyboard is preserved except for the existing VIDEO filter. No global DLL search or global input injection is allowed.
 
 Tests exercise initial deployment, repeat provisioning, replacement of corrupt DLL and notice, and preservation across atomic CD publication. This is packaging only, not proof of physical controller functionality.
 
@@ -182,3 +182,30 @@ action bindings, analog engine input, safe removal of duplicate native
 controller input and menu replacement still need source verification.
 A diagnostic build must be clearly identified as read-only until those
 are implemented.
+
+## First native integration: MENU, VIDEO, Jail_20
+
+The previous acquisition-only CI 45431086104 passed on Windows x86 and
+Linux. The next phase uses the existing authenticated DirectInput
+GetDeviceState(256) return hook, never a new detour at the same address.
+A live MENU level and verified controller model enable arrows (left stick
+or D-pad), Return (South) and Escape (East). The approved drawn VIDEO
+page accepts only East/Escape. Only successful writable native reads in
+foreground receive a bitwise OR of these scan codes; physical keyboard
+bits remain intact and the existing VIDEO suppression runs afterwards.
+
+The same original camera thread supplies a snapshot with a maximum age
+of 100 ms, rechecking live context and focus at consumption. The native
+frame flip can refresh SDL3 independently of the cinematic/audio
+scheduler, without invoking additional native audio or level changes.
+The physical neutral gate protects focus, owner and context boundaries.
+Jail_20 South is passed into the existing IntroSkipGuard, which still
+queues early requests until E_EM_ModePlaying=9 and dispatches at most
+once per scene. No new level-change route or global synthetic key event.
+Diagnostic markers native-route=MENU, VIDEO-back and jail_20 identify
+delivery separately from abstract input sampling.
+
+This is a scoped test candidate, not complete gamepad support. Native
+DirectInput joystick duplicate handling is still unresolved; gameplay
+and unverified menus are deliberately not mapped. Do not claim support
+for movement, camera, shooting or Learn_10 from this build.
