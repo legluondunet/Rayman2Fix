@@ -135,6 +135,7 @@ struct PatchSlot {
 };
 std::array<PatchSlot,5> g_scripts{};
 bool g_scripts_installed=false;
+std::atomic<std::uintptr_t> g_render_model{0};
 bool g_preflight_failed=false;
 bool g_retry_after_video=false;
 bool writable(std::uintptr_t at) noexcept {
@@ -253,11 +254,13 @@ bool install_pause_video_scripts(const PauseVideoModel& model) noexcept {
     }
     g_scripts=prepared;
     g_scripts_installed=true;
+    g_render_model.store(model.model,std::memory_order_release);
     if(g_log)g_log(
         "RUNTIME-PAUSE-VIDEO-PAGE: status=installed parent-Options-construction=original normal9-script1=V16-native+SetAGO-navigation-removed scripts2,3,4=inactive normal15-script2=inactive old-video-actions=unreachable original-title-retained=1");
     return true;
 }
 void restore_pause_video_scripts() noexcept {
+    g_render_model.store(0,std::memory_order_release);
     standalone_video_page_set_pause_visible(false);
     g_retry_after_video=false;
     g_preflight_failed=false;
@@ -483,8 +486,8 @@ DWORD WINAPI worker(void*) {
                 if(!g_scripts_installed && !g_preflight_failed)
                     install_pause_video_scripts(current);
                 const bool candidate=current.normal==9 && current.reflex==2;
-                standalone_video_page_set_pause_visible(
-                    candidate && g_scripts_installed);
+                // Rendering samples the authenticated live controller on
+                // the game thread; this polling worker only installs scripts.
                 if((current.normal!=prior_normal ||
                     current.reflex!=prior_reflex) && reports<64u) {
                 char msg[240]{};
@@ -522,6 +525,18 @@ DWORD WINAPI worker(void*) {
     return 0;
 }
 } // namespace
+bool pause_video_live_active() noexcept {
+    const auto address=g_render_model.load(std::memory_order_acquire);
+    if(!address)return false;
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    std::uint8_t flag=0;
+    if(!base || game_in_menu(base) ||
+       !read8(base+kGenericPauseRva,flag) || !flag)return false;
+    PauseVideoModel current{};
+    return inspect_pause_video_model(address,&read32,&read8,current) &&
+           current.normal==9 && current.reflex==2 &&
+           g_render_model.load(std::memory_order_acquire)==address;
+}
 void start_pause_video_observer(PauseVideoLogger logger) noexcept {
     if(!logger || g_started.exchange(true,std::memory_order_acq_rel))return;
     g_log=logger;
