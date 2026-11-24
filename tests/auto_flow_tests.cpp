@@ -285,11 +285,11 @@ int main() {
                   std::string::npos,
               "single EXE deploys full GPLv3 license in docs/ only, separate from GameFrame");
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
-        const auto sdl = root / "mods" / "SDL3.dll";
+        const auto sdl = root / "game" / "SDL3.dll";
         const auto notice = root / "docs" / "SDL3-LICENSE.txt";
         check(fs::is_regular_file(sdl) && fs::is_regular_file(notice) &&
-              !fs::exists(root / "game" / "SDL3.dll"),
-              "SDL3 and its notice stay outside original game files");
+              !fs::exists(root / "mods" / "SDL3.dll"),
+              "SDL3 beside game runtime; notice under docs");
         const auto sdl_bytes = contents(sdl);
         const auto notice_bytes = contents(notice);
         check(sdl_bytes.size() > 100000 && sdl_bytes.substr(0, 2) == "MZ" &&
@@ -303,8 +303,8 @@ int main() {
         write(notice, "CORRUPTED-NOTICE");
         app.initialize();
         check(contents(sdl) == sdl_bytes && contents(notice) == notice_bytes &&
-              !fs::exists(root / "mods" / "SDL3.dll.installing") &&
-              !fs::exists(root / "mods" / "SDL3.dll.bak"),
+              !fs::exists(root / "game" / "SDL3.dll.installing") &&
+              !fs::exists(root / "game" / "SDL3.dll.bak"),
               "corrupt SDL3 and notice restored without permanent backups");
         check(contents(root / "Rayman2Fix_installer.log").find("status=replaced runtime-active=0") != std::string::npos,
               "replacement is logged without claiming runtime activation");
@@ -611,6 +611,13 @@ int main() {
 #ifdef _WIN32
         check(r2fix::gameframe_glide_ready(game),
               "published ISO game contains the verified local GameFrame DLL");
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        check(contents(game / "SDL3.dll") == sdl_bytes &&
+              !fs::exists(root / "mods" / "SDL3.dll"),
+              "atomic CD installation preserves the exact bundled SDL3");
+        check(contents(root / "state" / ".rayman2fix-cd-files.tsv").find("SDL3.dll") == std::string::npos,
+              "SDL3 must not be recorded as original CD content");
+#endif
         check(contents(game/"glide2x.dll.bak")=="PRESERVE-OLD-GLIDE",
               "atomic CD installation preserves the user's Glide backup");
 #endif
