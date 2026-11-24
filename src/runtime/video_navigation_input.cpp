@@ -71,9 +71,15 @@ void __cdecl filter_approved_video_keys(void* keyboard,
     const bool foreground=foreground_game();
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
     const auto actions=::r2fix_sdl_menu_actions(video);
-    merge_pad_menu_keys(video ? PadContext::video : PadContext::menu,
+    const auto merged=merge_pad_menu_keys(video ? PadContext::video : PadContext::menu,
         foreground,result,kVideoKeyboardBytes,
         static_cast<std::uint8_t*>(keyboard),actions);
+    // Bounded proof of actual native buffer delivery, not just SDL sampling.
+    static std::atomic<bool> menu_reported{false},video_reported{false};
+    if(merged && !(video ? video_reported : menu_reported).exchange(true) && g_log)
+        g_log(video ?
+            "RUNTIME-SDL3: native-route=VIDEO-back merged=1 scope=verified-DirectInput256" :
+            "RUNTIME-SDL3: native-route=MENU merged=1 scope=verified-DirectInput256");
 #endif
     // VIDEO suppression is applied after the merge. Physical Escape and
     // native HRESULT semantics are preserved, as before.
