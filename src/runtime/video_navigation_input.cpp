@@ -8,6 +8,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+#include "rayman2fix/gamepad_menu_bridge.hpp"
+std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept;
+#endif
 
 #if !defined(_M_IX86)
 #error This hook uses exact approved Rayman 2 Windows x86 instructions
@@ -20,7 +24,7 @@ namespace {
 // 0x49669C and 0x4966B0. The calls converge at 0x4966B3.
 // Intercept AFTER the native COM call, BEFORE the game's keyboard
 // navigation interpretation. No keyboard driver, COM object, IAT,
-// system-wide key state or SDL input is patched.
+// system-wide key state is patched. Scoped SDL3 input can be OR-ed into this buffer.
 constexpr std::uintptr_t kPostKeyboardStateRva=0x966B3u;
 constexpr std::uintptr_t kContinueNormalRva=0x966BAu;
 constexpr std::uintptr_t kContinueGreaterRva=0x966C5u;
@@ -62,10 +66,20 @@ bool foreground_game() noexcept {
 void __cdecl filter_approved_video_keys(void* keyboard,
                                         std::int32_t result) noexcept {
     bool menu=false,pause=false;
-    if(!standalone_video_page_owns_navigation(menu,pause) ||
-       !writable_256(keyboard))return;
+    const bool video=standalone_video_page_owns_navigation(menu,pause);
+    if(!writable_256(keyboard) || result!=0)return;
+    const bool foreground=foreground_game();
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    const auto actions=::r2fix_sdl_menu_actions(video);
+    merge_pad_menu_keys(video ? PadContext::video : PadContext::menu,
+        foreground,result,kVideoKeyboardBytes,
+        static_cast<std::uint8_t*>(keyboard),actions);
+#endif
+    // VIDEO suppression is applied after the merge. Physical Escape and
+    // native HRESULT semantics are preserved, as before.
+    if(!video)return;
     const unsigned consumed=suppress_video_navigation_keys(
-        menu,pause,foreground_game(),result,kVideoKeyboardBytes,
+        menu,pause,foreground,result,kVideoKeyboardBytes,
         static_cast<std::uint8_t*>(keyboard));
     if(consumed && !g_ever_filtered.exchange(true) && g_log)
         g_log("RUNTIME-VIDEO-INPUT: source=retail-x86-DirectInput-GetDeviceState256 navigation-arrows-suppressed=1 scope=authenticated-MENU-or-ESC-VIDEO preserved=Escape,Enter,other-keys game-input=untouched");
