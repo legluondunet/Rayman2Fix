@@ -94,6 +94,12 @@ jobs:
         run: cmake --build build --config Release --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Smoke test audited SDL3 on x86 without game or display
+        shell: pwsh
+        run: |
+          $dll = Join-Path $env:RAYMAN2FIX_SDL3_AUDIT_DIR 'SDL3.dll'
+          & ./build/Release/sdl3_x86_smoke.exe $dll
+          if ($LASTEXITCODE -ne 0) { throw 'SDL3 x86 gamepad subsystem smoke test failed' }
       - name: Audit default single-EXE VIDEO feature inclusion
         shell: pwsh
         run: |
