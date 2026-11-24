@@ -34,6 +34,14 @@ using ShellExecuteFn=HINSTANCE (WINAPI*)(
     HWND,LPCSTR,LPCSTR,LPCSTR,LPCSTR,INT);
 std::atomic<ShellExecuteFn> g_original_shell{nullptr};
 std::atomic<bool> g_active{false};
+SRWLOCK g_caption_lock=SRWLOCK_INIT;
+struct CaptionLock {
+    bool held;
+    explicit CaptionLock(bool nonblocking) noexcept:
+        held(nonblocking ? TryAcquireSRWLockExclusive(&g_caption_lock)!=FALSE :
+             (AcquireSRWLockExclusive(&g_caption_lock),true)) {}
+    ~CaptionLock(){if(held)ReleaseSRWLockExclusive(&g_caption_lock);}
+};
 std::atomic<bool> g_input_worker_started{false};
 std::atomic<unsigned> g_site_install_attempts{0};
 std::atomic<DWORD> g_last_site_launch_tick{0};
@@ -325,7 +333,25 @@ void restore_site_script_literal() noexcept {
     // Do not VirtualFree: the private script might still be in-flight.
     g_site_script_copy=nullptr;
 }
+// The localized text table is loaded before the AI controller is
+// discovered. Replace only the authenticated source caption during
+// loading/early flips; leave URL/input installation to the normal worker.
+bool prepare_main_menu_site_caption(std::uintptr_t table,SiteLogger logger) noexcept {
+    if(!table)return false;
+    CaptionLock lock(true);
+    if(!lock.held)return false;
+    const auto slot=table+4u*kWebsiteHandle;
+    std::uint32_t source=0;
+    char label[48]{};
+    if(!read_exact(slot,&source,4u) || source<0x10000u ||
+       !read_exact(source,label,sizeof(label)-1u))return false;
+    if(approved_replaced_main_menu_site_text(label))return true;
+    if(!replace_verified_source_caption(source,label))return false;
+    if(logger)logger("RUNTIME-MENU-SITE: early-caption=Rayman2Fix source=verified-handle362 before-controller-scan=1");
+    return true;
+}
 bool install_main_menu_site(std::uintptr_t table,SiteLogger logger) noexcept {
+    CaptionLock lock(false);
     if(g_active.load(std::memory_order_acquire))return true;
     const unsigned attempt=++g_site_install_attempts;
     const auto refuse=[&](const char* reason) noexcept -> bool {
@@ -403,6 +429,7 @@ bool install_main_menu_site(std::uintptr_t table,SiteLogger logger) noexcept {
     return true;
 }
 void restore_main_menu_site() noexcept {
+    CaptionLock lock(false);
     g_active.store(false,std::memory_order_release);
     restore_site_script_literal();
     if(g_patched_table && g_original_text &&
