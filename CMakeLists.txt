@@ -118,7 +118,8 @@ if(WIN32)
       src/runtime/standalone_video_page.cpp
       src/runtime/main_menu_site.cpp
       src/runtime/pause_video_observer.cpp
-      src/runtime/video_navigation_input.cpp)
+      src/runtime/video_navigation_input.cpp
+      src/runtime/wine_vulkan_driver.cpp)
     target_link_libraries(Rayman2FixRuntime PRIVATE gdi32 setupapi advapi32)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_STANDALONE_VIDEO_PAGE=1)
   endif()
@@ -368,6 +369,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME pause-video-verified-companion-height
     COMMAND pause_video_companion_layout_tests)
+  add_executable(wine_vulkan_driver_policy_tests
+    tests/wine_vulkan_driver_policy_tests.cpp)
+  target_include_directories(wine_vulkan_driver_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME wine-vulkan-driver-identity-and-format
+    COMMAND wine_vulkan_driver_policy_tests)
   add_executable(video_navigation_input_policy_tests
     tests/video_navigation_input_policy_tests.cpp)
   target_include_directories(video_navigation_input_policy_tests PRIVATE
