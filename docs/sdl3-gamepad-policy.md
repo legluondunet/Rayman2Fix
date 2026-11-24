@@ -25,7 +25,7 @@ Le lanceur actuel recense certains périphériques XInput / DirectInput, mais il
 4. Construire un adaptateur indépendant du clavier qui applique les transitions uniquement au point d'entrée moteur confirmé, avec arrêt propre et repli clavier.
 5. Tester sous Windows et Wine les manettes Xbox 360 et DualShock 4, l'entrée dans les menus, le gameplay, la caméra, le branchement à chaud, Alt-Tab et les régressions audio.
 
-La future correspondance entre `primary/secondary/camera_*` et les actions de Rayman 2 reste **à valider** ; ce n'est pas une promesse de mapping définitif.
+La disposition Dreamcast adaptée aux manettes SDL3 est approuvée par le mainteneur (24 novembre 2026). Les identifiants de commandes natifs restent à vérifier. Voir le contrat ci-dessous.
 
 ## Reprise après l'intégration VIDEO (#53)
 
@@ -60,11 +60,47 @@ checks the exact SDL version, initializes only GAMEPAD on its main thread,
 disables event processing, updates and enumerates devices, then shuts down.
 No controller is required on the CI runner. This smoke test is not proof
 of game input or physical hotplug. No SDL binary is embedded or executed
-inside Rayman 2 by this phase. The final DLL hash will be recorded from a
-successful audit before packaging.
+inside Rayman 2 by this phase. The final DLL hash must be pinned from the successful audit before packaging. CI run 45411813631 passed the archive audit and the x86 gamepad-only smoke test.
 
 Native integration must use SDL initialization on the game's main thread,
 not the existing background menu discovery workers. Preserve the original
 GetDeviceState result and the VIDEO navigation filter. The analog route
-and duplicate native controller handling remain open; no keyboard mapping
-is approved yet.
+and duplicate native controller handling remain open; no native engine input binding is approved yet.
+
+## Mapping approuvé — Dreamcast + manettes modernes
+
+SDL3 utilise les positions physiques normalisées, jamais un index
+DirectInput propre à un modèle de manette.
+
+| Action en jeu | SDL3 | Xbox | DualShock |
+|---|---|---|---|
+| Déplacement proportionnel | Left X/Y | Stick gauche | Stick gauche |
+| Saut / hélicoptère | South | A | Croix |
+| Tir / tir chargé | East | B | Rond |
+| Caméra gauche | West, Left Shoulder, Right X négatif | X, LB, stick droit | Carré, L1, stick droit |
+| Caméra droite | North, Right Shoulder, Right X positif | Y, RB, stick droit | Triangle, R1, stick droit |
+| Ciblage / recentrage / plongée selon contexte natif | Left Trigger | LT | L2 |
+| Statistiques | Right Trigger | RT | R2 |
+| Connaissance du monde | D-pad Up | Haut | Haut |
+| Murphy | D-pad Down | Bas | Bas |
+| Pause | Start | Start | Options |
+
+Dans les menus : stick gauche ou croix directionnelle, South valide,
+East annule. Dans le panneau VIDEO en lecture seule, seul East (retour)
+est transmis par ce modèle. Pendant les cinématiques sautables, South
+demande le saut ; le moteur et ses gardes restent responsables du
+comportement réel.
+
+Le déplacement conserve un vecteur analogique normalisé, avec zone
+morte radiale de 25 %, sans accélération diagonale. Le stick droit
+commande la rotation horizontale ; aucune rotation verticale nouvelle
+n'est inventée. Les seuils initiaux seront ajustés si les tests matériels
+le justifient. Les transitions de contexte libèrent les actions et
+attendent la neutralisation des boutons avant de réarmer les commandes,
+pour éviter un saut déclenché par la validation précédente.
+
+Ces correspondances sont codées et testées au niveau sémantique, mais
+pas encore reliées aux commandes natives. L'identité des actions
+Connaissance du monde / Murphy et le comportement exact en nage restent
+à vérifier sur le moteur PC ; ne pas les simuler avec des touches
+arbitraires.
