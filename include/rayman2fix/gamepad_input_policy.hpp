@@ -6,7 +6,7 @@
 
 namespace r2fix {
 
-enum class PadContext { inactive, gameplay, menu, video, cinematic };
+enum class PadContext { inactive, gameplay, menu, video, controller_info, cinematic };
 enum class PadAction : unsigned {
     left, right, up, down, jump, fire, pause, camera_left, camera_right,
     target, statistics, world_knowledge, murphy, confirm, cancel, skip
@@ -59,9 +59,10 @@ constexpr std::uint32_t pad_actions(const PadSample& s) noexcept {
     };
     if (s.context == PadContext::cinematic)
         return bit(s.south, PadAction::skip);
-    if (s.context == PadContext::menu || s.context == PadContext::video) {
-        // VIDEO is read-only: do not leak navigation or confirm into it.
-        if (s.context == PadContext::video)
+    if (s.context == PadContext::menu || s.context == PadContext::video ||
+        s.context == PadContext::controller_info) {
+        // Information pages are read-only: only back is accepted.
+        if (s.context == PadContext::video || s.context == PadContext::controller_info)
             return bit(s.east, PadAction::cancel);
         const bool left = s.dpad_left || s.left_x < -kPadAxisDeadzone;
         const bool right = s.dpad_right || s.left_x > kPadAxisDeadzone;
