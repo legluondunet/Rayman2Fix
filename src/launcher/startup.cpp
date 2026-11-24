@@ -132,6 +132,28 @@ void ensure_embedded_readme(const fs::path& root) {
     if(!out)throw std::runtime_error("could not write bundled README.md");
 }
 
+// The GPLv3 license text is stored as RCDATA #1106 in the launcher.
+// Place it beside the separate GameFrame Apache license under docs/.
+void ensure_embedded_license(const fs::path& root) {
+    const auto dest=layout::docs(root)/"LICENSE";
+    if(fs::is_symlink(dest) ||
+       (fs::exists(dest) && !fs::is_regular_file(dest)))
+        throw std::runtime_error("unsafe existing LICENSE path");
+    if(fs::exists(dest))return; // Keep existing local documentation unchanged.
+    const HRSRC resource=FindResourceW(nullptr,MAKEINTRESOURCEW(1106),
+                                      MAKEINTRESOURCEW(10));
+    if(!resource)throw std::runtime_error("missing bundled GPLv3 LICENSE");
+    const auto size=SizeofResource(nullptr,resource);
+    const HGLOBAL loaded=LoadResource(nullptr,resource);
+    const auto* bytes=loaded ? static_cast<const char*>(LockResource(loaded)) : nullptr;
+    if(!bytes || !size)throw std::runtime_error("invalid bundled GPLv3 LICENSE");
+    std::ofstream out(dest,std::ios::binary|std::ios::trunc);
+    if(!out)throw std::runtime_error("cannot deploy LICENSE");
+    out.write(bytes,static_cast<std::streamsize>(size));
+    out.close();
+    if(!out)throw std::runtime_error("could not write bundled GPLv3 LICENSE");
+}
+
 // The launcher owns game/fix.dll. Obsolete copies from older launcher builds
 // are not retained: the verified embedded runtime is the only supported one.
 struct RuntimeDeployment {
@@ -161,6 +183,64 @@ std::size_t discard_legacy_runtime_backups(const fs::path& directory) {
     }
     return removed;
 }
+
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+// SDL3 lives under mods/, outside the atomic publication of CD files in game/.
+// Resources were hash-pinned at configure time; compare installed bytes
+// before replacing. Never follow reparse points or overwrite directories.
+const char* deploy_sdl3_resource(unsigned id, const fs::path& dest) {
+    const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(id),
+                                        MAKEINTRESOURCEW(10));
+    if (!resource) throw std::runtime_error("missing embedded SDL3 resource");
+    const DWORD length = SizeofResource(nullptr, resource);
+    const HGLOBAL loaded = LoadResource(nullptr, resource);
+    const auto* bytes = loaded ?
+        static_cast<const unsigned char*>(LockResource(loaded)) : nullptr;
+    if (!bytes || !length)
+        throw std::runtime_error("empty embedded SDL3 resource");
+    const DWORD attrs = GetFileAttributesW(dest.c_str());
+    const bool existing = attrs != INVALID_FILE_ATTRIBUTES;
+    if ((!existing && fs::is_symlink(dest)) ||
+        (existing && (attrs & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))))
+        throw std::runtime_error("unsafe SDL3 deployment destination");
+    if (existing && fs::file_size(dest) == length) {
+        std::ifstream in(dest, std::ios::binary);
+        std::array<char, 4096> block{};
+        bool same = true;
+        for (std::size_t off = 0; off < length;) {
+            const auto n = std::min<std::size_t>(block.size(), length - off);
+            in.read(block.data(), static_cast<std::streamsize>(n));
+            if (!in || std::memcmp(block.data(), bytes + off, n)) {
+                same = false;
+                break;
+            }
+            off += n;
+        }
+        if (same) return "unchanged";
+    }
+    auto stage = dest;
+    stage += L".installing";
+    HANDLE out = CreateFileW(stage.c_str(), GENERIC_WRITE, 0, nullptr,
+                             CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (out == INVALID_HANDLE_VALUE)
+        throw std::runtime_error("cannot exclusively stage SDL3 resource");
+    DWORD written = 0;
+    const bool ok = WriteFile(out, bytes, length, &written, nullptr) &&
+                    written == length && FlushFileBuffers(out);
+    CloseHandle(out);
+    if (!ok) {
+        DeleteFileW(stage.c_str());
+        throw std::runtime_error("cannot write staged SDL3 resource");
+    }
+    // Do not change permissions on an unknown local file. Failure preserves it.
+    if (!MoveFileExW(stage.c_str(), dest.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(stage.c_str());
+        throw std::runtime_error("cannot publish SDL3 resource");
+    }
+    return existing ? "replaced" : "installed";
+}
+#endif
 
 RuntimeDeployment ensure_embedded_runtime(const fs::path& directory) {
     const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1101),
@@ -255,6 +335,9 @@ RuntimeDeployment ensure_embedded_runtime(const fs::path& directory) {
 void Startup::initialize(bool provision_files) {
     std::string runtime_deployment_status = "not-packaged";
     std::size_t runtime_backups_removed = 0;
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    const char* sdl3_deployment_status = "not-provisioned";
+#endif
     if (provision_files) {
         // Clean layout only: NEVER rename/copy an older installation.
         // Reject before creating a new workspace so the user can keep it.
@@ -279,6 +362,12 @@ void Startup::initialize(bool provision_files) {
         ensure_gameframe_glide(game_dir_);
         prune_obsolete_nested_gameframe(root_);
         ensure_embedded_readme(root_);
+        ensure_embedded_license(root_);
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        // Notice first; an incomplete notice must never accompany a new DLL.
+        deploy_sdl3_resource(1108, docs / "SDL3-LICENSE.txt");
+        sdl3_deployment_status = deploy_sdl3_resource(1107, mods / "SDL3.dll");
+#endif
 #endif
     }
 
@@ -457,7 +546,12 @@ void Startup::initialize(bool provision_files) {
                 " upstream=f195a074a63cc150673c38becdec696163b0b3d1");
         else
             log("RENDERER: GameFrame glide2x.dll=not bundled in this developer build");
-        log("INPUT: SDL3 deferred to second phase; controller support not yet active");
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        log(std::string("INPUT: SDL3 3.4.20 x86 deployed to mods/SDL3.dll status=") +
+            sdl3_deployment_status + " runtime-active=0");
+#else
+        log("INPUT: SDL3 not bundled in this developer build; runtime-active=0");
+#endif
         log("INSTALL: startup resources ready; CD/game verification follows (local SHA256 receipt only)");
     } else {
         log("STARTUP: --launch-no-verify skips DLL deployment, runtime "
