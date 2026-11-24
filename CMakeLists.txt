@@ -227,6 +227,13 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  # SDL3 phase 0: pure focus/hotplug transition policy, no runtime input.
+  add_executable(gamepad_input_policy_tests tests/gamepad_input_policy_tests.cpp)
+  target_include_directories(gamepad_input_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME gamepad-input-focus-hotplug-policy
+    COMMAND gamepad_input_policy_tests)
+
   add_executable(disc_tests tests/disc_tests.cpp)
   target_link_libraries(disc_tests PRIVATE rayman2_disc)
   add_test(NAME disc-image-parser COMMAND disc_tests)
