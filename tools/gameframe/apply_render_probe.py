@@ -18,6 +18,21 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
+// Publish the actual GL context renderer to fix.dll, not the desktop
+// adapter selected by Windows. Process-local, independent of Debug.Log.
+// The PID-scoped key avoids collisions with an inherited parent value.
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn SetEnvironmentVariableA(name: *const u8, value: *const u8) -> i32;
+}
+pub fn context_renderer(name: &str) {
+    let Ok(key) = std::ffi::CString::new(format!("RAYMAN2FIX_GL_RENDERER_{}", std::process::id())) else { return };
+    let Ok(value) = std::ffi::CString::new(name) else { return };
+    if name.is_empty() || name.len() >= 128 { return; }
+    unsafe { SetEnvironmentVariableA(key.as_ptr().cast(), value.as_ptr().cast()); }
+    line(&format!("context-renderer={name} source=GL_RENDERER"));
+}
+
 static OPENS: AtomicU32 = AtomicU32::new(0);
 static MODES: AtomicU32 = AtomicU32::new(0);
 static FORMATS: AtomicU32 = AtomicU32::new(0);
@@ -192,7 +207,8 @@ def install(root: pathlib.Path) -> None:
     lfb = source / "api" / "lfb.rs"
     tex = source / "api" / "tex.rs"
     probe = source / "render_probe.rs"
-    if not all(p.is_file() for p in (lib, sst, lfb, tex)) or probe.exists():
+    renderer = source / "render" / "mod.rs"
+    if not all(p.is_file() for p in (lib, sst, lfb, tex, renderer)) or probe.exists():
         raise SystemExit("Pinned GameFrame sources missing or probe already installed")
     a, b, c, d = (p.read_text(encoding="utf-8") for p in (lib, sst, lfb, tex))
     a = substitute(a, "#[cfg(windows)]\nmod fps_limit;",
@@ -237,8 +253,14 @@ def install(root: pathlib.Path) -> None:
                    '    shim::call!("grTexDownloadTablePartial", tmu, kind, crate::callargs::table(kind, data, first, last), first, last);',
                    '    shim::call!("grTexDownloadTablePartial", tmu, kind, crate::callargs::table(kind, data, first, last), first, last);\n'
                    "    crate::render_probe::palette(kind, first, last);")
+    e = renderer.read_text(encoding="utf-8")
+    e = substitute(e,
+                   '            self.gpu = Some(Gpu { gl, programs, dc, hwnd, frame, vbo: ids[0], lfb_tex: ids[1], lfb_size: (0, 0) });',
+                   '            let renderer = s(RENDERER);\n'
+                   '            crate::render_probe::context_renderer(&renderer);\n'
+                   '            self.gpu = Some(Gpu { gl, programs, dc, hwnd, frame, vbo: ids[0], lfb_tex: ids[1], lfb_size: (0, 0) });')
     # All replacements have been verified before mutating any upstream file.
-    for path, contents in ((lib,a),(sst,b),(lfb,c),(tex,d)):
+    for path, contents in ((lib,a),(sst,b),(lfb,c),(tex,d),(renderer,e)):
         path.write_text(contents,encoding="utf-8")
     probe.write_text(MODULE,encoding="utf-8")
     print("Applied read-only Rayman2Fix Glide color-path diagnostics (single log)")
