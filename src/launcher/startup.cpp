@@ -185,7 +185,7 @@ std::size_t discard_legacy_runtime_backups(const fs::path& directory) {
 }
 
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
-// SDL3 lives under mods/, outside the atomic publication of CD files in game/.
+// SDL3 lives beside fix.dll and glide2x.dll in game/.
 // Resources were hash-pinned at configure time; compare installed bytes
 // before replacing. Never follow reparse points or overwrite directories.
 const char* deploy_sdl3_resource(unsigned id, const fs::path& dest) {
@@ -366,7 +366,7 @@ void Startup::initialize(bool provision_files) {
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
         // Notice first; an incomplete notice must never accompany a new DLL.
         deploy_sdl3_resource(1108, docs / "SDL3-LICENSE.txt");
-        sdl3_deployment_status = deploy_sdl3_resource(1107, mods / "SDL3.dll");
+        sdl3_deployment_status = deploy_sdl3_resource(1107, game_dir_ / "SDL3.dll");
 #endif
 #endif
     }
@@ -547,7 +547,7 @@ void Startup::initialize(bool provision_files) {
         else
             log("RENDERER: GameFrame glide2x.dll=not bundled in this developer build");
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
-        log(std::string("INPUT: SDL3 3.4.20 x86 deployed to mods/SDL3.dll status=") +
+        log(std::string("INPUT: SDL3 3.4.20 x86 deployed to game/SDL3.dll status=") +
             sdl3_deployment_status + " runtime-active=0");
 #else
         log("INPUT: SDL3 not bundled in this developer build; runtime-active=0");
