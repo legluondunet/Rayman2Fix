@@ -1,4 +1,5 @@
 #include "rayman2fix/gamepad_input_policy.hpp"
+#include "rayman2fix/gamepad_control_info.hpp"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -107,5 +108,35 @@ int main() {
     a.south = false; check(!contexts.update(a).held, "neutral rearms");
     a.south = true;
     check(has(contexts.update(a).pressed, PadAction::jump), "fresh gameplay press");
+    a = active(PadContext::controller_info);
+    a.south = a.west = a.north = a.start = a.dpad_up = a.dpad_down = true;
+    a.left_x = a.right_x = 32767;
+    a.left_trigger = a.right_trigger = 32767;
+    check(!pad_actions(a) && !pad_movement(a).x,
+        "controller info ignores all non-return input");
+    a.east = true;
+    check(pad_actions(a) == pad_action_bit(PadAction::cancel),
+        "controller info only back");
+    a.foreground = false;
+    check(!pad_actions(a), "controller info background ignores back");
+
+    check(kPadControlRows.size() == 11, "all approved controls presented");
+    for (const auto& row : kPadControlRows) {
+        check(!row.action_key.empty() && !row.generic.empty() &&
+            !row.xbox.empty() && !row.playstation.empty(), "complete label rows");
+    }
+    check(pad_display_family(false, PadLabelFamily::xbox) == PadLabelFamily::generic,
+        "disconnected never claims Xbox");
+    check(pad_display_family(true, PadLabelFamily::playstation) == PadLabelFamily::playstation,
+        "verified connected family");
+    check(pad_control_label(kPadControlRows[1], PadLabelFamily::xbox) == "A" &&
+        pad_control_label(kPadControlRows[1], PadLabelFamily::playstation) == "Cross" &&
+        pad_control_label(kPadControlRows[1], PadLabelFamily::generic) == "South",
+        "physical south labeling");
+    check(pad_control_label(kPadControlRows[2], PadLabelFamily::playstation) == "Circle" &&
+        pad_back_label(PadLabelFamily::playstation) == "Circle" &&
+        pad_back_label(PadLabelFamily::xbox) == "B" &&
+        pad_back_label(PadLabelFamily::generic) == "East",
+        "physical east labeling");
     std::cout << "SDL3 Dreamcast mapping / focus / hotplug policy: OK\n";
 }
