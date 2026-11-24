@@ -88,7 +88,7 @@ jobs:
         run: |
           $dll = (Resolve-Path 'third_party/game-frame/wrappers/target/i686-pc-windows-msvc/release/glide2x.dll').Path
           $license = (Resolve-Path 'third_party/game-frame/LICENSE-APACHE').Path
-          cmake -S . -B build -A Win32 -DBUILD_TESTING=ON "-DRAYMAN2FIX_GLIDE_DLL=$dll" "-DRAYMAN2FIX_GLIDE_LICENSE=$license" "-DRAYMAN2FIX_GLIDE_SHA256=$env:RAYMAN2FIX_GAMEFRAME_SHA256"
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=ON "-DRAYMAN2FIX_GLIDE_DLL=$dll" "-DRAYMAN2FIX_GLIDE_LICENSE=$license" "-DRAYMAN2FIX_GLIDE_SHA256=$env:RAYMAN2FIX_GAMEFRAME_SHA256" "-DRAYMAN2FIX_SDL3_DIR=$env:RAYMAN2FIX_SDL3_AUDIT_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'Launcher/GameFrame configure failed' }
       - name: Build
         run: cmake --build build --config Release --parallel
