@@ -34,6 +34,7 @@
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
 #include "rayman2fix/standalone_video_page.hpp"
 #include "rayman2fix/pause_video_text_filter_policy.hpp"
+#include "rayman2fix/post_pause_ui_bar_probe_policy.hpp"
 #include "rayman2fix/pause_video_companion_layout_policy.hpp"
 #endif
 #include "rayman2fix/graphics_menu_glyph_layout.hpp"
@@ -5757,6 +5758,38 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // by screen position, or the original animated 3D butterfly.
     if(r2fix::suppress_readonly_video_brightness_meter(
            route,xmin,ymin,xmax,ymax))return;
+#endif
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    // The owner observed a horizontal gold/magenta bar that persists
+    // in gameplay AFTER exiting the Pause VIDEO page. The legacy exact
+    // brightness-gauge filter does not see it. Identify its native
+    // producer and actual percentages before changing any cleanup.
+    // Never suppress unknown sound/health/camera UI by geometry.
+    if(r2fix::post_pause_ui_bar_probe(
+        r2fix::standalone_video_page_suppress_leaked_gauge(),
+        r2fix::standalone_video_page_pause_is_drawn(),
+        unsigned(producer),route,xmin,ymin,xmax,ymax)) {
+        static std::atomic<unsigned> samples{0};
+        static std::atomic<DWORD> previous{0};
+        const DWORD now=GetTickCount();
+        DWORD last=previous.load(std::memory_order_relaxed);
+        if(DWORD(now-last)>=350u &&
+           samples.load(std::memory_order_relaxed)<16u &&
+           previous.compare_exchange_strong(
+               last,now,
+               std::memory_order_relaxed)) {
+            const unsigned sample=samples.fetch_add(
+                1u,std::memory_order_relaxed)+1u;
+            if(sample<=16u) {
+                char msg[280]{};
+                std::snprintf(msg,sizeof(msg),
+                    "RUNTIME-PAUSE-UI-BAR-PROBE: sample=%u producer=%u route=%u x=%.2f..%.2f y=%.2f..%.2f screen-bar-candidate=1 passive=1",
+                    sample,unsigned(producer),route,
+                    double(xmin),double(xmax),double(ymin),double(ymax));
+                log_line(msg);
+            }
+        }
+    }
 #endif
     record_bottom_2d_geometry(route,xmin,ymin,xmax,ymax);
     if(route==0u)
