@@ -67,6 +67,22 @@ jobs:
           $sha = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant()
           "RAYMAN2FIX_GAMEFRAME_SHA256=$sha" >> $env:GITHUB_ENV
           Write-Host "Pinned GameFrame x86 SHA256=$sha"
+      - name: Audit pinned SDL3 3.4.20 x86 candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'SDL3-3.4.20-win32-x86.zip'
+          Invoke-WebRequest -Uri 'https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-3.4.20-win32-x86.zip' -OutFile $archive
+          $dest = Join-Path $env:RUNNER_TEMP 'rayman2fix-sdl3-audited'
+          python tools/sdl3/audit_release.py $archive --output $dest
+          if ($LASTEXITCODE -ne 0) { throw 'SDL3 x86 provenance/ABI audit failed' }
+          "RAYMAN2FIX_SDL3_AUDIT_DIR=$dest" >> $env:GITHUB_ENV
+      - name: Upload SDL3 dependency audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rayman2Fix-SDL3-x86-audit
+          path: ${{ env.RAYMAN2FIX_SDL3_AUDIT_DIR }}/sdl3-audit.json
+          if-no-files-found: error
       - name: Configure 32-bit Windows with embedded GameFrame
         shell: pwsh
         run: |
