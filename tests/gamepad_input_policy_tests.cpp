@@ -251,5 +251,14 @@ int main() {
     check(!movie_gate.update(a).held,"held skip cannot cross Learn10 boundary");
     a.south=false;movie_gate.update(a);a.south=true;
     check(has(movie_gate.update(a).held,PadAction::skip),"fresh Learn10 skip");
+    PadTransitionGate map_gate;
+    a=active(PadContext::world_map);map_gate.update(a);
+    a.left_x=32767;a.south=true;
+    const auto map=map_gate.update(a);
+    check(has(map.held,PadAction::right) && has(map.held,PadAction::confirm) &&
+          !has(map.held,PadAction::jump) && map.movement.x==0.f,
+          "world map uses native menu directions and confirm, not gameplay");
+    a.context=PadContext::gameplay;
+    check(!map_gate.update(a).held,"map confirm cannot leak into gameplay");
     std::cout << "SDL3 Dreamcast mapping / focus / hotplug policy: OK\n";
 }

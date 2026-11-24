@@ -2908,7 +2908,39 @@ void proto_menu_tick() {
         generation=g_proto_generation.load(std::memory_order_relaxed);
         started=g_proto_pending_at.load(std::memory_order_relaxed);
     }
-    if(phase==proto::Phase::idle)return;
+    if(phase==proto::Phase::idle) {
+        // A rejected provisional pair clears the coordinator before its
+        // first render tick. Preserve the bounded opening report instead
+        // of silently losing the evidence. Never authorize compensation.
+        ProtoPreDriverReport rejected{};
+        {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            if(g_proto_predriver_report.ready) {
+                rejected=g_proto_predriver_report;
+                g_proto_predriver_report.ready=false;
+            }
+        }
+        if(g_log && rejected.ready &&
+           g_proto_predriver_probe_budget.load(std::memory_order_relaxed)<=16u) {
+            const auto& probe=rejected.probe;
+            const auto owner=inspect_audio_theme_owner(probe.first_handle,true);
+            char line[520]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-ESC-REJECTED-OPEN: t_ms=%lu callbacks=%u pauses=%u other_slots=%u other_handles=%u depth=%d->%d transition_type=%d owner_driver=%u outer_candidates=%u ref_class=%d ref_match=%d outer_complete=%u outer_candidates_bank=%u outer_bank=%d outer_index=%d inner_complete=%u inner_candidates_bank=%u inner_bank=%d inner_index=%d (post-wrapper read-only; no audio authorization)",
+                static_cast<unsigned long>(rejected.t_ms),
+                probe.callback_count,probe.pause_count,probe.unrelated_slots,
+                probe.other_handle_count,rejected.depth_before,rejected.depth_after,
+                rejected.transition_type_post_pause,owner.theme_owned_driver,
+                owner.outer_candidates,owner.native_theme_player_ref_class,
+                owner.native_theme_player_ref_matches_outer,
+                owner.outer_bank_provenance.list_complete,owner.outer_bank_provenance.candidates,
+                owner.outer_bank_provenance.bank_id,owner.outer_bank_provenance.resource_index,
+                owner.inner_bank_provenance.list_complete,owner.inner_bank_provenance.candidates,
+                owner.inner_bank_provenance.bank_id,owner.inner_bank_provenance.resource_index);
+            log_line(line);
+        }
+        return;
+    }
     if(phase==proto::Phase::pending_menu &&
        DWORD(GetTickCount()-started)>1500u) {
         BYTE expired_menu=0;
@@ -5352,9 +5384,15 @@ r2fix::PadContext sdl_native_context() noexcept {
         }
     }
 #endif
+    // Exact world-map level observed in the owner's retail session.
+    // Use the native menu keyboard route, never world movement or fire.
+    std::uint8_t pause_flag=0;
+    if(_stricmp(level,"mapmonde")==0 &&
+       intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
+       read_u8(base+0xB9BC8u,pause_flag) && !pause_flag)
+        return PadContext::world_map;
     // First playable-scene test only. Never reinterpret the introductory
     // scene, loading, or an unverified pause as gameplay.
-    std::uint8_t pause_flag=0;
     bool handover=false;
     if(r2fix::is_first_playable_level(level) &&
        intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
@@ -8242,6 +8280,9 @@ std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept {
         return (sdl_fresh_actions(r2fix::PadContext::gameplay) &
                 r2fix::pad_action_bit(r2fix::PadAction::pause)) ?
                 r2fix::pad_action_bit(r2fix::PadAction::cancel):0u;
+    if(sdl_native_context()==r2fix::PadContext::world_map)
+        return sdl_fresh_actions(r2fix::PadContext::world_map) &
+            ~r2fix::pad_action_bit(r2fix::PadAction::pause);
     return sdl_fresh_actions(r2fix::PadContext::menu);
 }
 void r2fix_sdl_note_pause_delivery() noexcept {

@@ -290,3 +290,18 @@ pause guard required physical Escape. A one-shot same-thread token from
 actual successful SDL keyboard-buffer ESC merge now supplies the second
 input provenance option, with current gameplay/focus/100ms validation.
 All native menu, pause depth and audio-owner checks remain unchanged.
+
+## Wine af5ce27c / 20261124-221815
+
+Jail_10 native indices 20/21 delivered, Jail_20 South accepted by original
+skip guard (exit 389 ms), Learn_10 handover 1592 ms with no keyboard Enter
+edge and SDL skip sampled. First Pause adopted and paired native resumes
+requested; voice observed active and unpaused. Four later openings adopted
+but provisional owner rejected (phase idle), native resumes forwarded.
+No unsafe audio bypass: idle-phase render tick now publishes the previously
+lost bounded predriver rejection evidence, after the original callbacks.
+The exact Mapmonde scene was observed inactive with controller input. Add
+separate world-map context only in Playing with generic pause flag clear;
+use existing DirectInput menu navigation/confirm/cancel, not gameplay axes.
+The player can still use physical keys. World-map behavior needs hardware
+validation. General level gameplay and knowledge action remain pending.

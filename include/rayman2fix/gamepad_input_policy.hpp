@@ -6,7 +6,7 @@
 
 namespace r2fix {
 
-enum class PadContext { inactive, gameplay, menu, video, controller_info, cinematic, pause_menu, first_cinematic, learn_cinematic };
+enum class PadContext { inactive, gameplay, menu, video, controller_info, cinematic, pause_menu, first_cinematic, learn_cinematic, world_map };
 enum class PadAction : unsigned {
     left, right, up, down, jump, fire, pause, camera_left, camera_right,
     target, statistics, world_knowledge, murphy, confirm, cancel, skip
@@ -60,7 +60,8 @@ constexpr std::uint32_t pad_actions(const PadSample& s) noexcept {
     if (s.context == PadContext::cinematic || s.context == PadContext::first_cinematic ||
         s.context == PadContext::learn_cinematic)
         return bit(s.south, PadAction::skip);
-    if (s.context == PadContext::menu || s.context == PadContext::pause_menu || s.context == PadContext::video ||
+    if (s.context == PadContext::menu || s.context == PadContext::pause_menu ||
+        s.context == PadContext::world_map || s.context == PadContext::video ||
         s.context == PadContext::controller_info) {
         // Information pages are read-only: only back is accepted.
         if (s.context == PadContext::video || s.context == PadContext::controller_info)
