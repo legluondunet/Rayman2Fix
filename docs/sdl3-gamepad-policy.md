@@ -45,3 +45,26 @@ Les touches ESC, Enter et les raccourcis cinématiques, ainsi que le
 menu Contrôles, devront faire partie des tests. Pas de SendInput global.
 La dépendance SDL3 x86 et sa licence zlib seront vérifiées et embarquées
 avant l'activation réelle. Voir #40 pour la version candidate et son hash.
+
+## SDL3 dependency verification (24 November 2026)
+
+The official SDL release listing publishes SDL3 3.4.20 for Windows x86:
+https://github.com/libsdl-org/SDL/releases/tag/release-3.4.20
+
+Archive SHA-256: `f6fbf5afa42195a01b1da8adf25567377d0e212f4b2b6770923903eb3feea254`.
+The Windows CI downloads this exact archive and audits its hash, PE32 i386
+DLL identity, required Gamepad API exports and zlib notice before writing
+only fixed output filenames. The audit JSON records the extracted DLL and
+notice digests. A separate x86 test loads the audited DLL by absolute path,
+checks the exact SDL version, initializes only GAMEPAD on its main thread,
+disables event processing, updates and enumerates devices, then shuts down.
+No controller is required on the CI runner. This smoke test is not proof
+of game input or physical hotplug. No SDL binary is embedded or executed
+inside Rayman 2 by this phase. The final DLL hash will be recorded from a
+successful audit before packaging.
+
+Native integration must use SDL initialization on the game's main thread,
+not the existing background menu discovery workers. Preserve the original
+GetDeviceState result and the VIDEO navigation filter. The analog route
+and duplicate native controller handling remain open; no keyboard mapping
+is approved yet.
