@@ -369,6 +369,12 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME pause-video-verified-companion-height
     COMMAND pause_video_companion_layout_tests)
+  add_executable(post_pause_ui_bar_probe_policy_tests
+    tests/post_pause_ui_bar_probe_policy_tests.cpp)
+  target_include_directories(post_pause_ui_bar_probe_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME post-pause-video-slider-source-identity-probe
+    COMMAND post_pause_ui_bar_probe_policy_tests)
   add_executable(wine_vulkan_driver_policy_tests
     tests/wine_vulkan_driver_policy_tests.cpp)
   target_include_directories(wine_vulkan_driver_policy_tests PRIVATE
