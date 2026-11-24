@@ -5182,7 +5182,10 @@ void poll_second_intro_skip(bool pad_skip_down = false) {
     // A queued press must survive Alt-Tab; dispatch only in foreground.
     const bool ready=foreground && mode==int(kIntroEnginePlaying);
     const bool was_pending=g_intro_guard.pending;
+    const bool was_requested=g_intro_guard.requested;
     const bool requested=g_intro_guard.update(g_current_level,down,ready);
+    if(in_intro && pad_skip_down && !was_requested && g_intro_guard.requested)
+        log_line("RUNTIME-SDL3: native-route=jail_20 source=South accepted-by-original-guard=1");
     if(in_intro && g_log && !was_pending && g_intro_guard.pending) {
         char line[185]{};
         std::snprintf(line,sizeof(line),
@@ -5328,12 +5331,23 @@ void poll_sdl3_native() noexcept {
     static bool initialized = false;
     static DWORD owner = 0;
     static DWORD last_report = 0;
+    static DWORD last_poll = 0;
+    static bool polling = false;
     static unsigned reports = 0;
     static std::uint32_t last_buttons = 0;
     static bool last_motion = false;
     static bool last_focus = false;
     static std::uint32_t last_device = 0;
+    static std::uint32_t last_native_actions = 0;
+    static r2fix::PadContext last_context = r2fix::PadContext::inactive;
     const DWORD tid = GetCurrentThreadId();
+    if (g_game_camera_thread_id.load(std::memory_order_acquire) != tid ||
+        (owner && owner != tid) || polling) return;
+    const DWORD poll_now = GetTickCount();
+    if (last_poll && DWORD(poll_now-last_poll) < 12u) return;
+    last_poll = poll_now;
+    polling = true;
+    struct ClearPolling { bool& busy; ~ClearPolling() { busy = false; } } clear{polling};
     const bool foreground = game_window_is_foreground();
     if (!attempted) {
         if (!foreground || g_game_camera_thread_id.load(std::memory_order_acquire) != tid)
@@ -5372,7 +5386,8 @@ void poll_sdl3_native() noexcept {
     const bool moving = motion.x != 0 || motion.y != 0;
     const DWORD now = GetTickCount();
     const bool changed = sample.device_id != last_device || foreground != last_focus ||
-        buttons != last_buttons || moving != last_motion;
+        buttons != last_buttons || moving != last_motion ||
+        context != last_context || transitions.held != last_native_actions;
     // Diagnostics only, bounded to avoid flooding the original render thread.
     if (g_log && changed && reports < 128 && (!reports || DWORD(now-last_report)>=50)) {
         char msg[256]{};
@@ -5383,6 +5398,8 @@ void poll_sdl3_native() noexcept {
             unsigned(context), unsigned(transitions.held));
         log_line(msg);
         last_device = sample.device_id;
+        last_context = context;
+        last_native_actions = transitions.held;
         last_focus = foreground;
         last_buttons = buttons;
         last_motion = moving;
@@ -5499,7 +5516,14 @@ int __cdecl native_frame_flip_for_intro(int first,int second) {
             pending_at=g_proto_pending_at.load(std::memory_order_relaxed);
     }
 #endif
-    if(!intro && !audio_pending)return result;
+    if(!intro && !audio_pending) {
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        // Independent read/merge snapshot refresh; does not run audio or
+        // native level changes outside the pre-existing fallback scopes.
+        poll_sdl3_native();
+#endif
+        return result;
+    }
     const DWORD current_tid=GetCurrentThreadId();
     const DWORD camera_tid=g_game_camera_thread_id.load(
         std::memory_order_acquire);
