@@ -1,122 +1,111 @@
 #include "rayman2fix/gamepad_input_policy.hpp"
-
-#include <cstdint>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 
-namespace {
-void check(bool value, const char* msg) {
-    if (!value) throw std::runtime_error(msg);
+using namespace r2fix;
+void check(bool v, const char* msg) { if (!v) throw std::runtime_error(msg); }
+bool has(std::uint32_t actions, PadAction a) { return (actions & pad_action_bit(a)) != 0; }
+PadSample active(PadContext context = PadContext::gameplay) {
+    PadSample s{};
+    s.device_id = 7; s.connected = true; s.foreground = true; s.context = context;
+    return s;
 }
-bool has(std::uint32_t actions, r2fix::PadAction action) {
-    return (actions & r2fix::pad_action_bit(action)) != 0;
-}
-}
-
 int main() {
-    using namespace r2fix;
     PadTransitionGate gate;
-    PadSample a{};
-    a.device_id = 7;
-    a.connected = true;
-    a.foreground = true;
+    auto a = active();
     a.south = true;
-
-    // Missing/disconnected pads must NEVER synthesize input.
-    auto e = gate.update(PadSample{});
-    check(!e.eligible && e.pressed == 0 && e.held == 0, "no pad is neutral");
-
+    auto e = gate.update({});
+    check(!e.eligible && !e.held && !e.pressed, "no pad neutral");
     e = gate.update(a);
-    check(e.eligible && has(e.pressed, PadAction::primary) &&
-          has(e.held, PadAction::primary), "new press generated exactly once");
+    check(e.eligible && has(e.pressed, PadAction::jump), "south jumps");
     e = gate.update(a);
-    check(e.pressed == 0 && e.released == 0 &&
-          has(e.held, PadAction::primary), "held state has no key repeat");
-
-    // Loss of focus releases all logical buttons even if the hardware
-    // remains held. Repeated background samples never emit duplicate ups.
+    check(!e.pressed && !e.released && has(e.held, PadAction::jump), "no repeat");
     a.foreground = false;
     e = gate.update(a);
-    check(!e.eligible && has(e.released, PadAction::primary) &&
-          e.held == 0, "focus lost releases active controls");
-    e = gate.update(a);
-    check(e.pressed == 0 && e.released == 0, "no repeated release");
+    check(!e.eligible && has(e.released, PadAction::jump) && !e.held, "focus release");
+    check(!gate.update(a).released, "no duplicate release");
     a.foreground = true;
-    e = gate.update(a);
-    check(has(e.pressed, PadAction::primary), "focus restored gets fresh edge");
-
-    // Unplugging immediately resets state; reconnect starts fresh.
+    check(has(gate.update(a).pressed, PadAction::jump), "focus restored");
     a.connected = false;
-    e = gate.update(a);
-    check(has(e.released, PadAction::primary) && !e.eligible,
-          "disconnect releases all");
-    e = gate.update(a);
-    check(e.released == 0, "disconnect releases once");
-    a.connected = true;
-    a.device_id = 8;
-    e = gate.update(a);
-    check(has(e.pressed, PadAction::primary), "reconnected new pad works");
-
-    // Switching straight from one connected pad to another cannot inherit
-    // held buttons. The new pad is accepted on its next sample.
+    check(has(gate.update(a).released, PadAction::jump), "unplug release");
+    check(!gate.update(a).released, "unplug once");
+    a.connected = true; a.device_id = 8;
+    check(has(gate.update(a).pressed, PadAction::jump), "reconnect");
     a.device_id = 9;
     e = gate.update(a);
-    check(has(e.released, PadAction::primary) &&
-          e.held == 0 && !e.eligible, "identity switch releases old pad");
-    e = gate.update(a);
-    check(e.eligible && has(e.pressed, PadAction::primary),
-          "new identity requires a fresh sample");
-
-    // Axis deadzone has strict, stable thresholds and no overflow at -32768.
-    a.south = false;
-    a.left_x = -32768;
-    a.left_y = 32767;
-    e = gate.update(a);
-    check(has(e.held, PadAction::left) &&
-          has(e.held, PadAction::down), "full-scale axes map correctly");
-    a.left_x = -kPadAxisDeadzone;
-    a.left_y = kPadAxisDeadzone;
-    e = gate.update(a);
-    check(!has(e.held, PadAction::left) &&
-          !has(e.held, PadAction::down), "deadzone boundary is neutral");
-
-    a.left_x = kPadAxisDeadzone + 1;
-    a.left_y = -kPadAxisDeadzone - 1;
-    e = gate.update(a);
-    check(has(e.held, PadAction::right) && has(e.held, PadAction::up),
-          "axes outside deadzone produce directions");
-    a.dpad_left = true;
-    a.dpad_down = true;
-    e = gate.update(a);
-    check(!has(e.held, PadAction::left) &&
-          !has(e.held, PadAction::right) &&
-          !has(e.held, PadAction::up) &&
-          !has(e.held, PadAction::down),
-          "opposing dpad and axis directions cancel");
-
-    // Button mapping is logical only: there is no SendInput, keyboard hook,
-    // native engine write, background input or SDL DLL in this phase.
-    a.dpad_left = false;
-    a.dpad_down = false;
-    a.left_x = 0;
-    a.left_y = 0;
-    a.east = true;
-    a.start = true;
-    a.left_shoulder = true;
-    a.right_shoulder = true;
-    e = gate.update(a);
-    check(has(e.held, PadAction::secondary) &&
-          has(e.held, PadAction::pause) &&
-          has(e.held, PadAction::camera_left) &&
-          has(e.held, PadAction::camera_right),
-          "logical button set is independent");
-
-    // An invalid SDL instance ID cannot retain live controls.
+    check(!e.eligible && has(e.released, PadAction::jump), "switch releases");
+    check(has(gate.update(a).pressed, PadAction::jump), "fresh owner");
     a.device_id = 0;
-    e = gate.update(a);
-    check(!e.eligible && e.held == 0 && e.released != 0,
-          "invalid identity is disconnected");
+    check(!gate.update(a).eligible, "invalid device");
 
-    std::cout << "SDL3 gamepad focus/hotplug policy: OK\n";
-    return 0;
+    a = active();
+    a.east = a.start = a.dpad_up = a.dpad_down = true;
+    a.left_trigger = a.right_trigger = 32767;
+    check(pad_actions(a) == (pad_action_bit(PadAction::fire) |
+        pad_action_bit(PadAction::pause) | pad_action_bit(PadAction::target) |
+        pad_action_bit(PadAction::statistics) | pad_action_bit(PadAction::world_knowledge) |
+        pad_action_bit(PadAction::murphy)), "Dreamcast independent actions");
+    a = active();
+    a.west = true;
+    check(pad_actions(a) == pad_action_bit(PadAction::camera_left), "west camera left");
+    a.west = false; a.north = true;
+    check(pad_actions(a) == pad_action_bit(PadAction::camera_right), "north camera right");
+    a.north = false; a.left_shoulder = true;
+    check(pad_actions(a) == pad_action_bit(PadAction::camera_left), "LB camera left");
+    a.left_shoulder = false; a.right_shoulder = true;
+    check(pad_actions(a) == pad_action_bit(PadAction::camera_right), "RB camera right");
+    a.right_shoulder = false; a.right_x = -32768;
+    check(pad_actions(a) == pad_action_bit(PadAction::camera_left), "right stick left");
+    a.right_x = 32767;
+    check(pad_actions(a) == pad_action_bit(PadAction::camera_right), "right stick right");
+    a.west = true;
+    check(!pad_actions(a), "opposing camera inputs neutral");
+    a = active();
+    a.left_trigger = a.right_trigger = kPadTriggerThreshold;
+    check(!pad_actions(a), "trigger drift ignored");
+
+    a = active();
+    a.left_x = -8192;
+    check(pad_movement(a).x == 0, "deadzone");
+    a.left_x = 16384;
+    const auto half = pad_movement(a);
+    check(half.x > .30f && half.x < .35f, "proportional walking");
+    a.left_x = -32768;
+    check(pad_movement(a).x == -1.0f, "full negative");
+    a.left_x = 32767; a.left_y = 32767;
+    const auto diagonal = pad_movement(a);
+    check(std::abs(std::hypot(diagonal.x, diagonal.y) - 1.0f) < .0001f,
+        "diagonal normalized");
+    a.foreground = false;
+    check(!pad_movement(a).x && !pad_movement(a).y, "unfocused neutral axes");
+
+    a = active(PadContext::menu);
+    a.dpad_up = a.south = true;
+    check(pad_actions(a) == (pad_action_bit(PadAction::up) | pad_action_bit(PadAction::confirm)),
+        "menu navigation and confirm distinct from gameplay");
+    a.left_y = 32767;
+    check(!has(pad_actions(a), PadAction::up) && !has(pad_actions(a), PadAction::down),
+        "contradictory menu directions neutral");
+    check(!pad_movement(a).y, "menu no analog motion");
+    a.context = PadContext::video; a.east = true;
+    check(pad_actions(a) == pad_action_bit(PadAction::cancel), "video only back");
+    a.context = PadContext::cinematic;
+    check(pad_actions(a) == pad_action_bit(PadAction::skip), "cinematic south skip");
+    a.context = PadContext::inactive;
+    check(!pad_actions(a), "unknown context fail closed");
+
+    PadTransitionGate contexts;
+    a = active(PadContext::menu); a.south = true;
+    check(has(contexts.update(a).pressed, PadAction::confirm), "menu confirm");
+    a.context = PadContext::cinematic;
+    e = contexts.update(a);
+    check(has(e.released, PadAction::confirm) && !e.held, "context releases");
+    a.context = PadContext::gameplay;
+    check(!contexts.update(a).held, "second context cannot bypass release");
+    check(!contexts.update(a).held, "held confirm cannot jump");
+    a.south = false; check(!contexts.update(a).held, "neutral rearms");
+    a.south = true;
+    check(has(contexts.update(a).pressed, PadAction::jump), "fresh gameplay press");
+    std::cout << "SDL3 Dreamcast mapping / focus / hotplug policy: OK\n";
 }
