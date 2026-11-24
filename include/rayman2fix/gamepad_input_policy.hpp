@@ -96,46 +96,46 @@ struct PadTransitions {
     PadMovement movement{};
 };
 
-// One owner, one semantic context. Release old actions on context change;
-// do not turn a held confirmation into a jump, or a held skip into another
-// skip. Wait for previously held discrete actions to go neutral before
-// accepting new actions in the changed context.
+// Physical neutral is independent of the semantic context. In particular,
+// a button ignored by an information page cannot leak into gameplay.
+inline bool pad_physically_active(const PadSample& s) noexcept {
+    const auto x = std::int64_t(std::clamp(s.left_x, -32768, 32767));
+    const auto y = std::int64_t(std::clamp(s.left_y, -32768, 32767));
+    return s.south || s.east || s.west || s.north || s.start ||
+        s.left_shoulder || s.right_shoulder ||
+        s.dpad_left || s.dpad_right || s.dpad_up || s.dpad_down ||
+        s.left_trigger > kPadTriggerThreshold ||
+        s.right_trigger > kPadTriggerThreshold ||
+        s.right_x < -kPadAxisDeadzone || s.right_x > kPadAxisDeadzone ||
+        x*x + y*y > std::int64_t(kPadAxisDeadzone)*kPadAxisDeadzone;
+}
+
+// One owner, one semantic context. Require neutral physical controls after
+// attach, focus restoration, owner change and context change; neither a held
+// confirmation nor an ignored button nor analog motion may cross the boundary.
 class PadTransitionGate {
 public:
     PadTransitions update(const PadSample& sample) noexcept {
-        const bool eligible = pad_eligible(sample);
-        if (!eligible || (owner_ && owner_ != sample.device_id)) {
+        if (!pad_eligible(sample)) {
             const auto released = held_;
             held_ = owner_ = 0;
             context_ = PadContext::inactive;
-            blocked_ = false;
+            blocked_ = true;
             return {0, 0, released, false, {}};
         }
-        if (owner_ && context_ != sample.context) {
-            blocked_ = blocked_ || held_ != 0;
+        if (owner_ != sample.device_id || context_ != sample.context) {
             const auto released = held_;
             held_ = 0;
+            owner_ = sample.device_id;
             context_ = sample.context;
+            blocked_ = pad_physically_active(sample);
             return {0, 0, released, true, {}};
         }
-        owner_ = sample.device_id;
-        context_ = sample.context;
-        auto next = pad_actions(sample);
         if (blocked_) {
-            // Check physical discrete controls even if ignored in this context.
-            const bool any = sample.south || sample.east || sample.west ||
-                sample.north || sample.start || sample.left_shoulder ||
-                sample.right_shoulder || sample.dpad_left || sample.dpad_right ||
-                sample.dpad_up || sample.dpad_down ||
-                sample.left_trigger > kPadTriggerThreshold ||
-                sample.right_trigger > kPadTriggerThreshold ||
-                sample.right_x < -kPadAxisDeadzone || sample.right_x > kPadAxisDeadzone ||
-                (sample.context != PadContext::gameplay &&
-                 (sample.left_x < -kPadAxisDeadzone || sample.left_x > kPadAxisDeadzone ||
-                  sample.left_y < -kPadAxisDeadzone || sample.left_y > kPadAxisDeadzone));
-            blocked_ = any;
-            next = 0;
+            blocked_ = pad_physically_active(sample);
+            return {0, 0, 0, true, {}};
         }
+        const auto next = pad_actions(sample);
         const PadTransitions result{next, next & ~held_, held_ & ~next,
                                     true, pad_movement(sample)};
         held_ = next;
@@ -144,7 +144,7 @@ public:
 private:
     std::uint32_t owner_ = 0, held_ = 0;
     PadContext context_ = PadContext::inactive;
-    bool blocked_ = false;
+    bool blocked_ = true;
 };
 
 } // namespace r2fix
