@@ -94,6 +94,19 @@ Scan scan_controller() noexcept {
                         std::uint32_t flags=0;
                         std::memcpy(&flags,buffer.data()+i+16u,4u);
                         if(flags!=1u)continue;
+                        // Reject impossible reciprocal Mind owners from
+                        // the local chunk before expensive process reads.
+                        // At a chunk boundary keep the original full check.
+                        if(i>=24u) {
+                            std::uint32_t owner=0;
+                            std::memcpy(&owner,buffer.data()+i-24u,4u);
+                            if(owner!=at+i)continue;
+                        }
+                        std::uint32_t nlist=0,rlist=0;
+                        std::memcpy(&nlist,buffer.data()+i,4u);
+                        std::memcpy(&rlist,buffer.data()+i+4u,4u);
+                        if(!menu_safe_ptr(nlist,8u) ||
+                           !menu_safe_ptr(rlist,8u))continue;
                         PauseVideoModel candidate{};
                         if(inspect_pause_video_model(at+i,&read32,&read8,
                                                      candidate)) {
@@ -123,6 +136,7 @@ struct PatchSlot {
 std::array<PatchSlot,5> g_scripts{};
 bool g_scripts_installed=false;
 bool g_preflight_failed=false;
+bool g_retry_after_video=false;
 bool writable(std::uintptr_t at) noexcept {
     if(!at || at%4u)return false;
     MEMORY_BASIC_INFORMATION info{};
@@ -142,7 +156,8 @@ bool install_pause_video_scripts(const PauseVideoModel& model) noexcept {
     const char* reason="unverified";
     bool valid=true;
     unsigned failed_plan=~0u;
-    std::uint64_t observed_shape=0u;
+    std::uint64_t observed_shape=0u,zero_padding_shape=0u;
+    unsigned nonzero_padding=0u;
     for(unsigned k=0;k<5u;++k) {
         const auto& p=kPauseVideoPlans[k];
         const auto entries=model.normal_entries+p.behavior*12u;
@@ -175,23 +190,38 @@ bool install_pause_video_scripts(const PauseVideoModel& model) noexcept {
         if(!rewrite_pause_video_script(clone,p)) {
             valid=false;reason=observed_shape!=p.shape ?
                 "script-shape-mismatch" : "source-node-mismatch";
-            failed_plan=k;break;
+            failed_plan=k;
+            // Diagnostic only: distinguish structural changes from
+            // padding differences, without accepting either blindly.
+            for(unsigned i=0;i<p.count;++i) {
+                if(clone[i].padding)++nonzero_padding;
+                clone[i].padding=0;
+            }
+            zero_padding_shape=native_video_script_shape_hash(clone,p.count);
+            break;
         }
     }
     if(!valid) {
-        g_preflight_failed=true; // do not retry hundreds of times in one level
+        g_preflight_failed=true; // never loop over a rejected script
+        // A first scan may complete only after VIDEO has already
+        // entered. Allow one recheck on returning to native Options,
+        // not while the rejected script could still be executing.
+        g_retry_after_video=(model.normal==9 && model.reflex==2);
         for(unsigned i=0;i<built;++i)
             if(prepared[i].clone)
                 VirtualFree(prepared[i].clone,0,MEM_RELEASE);
         if(g_log) {
-            char msg[330]{};
+            char msg[430]{};
             const auto p=failed_plan<5u ? kPauseVideoPlans[failed_plan] :
                 PauseVideoScriptPlan{};
             std::snprintf(msg,sizeof(msg),
-                "RUNTIME-PAUSE-VIDEO-PAGE: status=preflight-refused reason=%s behavior=%u script=%u nodes=%u observed-shape=%08X%08X expected-shape=%08X%08X retry=next-scene-only no-patch=1",
+                "RUNTIME-PAUSE-VIDEO-PAGE: status=preflight-refused reason=%s behavior=%u script=%u nodes=%u observed-shape=%08X%08X expected-shape=%08X%08X zero-padding-shape=%08X%08X nonzero-padding=%u normal=%d reflex=%d retry=%s no-patch=1",
                 reason,p.behavior,p.script,p.count,
                 unsigned(observed_shape>>32),unsigned(observed_shape),
-                unsigned(p.shape>>32),unsigned(p.shape));
+                unsigned(p.shape>>32),unsigned(p.shape),
+                unsigned(zero_padding_shape>>32),unsigned(zero_padding_shape),
+                nonzero_padding,model.normal,model.reflex,
+                g_retry_after_video?"once-on-options-return":"next-scene-only");
             g_log(msg);
         }
         return false;
@@ -229,6 +259,8 @@ bool install_pause_video_scripts(const PauseVideoModel& model) noexcept {
 }
 void restore_pause_video_scripts() noexcept {
     standalone_video_page_set_pause_visible(false);
+    g_retry_after_video=false;
+    g_preflight_failed=false;
     if(!g_scripts_installed)return;
     for(const auto& entry:g_scripts)
         if(entry.slot && entry.original && entry.clone &&
@@ -440,6 +472,14 @@ DWORD WINAPI worker(void*) {
                 }
                 if(!website_row && !just_left_website_row)
                     last_site_selected_tick=0u;
+                // Only retry a failed late preflight after returning
+                // to the authenticated parent Options (normal6).
+                if(g_retry_after_video && current.normal==6 &&
+                   current.reflex==2) {
+                    g_retry_after_video=false;
+                    g_preflight_failed=false;
+                    if(g_log)g_log("RUNTIME-PAUSE-VIDEO-PAGE: retry=options-return original-signatures-required=1");
+                }
                 if(!g_scripts_installed && !g_preflight_failed)
                     install_pause_video_scripts(current);
                 const bool candidate=current.normal==9 && current.reflex==2;
@@ -449,8 +489,9 @@ DWORD WINAPI worker(void*) {
                     current.reflex!=prior_reflex) && reports<64u) {
                 char msg[240]{};
                 std::snprintf(msg,sizeof(msg),
-                    "RUNTIME-PAUSE-VIDEO-MODEL: controller=verified normal=%d reflex=%d candidate-video=%u page=script-verified",
-                    current.normal,current.reflex,unsigned(candidate));
+                    "RUNTIME-PAUSE-VIDEO-MODEL: controller=verified normal=%d reflex=%d candidate-video=%u page=%s",
+                    current.normal,current.reflex,unsigned(candidate),
+                    g_scripts_installed?"script-verified":"not-installed");
                 g_log(msg);
                 ++reports;
                 prior_normal=current.normal;
