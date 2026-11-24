@@ -25,7 +25,7 @@ namespace {
 // Center on the approved 1024x768 Glide frame, below the native VIDEO title.
 constexpr unsigned kW=kVideoInfoWidth,kH=kVideoInfoHeight;
 constexpr unsigned kX=kVideoInfoX,kY=kVideoInfoY;
-static_assert(kX==212u && kY==304u,
+static_assert(kX==212u && kY==284u,
               "Both VIDEO panels use the same lower geometry");
 static_assert(kX+kW<=kVideoCanvasWidth &&
               video_info_panel_y(true)+kH<=kVideoCanvasHeight,
@@ -91,8 +91,8 @@ std::atomic<bool> g_pause_title_restored_logged{false};
 std::atomic<bool> g_pause_title_band_sampled{false};
 GlideRead g_read=nullptr;
 GlideWrite g_write=nullptr;
-std::array<std::array<char,128>,5> g_lines{};
-constexpr const char* kRowLabels[5]{"SORTIE","GPU","PILOTE","RENDU","INTERNE"};
+std::array<std::array<char,128>,kVideoInfoRowCount> g_lines{};
+constexpr const char* kRowLabels[kVideoInfoRowCount]{"SORTIE","GPU","PILOTE","RENDU","INTERNE","FIX"};
 std::atomic<bool> g_title_preserved_logged{false};
 std::vector<std::uint16_t> g_pixels;
 std::vector<std::uint8_t> g_text_mask;
@@ -284,7 +284,7 @@ bool prepare_mask() noexcept {
     // Fit one consistent font size to the actual longest GPU / driver
     // string, using the active GDI font metrics (also valid under Wine).
     // This avoids the previous truncated "AMD Radeon RX 6600M (RADV N..."
-    // while retaining the approved blue panel and five-row positions.
+    // while retaining the approved blue panel and consistent six-row spacing.
     HFONT font=nullptr;
     int font_px=0;
     bool all_lines_fit=false;
@@ -326,11 +326,11 @@ bool prepare_mask() noexcept {
     }
     const auto old_font=SelectObject(dc,font);
     for(unsigned i=0;i<g_lines.size();++i) {
-        const int y=42+int(i)*53;
+        const int y=video_info_row_y(i);
         constexpr int scale=int(kSampleScale);
-        RECT label{kVideoInfoLabelLeft*scale,y*scale,166*scale,(y+38)*scale};
+        RECT label{kVideoInfoLabelLeft*scale,y*scale,166*scale,(y+kVideoInfoRowHeight)*scale};
         RECT value{kVideoInfoValueLeft*scale,y*scale,kVideoInfoValueRight*scale,
-                   (y+(all_lines_fit?38:48))*scale};
+                   (y+(all_lines_fit?kVideoInfoRowHeight:kVideoInfoWrappedRowHeight))*scale};
         DrawTextA(dc,kRowLabels[i],-1,&label,
                   DT_SINGLELINE|DT_NOPREFIX|DT_VCENTER);
         if(all_lines_fit)
@@ -434,9 +434,11 @@ void standalone_video_page_configure(StandaloneVideoLogger logger,
              "Version non disponible");
     std::snprintf(g_lines[3].data(),128,"GAMEFRAME / GLIDE2");
     std::snprintf(g_lines[4].data(),128,"1024 x 768 x 16");
+    std::snprintf(g_lines[5].data(),128,"Rayman2Fix %s-%s",
+                  RAYMAN2FIX_VERSION,RAYMAN2FIX_BUILD_COMMIT);
     g_configured.store(true,std::memory_order_release);
     install_video_navigation_input(g_log);
-    if(g_log)g_log("RUNTIME-STANDALONE-VIDEO: configured independent-page=1 native-title=original-video centered-panel=1 rows=5 win32-driver=verified-setupapi renderer=Glide2-LFB");
+    if(g_log)g_log("RUNTIME-STANDALONE-VIDEO: configured independent-page=1 native-title=original-video centered-panel=1 rows=6 win32-driver=verified-setupapi renderer=Glide2-LFB");
 }
 
 void standalone_video_page_set_visible(bool value) noexcept {
@@ -551,7 +553,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
     for(unsigned y=0;y<kH;++y)for(unsigned x=0;x<kW;++x) {
         const unsigned i=y*kW+x;
         constexpr unsigned kPanelR=74u,kPanelG=38u,kPanelB=18u;
-        constexpr unsigned kPanelAlpha=100u; // 39% tint, 61% live scene
+        constexpr unsigned kPanelAlpha=kVideoInfoPanelAlpha; // 40% tint, 60% live scene
         constexpr unsigned kBorderR=255u,kBorderG=218u,kBorderB=145u;
         const auto c=g_panel_mask[i];
         auto pix=g_pixels[i];
@@ -581,14 +583,14 @@ bool standalone_video_page_draw_before_flip() noexcept {
         return false;
     }
     if(!g_drew.exchange(true) && g_log)
-        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=translucent-midnight-blue alpha=100/255 blue-outline=verified-BGR565-blue border-width=2 controls=Escape-only source=MENU-or-verified-ESC-script corner-radius=12 coverage=4x text-supersampling=4x");
+        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=translucent-midnight-blue alpha=102/255 opacity=40% blue-outline=verified-BGR565-blue border-width=2 controls=Escape-only source=MENU-or-verified-ESC-script corner-radius=12 coverage=4x text-supersampling=4x");
     if(pause) {
         g_pause_early_failed=false;
         g_pause_drawn_this_visit.store(true,std::memory_order_release);
         g_pause_gauge_leak_guard.store(true,std::memory_order_release);
     }
     if(pause && !g_pause_draw_reported.exchange(true) && g_log)
-        g_log("RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1 source=own-Glide-LFB state=verified-normal9-reflex2 background=translucent-midnight-blue original-scene=preserved panel-y=304 layout=shared-with-MENU native-luciole-space=+80 no-actor-transform=1");
+        g_log("RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1 source=own-Glide-LFB state=verified-normal9-reflex2 background=translucent-midnight-blue original-scene=preserved panel-y=284 panel-height=368 rows=6 layout=shared-with-MENU no-actor-transform=1");
     return true;
 }
 } // namespace r2fix
