@@ -292,8 +292,8 @@ int main() {
               "SDL3 beside game runtime; notice under docs");
         const auto sdl_bytes = contents(sdl);
         const auto notice_bytes = contents(notice);
-        check(sdl_bytes.size() > 100000 && sdl_bytes.substr(0, 2) == "MZ" &&
-              notice_bytes.find("altered source versions") != std::string::npos,
+        check(r2fix::sha256_file(sdl) == "6d7e653aa9c762ceda4fffc054a504dcce273e016eb9f1fe079b6409a058a9f7" &&
+              r2fix::sha256_file(notice) == "1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd",
               "embedded PE and zlib notice deployed");
         app.initialize();
         check(contents(sdl) == sdl_bytes && contents(notice) == notice_bytes &&
