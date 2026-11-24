@@ -17,7 +17,7 @@ REQUIRED_EXPORTS = {
     "SDL_GetVersion", "SDL_GetError", "SDL_SetMainReady", "SDL_InitSubSystem",
     "SDL_QuitSubSystem", "SDL_SetHint", "SDL_GetGamepads", "SDL_free",
     "SDL_OpenGamepad", "SDL_CloseGamepad", "SDL_GamepadConnected",
-    "SDL_GetGamepadID", "SDL_GetGamepadName", "SDL_GetGamepadAxis",
+    "SDL_GetGamepadID", "SDL_GetGamepadName", "SDL_GetGamepadType", "SDL_GetGamepadAxis",
     "SDL_GetGamepadButton", "SDL_SetGamepadEventsEnabled", "SDL_UpdateGamepads",
 }
 
