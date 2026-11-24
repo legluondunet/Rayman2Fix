@@ -111,7 +111,7 @@ public:
             return {0, 0, released, false, {}};
         }
         if (owner_ && context_ != sample.context) {
-            blocked_ = held_ != 0;
+            blocked_ = blocked_ || held_ != 0;
             const auto released = held_;
             held_ = 0;
             context_ = sample.context;
