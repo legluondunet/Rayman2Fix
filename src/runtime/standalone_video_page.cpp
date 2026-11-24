@@ -30,6 +30,43 @@ static_assert(kX+kW<=kVideoCanvasWidth &&
               video_info_panel_y(true)+kH<=kVideoCanvasHeight,
               "Both VIDEO panel placements must fit the Glide canvas");
 constexpr int kBackBuffer=1,kRgb565=0;
+constexpr unsigned kSampleScale=4u,kSamples=kSampleScale*kSampleScale;
+constexpr unsigned kCornerRadius=12u,kBorderWidth=2u;
+constexpr unsigned kMaskW=kW*kSampleScale,kMaskH=kH*kSampleScale;
+struct PanelCoverage { unsigned char fill, border; };
+// Integer subpixel centres; inner and outer arcs share corner centres.
+constexpr bool rounded_sample(int x,int y,int inset) noexcept {
+    constexpr int unit=int(kSampleScale*2u);
+    const int left=inset*unit,top=left;
+    const int right=int(kW)*unit-left,bottom=int(kH)*unit-top;
+    const int radius=(int(kCornerRadius)-inset)*unit;
+    if(x<left || x>=right || y<top || y>=bottom)return false;
+    const int dx=x<left+radius?left+radius-x:
+                 x>right-radius?x-(right-radius):0;
+    const int dy=y<top+radius?top+radius-y:
+                 y>bottom-radius?y-(bottom-radius):0;
+    return dx*dx+dy*dy<=radius*radius;
+}
+constexpr PanelCoverage panel_coverage(unsigned x,unsigned y) noexcept {
+    PanelCoverage c{};
+    for(unsigned sy=0;sy<kSampleScale;++sy)
+        for(unsigned sx=0;sx<kSampleScale;++sx) {
+            const int px=int((x*kSampleScale+sx)*2u+1u);
+            const int py=int((y*kSampleScale+sy)*2u+1u);
+            if(rounded_sample(px,py,int(kBorderWidth)))++c.fill;
+            else if(rounded_sample(px,py,0))++c.border;
+        }
+    return c;
+}
+static_assert(panel_coverage(0,0).fill==0 &&
+              panel_coverage(0,0).border==0,"Outside corners remain untouched");
+static_assert(panel_coverage(kW/2,0).border==kSamples &&
+              panel_coverage(kW/2,2).fill==kSamples,"Two-pixel straight border");
+static_assert(panel_coverage(kW/2,kH/2).fill==kSamples,"Solid panel interior");
+static_assert(panel_coverage(3,3).border>0 &&
+              panel_coverage(3,3).border<kSamples,"Fractional corner coverage");
+static_assert(panel_coverage(3,3).border==panel_coverage(kW-4,kH-4).border,
+              "Symmetric rounded corners");
 using GlideRead=std::int32_t (WINAPI*)(int,unsigned,unsigned,unsigned,
                                        unsigned,unsigned,void*);
 using GlideWrite=std::int32_t (WINAPI*)(int,unsigned,unsigned,int,unsigned,
@@ -57,7 +94,8 @@ std::array<std::array<char,128>,5> g_lines{};
 constexpr const char* kRowLabels[5]{"SORTIE","GPU","PILOTE","RENDU","INTERNE"};
 std::atomic<bool> g_title_preserved_logged{false};
 std::vector<std::uint16_t> g_pixels;
-std::vector<std::uint32_t> g_text_mask;
+std::vector<std::uint8_t> g_text_mask;
+std::vector<PanelCoverage> g_panel_mask;
 bool g_prepared=false;
 bool g_prepare_failed=false;
 
@@ -167,8 +205,8 @@ bool prepare_mask() noexcept {
     HDC dc=CreateCompatibleDC(screen);
     BITMAPINFO bmi{};
     bmi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth=LONG(kW);
-    bmi.bmiHeader.biHeight=-LONG(kH);
+    bmi.bmiHeader.biWidth=LONG(kMaskW);
+    bmi.bmiHeader.biHeight=-LONG(kMaskH);
     bmi.bmiHeader.biPlanes=1;
     bmi.bmiHeader.biBitCount=32;
     bmi.bmiHeader.biCompression=BI_RGB;
@@ -182,7 +220,7 @@ bool prepare_mask() noexcept {
         g_prepare_failed=true;return false;
     }
     const auto prior=SelectObject(dc,bitmap);
-    std::memset(bits,0,kW*kH*4u);
+    std::memset(bits,0,kMaskW*kMaskH*4u);
     SetBkMode(dc,TRANSPARENT);
     SetTextColor(dc,RGB(255,255,255));
     // The title uses the original Rayman 2 JFFTXT glyphs / animation,
@@ -196,7 +234,7 @@ bool prepare_mask() noexcept {
     bool all_lines_fit=false;
     for(int px=kVideoInfoFontPreferredPx;
         px>=kVideoInfoFontMinPx;--px) {
-        HFONT candidate=CreateFontA(-px,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,
+        HFONT candidate=CreateFontA(-px*int(kSampleScale),0,0,0,FW_BOLD,FALSE,FALSE,FALSE,
             DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
             ANTIALIASED_QUALITY,DEFAULT_PITCH|FF_SWISS,"Segoe UI");
         if(!candidate)continue;
@@ -210,10 +248,10 @@ bool prepare_mask() noexcept {
             if(!GetTextExtentPoint32A(dc,kRowLabels[i],label_len,
                                       &label_size) ||
                !GetTextExtentPoint32A(dc,value,value_len,&value_size) ||
-               label_size.cx>kVideoInfoValueLeft-kVideoInfoLabelLeft-
-                                 kVideoInfoTextPadding ||
-               value_size.cx>kVideoInfoValueRight-kVideoInfoValueLeft-
-                                 kVideoInfoTextPadding)
+               label_size.cx>(kVideoInfoValueLeft-kVideoInfoLabelLeft-
+                                 kVideoInfoTextPadding)*int(kSampleScale) ||
+               value_size.cx>(kVideoInfoValueRight-kVideoInfoValueLeft-
+                                 kVideoInfoTextPadding)*int(kSampleScale))
                 fits=false;
         }
         SelectObject(dc,previous);
@@ -233,9 +271,10 @@ bool prepare_mask() noexcept {
     const auto old_font=SelectObject(dc,font);
     for(unsigned i=0;i<g_lines.size();++i) {
         const int y=42+int(i)*53;
-        RECT label{kVideoInfoLabelLeft,y,166,y+38};
-        RECT value{kVideoInfoValueLeft,y,kVideoInfoValueRight,
-                   y+(all_lines_fit?38:48)};
+        constexpr int scale=int(kSampleScale);
+        RECT label{kVideoInfoLabelLeft*scale,y*scale,166*scale,(y+38)*scale};
+        RECT value{kVideoInfoValueLeft*scale,y*scale,kVideoInfoValueRight*scale,
+                   (y+(all_lines_fit?38:48))*scale};
         DrawTextA(dc,kRowLabels[i],-1,&label,
                   DT_SINGLELINE|DT_NOPREFIX|DT_VCENTER);
         if(all_lines_fit)
@@ -258,8 +297,23 @@ bool prepare_mask() noexcept {
     }
     SelectObject(dc,old_font);
     DeleteObject(font);
+    // Finish GDI operations before accessing DIB memory directly.
+    GdiFlush();
+    // Box-filter the supersampled DIB to grayscale coverage, avoiding
+    // ClearType colour fringes. Cache both masks once, not per frame.
     g_text_mask.resize(kW*kH);
-    std::memcpy(g_text_mask.data(),bits,kW*kH*4u);
+    g_panel_mask.resize(kW*kH);
+    const auto* samples=static_cast<const std::uint32_t*>(bits);
+    for(unsigned y=0;y<kH;++y)for(unsigned x=0;x<kW;++x) {
+        unsigned sum=0;
+        for(unsigned sy=0;sy<kSampleScale;++sy)
+            for(unsigned sx=0;sx<kSampleScale;++sx) {
+                const auto v=samples[(y*kSampleScale+sy)*kMaskW+x*kSampleScale+sx];
+                sum+=(v&255u)+((v>>8)&255u)+((v>>16)&255u);
+            }
+        g_text_mask[y*kW+x]=std::uint8_t((sum+3u*kSamples/2u)/(3u*kSamples));
+        g_panel_mask[y*kW+x]=panel_coverage(x,y);
+    }
     SelectObject(dc,prior);DeleteObject(bitmap);DeleteDC(dc);
     ReleaseDC(nullptr,screen);
     g_pixels.resize(kW*kH);
@@ -425,13 +479,23 @@ bool standalone_video_page_draw_before_flip() noexcept {
         constexpr unsigned kPanelR=74u,kPanelG=38u,kPanelB=18u;
         constexpr unsigned kPanelAlpha=100u; // 39% tint, 61% live scene
         constexpr unsigned kBorderR=255u,kBorderG=218u,kBorderB=145u;
-        const bool outline=x<2u || y<2u || x>=kW-2u || y>=kH-2u;
-        auto pix=blend_565(g_pixels[i],
-            kPanelR,kPanelG,kPanelB,kPanelAlpha);
-        if(outline)pix=blend_565(pix,
-            kBorderR,kBorderG,kBorderB,255u);
-        const auto value=g_text_mask[i];
-        const unsigned m=value&255u;
+        const auto c=g_panel_mask[i];
+        auto pix=g_pixels[i];
+        if(c.fill==kSamples)
+            pix=blend_565(pix,kPanelR,kPanelG,kPanelB,kPanelAlpha);
+        else if(c.border==kSamples)
+            pix=blend_565(pix,kBorderR,kBorderG,kBorderB,255u);
+        else if(c.fill || c.border) {
+            // Disjoint subpixel areas: combine tint and opaque outline
+            // against the original live scene in a single blend.
+            const unsigned f=c.fill*kPanelAlpha,b=c.border*255u,a=f+b;
+            pix=blend_565(pix,
+                (f*kPanelR+b*kBorderR+a/2u)/a,
+                (f*kPanelG+b*kBorderG+a/2u)/a,
+                (f*kPanelB+b*kBorderB+a/2u)/a,
+                (a+kSamples/2u)/kSamples);
+        }
+        const unsigned m=g_text_mask[i];
         if(m)pix=blend_565(pix,255u,255u,255u,m);
         g_pixels[i]=pix;
     }
@@ -442,7 +506,7 @@ bool standalone_video_page_draw_before_flip() noexcept {
         return false;
     }
     if(!g_drew.exchange(true) && g_log)
-        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=translucent-midnight-blue alpha=100/255 blue-outline=verified-BGR565-blue border-width=2 controls=Escape-only source=MENU-or-verified-ESC-script");
+        g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=translucent-midnight-blue alpha=100/255 blue-outline=verified-BGR565-blue border-width=2 controls=Escape-only source=MENU-or-verified-ESC-script corner-radius=12 coverage=4x text-supersampling=4x");
     if(pause) {
         g_pause_drawn_this_visit.store(true,std::memory_order_release);
         g_pause_gauge_leak_guard.store(true,std::memory_order_release);
