@@ -2,6 +2,7 @@
 #include "rayman2fix/standalone_video_device_policy.hpp"
 #include "rayman2fix/standalone_video_layout_policy.hpp"
 #include "rayman2fix/video_navigation_input.hpp"
+#include "rayman2fix/wine_vulkan_driver.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -293,15 +294,32 @@ void standalone_video_page_configure(StandaloneVideoLogger logger,
         const HMODULE ntdll=GetModuleHandleW(L"ntdll.dll");
         return ntdll && GetProcAddress(ntdll,"wine_get_version")!=nullptr;
     }();
-    if(!wine)
+    if(!wine) {
         primary_display_driver(primary,gpu,unsigned(sizeof(gpu)),
                                driver_version,unsigned(sizeof(driver_version)));
+    } else {
+        char reason[96]{};
+        const bool matched=wine_vulkan_driver_for_display(
+            primary.DeviceString,primary.DeviceID,
+            driver_version,unsigned(sizeof(driver_version)),
+            reason,unsigned(sizeof(reason)));
+        if(g_log) {
+            char msg[260]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-WINE-VIDEO-DRIVER: host-ICD-source=winevulkan "
+                "status=%s reason=%s information=%s no-external-command=1",
+                matched?"matched":"unavailable",reason,
+                matched?driver_version:"not-attributed");
+            g_log(msg);
+        }
+    }
     std::snprintf(g_lines[0].data(),128,"%u x %u  %u:%u  %s",
         out_w,out_h,a,b,classic?"4:3":"AUTO");
     std::snprintf(g_lines[1].data(),128,"%s",gpu);
     std::snprintf(g_lines[2].data(),128,"%s",
-        wine?"Pilote hote non expose (Wine)":
-        driver_version[0]?driver_version:"Version non disponible");
+        driver_version[0]?driver_version:
+        wine?"Pilote Vulkan non identifie (Wine)":
+             "Version non disponible");
     std::snprintf(g_lines[3].data(),128,"GAMEFRAME / GLIDE2");
     std::snprintf(g_lines[4].data(),128,"1024 x 768 x 16");
     g_configured.store(true,std::memory_order_release);
