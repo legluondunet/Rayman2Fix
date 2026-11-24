@@ -122,9 +122,13 @@ jobs:
               'RUNTIME-VIDEO-INPUT: status=installed',
               'RUNTIME-STANDALONE-VIDEO: configured independent-page=1',
               'RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1',
-              'RUNTIME-MENU-SITE: status=installed handle=362')) {
+              'RUNTIME-MENU-SITE: status=installed handle=362',
+              'RUNTIME-SDL3: compiled=1 owner=native-camera-thread',
+              'RUNTIME-SDL3: poll-entered=1',
+              'RUNTIME-SDL3: initialized=1 version=3.4.20',
+              'RUNTIME-SDL3: native-route=MENU merged=1')) {
             if (!$text.Contains($marker)) {
-              throw "Default x86 fix.dll missing required VIDEO feature: $marker"
+              throw "Default x86 fix.dll missing required VIDEO/SDL3 feature: $marker"
             }
           }
           if ($text.Contains('RUNTIME-AUDIO-TRACE: enabled=1')) {
