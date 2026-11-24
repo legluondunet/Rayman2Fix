@@ -5483,7 +5483,7 @@ bool ipt_live_entry(void* entry,r2fix::IptActionReadback& row,
        at<h.table || (at-h.table)%sizeof(row) ||
        (at-h.table)/sizeof(row)>=h.count ||
        !ipt_read(at,&row,sizeof(row)) || !ipt_entry_plausible(row) ||
-       !row.name || row.active!=1u || !ipt_read(row.name,name.data(),name.size()) ||
+       !row.name || !(row.active == 1u) || !ipt_read(row.name,name.data(),name.size()) ||
        !ipt_name_plausible(name) || !ipt_read(hdr,&after,sizeof(after)) ||
        h.count!=after.count || h.table!=after.table) return false;
     index=unsigned((at-h.table)/sizeof(row));
