@@ -42,6 +42,11 @@ std::atomic<bool> g_glide_missing{false};
 std::atomic<bool> g_write_error{false};
 std::atomic<bool> g_pause_draw_reported{false};
 std::atomic<bool> g_pause_drawn_this_visit{false};
+// Once an authenticated Pause VIDEO page was rendered, the original
+// brightness ScreenImage actors can survive the menu's destruction.
+// Keep the exact two-rectangle filter armed through resumed gameplay,
+// but never before that verified page was displayed.
+std::atomic<bool> g_pause_gauge_leak_guard{false};
 std::atomic<bool> g_pause_native_glyphs_suppressed{false};
 std::atomic<bool> g_pause_title_restored_logged{false};
 std::atomic<bool> g_pause_title_band_sampled{false};
@@ -305,6 +310,10 @@ void standalone_video_page_configure(StandaloneVideoLogger logger,
 }
 
 void standalone_video_page_set_visible(bool value) noexcept {
+    // A new verified MENU VIDEO visit means the previous in-game actor
+    // lifetime has ended. Re-arm only after a fresh Pause VIDEO draw.
+    if(value)g_pause_gauge_leak_guard.store(false,
+                                            std::memory_order_release);
     g_visible.store(value,std::memory_order_release);
 }
 void standalone_video_page_set_pause_visible(bool value) noexcept {
@@ -315,6 +324,12 @@ void standalone_video_page_set_pause_visible(bool value) noexcept {
 bool standalone_video_page_pause_is_drawn() noexcept {
     return g_pause_visible.load(std::memory_order_acquire) &&
            g_pause_drawn_this_visit.load(std::memory_order_acquire);
+}
+void standalone_video_page_set_leaked_gauge_visible(bool suppress) noexcept {
+    g_pause_gauge_leak_guard.store(suppress,std::memory_order_release);
+}
+bool standalone_video_page_suppress_leaked_gauge() noexcept {
+    return g_pause_gauge_leak_guard.load(std::memory_order_acquire);
 }
 bool standalone_video_page_owns_navigation(bool& main,
                                            bool& pause) noexcept {
@@ -410,8 +425,10 @@ bool standalone_video_page_draw_before_flip() noexcept {
     }
     if(!g_drew.exchange(true) && g_log)
         g_log("RUNTIME-STANDALONE-VIDEO: frame-rendered=1 source=own-Glide-LFB background=translucent-midnight-blue alpha=100/255 blue-outline=verified-BGR565-blue border-width=2 controls=Escape-only source=MENU-or-verified-ESC-script");
-    if(pause)
+    if(pause) {
         g_pause_drawn_this_visit.store(true,std::memory_order_release);
+        g_pause_gauge_leak_guard.store(true,std::memory_order_release);
+    }
     if(pause && !g_pause_draw_reported.exchange(true) && g_log)
         g_log("RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1 source=own-Glide-LFB state=verified-normal9-reflex2 background=translucent-midnight-blue original-scene=preserved panel-y=304 layout=shared-with-MENU native-luciole-space=+80 no-actor-transform=1");
     return true;
