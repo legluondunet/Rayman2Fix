@@ -179,7 +179,8 @@ bool generic_amd_renderer(const char* name) noexcept {
 void primary_display_driver(const DISPLAY_DEVICEA& primary,
                             char* friendly,unsigned friendly_capacity,
                             char* version,unsigned version_capacity,
-                            char* chip=nullptr,unsigned chip_capacity=0) noexcept {
+                            char* chip=nullptr,unsigned chip_capacity=0,
+                            int* revision=nullptr) noexcept {
     if(!primary.DeviceID[0] || !friendly || !version ||
        friendly_capacity<2u || version_capacity<2u)return;
     const HDEVINFO devices=SetupDiGetClassDevsA(
@@ -187,6 +188,7 @@ void primary_display_driver(const DISPLAY_DEVICEA& primary,
     if(devices==INVALID_HANDLE_VALUE)return;
     unsigned matches=0;
     char matched_name[128]{},matched_version[96]{},matched_chip[128]{};
+    int matched_revision=-1;
     for(DWORD i=0;i<32u;++i) {
         SP_DEVINFO_DATA item{};item.cbSize=sizeof(item);
         if(!SetupDiEnumDeviceInfo(devices,i,&item))break;
@@ -197,6 +199,7 @@ void primary_display_driver(const DISPLAY_DEVICEA& primary,
             continue;
         ++matches;
         if(matches>1u)break; // Do not attribute another GPU's driver.
+        matched_revision=display_pci_revision(instance_id);
         DWORD type=0;
         char name[128]{};
         if(!SetupDiGetDeviceRegistryPropertyA(devices,&item,
@@ -234,6 +237,7 @@ void primary_display_driver(const DISPLAY_DEVICEA& primary,
         std::snprintf(version,version_capacity,"%s",matched_version);
     if(chip && chip_capacity && matched_chip[0])
         std::snprintf(chip,chip_capacity,"%s",matched_chip);
+    if(revision)*revision=matched_revision;
 }
 // Resolve the GPU from GameFrame's own live OpenGL context, not from
 // the primary desktop adapter (which can be a different GPU).
@@ -268,10 +272,14 @@ void update_native_renderer_name() noexcept {
     }
     const bool unique_identity=have_identity && !ambiguous;
     char friendly[128]{},version[96]{},chip[128]{};
+    int revision=unique_identity?display_pci_revision(matched.DeviceID):-1;
+    int setup_revision=-1;
     if(unique_identity)
         primary_display_driver(matched,friendly,unsigned(sizeof(friendly)),
                                version,unsigned(sizeof(version)),
-                               chip,unsigned(sizeof(chip)));
+                               chip,unsigned(sizeof(chip)),&setup_revision);
+    if(revision<0)revision=setup_revision;
+    else if(setup_revision>=0 && setup_revision!=revision)revision=-1;
     if(version[0])
         std::snprintf(g_lines[2].data(),128,"%s",version);
     else if(g_lines[2][0] && (ambiguous ||
@@ -285,29 +293,57 @@ void update_native_renderer_name() noexcept {
     const auto d=unique_identity?pci_token(matched.DeviceID,"DEV_"):nullptr;
     const char* model_source="GL_RENDERER";
     if(generic_amd_renderer(renderer)) {
-        if(unique_identity && friendly[0] && !generic_amd_renderer(friendly)) {
+        char identity[64]{};
+        if(v && d && revision>=0)
+            std::snprintf(identity,sizeof(identity),
+                "PCI\\VEN_%.4s&DEV_%.4s&REV_%02X",v,d,unsigned(revision));
+        const char* model=amd_hawkpoint_model(identity);
+        if(model) {
+            std::snprintf(g_lines[1].data(),128,"%s",model);
+            model_source="AMD-PCI-device-revision";
+        } else if(unique_identity && friendly[0] &&
+                  !generic_amd_renderer(friendly) &&
+                  !std::strstr(friendly,"Graphics Processor")) {
             std::snprintf(g_lines[1].data(),128,"%s",friendly);
             model_source="matched-SetupAPI";
-        } else if(v && d) {
-            // A chip name is not necessarily a retail model; preserve
-            // that distinction and include the actual PCI identifier.
-            if(chip[0] && !generic_amd_renderer(chip) &&
-               lstrcmpiA(chip,renderer)!=0)
-                std::snprintf(g_lines[1].data(),128,
-                    "AMD Radeon / %.65s [%.4s:%.4s]",chip,v,d);
+        } else {
+            // Never expand a generic description into a long technical
+            // string. Keep PCI and chip details in the log, not the panel.
+            if(v && d && matching_display_pci_identity(matched.DeviceID,
+                                      "PCI\\VEN_1002&DEV_1900"))
+                std::snprintf(g_lines[1].data(),128,"AMD Radeon 760M / 780M");
             else
-                std::snprintf(g_lines[1].data(),128,
-                    "%s [%.4s:%.4s]",renderer,v,d);
-            model_source="matched-PCI";
+                std::snprintf(g_lines[1].data(),128,"AMD Radeon Graphics");
+            model_source="model-unresolved";
         }
     }
+    // Remove trademark and API suffixes, without inventing a model.
+    for(const char* token:{"(TM)","(tm)","(R)","(r)"}) {
+        char* at=nullptr;
+        while((at=std::strstr(g_lines[1].data(),token))!=nullptr)
+            std::memmove(at,at+std::strlen(token),std::strlen(at+std::strlen(token))+1u);
+    }
+    char* name=g_lines[1].data();
+    if(char* suffix=std::strstr(name,"/PCIe/SSE2"))*suffix='\0';
+    if(char* suffix=std::strstr(name," (RADV"))*suffix='\0';
+    if(char* suffix=std::strstr(name," (radeonsi"))*suffix='\0';
+    for(char* p=name;*p;++p)
+        while(*p==' ' && p[1]==' ')std::memmove(p,p+1,std::strlen(p));
+    // NVIDIA/AMD retail names remain intact; strip only the redundant
+    // final Graphics suffix from names that contain a numerical model.
+    constexpr const char* graphics=" Graphics";
+    const auto len=std::strlen(name),tail=std::strlen(graphics);
+    bool has_digit=false;
+    for(const char* p=name;*p;++p)if(*p>='0'&&*p<='9')has_digit=true;
+    if(has_digit && len>tail && std::strcmp(name+len-tail,graphics)==0)
+        name[len-tail]='\0';
     if(g_log) {
         char msg[640]{};
         std::snprintf(msg,sizeof(msg),
-            "RUNTIME-VIDEO-GPU: source=GameFrame-GL_RENDERER name=%s model-source=%s matching-outputs=%u unique-pci=%u ambiguous=%u pci=%.4s:%.4s setupapi-name=%s chip=%s driver-matched=%u",
+            "RUNTIME-VIDEO-GPU: source=GameFrame-GL_RENDERER name=%s model-source=%s matching-outputs=%u unique-pci=%u ambiguous=%u pci=%.4s:%.4s revision=%d setupapi-name=%s chip=%s driver-matched=%u",
             g_lines[1].data(),model_source,matching_outputs,
             unsigned(unique_identity),unsigned(ambiguous),
-            v?v:"none",d?d:"none",friendly[0]?friendly:"none",
+            v?v:"none",d?d:"none",revision,friendly[0]?friendly:"none",
             chip[0]?chip:"none",unsigned(version[0]!=0));
         g_log(msg);
     }
