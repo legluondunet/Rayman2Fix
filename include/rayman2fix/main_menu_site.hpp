@@ -2,6 +2,8 @@
 #include <cstdint>
 namespace r2fix {
 using SiteLogger=void (*)(const char*);
+bool prepare_main_menu_site_caption(std::uintptr_t language_table,
+                                    SiteLogger logger) noexcept;
 bool install_main_menu_site(std::uintptr_t language_table,
                             SiteLogger logger) noexcept;
 void restore_main_menu_site() noexcept;
