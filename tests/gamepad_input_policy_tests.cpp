@@ -218,5 +218,15 @@ int main() {
            ipt_entry_changed({0,0,0,1,0,1},{0,0,0,1,0x3f000000,1}),
            "probe ignores age counters, records sign or analog changes");
 
+    IptActionReadback byte_active{1,0x10000,0x10000,1,0,1,{0xff,0xaa,0x55}};
+    check(ipt_entry_plausible(byte_active),"native active is a byte; padding is not BOOL");
+    check(ipt_entry_plausible({0,0,0,0,0,0}),"unused native entry allowed");
+    check(ipt_calibrated_axis(-1.f,-50,2,50)==-50.f &&
+          ipt_calibrated_axis(1.f,-50,2,50)==50.f &&
+          ipt_calibrated_axis(0.f,-50,2,50)==2.f &&
+          ipt_calibrated_axis(.5f,-50,2,50)==26.f,"signed native calibration");
+    a=active(PadContext::pause_menu);a.south=true;a.dpad_up=true;
+    check(has(pad_actions(a),PadAction::confirm) && has(pad_actions(a),PadAction::up),
+          "verified in-game pause has menu semantics");
     std::cout << "SDL3 Dreamcast mapping / focus / hotplug policy: OK\n";
 }

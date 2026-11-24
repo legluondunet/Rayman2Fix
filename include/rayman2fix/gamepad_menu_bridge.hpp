@@ -9,7 +9,7 @@ inline unsigned merge_pad_menu_keys(PadContext context, bool foreground,
     std::int32_t result, unsigned size, std::uint8_t* keys,
     std::uint32_t actions) noexcept {
     if (!foreground || result != 0 || size != 256 || !keys ||
-        (context != PadContext::menu && context != PadContext::video))
+        (context != PadContext::menu && context != PadContext::pause_menu && context != PadContext::video))
         return 0;
     unsigned count = 0;
     const auto set = [&](PadAction action, unsigned dik) {
@@ -19,7 +19,8 @@ inline unsigned merge_pad_menu_keys(PadContext context, bool foreground,
     };
     // DIK_ESCAPE, DIK_RETURN and the four verified navigation arrows.
     set(PadAction::cancel, 0x01);
-    if (context == PadContext::menu) {
+    if (context == PadContext::menu || context == PadContext::pause_menu) {
+        if(context == PadContext::pause_menu) set(PadAction::pause, 0x01);
         set(PadAction::confirm, 0x1C);
         set(PadAction::left, 0xCB);
         set(PadAction::right, 0xCD);

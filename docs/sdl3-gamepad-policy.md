@@ -238,3 +238,24 @@ binary and action behavior before any gameplay write, hook, or override.
 
 The controller illustration contract now uses a central controller and
 arrows toward labels, following the maintainer's approved 4:3 reference.
+
+## Retail executable verification (owner-supplied PE32)
+
+SHA-256 9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713.
+Timestamp 0x3807B68B, image size 0x1D7000. Disassembly 42E090, 42E0C0,
+42E798-42E842 confirms descriptor at 50A560/50A564, stride 24, name +8,
+state +0xC, analog float +0x10 (42E8D8) and BYTE active +0x14 (42E7A0).
+Unused names are legal; the previous probe incorrectly read padding as BOOL.
+The exact E8 caller at 42E7AD evaluates each active entry before original
+counter advancement. Merge SDL actions only after native predicate returns
+false and the live table index/name and Learn_10 handover are checked.
+The native analog consumer calls 42E8D0 at 46E755/46E774, using script-owned
+axis pointers 4B9B54/58, signed byte calibration 4A40A4/A8/AC/B0 and
+centers 4B9B5C/60. Two source-verified getter calls merge calibrated SDL
+values when a stick is active; the existing native keyboard path and
+native world-vector calculation remain untouched. No action-table writes.
+All three signatures are preflighted together. First hardware candidate
+is intentionally limited to Learn_10 after story1091 handover, not all
+levels or cinematics. Generic Pause uses the live model and flag; VIDEO
+retains its original scope. World knowledge and exact swimming behavior
+remain unverified. Duplicate native joystick ownership is not resolved.

@@ -17,7 +17,9 @@ struct IptTableHeader {
 struct IptActionReadback {
     std::uint32_t keyword_count = 0, keywords = 0, name = 0;
     std::int32_t state = 0;
-    std::uint32_t analog_bits = 0, active = 0;
+    std::uint32_t analog_bits = 0;
+    std::uint8_t active = 0;
+    std::uint8_t padding[3]{}; // native 42E7A0 reads only byte +0x14
 };
 static_assert(sizeof(IptTableHeader) == 8);
 static_assert(sizeof(IptActionReadback) == 24);
@@ -30,7 +32,7 @@ constexpr bool ipt_header_plausible(IptTableHeader h) noexcept {
         h.table <= 0xffffffffu - h.count * sizeof(IptActionReadback);
 }
 constexpr bool ipt_entry_plausible(IptActionReadback a) noexcept {
-    return a.name >= 0x10000u && a.name <= 0xffffffbfu &&
+    return (!a.name || (a.name >= 0x10000u && a.name <= 0xffffffbfu)) &&
         a.keyword_count <= 4096 && (!a.keyword_count || a.keywords >= 0x10000u) &&
         a.active <= 1u;
 }
@@ -56,9 +58,9 @@ inline bool ipt_name_contains(std::string_view name, std::string_view key) noexc
 // Expected names are hypotheses from the published reference's action
 // enumeration, not proof of exact native CD semantics or writable ownership.
 inline unsigned ipt_reference_anchors(const IptNames& names) noexcept {
-    for(const auto& n:names) if(!ipt_name_plausible(n)) return 0;
+    for(const auto& n:names) if(n[0] && !ipt_name_plausible(n)) return 0;
     const auto match=[&](unsigned i,std::string_view key) {
-        return ipt_name_contains(names[i].data(),key);
+        return ipt_name_plausible(names[i]) && ipt_name_contains(names[i].data(),key);
     };
     return (match(0,"axex") ? 1u:0u) |
            (match(1,"axey") ? 2u:0u) |
@@ -72,5 +74,12 @@ inline bool ipt_entry_changed(const IptActionReadback& a,
                               const IptActionReadback& b) noexcept {
     return ipt_state_sign(a.state)!=ipt_state_sign(b.state) ||
            a.analog_bits!=b.analog_bits || a.active!=b.active;
+}
+// Exact CD analog consumer reads signed-byte calibration and native
+// integer conversion. Preserve its center and endpoints, not a fake key.
+inline float ipt_calibrated_axis(float unit, int lo, int center, int hi) noexcept {
+    if(lo < -128 || hi > 127 || lo >= center || hi <= center ||
+       !(unit >= -1.f && unit <= 1.f)) return float(center);
+    return float(center) + unit * float(unit < 0.f ? center-lo : hi-center);
 }
 } // namespace r2fix

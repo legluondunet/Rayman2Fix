@@ -525,7 +525,7 @@ DWORD WINAPI worker(void*) {
     return 0;
 }
 } // namespace
-bool pause_video_live_active() noexcept {
+bool pause_menu_live_state(int& normal, int& reflex) noexcept {
     const auto address=g_render_model.load(std::memory_order_acquire);
     if(!address)return false;
     const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
@@ -533,9 +533,15 @@ bool pause_video_live_active() noexcept {
     if(!base || game_in_menu(base) ||
        !read8(base+kGenericPauseRva,flag) || !flag)return false;
     PauseVideoModel current{};
-    return inspect_pause_video_model(address,&read32,&read8,current) &&
-           current.normal==9 && current.reflex==2 &&
-           g_render_model.load(std::memory_order_acquire)==address;
+    if(!inspect_pause_video_model(address,&read32,&read8,current) ||
+       g_render_model.load(std::memory_order_acquire)!=address) return false;
+    normal=current.normal;
+    reflex=current.reflex;
+    return true;
+}
+bool pause_video_live_active() noexcept {
+    int normal=-1,reflex=-1;
+    return pause_menu_live_state(normal,reflex) && normal==9 && reflex==2;
 }
 void start_pause_video_observer(PauseVideoLogger logger) noexcept {
     if(!logger || g_started.exchange(true,std::memory_order_acq_rel))return;
