@@ -92,7 +92,7 @@ std::atomic<bool> g_pause_title_band_sampled{false};
 GlideRead g_read=nullptr;
 GlideWrite g_write=nullptr;
 std::array<std::array<char,128>,kVideoInfoRowCount> g_lines{};
-constexpr const char* kRowLabels[kVideoInfoRowCount]{"SORTIE","GPU","PILOTE","RENDU","INTERNE","FIX"};
+constexpr const char* kRowLabels[kVideoInfoRowCount]{"SORTIE","GPU","PILOTE","RENDU","INTERNE","Rayman2Fix"};
 std::atomic<bool> g_title_preserved_logged{false};
 std::vector<std::uint16_t> g_pixels;
 std::vector<std::uint8_t> g_text_mask;
@@ -154,16 +154,39 @@ bool read_registry_string(HKEY key,const char* name,
     out[capacity-1u]='\0';
     return out[0]!='\0';
 }
+// Some display drivers store these strings as UTF-16 REG_BINARY.
+bool read_adapter_property(HKEY key,const wchar_t* property,
+                           char* out,unsigned capacity) noexcept {
+    if(!key || !out || capacity<2u)return false;
+    wchar_t value[256]{};
+    DWORD type=0,bytes=DWORD(sizeof(value)-sizeof(wchar_t));
+    if(RegQueryValueExW(key,property,nullptr,&type,
+            reinterpret_cast<BYTE*>(value),&bytes)!=ERROR_SUCCESS ||
+       (type!=REG_SZ && type!=REG_BINARY) || bytes<sizeof(wchar_t) ||
+       bytes%sizeof(wchar_t))return false;
+    value[bytes/sizeof(wchar_t)]=L'\0';
+    for(const wchar_t* p=value;*p;++p)
+        if(*p<32 || *p==127)return false;
+    if(!value[0])return false;
+    return WideCharToMultiByte(CP_ACP,0,value,-1,out,int(capacity),
+                              nullptr,nullptr)>1;
+}
+bool generic_amd_renderer(const char* name) noexcept {
+    return name && (lstrcmpiA(name,"AMD Radeon(TM) Graphics")==0 ||
+                    lstrcmpiA(name,"AMD Radeon Graphics")==0 ||
+                    lstrcmpiA(name,"AMD Radeon(TM) Vega Graphics")==0);
+}
 void primary_display_driver(const DISPLAY_DEVICEA& primary,
                             char* friendly,unsigned friendly_capacity,
-                            char* version,unsigned version_capacity) noexcept {
+                            char* version,unsigned version_capacity,
+                            char* chip=nullptr,unsigned chip_capacity=0) noexcept {
     if(!primary.DeviceID[0] || !friendly || !version ||
        friendly_capacity<2u || version_capacity<2u)return;
     const HDEVINFO devices=SetupDiGetClassDevsA(
         &kDisplayClassGuid,nullptr,nullptr,DIGCF_PRESENT);
     if(devices==INVALID_HANDLE_VALUE)return;
     unsigned matches=0;
-    char matched_name[128]{},matched_version[96]{};
+    char matched_name[128]{},matched_version[96]{},matched_chip[128]{};
     for(DWORD i=0;i<32u;++i) {
         SP_DEVINFO_DATA item{};item.cbSize=sizeof(item);
         if(!SetupDiEnumDeviceInfo(devices,i,&item))break;
@@ -192,6 +215,14 @@ void primary_display_driver(const DISPLAY_DEVICEA& primary,
         if(key!=INVALID_HANDLE_VALUE) {
             read_registry_string(key,"DriverVersion",
                 matched_version,DWORD(sizeof(matched_version)));
+            char adapter[128]{};
+            if(read_adapter_property(key,L"HardwareInformation.AdapterString",
+                                     adapter,unsigned(sizeof(adapter))) &&
+               (!matched_name[0] ||
+                (generic_amd_renderer(matched_name) && !generic_amd_renderer(adapter))))
+                std::snprintf(matched_name,sizeof(matched_name),"%s",adapter);
+            read_adapter_property(key,L"HardwareInformation.ChipType",
+                                  matched_chip,unsigned(sizeof(matched_chip)));
             RegCloseKey(key);
         }
     }
@@ -201,6 +232,8 @@ void primary_display_driver(const DISPLAY_DEVICEA& primary,
         std::snprintf(friendly,friendly_capacity,"%s",matched_name);
     if(matched_version[0])
         std::snprintf(version,version_capacity,"%s",matched_version);
+    if(chip && chip_capacity && matched_chip[0])
+        std::snprintf(chip,chip_capacity,"%s",matched_chip);
 }
 // Resolve the GPU from GameFrame's own live OpenGL context, not from
 // the primary desktop adapter (which can be a different GPU).
@@ -212,43 +245,70 @@ void update_native_renderer_name() noexcept {
     const DWORD n=GetEnvironmentVariableA(key,renderer,DWORD(sizeof(renderer)));
     if(!n || n>=sizeof(renderer))return;
     DISPLAY_DEVICEA matched{};
-    unsigned matches=0;
+    bool have_identity=false,ambiguous=false;
+    unsigned matching_outputs=0;
     for(DWORD i=0;i<32u;++i) {
         DISPLAY_DEVICEA d{};d.cb=sizeof(d);
         if(!EnumDisplayDevicesA(nullptr,i,&d,0))break;
-        if(d.DeviceID[0] && lstrcmpiA(d.DeviceString,renderer)==0) {
-            matched=d;++matches;
+        if(lstrcmpiA(d.DeviceString,renderer)!=0)continue;
+        ++matching_outputs;
+        const auto v=pci_token(d.DeviceID,"VEN_");
+        const auto p=pci_token(d.DeviceID,"DEV_");
+        if(!v || !p)continue;
+        if(!have_identity) {
+            matched=d;
+            have_identity=true;
+        } else if(!matching_display_pci_identity(matched.DeviceID,d.DeviceID)) {
+            ambiguous=true;
         }
+        // Different desktop outputs can name the same PCI GPU family.
+        // Prefer the primary output only within the same PCI identity.
+        if(!ambiguous && (d.StateFlags&DISPLAY_DEVICE_PRIMARY_DEVICE))
+            matched=d;
     }
-    char friendly[128]{},version[96]{};
-    if(matches==1u)
+    const bool unique_identity=have_identity && !ambiguous;
+    char friendly[128]{},version[96]{},chip[128]{};
+    if(unique_identity)
         primary_display_driver(matched,friendly,unsigned(sizeof(friendly)),
-                               version,unsigned(sizeof(version)));
+                               version,unsigned(sizeof(version)),
+                               chip,unsigned(sizeof(chip)));
     if(version[0])
         std::snprintf(g_lines[2].data(),128,"%s",version);
-    else if(g_lines[2][0] && lstrcmpiA(g_lines[1].data(),renderer)!=0) {
-        // No exact association: keep the existing display driver
-        // version explicitly labelled as display, not renderer.
+    else if(g_lines[2][0] && (ambiguous ||
+            lstrcmpiA(g_lines[1].data(),renderer)!=0)) {
         char value[128]{};
         std::snprintf(value,sizeof(value),"%.100s (ecran)",g_lines[2].data());
         std::snprintf(g_lines[2].data(),128,"%s",value);
     }
     std::snprintf(g_lines[1].data(),128,"%s",renderer);
-    // Some drivers expose only a family name even via GL_RENDERER.
-    // A uniquely matched PCI identifier is useful without guessing SKU.
-    if(matches==1u &&
-       (lstrcmpiA(renderer,"AMD Radeon(TM) Graphics")==0 ||
-        lstrcmpiA(renderer,"AMD Radeon Graphics")==0)) {
-        const auto v=pci_token(matched.DeviceID,"VEN_");
-        const auto d=pci_token(matched.DeviceID,"DEV_");
-        if(v && d)std::snprintf(g_lines[1].data(),128,
-            "%s [%.4s:%.4s]",renderer,v,d);
+    const auto v=unique_identity?pci_token(matched.DeviceID,"VEN_"):nullptr;
+    const auto d=unique_identity?pci_token(matched.DeviceID,"DEV_"):nullptr;
+    const char* model_source="GL_RENDERER";
+    if(generic_amd_renderer(renderer)) {
+        if(unique_identity && friendly[0] && !generic_amd_renderer(friendly)) {
+            std::snprintf(g_lines[1].data(),128,"%s",friendly);
+            model_source="matched-SetupAPI";
+        } else if(v && d) {
+            // A chip name is not necessarily a retail model; preserve
+            // that distinction and include the actual PCI identifier.
+            if(chip[0] && !generic_amd_renderer(chip) &&
+               lstrcmpiA(chip,renderer)!=0)
+                std::snprintf(g_lines[1].data(),128,
+                    "AMD Radeon / %.65s [%.4s:%.4s]",chip,v,d);
+            else
+                std::snprintf(g_lines[1].data(),128,
+                    "%s [%.4s:%.4s]",renderer,v,d);
+            model_source="matched-PCI";
+        }
     }
     if(g_log) {
-        char msg[330]{};
+        char msg[640]{};
         std::snprintf(msg,sizeof(msg),
-            "RUNTIME-VIDEO-GPU: source=GameFrame-GL_RENDERER name=%s driver-matched=%u display-name=%s",
-            g_lines[1].data(),unsigned(version[0]!=0),g_primary_display.DeviceString);
+            "RUNTIME-VIDEO-GPU: source=GameFrame-GL_RENDERER name=%s model-source=%s matching-outputs=%u unique-pci=%u ambiguous=%u pci=%.4s:%.4s setupapi-name=%s chip=%s driver-matched=%u",
+            g_lines[1].data(),model_source,matching_outputs,
+            unsigned(unique_identity),unsigned(ambiguous),
+            v?v:"none",d?d:"none",friendly[0]?friendly:"none",
+            chip[0]?chip:"none",unsigned(version[0]!=0));
         g_log(msg);
     }
 }
@@ -434,7 +494,7 @@ void standalone_video_page_configure(StandaloneVideoLogger logger,
              "Version non disponible");
     std::snprintf(g_lines[3].data(),128,"GAMEFRAME / GLIDE2");
     std::snprintf(g_lines[4].data(),128,"1024 x 768 x 16");
-    std::snprintf(g_lines[5].data(),128,"Rayman2Fix %s-%s",
+    std::snprintf(g_lines[5].data(),128,"%s-%s",
                   RAYMAN2FIX_VERSION,RAYMAN2FIX_BUILD_COMMIT);
     g_configured.store(true,std::memory_order_release);
     install_video_navigation_input(g_log);
