@@ -5350,8 +5350,23 @@ void poll_sdl3_native() noexcept {
     static std::uint32_t last_native_actions = 0;
     static r2fix::PadContext last_context = r2fix::PadContext::inactive;
     const DWORD tid = GetCurrentThreadId();
-    if (g_game_camera_thread_id.load(std::memory_order_acquire) != tid ||
-        (owner && owner != tid) || polling) return;
+    const DWORD camera_tid = g_game_camera_thread_id.load(std::memory_order_acquire);
+    if (camera_tid != tid || (owner && owner != tid) || polling) return;
+    // The native camera callback proves the game thread. Wine or a
+    // graphics wrapper may own its foreground HWND on a different thread.
+    // Require the SAME PROCESS, not the HWND's creating thread.
+    static bool reported_entry = false;
+    if (!reported_entry) {
+        reported_entry = true;
+        DWORD pid = 0;
+        const DWORD window_tid = GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+        char msg[220]{};
+        std::snprintf(msg, sizeof(msg),
+            "RUNTIME-SDL3: poll-entered=1 camera-thread=%lu window-thread=%lu same-process=%u",
+            static_cast<unsigned long>(camera_tid), static_cast<unsigned long>(window_tid),
+            unsigned(pid == GetCurrentProcessId()));
+        log_line(msg);
+    }
     const DWORD poll_now = GetTickCount();
     if (last_poll && DWORD(poll_now-last_poll) < 12u) return;
     last_poll = poll_now;
@@ -5359,12 +5374,16 @@ void poll_sdl3_native() noexcept {
     struct ClearPolling { bool& busy; ~ClearPolling() { busy = false; } } clear{polling};
     const bool foreground = game_window_is_foreground();
     if (!attempted) {
-        if (!foreground || g_game_camera_thread_id.load(std::memory_order_acquire) != tid)
+        if (!foreground) {
+            static bool reported_wait = false;
+            if (!reported_wait) {
+                reported_wait = true;
+                log_line("RUNTIME-SDL3: init-deferred=foreground-not-game-process");
+            }
             return;
-        DWORD pid = 0;
-        if (GetWindowThreadProcessId(GetForegroundWindow(), &pid) != tid ||
-            pid != GetCurrentProcessId()) return;
+        }
         attempted = true;
+        log_line("RUNTIME-SDL3: init-attempt=1 source=native-camera-thread foreground-process-verified=1");
         owner = tid;
         try {
             std::wstring exe(32768, L'\0');
@@ -5382,6 +5401,14 @@ void poll_sdl3_native() noexcept {
     if (!initialized || owner != tid) return;
     const auto context = sdl_native_context();
     const auto sample = pads.poll(foreground, context);
+    static bool first_sample = true;
+    if (first_sample) {
+        first_sample = false;
+        char msg[140]{};
+        std::snprintf(msg, sizeof(msg), "RUNTIME-SDL3: first-sample=1 connected=%u context=%u foreground=%u",
+            unsigned(sample.connected), unsigned(context), unsigned(foreground));
+        log_line(msg);
+    }
     const auto transitions = gate.update(sample);
     g_sdl_input_context = context;
     g_sdl_input_actions = transitions.held;
@@ -7043,6 +7070,11 @@ void __cdecl standalone_video_flip() {
     const auto original=reinterpret_cast<void (__cdecl*)()>(
         g_standalone_flip_original.load(std::memory_order_acquire));
     if(original)original();
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    // Also refresh on the verified VIDEO flip route used in MENU.
+    // The acquisition function still requires the original camera thread.
+    poll_sdl3_native();
+#endif
 }
 #endif
 constexpr float kInternalGlideWidth = 1024.0f;
@@ -8011,6 +8043,9 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
             install_cinematic_viewport_hook();
         initialize_native_intro_skip();
         install_native_frame_flip_hook();
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        log_line("RUNTIME-SDL3: compiled=1 owner=native-camera-thread init=deferred-to-foreground-game");
+#endif
         start_hud_monitor();
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
         // The read-only observer is also the VERIFIED controller source
