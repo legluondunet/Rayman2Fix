@@ -25,6 +25,9 @@
 #endif
 #include "rayman2fix/game_window_icon.hpp"
 #include "rayman2fix/render_poll_gate.hpp"
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+#include "rayman2fix/sdl_gamepads.hpp"
+#endif
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
 #include "rayman2fix/graphics_menu_trace.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
@@ -5267,6 +5270,73 @@ void poll_second_intro_skip() {
     }
 }
 
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+// Read-only first in-game acquisition phase. Start only on the authenticated
+// game camera/window thread, never on the remote initializer or HUD worker.
+// SDL's state is deliberately not merged into DirectInput yet. No action,
+// including intro skip, is sent to the native game in this phase.
+void poll_sdl3_readonly() noexcept {
+    static r2fix::SdlGamepads pads;
+    static bool attempted = false;
+    static bool initialized = false;
+    static DWORD owner = 0;
+    static DWORD last_report = 0;
+    static unsigned reports = 0;
+    static std::uint32_t last_buttons = 0;
+    static bool last_motion = false;
+    static bool last_focus = false;
+    static std::uint32_t last_device = 0;
+    const DWORD tid = GetCurrentThreadId();
+    const bool foreground = game_window_is_foreground();
+    if (!attempted) {
+        if (!foreground || g_game_camera_thread_id.load(std::memory_order_acquire) != tid)
+            return;
+        DWORD pid = 0;
+        if (GetWindowThreadProcessId(GetForegroundWindow(), &pid) != tid ||
+            pid != GetCurrentProcessId()) return;
+        attempted = true;
+        owner = tid;
+        try {
+            std::wstring exe(32768, L'\0');
+            const DWORD n = GetModuleFileNameW(nullptr, exe.data(), DWORD(exe.size()));
+            if (!n || n >= exe.size()) {
+                log_line("RUNTIME-SDL3: init-refused=game-path-unavailable");
+                return;
+            }
+            exe.resize(n);
+            initialized = pads.initialize(std::filesystem::path(exe).parent_path() / L"SDL3.dll", &log_line);
+        } catch (...) {
+            log_line("RUNTIME-SDL3: init-refused=game-path-exception");
+        }
+    }
+    if (!initialized || owner != tid) return;
+    // Use gameplay context ONLY to exercise the abstract mapping in logs.
+    // This does not assert the native scene is gameplay.
+    const auto sample = pads.poll(foreground, r2fix::PadContext::gameplay);
+    const auto buttons = r2fix::pad_actions(sample);
+    const auto motion = r2fix::pad_movement(sample);
+    const bool moving = motion.x != 0 || motion.y != 0;
+    const DWORD now = GetTickCount();
+    const bool changed = sample.device_id != last_device || foreground != last_focus ||
+        buttons != last_buttons || moving != last_motion;
+    // Diagnostics only, bounded to avoid flooding the original render thread.
+    if (g_log && changed && reports < 128 && (!reports || DWORD(now-last_report)>=50)) {
+        char msg[256]{};
+        std::snprintf(msg, sizeof(msg),
+            "RUNTIME-SDL3-SAMPLE: id=%u foreground=%u actions=0x%04x lx=%d ly=%d rx=%d lt=%d rt=%d native-input=unchanged",
+            unsigned(sample.device_id), unsigned(foreground), unsigned(buttons),
+            sample.left_x, sample.left_y, sample.right_x, sample.left_trigger, sample.right_trigger);
+        log_line(msg);
+        last_device = sample.device_id;
+        last_focus = foreground;
+        last_buttons = buttons;
+        last_motion = moving;
+        last_report = now;
+        ++reports;
+    }
+}
+#endif
+
 // Service the existing skip and ESC music decision machines exclusively
 // on the original GLI/game thread. Cinematic 4:3 rendering may not call
 // the 3D camera for 20+ seconds, while its 2D/viewport callbacks run.
@@ -5324,6 +5394,9 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     // the validated research build. Either opt-out prevents F248 armament.
     // Diagnostics remain gated by Debug.Log, not feature activation.
     poll_learn_intro_skip();
+#endif
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    poll_sdl3_readonly();
 #endif
     if(first_fallback && g_log) {
         char msg[220]{};
