@@ -268,7 +268,8 @@ ChildProcessResult run_child_process(
             raw.dwProcessId, working_directory / "fix.dll",
             display.output_width, display.output_height, display.log_enabled,
             display.skip_cinematics, display.skip_learn10, display.remove_dialogue_backgrounds,
-            display.remove_cinematic_bars, display.music_in_pause_menu);
+            display.remove_cinematic_bars, display.music_in_pause_menu,
+            display.classic_4_3);
     }
 
     if (display.borderless) {
@@ -353,6 +354,7 @@ int launch_verified_game(Startup& startup, bool verify) {
     display.monitor = monitor;
     display.output_width = content.first;
     display.output_height = content.second;
+    display.classic_4_3 = classic_aspect;
     display.skip_cinematics = !unchecked_without_ini &&
         configured_skip_cinematics(startup.ini_path());
     display.skip_learn10 = !unchecked_without_ini &&

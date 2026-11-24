@@ -25,6 +25,22 @@
 #endif
 #include "rayman2fix/game_window_icon.hpp"
 #include "rayman2fix/render_poll_gate.hpp"
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+#include "rayman2fix/graphics_menu_trace.hpp"
+#include "rayman2fix/graphics_menu_controller_trace.hpp"
+#include "rayman2fix/graphics_menu_start_policy.hpp"
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+#include "rayman2fix/native_graphics_info_proto.hpp"
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+#include "rayman2fix/standalone_video_page.hpp"
+#include "rayman2fix/pause_video_text_filter_policy.hpp"
+#include "rayman2fix/post_pause_ui_bar_probe_policy.hpp"
+#include "rayman2fix/pause_video_companion_layout_policy.hpp"
+#endif
+#include "rayman2fix/graphics_menu_glyph_layout.hpp"
+#include "rayman2fix/native_graphics_info_color.hpp"
+#endif
+#endif
 #include <mutex>
 #if RAYMAN2FIX_ESC_MUSIC_PROTO || RAYMAN2FIX_ESC_MUSIC_FEATURE
 #include "rayman2fix/esc_music_wine_prototype.hpp"
@@ -32,12 +48,14 @@
 #include "rayman2fix/esc_early_theme.hpp"
 #endif
 #include <atomic>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <climits>
 #include <cstdio>
 #include <unordered_set>
+#include <string>
 #include <vector>
 
 #if !defined(_M_IX86)
@@ -365,6 +383,16 @@ Bottom2DStats g_native_bottom_2d[4];
 // driver vertices, without changing the existing thread-local
 // double-correction bypass. Native 2D callbacks are synchronous.
 thread_local unsigned g_current_native_route=3;
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+// The original native glyph percent-call and the colored driver call are
+// synchronous on the same render thread. Do not infer target glyphs from
+// color, position or arbitrary global screens outside this verified scope.
+thread_local bool g_native_info_remapped_glyph=false;
+thread_local unsigned g_native_info_source_row=0;
+std::atomic<std::uint32_t> g_native_info_material_pairs_seen{0};
+std::atomic<unsigned> g_native_info_tinted_quads{0};
+std::atomic<unsigned> g_native_info_static_palette_quads{0};
+#endif
 thread_local float g_native_input_left=0.0f;
 thread_local float g_native_input_right=0.0f;
 thread_local float g_native_mapped_left=0.0f;
@@ -448,7 +476,10 @@ struct RuntimeOptions {
     DWORD remove_cinematic_bars;
     DWORD music_in_pause_menu;
     DWORD skip_learn10;
+    DWORD classic_4_3;
 };
+static_assert(sizeof(RuntimeOptions)==44u,
+              "Rayman2Fix x86 runtime ABI size mismatch");
 
 bool valid_angle(float v) {
     return std::isfinite(v) && v > 0.05f && v < 3.0f;
@@ -471,9 +502,18 @@ void log_line(const char* message) {
     HANDLE file = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) return;
-    DWORD written = 0;
-    WriteFile(file, message, static_cast<DWORD>(std::strlen(message)), &written, nullptr);
-    WriteFile(file, "\r\n", 2, &written, nullptr);
+    // One append operation per entry: separate writes for text and CRLF
+    // allowed different debug threads to interleave two log records.
+    // Preserve the entire original message, including long diagnostic
+    // summaries, and append its line ending in the SAME WriteFile.
+    const std::size_t length=std::strlen(message);
+    if (length <= static_cast<std::size_t>(MAXDWORD)-2u) {
+        std::string entry(message,length);
+        entry.append("\r\n");
+        DWORD written=0;
+        WriteFile(file,entry.data(),static_cast<DWORD>(entry.size()),
+                  &written,nullptr);
+    }
     CloseHandle(file);
 }
 // Read-only audit of the ORIGINAL CPA sound configuration, not a fix
@@ -5667,6 +5707,90 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     const unsigned route=static_cast<unsigned>(producer);
     g_native_2d_producers[route].fetch_add(
         1,std::memory_order_relaxed);
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    // Exact source identity: return RVA 0x664D9 belongs only to
+    // JFFTXT_vDrawString glyphs. Keep the native VIDEO heading in its
+    // known top title band, preserving its animated original artwork.
+    // The position exception applies only to an authenticated VIDEO
+    // page after the owned LFB panel rendered, never normal-3/Options.
+    // Our own page text is rasterized into Glide's LFB and never
+    // passes through this native glyph producer.
+    if(producer==Native2DProducer::Glyph &&
+       r2fix::standalone_video_page_filter_native_glyphs(
+           xmin,ymin,xmax,ymax)) {
+        static std::atomic<bool> reported{false};
+        if(!reported.exchange(true,std::memory_order_relaxed))
+            log_line("RUNTIME-STANDALONE-VIDEO: source-glyph-suppressed=1 source=JFFTXT-vDrawString verified-return-rva=0x664D9 scope=own-page-only butterfly=untouched");
+        return;
+    }
+#endif
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    // Exact two source-identified ScreenImage halves of the native
+    // retired brightness gauge. This filter already works in MENU;
+    // additionally apply its verified 60..90 x 85..90 source geometry
+    // while the authenticated in-game Pause VIDEO page is drawn.
+    // No rounded region masks or 3D actor filtering.
+    // The owner observed the two source-authenticated ScreenImage halves
+    // surviving ESC -> resume. The HUD renderer still submits them after
+    // normal9/reflex2 has gone away. The latch is armed only by an actual
+    // verified Pause VIDEO frame (not by mere menu entry), and the match
+    // stays exact; unrelated textures, glyphs and world sprites pass.
+    if(producer==Native2DProducer::ScreenImage &&
+       r2fix::readonly_video_brightness_meter_quad(
+           r2fix::standalone_video_page_pause_render_ready() ||
+           r2fix::standalone_video_page_suppress_leaked_gauge(),
+           route,{xmin,ymin,xmax,ymax})) {
+        const bool returned_to_game=
+            !r2fix::standalone_video_page_pause_render_ready();
+        static std::atomic<bool> once_in_menu{false};
+        static std::atomic<bool> once_after_menu{false};
+        auto& marker=returned_to_game?once_after_menu:once_in_menu;
+        if(!marker.exchange(true,std::memory_order_relaxed))
+            log_line(returned_to_game?
+                "RUNTIME-PAUSE-VIDEO-PAGE: leaked-brightness-gauge-suppressed=1 source=ScreenImage exact-halves=60..90/85..90 state=after-verified-pause-video gameplay-HUD=untouched":
+                "RUNTIME-PAUSE-VIDEO-PAGE: native-brightness-gauge-suppressed=1 source=ScreenImage exact-halves=60..90/85..90 scene=verified-normal9/reflex2");
+        return;
+    }
+#endif
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    // SOURCE-SCOPED only: the original two screen-image rectangles
+    // of the obsolete brightness meter. Never filter generic quads
+    // by screen position, or the original animated 3D butterfly.
+    if(r2fix::suppress_readonly_video_brightness_meter(
+           route,xmin,ymin,xmax,ymax))return;
+#endif
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    // The owner observed a horizontal gold/magenta bar that persists
+    // in gameplay AFTER exiting the Pause VIDEO page. The legacy exact
+    // brightness-gauge filter does not see it. Identify its native
+    // producer and actual percentages before changing any cleanup.
+    // Never suppress unknown sound/health/camera UI by geometry.
+    if(r2fix::post_pause_ui_bar_probe(
+        r2fix::standalone_video_page_suppress_leaked_gauge(),
+        r2fix::standalone_video_page_pause_is_drawn(),
+        unsigned(producer),route,xmin,ymin,xmax,ymax)) {
+        static std::atomic<unsigned> samples{0};
+        static std::atomic<DWORD> previous{0};
+        const DWORD now=GetTickCount();
+        DWORD last=previous.load(std::memory_order_relaxed);
+        if(DWORD(now-last)>=350u &&
+           samples.load(std::memory_order_relaxed)<16u &&
+           previous.compare_exchange_strong(
+               last,now,
+               std::memory_order_relaxed)) {
+            const unsigned sample=samples.fetch_add(
+                1u,std::memory_order_relaxed)+1u;
+            if(sample<=16u) {
+                char msg[280]{};
+                std::snprintf(msg,sizeof(msg),
+                    "RUNTIME-PAUSE-UI-BAR-PROBE: sample=%u producer=%u route=%u x=%.2f..%.2f y=%.2f..%.2f screen-bar-candidate=1 passive=1",
+                    sample,unsigned(producer),route,
+                    double(xmin),double(xmax),double(ymin),double(ymax));
+                log_line(msg);
+            }
+        }
+    }
+#endif
     record_bottom_2d_geometry(route,xmin,ymin,xmax,ymax);
     if(route==0u)
         probe_native_glyph_after_frame(xmin,ymin,xmax,ymax);
@@ -5745,6 +5869,36 @@ void __cdecl native_2d_percent_sprite(void* viewport,
             double(ymin),double(ymax));
         log_line(sample);
     }
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    // Experimental Resolution page only: position existing native font
+    // glyph quads into a regular 4:3-safe information grid. Non-glyph
+    // producers (including the brightness bar) remain untouched.
+    bool information_glyph=false;
+    unsigned information_source_row=0u;
+    if(producer==Native2DProducer::Glyph) {
+        // The parent Options page shares the normal-3 controller phase
+        // with the VIDEO transition, so its glyph bands overlap the
+        // old resolution choice bands. Never discard font glyphs here
+        // based on coordinates: owner screenshot 11:18 showed only
+        // fragments of SOUND, CONTROLS and LANGUAGE. The video-only
+        // read-only renderer is activated later, in verified normal-5.
+        // The game may keep glyphs built with VIDEO information strings
+        // after localization pointers are restored. Only in the verified
+        // native brightness behavior, drop those stale VIDEO choice glyphs
+        // before forwarding to GLI. The butterfly is not a font producer.
+        if(r2fix::suppress_cached_native_graphics_info_glyph(
+                xmin,ymin,xmax,ymax))return;
+        const auto source_quad=r2fix::GraphicsInfoQuad{
+            xmin,ymin,xmax,ymax};
+        information_source_row=r2fix::graphics_info_source_row(source_quad);
+        information_glyph=
+            r2fix::remap_native_graphics_info_glyph(xmin,ymin,xmax,ymax);
+        if(!information_glyph)information_source_row=0u;
+    } else {
+        r2fix::observe_native_graphics_info_non_glyph(
+            static_cast<unsigned>(producer),xmin,ymin,xmax,ymax);
+    }
+#endif
     float left=0.0f,right=0.0f;
     if(g_hud_scale>=0.9999f ||
        !r2fix::center_native_2d_percent(
@@ -5753,7 +5907,17 @@ void __cdecl native_2d_percent_sprite(void* viewport,
            !g_native_2d_invalid_logged.exchange(
                true,std::memory_order_relaxed))
             log_line("RUNTIME-HUD: native 2D input geometry invalid; original percent coordinates retained");
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+        const bool previous_info=g_native_info_remapped_glyph;
+        const unsigned previous_source_row=g_native_info_source_row;
+        g_native_info_remapped_glyph=information_glyph;
+        g_native_info_source_row=information_source_row;
+#endif
         original(viewport,xmin,ymin,xmax,ymax,material);
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+        g_native_info_remapped_glyph=previous_info;
+        g_native_info_source_row=previous_source_row;
+#endif
         return;
     }
     g_native_2d_calls.fetch_add(1,std::memory_order_relaxed);
@@ -5771,7 +5935,17 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     g_native_mapped_left=left;
     g_native_mapped_right=right;
     ++g_native_2d_call_depth;
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    const bool previous_info=g_native_info_remapped_glyph;
+    const unsigned previous_source_row=g_native_info_source_row;
+    g_native_info_remapped_glyph=information_glyph;
+    g_native_info_source_row=information_source_row;
+#endif
     original(viewport,left,ymin,right,ymax,material);
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    g_native_info_remapped_glyph=previous_info;
+    g_native_info_source_row=previous_source_row;
+#endif
     --g_native_2d_call_depth;
     g_current_native_route=previous_route;
     g_native_input_left=prev_input_l;
@@ -5857,6 +6031,42 @@ void __cdecl centered_native_screen_to_vertex(
                     double(y),double(depth));
                 log_line(msg);
             }
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+            // This is the engine's approved native 2D->3D conversion
+            // for Menu.sna/Fix.sna superimposed actors, not a global
+            // vertex or world camera hook. Adjust the lower native
+            // ESC companion only while normal9/reflex2 has drawn the
+            // owned informational VIDEO panel. Other menus and all
+            // world rendering retain their original source geometry.
+            const float original_y=y;
+            if(r2fix::lift_pause_video_companion(
+                r2fix::standalone_video_page_pause_render_ready(),
+                viewport==g_approved_overlay_viewport,
+                route,before,y,depth)) {
+                static std::atomic<bool> reported{false};
+                if(!reported.exchange(true,std::memory_order_relaxed)) {
+                    char msg[248]{};
+                    std::snprintf(msg,sizeof(msg),
+                        "RUNTIME-PAUSE-VIDEO-PAGE: native-companion-lift=active source=approved-3d-superimposed-route%u original-y=%.4f aligned-y=%.4f native-gameplay=untouched",
+                        route,double(original_y),double(y));
+                    log_line(msg);
+                }
+            }
+            // Original pause UI text is a 3D TextSuperImposed object,
+            // not the JFFTXT 2D glyph path. The latter was already
+            // suppressed but still left SON/CONTROLES behind the panel.
+            // Use ONLY approved native callers 0x75C58/0x75C93,
+            // approved UI viewport and verified drawn Pause VIDEO state.
+            // Preserve the VIDEO title row and animated 3D butterfly.
+            if(r2fix::pause_video_hide_obsolete_native_text(
+                r2fix::standalone_video_page_pause_render_ready(),
+                viewport==g_approved_overlay_viewport,route,y)) {
+                x+=8.0f; // shift original 3D text well outside viewport
+                static std::atomic<bool> reported{false};
+                if(!reported.exchange(true,std::memory_order_relaxed))
+                    log_line("RUNTIME-PAUSE-VIDEO-PAGE: native-3d-text-filter=active source=approved-TextSuperImposed-path-A-or-B only-body-band=1 native-title=preserved game-actors=untouched");
+            }
+#endif
         }
     }
     original(viewport,out_vertex,x,y,depth);
@@ -6656,6 +6866,24 @@ constexpr uintptr_t kPlainSpriteSlotRva = 0x104530; // VA 0x504530
 constexpr uintptr_t kUvSpriteSlotRva = 0x104524;    // VA 0x504524
 // The colored variant is used by the GLI font/sprite path in Rayman 2.
 constexpr uintptr_t kColorSpriteSlotRva = 0x104838; // VA 0x504838
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+// GLI_DRV_vFlipDeviceWithSyncro was resolved by the approved game
+// into VA 0x504538 (RVA 0x104538). x86 call 0x420F72 has no parameters.
+// This is a late native draw endpoint, before the GameFrame swap.
+constexpr uintptr_t kStandaloneFlipSlotRva=0x104538;
+std::atomic<void*> g_standalone_flip_original{nullptr};
+void __cdecl standalone_video_flip() {
+    // The original game updates the MENU AI before this native flip.
+    // Clamp only the now-invisible VIDEO selection on the SAME game
+    // rendering thread, with complete model/mind/DsgMem validation.
+    // Never intercept keyboard messages or alter parent Options.
+    r2fix::native_graphics_info_stabilize_video_cursor_at_flip();
+    r2fix::standalone_video_page_draw_before_flip();
+    const auto original=reinterpret_cast<void (__cdecl*)()>(
+        g_standalone_flip_original.load(std::memory_order_acquire));
+    if(original)original();
+}
+#endif
 constexpr float kInternalGlideWidth = 1024.0f;
 using PlainSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float, void*);
 using UvSpriteFn = void (__cdecl*)(r2fix::HudVertex*, float*, float, void*);
@@ -6962,12 +7190,102 @@ void __cdecl hud_uv_sprite(r2fix::HudVertex* quad, float* uv,
 }
 
 
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+// The approved EXE's colored GLI callback receives a stack-built
+// 4×32-bit secondary font palette, independent of the vertex colors.
+// Read it via checked process memory. Never modify the game's source
+// palette; any read-only information style uses a separate local copy.
+bool snapshot_native_glyph_palette(const void* ptr,
+                                   std::uint32_t (&words)[4]) noexcept {
+    if(!ptr)return false;
+    MEMORY_BASIC_INFORMATION m{};
+    if(VirtualQuery(ptr,&m,sizeof(m))!=sizeof(m) ||
+       m.State!=MEM_COMMIT || (m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))
+        return false;
+    const DWORD protection=m.Protect&0xffu;
+    if(protection!=PAGE_READONLY && protection!=PAGE_READWRITE &&
+       protection!=PAGE_WRITECOPY && protection!=PAGE_EXECUTE_READ &&
+       protection!=PAGE_EXECUTE_READWRITE &&
+       protection!=PAGE_EXECUTE_WRITECOPY)return false;
+    const auto address=reinterpret_cast<std::uintptr_t>(ptr);
+    const auto begin=reinterpret_cast<std::uintptr_t>(m.BaseAddress);
+    if(address<begin || m.RegionSize<sizeof(words) ||
+       address-begin>m.RegionSize-sizeof(words))return false;
+    SIZE_T bytes_read=0;
+    return ReadProcessMemory(GetCurrentProcess(),ptr,words,
+                             sizeof(words),&bytes_read)!=0 &&
+           bytes_read==sizeof(words);
+}
+void trace_native_information_glyph_palette(const r2fix::HudVertex* quad,
+                                             const void* colors) noexcept {
+    // Cap at 4 glyph rows x 4 native focus positions = 16 lines for the
+    // entire session, even at 60 FPS. Never log raw process addresses.
+    if(!quad || !g_native_info_remapped_glyph ||
+       g_native_2d_call_depth==0u)return;
+    const unsigned source=g_native_info_source_row;
+    const int focus=r2fix::native_graphics_info_focus_row();
+    if(source<1u || source>4u || focus<1 || focus>4)return;
+    const std::uint32_t bit=
+        r2fix::graphics_info_material_sample_bit(source,focus);
+    if(!bit)return;
+    if(g_native_info_material_pairs_seen.fetch_or(
+           bit,std::memory_order_relaxed)&bit)return;
+    std::uint32_t words[4]{};
+    const bool readable=snapshot_native_glyph_palette(colors,words);
+    char line[240]{};
+    if(readable)
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-GRAPHICS-MATERIAL: focus=%d row=%u raw_dwords=%08X,%08X,%08X,%08X vertex0=%08X source=verified-native-glyph no-color-write=1",
+            focus,source,unsigned(words[0]),unsigned(words[1]),
+            unsigned(words[2]),unsigned(words[3]),
+            unsigned(quad[0].packed_color));
+    else
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-GRAPHICS-MATERIAL: focus=%d row=%u readable=0 no-color-write=1",
+            focus,source);
+    log_line(line);
+}
+#endif
+
 void __cdecl hud_color_sprite(r2fix::HudVertex* quad, void* colors,
                               float z, void* globals) {
     const auto original = reinterpret_cast<ColorSpriteFn>(
         g_color_sprite_original.load(std::memory_order_acquire));
     if (!original) return;
     report_first(g_color_seen, "RUNTIME-HUD: colored sprite callback reached");
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+    // The owner's screenshot/log proved native focus tint came from
+    // the separate colored-GLI palette (not just vertex packed_color):
+    // FFFFFF78 for the highlighted item; FF6EBEFF for normal text.
+    // Keep the 16 raw diagnostic samples and replace only the four
+    // source-verified VIDEO glyph rows with a local, invariant palette.
+    trace_native_information_glyph_palette(quad,colors);
+    if(g_native_info_remapped_glyph && g_native_2d_call_depth!=0u &&
+       g_native_info_source_row>=1u && g_native_info_source_row<=4u &&
+       r2fix::native_graphics_info_focus_row()>=1 && quad &&
+       r2fix::is_screen_sprite_quad(quad)) {
+        std::uint32_t native_colors[4]{},fixed_colors[4]{};
+        const bool readable=snapshot_native_glyph_palette(
+            colors,native_colors);
+        if(readable && r2fix::static_video_information_palette(
+                native_colors,fixed_colors,true,
+                g_native_info_source_row,
+                r2fix::native_graphics_info_focus_row())) {
+            r2fix::HudVertex styled[4]{};
+            std::memcpy(styled,quad,sizeof(styled));
+            if(r2fix::tint_native_information_glyph(styled,true)) {
+                probe_native_2d_driver(quad,"colored");
+                g_native_2d_passthrough_color.fetch_add(
+                    1,std::memory_order_relaxed);
+                if(g_native_info_static_palette_quads.fetch_add(
+                        1u,std::memory_order_relaxed)==0u)
+                    log_line("RUNTIME-GRAPHICS-STYLE: status=static-information-palette-active copy=vertex-and-4colors native-focus-ignored=1 original-material-untouched=1 brightness-and-butterfly=untouched");
+                original(styled,fixed_colors,z,globals);
+                return;
+            }
+        }
+    }
+#endif
     if (g_native_2d_call_depth!=0) {
         probe_native_2d_driver(quad,"colored");
         g_native_2d_passthrough_color.fetch_add(1,std::memory_order_relaxed);
@@ -7128,6 +7446,11 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
         const_cast<BYTE*>(module + kColorSpriteSlotRva));
     auto* black_polygon = reinterpret_cast<void* volatile*>(
         const_cast<BYTE*>(module + kBlackPolygonSlotRva));
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    auto* video_flip = reinterpret_cast<void* volatile*>(
+        const_cast<BYTE*>(module + kStandaloneFlipSlotRva));
+    bool video_flip_logged=false;
+#endif
     bool black_polygon_logged = false;
     bool plain_logged = false;
     bool uv_logged = false;
@@ -7174,6 +7497,13 @@ DWORD WINAPI monitor_hud_callbacks(void*) {
             }
         }
         // The game registers its GLI driver exports after DLL injection.
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+        install_callback(video_flip,
+            reinterpret_cast<void*>(&standalone_video_flip),
+            g_standalone_flip_original,
+            "RUNTIME-STANDALONE-VIDEO: verified-native-flip-hook-installed no-extra-window=1",
+            video_flip_logged);
+#endif
         // Keep the native black-polygon hook installed across driver reloads.
         // The path is strictly opt-in and never touches 4:3 side masks.
         if(g_remove_cinematic_bars)
@@ -7386,7 +7716,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
     if (settings->size != sizeof(RuntimeOptions) ||
         settings->magic != kConfigMagic ||
         settings->output_width < 640 || settings->output_width > 16384 ||
-        settings->output_height < 480 || settings->output_height > 8640)
+        settings->output_height < 480 || settings->output_height > 8640 ||
+        settings->classic_4_3>1u)
         return 5;
     const float aspect = static_cast<float>(settings->output_width) /
                          static_cast<float>(settings->output_height);
@@ -7495,8 +7826,14 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         needs_native_render_events=needs_native_render_events ||
             g_proto_enabled.load(std::memory_order_acquire);
 #endif
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+        constexpr bool needs_graphics_info_glyph_hook=true;
+#else
+        constexpr bool needs_graphics_info_glyph_hook=false;
+#endif
         if(g_hud_scale<0.9999f || g_remove_dialogue_backgrounds ||
-           g_remove_cinematic_bars || needs_native_render_events)
+           g_remove_cinematic_bars || needs_native_render_events ||
+           needs_graphics_info_glyph_hook)
             install_native_2d_percent_hook();
 #if RAYMAN2FIX_RESEARCH_PROBES
         // Read-only hook at VA 0x4710C0 is not part of the actual fix.
@@ -7507,6 +7844,34 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         initialize_native_intro_skip();
         install_native_frame_flip_hook();
         start_hud_monitor();
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+        // The read-only observer is also the VERIFIED controller source
+        // required by the native information page and its exact-script
+        // video-mode write guards. Never tie this functionality to Log=1:
+        // the normal packaged default is Log=0.
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+        constexpr bool kNativeGraphicsInformationCompiled=true;
+#else
+        constexpr bool kNativeGraphicsInformationCompiled=false;
+#endif
+        if(r2fix::menu_controller_worker_required(
+                g_log,kNativeGraphicsInformationCompiled))
+            r2fix::start_menu_ai_controller_trace(&log_line);
+#if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
+        // log_line() is intentionally a no-op at Log=0. The feature,
+        // callbacks and text presentation still initialize normally.
+        r2fix::start_native_graphics_info_proto(&log_line,
+            settings->output_width,settings->output_height,
+            settings->classic_4_3!=0);
+#endif
+#if defined(RAYMAN2FIX_RESEARCH_PROBES) && RAYMAN2FIX_RESEARCH_PROBES
+        // The legacy passive resolution trace is research-only. The
+        // authenticated controller and the production VIDEO feature
+        // above remain independent of this gate and of Debug.Log.
+        if(r2fix::menu_passive_diagnostics_required(g_log))
+            r2fix::start_graphics_menu_trace(&log_line);
+#endif
+#endif
         // Apply game EXE icon in its own process, independently of ESC audio.
         r2fix::start_game_window_icon_worker(&log_line);
     }

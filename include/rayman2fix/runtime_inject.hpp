@@ -22,5 +22,6 @@ FovHookResult initialize_game_fov(
     const std::filesystem::path& dll,
     std::uint32_t width, std::uint32_t height, bool log_enabled,
     bool skip_cinematics, bool skip_learn10 = false, bool remove_dialogue_backgrounds = false,
-    bool remove_cinematic_bars = false, bool music_in_pause_menu = false);
+    bool remove_cinematic_bars = false, bool music_in_pause_menu = false,
+    bool classic_4_3 = false);
 }

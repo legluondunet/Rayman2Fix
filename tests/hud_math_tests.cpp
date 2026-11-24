@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 // Exercise every geometry check in Debug AND Release (NDEBUG disables assert).
@@ -70,6 +71,30 @@ int main() {
     CHECK(near(quad[0].y, 0.0f) && near(quad[2].y, 768.0f));
     CHECK(quad[0].packed_color == 0x11223344 &&
            quad[1].packed_color == 0x55667788);
+
+    // An experimental font tint may affect ONLY a verified native
+    // information glyph, using a caller-owned COPY of its four vertices.
+    r2fix::HudVertex text_quad[4] = {
+        {0,0,1,0x00112233u}, {16,0,1,0x44556677u},
+        {16,12,1,0x8899AABBu}, {0,12,1,0xCCDDEEFFu}
+    };
+    r2fix::HudVertex untouched[4];
+    std::memcpy(untouched,text_quad,sizeof(text_quad));
+    CHECK(!r2fix::tint_native_information_glyph(text_quad,false));
+    CHECK(std::memcmp(untouched,text_quad,sizeof(text_quad))==0);
+    CHECK(r2fix::tint_native_information_glyph(text_quad,true));
+    for(unsigned i=0;i<4;++i){
+        CHECK(text_quad[i].packed_color==0xFFFFFFFFu);
+        CHECK(text_quad[i].x==untouched[i].x &&
+              text_quad[i].y==untouched[i].y &&
+              text_quad[i].reciprocal_z==untouched[i].reciprocal_z);
+    }
+    CHECK(std::memcmp(untouched,text_quad,sizeof(text_quad))!=0);
+    CHECK(!r2fix::tint_native_information_glyph(nullptr,true));
+    text_quad[1].reciprocal_z=0.5f;
+    const auto before_world=text_quad[0].packed_color;
+    CHECK(!r2fix::tint_native_information_glyph(text_quad,true));
+    CHECK(text_quad[0].packed_color==before_world);
 
     r2fix::HudVertex world[4] = {
         {10,10,0.5f,0}, {20,10,0.5f,0}, {20,20,0.5f,0}, {10,20,0.5f,0}

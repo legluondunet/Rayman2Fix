@@ -1,3 +1,14 @@
+## Read-only Video information
+
+The regular Rayman2Fix installer includes a read-only Video page in both
+the startup Options menu and the in-game ESC → Options menu. It shows
+output resolution and aspect ratio, GPU, driver, GameFrame/Glide2,
+internal resolution and the Rayman2Fix version-commit. The original
+resolution and brightness controls are replaced because Rayman2Fix
+manages the display automatically. Escape returns to Options.
+The main-menu Rayman2Fix entry opens the official project repository.
+No extra INI setting is required. See [technical documentation](docs/standalone-video-page.md).
+
 > **ESC menu music (enabled by default):** `[Features] MusicInPauseMenu=1`
 > keeps native Theme/SXD music active during the ESC pause menu, including
 > verified early Theme handoffs. Set it to `0` to restore original pause

@@ -35,6 +35,7 @@ struct ChildDisplayOptions {
     DisplayMetrics monitor;
     std::uint32_t output_width = 0;
     std::uint32_t output_height = 0;
+    bool classic_4_3 = false; // launcher-approved policy, independent of output ratio
     bool enable_fov = false;
     bool skip_cinematics = false; // jail_20 key skip (INI default 1)
     bool skip_learn10 = false; // default enabled from INI; hidden debug opt-out

@@ -70,8 +70,24 @@ option(RAYMAN2FIX_RESEARCH_PROBES
   "Enable invasive read-only research instrumentation in the x86 runtime" OFF)
 option(RAYMAN2FIX_AUDIO_TRACE
   "Build bounded audio pause/resume research trace; never suppress native calls" OFF)
+# Release-candidate: the owner validated MENU + ESC VIDEO information
+# panels against the original game under Wine. Enable them in the *normal*
+# single-EXE installer, not only in a separately named research artifact.
+# The switches remain available as an opt-out for troubleshooting.
+option(RAYMAN2FIX_GRAPHICS_INFO_PROTO
+  "Build verified in-menu video-action guards for native VIDEO information pages" ON)
+option(RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+  "Build verified shared Glide2 VIDEO information page in MENU and Pause" ON)
+if(RAYMAN2FIX_STANDALONE_VIDEO_PAGE AND NOT RAYMAN2FIX_GRAPHICS_INFO_PROTO)
+  message(FATAL_ERROR "Standalone video page requires verified graphics action guards")
+endif()
+option(RAYMAN2FIX_GRAPHICS_MENU_TRACE
+  "Build source-verified native MENU model locator needed by VIDEO page" ON)
 option(RAYMAN2FIX_ESC_MUSIC_PROTO
   "Build explicit opt-in, experimental native ESC music compensation for Wine testing" OFF)
+if(RAYMAN2FIX_GRAPHICS_INFO_PROTO AND NOT RAYMAN2FIX_GRAPHICS_MENU_TRACE)
+  message(FATAL_ERROR "Native graphics info prototype requires graphics menu trace")
+endif()
 if(RAYMAN2FIX_ESC_MUSIC_PROTO AND NOT RAYMAN2FIX_AUDIO_TRACE)
   message(FATAL_ERROR "ESC audio prototype requires RAYMAN2FIX_AUDIO_TRACE=ON")
 endif()
@@ -85,10 +101,33 @@ if(WIN32)
     src/runtime/runtime.cpp
     src/runtime/game_window_icon.cpp)
   set_target_properties(Rayman2FixRuntime PROPERTIES OUTPUT_NAME fix)
+  if(RAYMAN2FIX_GRAPHICS_MENU_TRACE)
+    target_sources(Rayman2FixRuntime PRIVATE
+      src/runtime/graphics_menu_trace.cpp
+      src/runtime/graphics_menu_controller_trace.cpp)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE
+      RAYMAN2FIX_GRAPHICS_MENU_TRACE=1)
+  endif()
+  if(RAYMAN2FIX_GRAPHICS_INFO_PROTO)
+    target_sources(Rayman2FixRuntime PRIVATE src/runtime/native_graphics_info_proto.cpp)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE
+      RAYMAN2FIX_GRAPHICS_INFO_PROTO=1)
+  endif()
+  if(RAYMAN2FIX_STANDALONE_VIDEO_PAGE)
+    target_sources(Rayman2FixRuntime PRIVATE
+      src/runtime/standalone_video_page.cpp
+      src/runtime/main_menu_site.cpp
+      src/runtime/pause_video_observer.cpp
+      src/runtime/video_navigation_input.cpp
+      src/runtime/wine_vulkan_driver.cpp)
+    target_link_libraries(Rayman2FixRuntime PRIVATE gdi32 setupapi advapi32)
+    target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_STANDALONE_VIDEO_PAGE=1)
+  endif()
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
     RAYMAN2FIX_ESC_MUSIC_FEATURE=1
-    RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}")
+    RAYMAN2FIX_BUILD_COMMIT="${RAYMAN2FIX_BUILD_COMMIT}"
+    RAYMAN2FIX_VERSION="${PROJECT_VERSION}")
   if(RAYMAN2FIX_RESEARCH_PROBES)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_RESEARCH_PROBES=1)
   endif()
@@ -259,6 +298,167 @@ if(BUILD_TESTING)
   target_include_directories(graphics_menu_info_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME graphics-menu-readonly-info-model COMMAND graphics_menu_info_tests)
+  # Guard against confusing original CD (0x117000) with the authenticated
+  # expanded/deprotected game image (0x1D7000), without shipping game bytes.
+  add_executable(graphics_menu_target_tests tests/graphics_menu_target_tests.cpp)
+  target_include_directories(graphics_menu_target_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-deprotected-pe-fingerprint
+    COMMAND graphics_menu_target_tests)
+  add_executable(menu_text_probe_tests tests/menu_text_probe_tests.cpp)
+  target_include_directories(menu_text_probe_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME menu-text-handle-scoping COMMAND menu_text_probe_tests)
+  add_executable(graphics_menu_controller_tests
+    tests/graphics_menu_controller_model_tests.cpp)
+  target_include_directories(graphics_menu_controller_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-controller-relocation-and-state
+    COMMAND graphics_menu_controller_tests)
+  add_executable(native_graphics_info_policy_tests
+    tests/native_graphics_info_policy_tests.cpp)
+  target_include_directories(native_graphics_info_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-graphics-info-prototype-scope
+    COMMAND native_graphics_info_policy_tests)
+  add_executable(graphics_menu_start_policy_tests
+    tests/graphics_menu_start_policy_tests.cpp)
+  target_include_directories(graphics_menu_start_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-log0-feature-startup
+    COMMAND graphics_menu_start_policy_tests)
+  add_executable(native_graphics_text_storage_tests
+    tests/native_graphics_text_storage_tests.cpp)
+  target_include_directories(native_graphics_text_storage_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-video-pointer-restore
+    COMMAND native_graphics_text_storage_tests)
+  add_executable(native_graphics_static_text_tests
+    tests/native_graphics_static_text_tests.cpp)
+  target_include_directories(native_graphics_static_text_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-menu-verified-static-text-script-copy
+    COMMAND native_graphics_static_text_tests)
+  add_executable(standalone_video_transition_tests
+    tests/standalone_video_transition_tests.cpp)
+  target_include_directories(standalone_video_transition_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME standalone-video-direct-transition
+    COMMAND standalone_video_transition_tests)
+  add_executable(main_menu_site_policy_tests
+    tests/main_menu_site_policy_tests.cpp)
+  target_include_directories(main_menu_site_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-main-menu-site-label-url-scoping
+    COMMAND main_menu_site_policy_tests)
+  add_executable(pause_video_preparation_policy_tests
+    tests/pause_video_preparation_policy_tests.cpp)
+  target_include_directories(pause_video_preparation_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME pause-video-preentry-no-obsolete-widgets
+    COMMAND pause_video_preparation_policy_tests)
+  add_executable(pause_video_patch_policy_tests
+    tests/pause_video_patch_policy_tests.cpp)
+  target_include_directories(pause_video_patch_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME pause-video-fix-sna-readonly-script-patches
+    COMMAND pause_video_patch_policy_tests)
+  add_executable(pause_video_companion_layout_tests
+    tests/pause_video_companion_layout_tests.cpp)
+  target_include_directories(pause_video_companion_layout_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME pause-video-verified-companion-height
+    COMMAND pause_video_companion_layout_tests)
+  add_executable(post_pause_ui_bar_probe_policy_tests
+    tests/post_pause_ui_bar_probe_policy_tests.cpp)
+  target_include_directories(post_pause_ui_bar_probe_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME post-pause-video-slider-source-identity-probe
+    COMMAND post_pause_ui_bar_probe_policy_tests)
+  add_executable(wine_vulkan_driver_policy_tests
+    tests/wine_vulkan_driver_policy_tests.cpp)
+  target_include_directories(wine_vulkan_driver_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME wine-vulkan-driver-identity-and-format
+    COMMAND wine_vulkan_driver_policy_tests)
+  add_executable(video_navigation_input_policy_tests
+    tests/video_navigation_input_policy_tests.cpp)
+  target_include_directories(video_navigation_input_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME source-directinput-video-navigation-only
+    COMMAND video_navigation_input_policy_tests)
+  add_executable(pause_video_text_filter_policy_tests
+    tests/pause_video_text_filter_policy_tests.cpp)
+  target_include_directories(pause_video_text_filter_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME pause-video-native-text-only-suppression
+    COMMAND pause_video_text_filter_policy_tests)
+  add_executable(pause_menu_site_policy_tests
+    tests/pause_menu_site_policy_tests.cpp)
+  target_include_directories(pause_menu_site_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME pause-site-script-and-selection
+    COMMAND pause_menu_site_policy_tests)
+  add_executable(pause_video_model_policy_tests
+    tests/pause_video_model_policy_tests.cpp)
+  target_include_directories(pause_video_model_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME pause-video-model-23x6-fingerprint
+    COMMAND pause_video_model_policy_tests)
+  add_executable(standalone_video_cursor_policy_tests
+    tests/standalone_video_cursor_policy_tests.cpp)
+  target_include_directories(standalone_video_cursor_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME standalone-video-cursor-memory-gate
+    COMMAND standalone_video_cursor_policy_tests)
+  add_executable(standalone_video_device_policy_tests
+    tests/standalone_video_device_policy_tests.cpp)
+  target_include_directories(standalone_video_device_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME standalone-video-gpu-matching
+    COMMAND standalone_video_device_policy_tests)
+  add_executable(standalone_video_page_tests
+    tests/standalone_video_page_tests.cpp)
+  target_include_directories(standalone_video_page_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME standalone-video-page-navigation-scope COMMAND standalone_video_page_tests)
+  add_executable(native_video_disable_choices_tests
+    tests/native_video_disable_choices_tests.cpp)
+  target_include_directories(native_video_disable_choices_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-menu-disable-resolution-choice-copy
+    COMMAND native_video_disable_choices_tests)
+  add_executable(native_video_navigation_tests
+    tests/native_video_navigation_tests.cpp)
+  target_include_directories(native_video_navigation_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-menu-fixed-brightness-navigation-copy
+    COMMAND native_video_navigation_tests)
+  add_executable(native_video_brightness_suppression_tests
+    tests/native_video_brightness_suppression_tests.cpp)
+  target_include_directories(native_video_brightness_suppression_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME native-menu-readonly-no-brightness-transition
+    COMMAND native_video_brightness_suppression_tests)
+  add_executable(graphics_menu_cursor_actor_anchor_tests
+    tests/graphics_menu_cursor_actor_anchor_tests.cpp)
+  target_include_directories(graphics_menu_cursor_actor_anchor_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-cursor-actor-name-fingerprint
+    COMMAND graphics_menu_cursor_actor_anchor_tests)
+  add_executable(graphics_menu_cursor_reference_tests
+    tests/graphics_menu_cursor_reference_tests.cpp)
+  target_include_directories(graphics_menu_cursor_reference_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-cursor-ptr-value-candidates
+    COMMAND graphics_menu_cursor_reference_tests)
+  # Pure native-JFFTXT glyph placement contract: stable 4:3 canvas and
+  # intentional exclusion of the original brightness control.
+  add_executable(graphics_menu_glyph_layout_tests
+    tests/graphics_menu_glyph_layout_tests.cpp)
+  target_include_directories(graphics_menu_glyph_layout_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME graphics-menu-native-glyph-layout
+    COMMAND graphics_menu_glyph_layout_tests)
 
   # Pure C++17 research-only ESC music shadow core, no Win32 or game
   # driver calls. Run on both Linux and Windows (even in Release/NDEBUG).
