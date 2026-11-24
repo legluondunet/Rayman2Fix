@@ -145,7 +145,7 @@ if(WIN32)
   # Package the project's own x86 DLL inside Rayman2Fix.exe as RCDATA.
   # Windows artifact: one EXE. GameFrame is compiled separately by CI and
   # embedded as a second RCDATA resource with its Apache license.
-  # No INI, log, runtime directory, SDL3 or commercial game assets are shipped.
+  # No external INI, log, runtime directory or commercial game assets are shipped.
   # The resource file is config-specific so both Debug and Release resolve
   # their matching DLL. This DLL remains an inert bootstrap placeholder.
   file(GENERATE
@@ -201,6 +201,29 @@ if(WIN32)
       "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_gameframe.rc")
   endif()
 
+  # Audited official SDL3 binary, fixed digests from CI 45411813631.
+  # The launcher embeds both the DLL and the original zlib notice.
+  set(RAYMAN2FIX_SDL3_DIR "" CACHE PATH "Audited SDL3 x86 output directory")
+  if(RAYMAN2FIX_SDL3_DIR)
+    set(SDL3_DLL "${RAYMAN2FIX_SDL3_DIR}/SDL3.dll")
+    set(SDL3_NOTICE "${RAYMAN2FIX_SDL3_DIR}/SDL3-LICENSE.txt")
+    file(SHA256 "${SDL3_DLL}" SDL3_DLL_SHA)
+    file(SHA256 "${SDL3_NOTICE}" SDL3_NOTICE_SHA)
+    if(NOT SDL3_DLL_SHA STREQUAL "6d7e653aa9c762ceda4fffc054a504dcce273e016eb9f1fe079b6409a058a9f7" OR
+       NOT SDL3_NOTICE_SHA STREQUAL "1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd")
+      message(FATAL_ERROR "SDL3 x86 or zlib notice does not match audited release 3.4.20")
+    endif()
+    target_compile_definitions(Rayman2Fix PRIVATE RAYMAN2FIX_BUNDLED_SDL3=1)
+    file(GENERATE
+      OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_sdl3.rc"
+      CONTENT "1107 RCDATA \"${SDL3_DLL}\"\n1108 RCDATA \"${SDL3_NOTICE}\"\n")
+    set_source_files_properties(
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_sdl3.rc"
+      PROPERTIES GENERATED TRUE)
+    target_sources(Rayman2Fix PRIVATE
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_sdl3.rc")
+  endif()
+
   # An owner-verified delta is optional and must never be checked into the
   # public repository or bundled in bootstrap CI artifacts. When explicitly
   # supplied for a local Windows build, it becomes RCDATA #1102 in the
@@ -227,6 +250,18 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  if(WIN32)
+    # Explicit CI smoke test against an audited absolute DLL path.
+    # No link dependency on SDL3 in the launcher or game runtime yet.
+    add_executable(sdl3_x86_smoke tests/sdl3_x86_smoke.cpp)
+  endif()
+  # SDL3 phase 0: pure focus/hotplug transition policy, no runtime input.
+  add_executable(gamepad_input_policy_tests tests/gamepad_input_policy_tests.cpp)
+  target_include_directories(gamepad_input_policy_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME gamepad-input-focus-hotplug-policy
+    COMMAND gamepad_input_policy_tests)
+
   add_executable(disc_tests tests/disc_tests.cpp)
   target_link_libraries(disc_tests PRIVATE rayman2_disc)
   add_test(NAME disc-image-parser COMMAND disc_tests)
@@ -259,6 +294,11 @@ if(BUILD_TESTING)
       "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_payload.rc"
       "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc")
     add_dependencies(auto_flow_tests Rayman2FixRuntime)
+    if(RAYMAN2FIX_SDL3_DIR)
+      target_compile_definitions(auto_flow_tests PRIVATE RAYMAN2FIX_BUNDLED_SDL3=1)
+      target_sources(auto_flow_tests PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_sdl3.rc")
+    endif()
     if(RAYMAN2FIX_GLIDE_DLL)
       target_compile_definitions(auto_flow_tests PRIVATE
         RAYMAN2FIX_GLIDE_SHA256="${RAYMAN2FIX_GLIDE_SHA256}")
