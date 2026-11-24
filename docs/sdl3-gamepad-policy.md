@@ -142,3 +142,13 @@ le cas sans manette et l'isolation de la navigation. Le dessin, la détection
 SDL3 réelle de la famille, la localisation et la substitution du menu
 natif restent à implémenter. L'écran ne doit pas annoncer des commandes
 non opérationnelles dans une compilation distribuée.
+
+## Packaging SDL3 (phase 1)
+
+Windows CI 45411813631 verified the official SDL 3.4.20 x86 dependency:
+- SDL3.dll SHA-256: `6d7e653aa9c762ceda4fffc054a504dcce273e016eb9f1fe079b6409a058a9f7`
+- Original zlib notice SHA-256: `1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd`
+
+Standard x86 CI supplies the audited directory to CMake. Both extracted hashes are pinned at configure time. RCDATA 1107 contains SDL3.dll and 1108 contains its original license. Normal provisioning compares installed bytes with the embedded payload, stages exclusively and replaces atomically if necessary. Deployment targets `mods/SDL3.dll` and `docs/SDL3-LICENSE.txt`; this deliberately avoids the atomic CD publication directory `game/`. The notice is provisioned first, without altering the GPLv3 or GameFrame notices. No download or configuration by the user, no permanent backup, no global DLL installation. Unbundled developer builds remain possible. The DLL is not yet loaded by the game. Later runtime initialization must use the absolute installation-owned path, verify provenance and fail back to native keyboard input if unavailable. Do not load from the process search path.
+
+Tests exercise initial deployment, repeat provisioning, and replacement of corrupt DLL and notice. This is packaging only, not proof of physical controller functionality.
