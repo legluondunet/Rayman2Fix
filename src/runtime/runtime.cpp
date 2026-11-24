@@ -5111,7 +5111,16 @@ int intro_next_level_status(std::uintptr_t base) {
     if(name[0]==0)return 0; // none
     return std::strcmp(name,kAfterIntroLevel)==0 ? 1 : 2; // expected / other
 }
-void poll_second_intro_skip(bool pad_skip_down = false) {
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept;
+#endif
+void poll_second_intro_skip() {
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    const bool pad_skip_down=(sdl_fresh_actions(r2fix::PadContext::cinematic) &
+        r2fix::pad_action_bit(r2fix::PadAction::skip)) != 0;
+#else
+    constexpr bool pad_skip_down=false;
+#endif
     if(!g_skip_cinematics)return;
     const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
     if (!native_change || !g_current_level) return;
@@ -5448,12 +5457,7 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     const bool first_fallback=fallback_bit &&
         !(g_render_poll_fallback_reported.fetch_or(
               fallback_bit,std::memory_order_relaxed)&fallback_bit);
-#ifdef RAYMAN2FIX_BUNDLED_SDL3
-    poll_second_intro_skip((sdl_fresh_actions(r2fix::PadContext::cinematic) &
-        r2fix::pad_action_bit(r2fix::PadAction::skip)) != 0);
-#else
     poll_second_intro_skip();
-#endif
 #if RAYMAN2FIX_AUDIO_HOOKS
     poll_audio_pause_trace();
 #if RAYMAN2FIX_ESC_MUSIC_ACTIVE
