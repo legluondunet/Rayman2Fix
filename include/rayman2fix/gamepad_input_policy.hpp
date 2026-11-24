@@ -6,7 +6,7 @@
 
 namespace r2fix {
 
-enum class PadContext { inactive, gameplay, menu, video, controller_info, cinematic, pause_menu };
+enum class PadContext { inactive, gameplay, menu, video, controller_info, cinematic, pause_menu, first_cinematic, learn_cinematic };
 enum class PadAction : unsigned {
     left, right, up, down, jump, fire, pause, camera_left, camera_right,
     target, statistics, world_knowledge, murphy, confirm, cancel, skip
@@ -57,7 +57,8 @@ constexpr std::uint32_t pad_actions(const PadSample& s) noexcept {
     const auto bit = [](bool on, PadAction a) {
         return on ? pad_action_bit(a) : 0u;
     };
-    if (s.context == PadContext::cinematic)
+    if (s.context == PadContext::cinematic || s.context == PadContext::first_cinematic ||
+        s.context == PadContext::learn_cinematic)
         return bit(s.south, PadAction::skip);
     if (s.context == PadContext::menu || s.context == PadContext::pause_menu || s.context == PadContext::video ||
         s.context == PadContext::controller_info) {

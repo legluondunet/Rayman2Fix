@@ -2101,6 +2101,9 @@ ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {
     out.mode1_output=mode1_output;
     return out;
 }
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+bool consume_sdl_pause_delivery() noexcept;
+#endif
 void __cdecl proto_script_pause() {
     bool adopted=false;
     DWORD depth_before=0,depth_after=0;
@@ -2115,8 +2118,13 @@ void __cdecl proto_script_pause() {
         // menu entered at depth 1, but a subsequent ESC menu in the same
         // session was entered at depth 2 (Nov 14 Wine evidence).
         // A hard-coded ==1 silently disabled all subsequent attempts.
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        const bool pad_pause=consume_sdl_pause_delivery();
+#else
+        constexpr bool pad_pause=false;
+#endif
         const bool candidate=game_window_is_foreground() &&
-            (GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0 &&
+            ((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0 || pad_pause) &&
             proto_game_read(0xB9BC8,menu) && menu==0 &&
             proto_read_depth(depth) && depth>=1u && depth<=8u;
         if(candidate) {
@@ -5291,6 +5299,8 @@ r2fix::PadContext g_sdl_input_context = r2fix::PadContext::inactive;
 std::uint32_t g_sdl_input_actions = 0;
 r2fix::PadMovement g_sdl_input_movement{};
 DWORD g_sdl_input_tick = 0;
+thread_local DWORD g_sdl_pause_delivery_tick=0;
+thread_local bool g_sdl_pause_delivery_pending=false;
 
 r2fix::PadContext sdl_native_context() noexcept {
     using r2fix::PadContext;
@@ -5305,6 +5315,19 @@ r2fix::PadContext sdl_native_context() noexcept {
         return PadContext::inactive;
     if (g_skip_cinematics && r2fix::is_second_intro(level))
         return PadContext::cinematic;
+    if(g_skip_cinematics && _stricmp(level,"jail_10")==0 &&
+       intro_native_engine_mode(base)==int(kIntroEnginePlaying))
+        return PadContext::first_cinematic;
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+    bool intro_handed_over=false;
+    if(g_skip_cinematics && g_f248_enabled.load(std::memory_order_acquire) &&
+       r2fix::is_first_playable_level(level) &&
+       intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
+       g_progress_words &&
+       game_story_bit(g_progress_words,kLearnHandoverBit,intro_handed_over) &&
+       !intro_handed_over)
+        return PadContext::learn_cinematic;
+#endif
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
     bool main_video = false, pause_video = false;
     const bool video = r2fix::standalone_video_page_owns_navigation(main_video, pause_video);
@@ -5348,6 +5371,20 @@ std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept {
         return 0;
     return g_sdl_input_actions;
 }
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+// One-shot proof of delivery at the approved keyboard-buffer route.
+// Retain the original script-only source, native menu/depth guards and
+// audio pairing; do not treat a merely held unrelated button as ESC.
+bool consume_sdl_pause_delivery() noexcept {
+    const bool pending=g_sdl_pause_delivery_pending;
+    g_sdl_pause_delivery_pending=false;
+    return pending && game_window_is_foreground() &&
+        g_sdl_input_owner.load(std::memory_order_acquire)==GetCurrentThreadId() &&
+        DWORD(GetTickCount()-g_sdl_pause_delivery_tick)<=100u &&
+        sdl_fresh_actions(r2fix::PadContext::gameplay) &
+            r2fix::pad_action_bit(r2fix::PadAction::pause);
+}
+#endif
 
 // Candidate IPT layout from RayTools' documented PC reference.
 // No writes, hooks, native function calls or raw pointers in diagnostics.
@@ -5505,12 +5542,20 @@ bool ipt_current_gameplay() noexcept {
 unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
     const auto original=reinterpret_cast<IptPredicate>(intro_game_base()+0x2EAC0u);
     const unsigned char native=original(entry);
-    if(native || !ipt_current_gameplay() || !g_sdl_input_actions) return native;
+    if(native || !g_sdl_input_actions ||
+       g_sdl_input_owner.load(std::memory_order_acquire)!=GetCurrentThreadId())return native;
+    using r2fix::PadContext;
+    using r2fix::PadAction;
+    const auto context=g_sdl_input_context;
+    const bool gameplay=ipt_current_gameplay();
+    const bool native_cinematic=(context==PadContext::first_cinematic ||
+        context==PadContext::learn_cinematic) &&
+        (sdl_fresh_actions(context)&r2fix::pad_action_bit(PadAction::skip));
+    if(!gameplay && !native_cinematic)return native;
     r2fix::IptActionReadback row{};
     std::array<char,64> name{};
     unsigned index=0;
     if(!ipt_live_entry(entry,row,index,name)) return native;
-    using r2fix::PadAction;
     // The approved CD has stripped names. Match the entire observed
     // 28-entry structural fingerprint and exact table membership first.
     // Reference action indices remain subject to hardware confirmation.
@@ -5519,13 +5564,20 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
         std::string_view n(name.data());
         return n.empty() || r2fix::ipt_name_contains(n,suffix);
     };
-    if(matches(10,"sauter",PadAction::jump) ||
+    // Native action 20 = CouperCinematique, 21 = TexteSuivant in the
+    // reference enumeration. Leave Jail_20 to its existing guarded
+    // level request, avoiding a simultaneous native skip and level change.
+    const bool requested=native_cinematic ?
+        (index==20u || index==21u) :
+        (matches(21,"textesuivant",PadAction::jump) ||
+        matches(10,"sauter",PadAction::jump) ||
        matches(11,"tirer",PadAction::fire) ||
        matches(13,"strafe",PadAction::target) ||
        matches(16,"tournedroite",PadAction::camera_right) ||
        matches(17,"tournegauche",PadAction::camera_left) ||
        matches(22,"appelermurphy",PadAction::murphy) ||
-       matches(24,"affiche_jauge",PadAction::statistics)) {
+       matches(24,"affiche_jauge",PadAction::statistics));
+    if(requested) {
         static std::uint32_t seen=0;
         if(index<32u && !(seen&(1u<<index))) {
             seen|=1u<<index;
@@ -8191,6 +8243,14 @@ std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept {
                 r2fix::pad_action_bit(r2fix::PadAction::pause)) ?
                 r2fix::pad_action_bit(r2fix::PadAction::cancel):0u;
     return sdl_fresh_actions(r2fix::PadContext::menu);
+}
+void r2fix_sdl_note_pause_delivery() noexcept {
+    if(sdl_fresh_actions(r2fix::PadContext::gameplay) &
+       r2fix::pad_action_bit(r2fix::PadAction::pause)) {
+        // Called only after a successful native keyboard buffer merge.
+        g_sdl_pause_delivery_tick=GetTickCount();
+        g_sdl_pause_delivery_pending=true;
+    }
 }
 #endif
 

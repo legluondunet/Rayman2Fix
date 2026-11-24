@@ -272,3 +272,21 @@ uses the exact native consumer's current script-owned axis pointer rather
 than requiring reference index 0/1. All other focus and handover constraints
 remain. The reference action indices are still candidates until tested;
 no claim of validated gameplay. No native action table writes.
+
+## Controller feedback 9c5ee4ce
+
+Wine log 20261124-220157 verifies actual IPT delivery: axis 0/1 calibrated
+-50/0/50 and action indices 10,11,13,16,17,22,24. Physical gameplay
+semantics still need confirmation. D-pad down = Murphy (F1); D-pad up
+world knowledge remains unimplemented. South = next dialogue candidate
+native index 21 in gameplay, in addition to native jump; no system-wide
+Space injection. First jail_10 and Learn_10 opening now have separate
+cinematic contexts, using native cut/next-text indices 20/21 only when
+Playing and skip enabled. Learn_10 also requires original F248 enabled and
+story handover false. Jail_20 retains the existing guarded skip request;
+held button cannot cross cinematic boundaries. Native acceptance untested.
+Pause music was enabled but no paired opening was adopted: the script
+pause guard required physical Escape. A one-shot same-thread token from
+actual successful SDL keyboard-buffer ESC merge now supplies the second
+input provenance option, with current gameplay/focus/100ms validation.
+All native menu, pause depth and audio-owner checks remain unchanged.

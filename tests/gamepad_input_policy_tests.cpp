@@ -241,5 +241,15 @@ int main() {
     retail[10].keyword_count--;
     retail[0].keywords=0;
     check(!ipt_retail_structure({138,0x20000},retail),"missing keyword buffer");
+    PadTransitionGate movie_gate;
+    a=active(PadContext::first_cinematic); movie_gate.update(a);
+    a.south=true;
+    check(has(movie_gate.update(a).held,PadAction::skip),"first native movie skip");
+    a.context=PadContext::cinematic;
+    check(!movie_gate.update(a).held,"held skip cannot cross movie boundary");
+    a.context=PadContext::learn_cinematic;
+    check(!movie_gate.update(a).held,"held skip cannot cross Learn10 boundary");
+    a.south=false;movie_gate.update(a);a.south=true;
+    check(has(movie_gate.update(a).held,PadAction::skip),"fresh Learn10 skip");
     std::cout << "SDL3 Dreamcast mapping / focus / hotplug policy: OK\n";
 }

@@ -11,6 +11,7 @@
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
 #include "rayman2fix/gamepad_menu_bridge.hpp"
 std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept;
+void r2fix_sdl_note_pause_delivery() noexcept;
 #endif
 
 #if !defined(_M_IX86)
@@ -74,6 +75,8 @@ void __cdecl filter_approved_video_keys(void* keyboard,
     const auto merged=merge_pad_menu_keys(video ? PadContext::video : PadContext::menu,
         foreground,result,kVideoKeyboardBytes,
         static_cast<std::uint8_t*>(keyboard),actions);
+    if(merged && !video && (actions & pad_action_bit(PadAction::cancel)))
+        ::r2fix_sdl_note_pause_delivery();
     // Bounded proof of actual native buffer delivery, not just SDL sampling.
     static std::atomic<bool> menu_reported{false},video_reported{false};
     if(merged && !(video ? video_reported : menu_reported).exchange(true) && g_log)
