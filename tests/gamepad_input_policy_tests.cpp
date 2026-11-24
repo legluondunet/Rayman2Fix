@@ -228,5 +228,18 @@ int main() {
     a=active(PadContext::pause_menu);a.south=true;a.dpad_up=true;
     check(has(pad_actions(a),PadAction::confirm) && has(pad_actions(a),PadAction::up),
           "verified in-game pause has menu semantics");
+    IptReadbacks retail{};
+    for(unsigned i=0;i<retail.size();++i) {
+        retail[i].keyword_count=kRetailIptCounts[i];
+        retail[i].keywords=0x10000u+i*0x100u;
+        retail[i].active=1;
+    }
+    check(ipt_retail_structure({138,0x20000},retail),"CD stripped-name fingerprint");
+    check(!ipt_retail_structure({137,0x20000},retail),"wrong table length");
+    retail[10].keyword_count++;
+    check(!ipt_retail_structure({138,0x20000},retail),"wrong action layout");
+    retail[10].keyword_count--;
+    retail[0].keywords=0;
+    check(!ipt_retail_structure({138,0x20000},retail),"missing keyword buffer");
     std::cout << "SDL3 Dreamcast mapping / focus / hotplug policy: OK\n";
 }

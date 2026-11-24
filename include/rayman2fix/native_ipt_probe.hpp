@@ -67,6 +67,20 @@ inline unsigned ipt_reference_anchors(const IptNames& names) noexcept {
            (match(10,"sauter") ? 4u:0u) |
            (match(11,"tirer") ? 8u:0u);
 }
+// Retail CD log ccab2261: 138 entries, names stripped, all first 28
+// active at initial MENU load, this exact keyword-count sequence.
+// Distinguish table structure from action semantics (still hardware-tested).
+constexpr std::array<unsigned,kIptObservedActions> kRetailIptCounts{
+    5,5,2,2,2,2,5,2,6,9,9,9,9,8,8,9,9,9,10,2,2,9,2,2,6,6,6,16
+};
+inline bool ipt_retail_structure(IptTableHeader h,const IptReadbacks& rows) noexcept {
+    if(h.count!=138u || !ipt_header_plausible(h))return false;
+    for(unsigned i=0;i<rows.size();++i)
+        if(!ipt_entry_plausible(rows[i]) || rows[i].name ||
+           rows[i].keyword_count!=kRetailIptCounts[i] ||
+           (rows[i].keywords&3u))return false;
+    return true;
+}
 constexpr int ipt_state_sign(std::int32_t n) noexcept {
     return (n>0)-(n<0);
 }

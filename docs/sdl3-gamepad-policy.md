@@ -259,3 +259,16 @@ is intentionally limited to Learn_10 after story1091 handover, not all
 levels or cinematics. Generic Pause uses the live model and flag; VIDEO
 retains its original scope. World knowledge and exact swimming behavior
 remain unverified. Duplicate native joystick ownership is not resolved.
+
+## Wine test ccab2261
+
+The 20261124-213128 log confirms the three callsite signatures installed,
+138 active-table entries and stripped names (first 28), plus transition
+to gameplay context 1 after Learn_10 handover and verified Pause context
+6. No IPT delivery marker was emitted because the name guard refused the
+retail rows. The revised guard checks exact table count and all 28 observed
+keyword counts and aligned non-null keyword pointers. Analog identity
+uses the exact native consumer's current script-owned axis pointer rather
+than requiring reference index 0/1. All other focus and handover constraints
+remain. The reference action indices are still candidates until tested;
+no claim of validated gameplay. No native action table writes.

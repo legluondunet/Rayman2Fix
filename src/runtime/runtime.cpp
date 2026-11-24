@@ -5434,11 +5434,13 @@ void observe_native_ipt_readonly(r2fix::PadContext context) noexcept {
         }
         // Require all four independent reference names before recording
         // any changing native values. Names alone never authorize writes.
-        if(anchors!=15u) {
-            exhausted=true;
-            log_line("RUNTIME-IPT-PROBE: reference-anchors-unconfirmed observation-stopped=1");
+        if(anchors!=15u && !ipt_retail_structure(h,rows)) {
+            have_names=false;
+            log_line("RUNTIME-IPT-PROBE: reference-anchors-and-retail-fingerprint-unconfirmed");
             return;
         }
+        if(anchors!=15u)
+            log_line("RUNTIME-IPT-PROBE: retail-fingerprint=matched entries=138 names=stripped read-only=1");
     }
     const bool scope_changed=prior_scope!=scope;
     for(unsigned i=0;i<rows.size();++i) {
@@ -5479,14 +5481,18 @@ bool ipt_live_entry(void* entry,r2fix::IptActionReadback& row,
     IptTableHeader h{},after{};
     const auto at=reinterpret_cast<std::uintptr_t>(entry);
     const auto hdr=base+kIptCandidateRva+kIptTableHeaderOffset;
+    IptReadbacks rows{};
     if(!base || !ipt_read(hdr,&h,sizeof(h)) || !ipt_header_plausible(h) ||
        at<h.table || (at-h.table)%sizeof(row) ||
        (at-h.table)/sizeof(row)>=h.count ||
+       !ipt_read(h.table,rows.data(),sizeof(rows)) ||
+       !ipt_retail_structure(h,rows) ||
        !ipt_read(at,&row,sizeof(row)) || !ipt_entry_plausible(row) ||
-       !row.name || !(row.active == 1u) || !ipt_read(row.name,name.data(),name.size()) ||
-       !ipt_name_plausible(name) || !ipt_read(hdr,&after,sizeof(after)) ||
+       !(row.active == 1u) || !ipt_read(hdr,&after,sizeof(after)) ||
        h.count!=after.count || h.table!=after.table) return false;
     index=unsigned((at-h.table)/sizeof(row));
+    if(row.name && (!ipt_read(row.name,name.data(),name.size()) ||
+                    !ipt_name_plausible(name)))return false;
     return true;
 }
 bool ipt_current_gameplay() noexcept {
@@ -5505,12 +5511,13 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
     unsigned index=0;
     if(!ipt_live_entry(entry,row,index,name)) return native;
     using r2fix::PadAction;
-    // Index + observed native name; no address or input identity inferred
-    // solely from ACP_Ray2. Exact native counter update follows this call.
+    // The approved CD has stripped names. Match the entire observed
+    // 28-entry structural fingerprint and exact table membership first.
+    // Reference action indices remain subject to hardware confirmation.
     const auto matches=[&](unsigned id,const char* suffix,PadAction action) {
         if(index!=id || !(g_sdl_input_actions&r2fix::pad_action_bit(action)))return false;
         std::string_view n(name.data());
-        return r2fix::ipt_name_contains(n,suffix);
+        return n.empty() || r2fix::ipt_name_contains(n,suffix);
     };
     if(matches(10,"sauter",PadAction::jump) ||
        matches(11,"tirer",PadAction::fire) ||
@@ -5523,7 +5530,7 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
         if(index<32u && !(seen&(1u<<index))) {
             seen|=1u<<index;
             char msg[160]{};
-            std::snprintf(msg,sizeof(msg),"RUNTIME-SDL3: native-route=IPT-action index=%u name=%s",index,name.data());
+            std::snprintf(msg,sizeof(msg),"RUNTIME-SDL3: native-route=IPT-action index=%u source=retail-fingerprint",index);
             log_line(msg);
         }
         return 1;
@@ -5543,9 +5550,10 @@ float ipt_gameplay_axis(void* entry,bool vertical) noexcept {
     const auto slot_rva=vertical?0xB9B58u:0xB9B54u;
     if(!ipt_read(base+slot_rva,&slot,4) ||
        slot!=reinterpret_cast<std::uintptr_t>(entry) ||
-       !ipt_live_entry(entry,row,index,name) ||
-       index!=(vertical?1u:0u) ||
-       !r2fix::ipt_name_contains(name.data(),vertical?"axey":"axex"))return native;
+       !ipt_live_entry(entry,row,index,name))return native;
+    // This consumer's script-owned pointer is the axis identity, not
+    // a reference enum index (the script can select a different entry).
+    if(name[0] && !r2fix::ipt_name_contains(name.data(),vertical?"axey":"axex"))return native;
     std::int8_t lo=0,center=0,hi=0;
     if(!ipt_read(base+(vertical?0xA40ACu:0xA40A4u),&lo,1) ||
        !ipt_read(base+(vertical?0xB9B60u:0xB9B5Cu),&center,1) ||
