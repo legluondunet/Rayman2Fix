@@ -277,6 +277,38 @@ int main() {
               !fs::exists(root / "third_party" / "gameframe" /
                           "GameFrame-LICENSE-APACHE.txt"),
               "GameFrame Apache license remains deployed, under docs/ only");
+        check(fs::is_regular_file(root / "docs" / "LICENSE") &&
+              !fs::exists(root / "LICENSE") &&
+              contents(root / "docs" / "LICENSE").find("GNU GENERAL PUBLIC LICENSE") !=
+                  std::string::npos &&
+              contents(root / "docs" / "LICENSE").find("Version 3, 29 June 2007") !=
+                  std::string::npos,
+              "single EXE deploys full GPLv3 license in docs/ only, separate from GameFrame");
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        const auto sdl = root / "mods" / "SDL3.dll";
+        const auto notice = root / "docs" / "SDL3-LICENSE.txt";
+        check(fs::is_regular_file(sdl) && fs::is_regular_file(notice) &&
+              !fs::exists(root / "game" / "SDL3.dll"),
+              "SDL3 and its notice stay outside original game files");
+        const auto sdl_bytes = contents(sdl);
+        const auto notice_bytes = contents(notice);
+        check(sdl_bytes.size() > 100000 && sdl_bytes.substr(0, 2) == "MZ" &&
+              notice_bytes.find("altered source versions") != std::string::npos,
+              "embedded PE and zlib notice deployed");
+        app.initialize();
+        check(contents(sdl) == sdl_bytes && contents(notice) == notice_bytes &&
+              contents(root / "Rayman2Fix_installer.log").find("status=unchanged runtime-active=0") != std::string::npos,
+              "identical SDL3 payload remains unchanged");
+        write(sdl, "CORRUPTED-SDL3");
+        write(notice, "CORRUPTED-NOTICE");
+        app.initialize();
+        check(contents(sdl) == sdl_bytes && contents(notice) == notice_bytes &&
+              !fs::exists(root / "mods" / "SDL3.dll.installing") &&
+              !fs::exists(root / "mods" / "SDL3.dll.bak"),
+              "corrupt SDL3 and notice restored without permanent backups");
+        check(contents(root / "Rayman2Fix_installer.log").find("status=replaced runtime-active=0") != std::string::npos,
+              "replacement is logged without claiming runtime activation");
+#endif
         const auto installed_guide=contents(root / "docs" / "README.md");
         check(installed_guide.find("Installation neuve uniquement") !=
                     std::string::npos &&
