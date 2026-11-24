@@ -1146,6 +1146,13 @@ DWORD WINAPI worker(void*) {
 } // namespace
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
 void native_graphics_info_stabilize_video_cursor_at_flip() noexcept {
+    // Prepare the exact localized website caption during loading, before
+    // the asynchronous MENU controller discovery and first visible menu.
+    // Stop probing after the first success (subsequent scene loads retain
+    // the existing worker's authenticated replacement).
+    static bool initial_caption_ready=false;
+    if(!initial_caption_ready && g_logger && approved())
+        initial_caption_ready=prepare_main_menu_site_caption(text_slot_table(),g_logger);
     // Called ONLY on the game's approved native flip thread, never the
     // asynchronous model monitor. The page has no selectable widgets.
     if(!g_protected.load(std::memory_order_acquire) ||
