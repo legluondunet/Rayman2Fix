@@ -94,10 +94,10 @@ parity is claimed yet.
 - The native `normal-3` preparation stage is shared with unrelated
   menus. This build does not suppress its glyphs or infer ownership by
   their screen coordinates; a residual transition is still possible.
-- Five data rows use a system font in a memory-only raster mask. The
+- Six data rows (including FIX with the build version and commit) use a system font in a memory-only raster mask. The
   VIDEO title is the original animated native JFFTXT heading, retained
   in the verified title band only while the standalone page is visible.
-  The 600x320 panel is centered in the 1024x768 canvas and has no
+  The 600x368 panel is centered horizontally at y=284 in the 1024x768 canvas and has no
   Retour/Echap or automatic-settings row.
 - GPU name comes from EnumDisplayDevicesA. On native Windows, SetupAPI
   supplies a more precise matched display-class device name and an
@@ -114,7 +114,7 @@ parity is claimed yet.
   correction is only a defensive fallback. CI proves the patch
   preflight, not yet the visible elimination of the one-step movement.
 - The information page now composites a subtle translucent midnight-blue
-  background (alpha 100/255, 39%) over the live 3D scene using the
+  background (alpha 102/255, exactly 40%) over the live 3D scene using the
   approved Glide2 LFB read/write path. A crisp 2px title-blue border
   surrounds the white text; no asset files, butterfly actor or scene
   geometry are modified. The color and transparency are pending visual
