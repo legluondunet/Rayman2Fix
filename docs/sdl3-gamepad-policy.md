@@ -320,3 +320,28 @@ the visible tutorial rectangle after 4:3 centering. Add that exact geometry
 with 0.15 percent-point tolerance to RemoveDialogueBackgrounds; do not
 broaden the existing lower-screen rule or suppress other producers.
 The screenshot-to-source correspondence is a hypothesis until retested.
+
+
+## Wine e3347b62 / 20261125-035419: general gameplay routing
+
+The Mapmonde jump reached IPT index 10 and the dialogue backdrop filter
+reported suppression. The owner entered Learn_30 but could not move:
+SDL3 continued to report physical axes and buttons while native context
+was inactive. The original route only enabled Learn_10 after handover.
+
+Use a 55-scene exact, case-insensitive PC playable-scene catalog,
+including bonus and vehicle/boss scenes as candidates, rather than
+adding a level after each owner test. Map classification reference:
+https://raymanpc.com/forum/threads/project-unlockray-ulr-rel.2406/page-19
+PC asset names cross-check: https://steamdb.info/depot/15061/ .
+These are catalog references, not hardware validation of every scene.
+Dedicated movie, score, council, credits, menu and unknown scenes remain
+excluded from general gameplay. Mapmonde keeps its distinct route.
+Learn_10 alone requires the native story handover. All playable scenes
+require live Playing and a readable clear native pause flag; the existing
+owner, foreground, freshness, IPT fingerprint and native axis-pointer
+checks remain. Level identity is checked at sampling and consumption;
+require physical neutral input even between two gameplay scenes that
+share the same semantic context. No changes to native level transitions,
+original keyboard, story state or audio policy. Special bonus/vehicle
+controls and cutscenes within a playable map remain to be verified.

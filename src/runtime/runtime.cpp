@@ -5328,14 +5328,16 @@ void poll_second_intro_skip() {
 // Cache is owned exclusively by the authenticated original game thread.
 std::atomic<DWORD> g_sdl_input_owner{0};
 r2fix::PadContext g_sdl_input_context = r2fix::PadContext::inactive;
+std::uint32_t g_sdl_input_scene = 0;
 std::uint32_t g_sdl_input_actions = 0;
 r2fix::PadMovement g_sdl_input_movement{};
 DWORD g_sdl_input_tick = 0;
 thread_local DWORD g_sdl_pause_delivery_tick=0;
 thread_local bool g_sdl_pause_delivery_pending=false;
 
-r2fix::PadContext sdl_native_context() noexcept {
+r2fix::PadContext sdl_native_context(std::uint32_t* scene_out=nullptr) noexcept {
     using r2fix::PadContext;
+    if(scene_out) *scene_out=0;
     if (g_game_camera_thread_id.load(std::memory_order_acquire) != GetCurrentThreadId())
         return PadContext::inactive;
     char level[30]{};
@@ -5345,6 +5347,8 @@ r2fix::PadContext sdl_native_context() noexcept {
         reinterpret_cast<const void*>(base + kLevelNameRva), level, sizeof(level), &copied) ||
         copied != sizeof(level) || !std::memchr(level, 0, sizeof(level)))
         return PadContext::inactive;
+    const auto scene=r2fix::pad_playable_scene_id(level);
+    if(scene_out) *scene_out=scene;
     if (g_skip_cinematics && r2fix::is_second_intro(level))
         return PadContext::cinematic;
     if(g_skip_cinematics && _stricmp(level,"jail_10")==0 &&
@@ -5392,26 +5396,29 @@ r2fix::PadContext sdl_native_context() noexcept {
        intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
        read_u8(base+0xB9BC8u,pause_flag) && !pause_flag)
         return PadContext::world_map;
-    // Ordinary gameplay must not depend on the Learn_10 intro handover.
-    // Learn_30 is the exact playable level confirmed by the owner log
-    // 20261125-035419 (including a native ESC menu and return to play).
-    // Keep unknown levels fail-closed until their native context is verified.
-    if(intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
-       read_u8(base+0xB9BC8u,pause_flag) && !pause_flag) {
-        if(_stricmp(level,"learn_30")==0)
-            return PadContext::gameplay;
+    // The first level alone has the special story handover requirement.
+    // Never classify unknown maps or dedicated cinematic scenes as gameplay.
+    if(scene) {
+        const bool playing=intro_native_engine_mode(base)==int(kIntroEnginePlaying);
+        const bool pause_clear=read_u8(base+0xB9BC8u,pause_flag) && !pause_flag;
         bool handover=false;
-        if(r2fix::is_first_playable_level(level) &&
-           g_progress_words && game_story_bit(g_progress_words,kLearnHandoverBit,handover) && handover)
+        const bool handover_known=scene==1 && g_progress_words &&
+            game_story_bit(g_progress_words,kLearnHandoverBit,handover);
+        if(r2fix::pad_gameplay_scene_ready(scene,playing,pause_clear,handover_known && handover))
             return PadContext::gameplay;
     }
     return PadContext::inactive;
+}
+bool sdl_context_matches(r2fix::PadContext expected) noexcept {
+    std::uint32_t scene=0;
+    const auto context=sdl_native_context(&scene);
+    return context==expected && scene==g_sdl_input_scene;
 }
 std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept {
     if (g_sdl_input_owner.load(std::memory_order_acquire) != GetCurrentThreadId() ||
         !game_window_is_foreground() || g_sdl_input_context != expected ||
         DWORD(GetTickCount() - g_sdl_input_tick) > 100u ||
-        sdl_native_context() != expected)
+        !sdl_context_matches(expected))
         return 0;
     return g_sdl_input_actions;
 }
@@ -5581,7 +5588,7 @@ bool ipt_current_gameplay() noexcept {
         game_window_is_foreground() &&
         g_sdl_input_context==r2fix::PadContext::gameplay &&
         DWORD(GetTickCount()-g_sdl_input_tick)<=100u &&
-        sdl_native_context()==r2fix::PadContext::gameplay;
+        sdl_context_matches(r2fix::PadContext::gameplay);
 }
 unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
     const auto original=reinterpret_cast<IptPredicate>(intro_game_base()+0x2EAC0u);
@@ -5736,6 +5743,7 @@ void poll_sdl3_native() noexcept {
     static bool last_focus = false;
     static std::uint32_t last_device = 0;
     static std::uint32_t last_native_actions = 0;
+    static std::uint32_t last_scene = 0;
     static r2fix::PadContext last_context = r2fix::PadContext::inactive;
     const DWORD tid = GetCurrentThreadId();
     const DWORD camera_tid = g_game_camera_thread_id.load(std::memory_order_acquire);
@@ -5787,8 +5795,10 @@ void poll_sdl3_native() noexcept {
         }
     }
     if (!initialized || owner != tid) return;
-    const auto context = sdl_native_context();
-    const auto sample = pads.poll(foreground, context);
+    std::uint32_t scene=0;
+    const auto context = sdl_native_context(&scene);
+    auto sample = pads.poll(foreground, context);
+    sample.scene_id=scene;
     static bool first_sample = true;
     if (first_sample) {
         first_sample = false;
@@ -5800,6 +5810,7 @@ void poll_sdl3_native() noexcept {
     const auto transitions = gate.update(sample);
     observe_native_ipt_readonly(context);
     g_sdl_input_context = context;
+    g_sdl_input_scene = scene;
     g_sdl_input_actions = transitions.held;
     g_sdl_input_movement = transitions.movement;
     g_sdl_input_tick = GetTickCount();
@@ -5813,18 +5824,19 @@ void poll_sdl3_native() noexcept {
     const DWORD now = GetTickCount();
     const bool changed = sample.device_id != last_device || foreground != last_focus ||
         buttons != last_buttons || moving != last_motion ||
-        context != last_context || transitions.held != last_native_actions;
+        context != last_context || scene != last_scene || transitions.held != last_native_actions;
     // Diagnostics only, bounded to avoid flooding the original render thread.
     if (g_log && changed && reports < 128 && (!reports || DWORD(now-last_report)>=50)) {
         char msg[256]{};
         std::snprintf(msg, sizeof(msg),
-            "RUNTIME-SDL3-SAMPLE: id=%u foreground=%u actions=0x%04x lx=%d ly=%d rx=%d lt=%d rt=%d context=%u native-actions=0x%04x",
+            "RUNTIME-SDL3-SAMPLE: id=%u foreground=%u actions=0x%04x lx=%d ly=%d rx=%d lt=%d rt=%d context=%u native-actions=0x%04x scene=%u",
             unsigned(sample.device_id), unsigned(foreground), unsigned(buttons),
             sample.left_x, sample.left_y, sample.right_x, sample.left_trigger, sample.right_trigger,
-            unsigned(context), unsigned(transitions.held));
+            unsigned(context), unsigned(transitions.held), unsigned(scene));
         log_line(msg);
         last_device = sample.device_id;
         last_context = context;
+        last_scene = scene;
         last_native_actions = transitions.held;
         last_focus = foreground;
         last_buttons = buttons;

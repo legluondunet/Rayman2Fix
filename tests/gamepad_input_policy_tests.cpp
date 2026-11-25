@@ -270,5 +270,38 @@ int main() {
     a.foreground=true;
     a.context=PadContext::gameplay;
     check(!map_gate.update(a).held,"map confirm cannot leak into gameplay");
+    check(pad_playable_scene_id("Learn_10")==1, "Learn_10 has special handover");
+    const auto first=pad_playable_scene_id("LEARN_30");
+    const auto next=pad_playable_scene_id("learn_31");
+    check(first && next && first!=next, "distinct consecutive gameplay scenes");
+    for(auto name:kPadPlayableScenes) {
+        const auto id=pad_playable_scene_id(name);
+        check(id && pad_gameplay_scene_ready(id,true,true,true), "catalog scene available");
+        check(!pad_gameplay_scene_ready(id,false,true,true), "loading refuses gameplay");
+        check(!pad_gameplay_scene_ready(id,true,false,true), "pause refuses gameplay");
+    }
+    for(auto name:{"", "menu", "mapmonde", "jail_10", "jail_20", "bast_09",
+                   "batam_10", "batam_20", "nego_10", "poloc_10", "poloc_20",
+                   "poloc_30", "poloc_40", "raycap", "end_10", "staff_10",
+                   "learn_20", "learn_30_extra", "unrecognized"}) {
+        check(!pad_playable_scene_id(name), "non-gameplay map excluded");
+    }
+    check(!pad_gameplay_scene_ready(1,true,true,false), "Learn10 intro protected");
+    check(pad_gameplay_scene_ready(first,true,true,false), "other levels independent of story");
+    check(!pad_gameplay_scene_ready(0,true,true,true), "unknown refuses gameplay");
+    check(!pad_gameplay_scene_ready(999,true,true,true), "out of range refuses gameplay");
+    PadTransitionGate scene_gate;
+    a=active();a.scene_id=first;scene_gate.update(a);
+    a.south=true;a.left_x=32767;
+    check(has(scene_gate.update(a).held,PadAction::jump), "first scene input");
+    a.scene_id=next;
+    const auto boundary=scene_gate.update(a);
+    check(!boundary.held && has(boundary.released,PadAction::jump) &&
+          boundary.movement.x==0.f, "same-context level transition releases all");
+    check(!scene_gate.update(a).held, "held input across new level blocked");
+    a.south=false;a.left_x=0;scene_gate.update(a);
+    a.south=true;a.left_x=32767;
+    const auto fresh=scene_gate.update(a);
+    check(has(fresh.pressed,PadAction::jump) && fresh.movement.x>0.f, "fresh input in next level");
     std::cout << "SDL3 Dreamcast mapping / focus / hotplug policy: OK\n";
 }

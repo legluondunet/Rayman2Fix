@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <string_view>
 
 namespace r2fix {
 
@@ -15,6 +16,45 @@ constexpr std::uint32_t pad_action_bit(PadAction a) noexcept {
     return std::uint32_t{1} << static_cast<unsigned>(a);
 }
 
+// Exact PC scene catalog, cross-checked against the PC depot and map
+// classification documented in docs/sdl3-gamepad-policy.md. Names alone
+// do not authorize input: the live Playing/pause/IPT guards still apply.
+inline constexpr std::string_view kPadPlayableScenes[] = {
+    "learn_10", "learn_30", "learn_31", "learn_40", "learn_60",
+    "bast_10", "bast_20", "bast_22", "ski_10", "ski_60",
+    "chase_10", "chase_22", "ly_10", "ly_20", "water_10",
+    "water_20", "rodeo_10", "rodeo_40", "rodeo_60", "vulca_10",
+    "vulca_20", "glob_10", "glob_20", "glob_30", "whale_00",
+    "whale_05", "whale_10", "plum_00", "plum_10", "plum_20",
+    "cask_10", "cask_30", "nave_10", "nave_15", "nave_20",
+    "seat_10", "seat_11", "earth_10", "earth_20", "earth_30",
+    "helic_10", "helic_20", "helic_30", "morb_00", "morb_10",
+    "morb_20", "ball", "ile_10", "mine_10", "boat01",
+    "boat02", "astro_00", "astro_10", "rhop_10", "bonux",
+};
+constexpr char pad_ascii_lower(char c) noexcept {
+    return c >= 'A' && c <= 'Z' ? char(c - 'A' + 'a') : c;
+}
+constexpr bool pad_scene_equal(std::string_view a, std::string_view b) noexcept {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        if (pad_ascii_lower(a[i]) != b[i]) return false;
+    return true;
+}
+constexpr std::uint32_t pad_playable_scene_id(std::string_view level) noexcept {
+    std::uint32_t id = 1;
+    for (auto candidate : kPadPlayableScenes) {
+        if (pad_scene_equal(level, candidate)) return id;
+        ++id;
+    }
+    return 0;
+}
+constexpr bool pad_gameplay_scene_ready(std::uint32_t scene, bool playing,
+                                        bool pause_clear, bool learn_handover) noexcept {
+    return scene > 0 && scene <= sizeof(kPadPlayableScenes)/sizeof(kPadPlayableScenes[0]) &&
+        playing && pause_clear && (scene != 1 || learn_handover);
+}
+
 struct PadSample {
     std::uint32_t device_id = 0;
     bool connected = false;
@@ -25,6 +65,7 @@ struct PadSample {
     bool dpad_left = false, dpad_right = false, dpad_up = false, dpad_down = false;
     bool south = false, east = false, west = false, north = false;
     bool start = false, left_shoulder = false, right_shoulder = false;
+    std::uint32_t scene_id = 0; // exact live scene identity; 0 for non-gameplay catalog scenes
 };
 
 constexpr int kPadAxisDeadzone = 8192;
@@ -123,16 +164,17 @@ public:
     PadTransitions update(const PadSample& sample) noexcept {
         if (!pad_eligible(sample)) {
             const auto released = held_;
-            held_ = owner_ = 0;
+            held_ = owner_ = scene_ = 0;
             context_ = PadContext::inactive;
             blocked_ = true;
             return {0, 0, released, false, {}};
         }
-        if (owner_ != sample.device_id || context_ != sample.context) {
+        if (owner_ != sample.device_id || context_ != sample.context || scene_ != sample.scene_id) {
             const auto released = held_;
             held_ = 0;
             owner_ = sample.device_id;
             context_ = sample.context;
+            scene_ = sample.scene_id;
             blocked_ = pad_physically_active(sample);
             return {0, 0, released, true, {}};
         }
@@ -147,7 +189,7 @@ public:
         return result;
     }
 private:
-    std::uint32_t owner_ = 0, held_ = 0;
+    std::uint32_t owner_ = 0, held_ = 0, scene_ = 0;
     PadContext context_ = PadContext::inactive;
     bool blocked_ = true;
 };
