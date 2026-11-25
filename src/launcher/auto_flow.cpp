@@ -20,6 +20,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -488,9 +489,9 @@ int run_automatic(Startup& startup, bool install_only) {
             const auto adjacent = gog::candidates(startup.root(),
                 Startup::executable_path(startup.root() / "Rayman2Fix.exe"));
             if (!adjacent.empty()) {
-                gog::OfflineWorkspace workspace(startup.root());
+                auto workspace = std::make_unique<gog::OfflineWorkspace>(startup.root());
                 const auto selected = gog::select(candidates, adjacent,
-                    [&](const auto& path) { return workspace.probe(path); });
+                    [&](const auto& path) { return workspace->probe(path); });
                 if (selected.source == gog::Source::ambiguous ||
                     selected.source == gog::Source::unreadable) {
                     startup.log("GOG: ambiguous media or failed installer probe");
@@ -507,7 +508,7 @@ int run_automatic(Startup& startup, bool install_only) {
                     // Source archives are kept intact. No CD EXE replacement
                     // or CD audio initialization is applied to this edition.
                     std::cout << "Extracting and verifying original GOG archives...\n";
-                    const auto payload = workspace.extract(selected.path);
+                    const auto payload = workspace->extract(selected.path);
                     try {
                         gog::stage_payload(payload, staging);
                         for (const auto& line : gog::hook_diagnostics(staging / "rayman2.exe"))
@@ -525,6 +526,7 @@ int run_automatic(Startup& startup, bool install_only) {
                         fs::remove_all(pending_state, ignored);
                         throw;
                     }
+                    workspace.reset(); // Remove extracted payload and tool before gameplay.
                     if (verify_installation(startup) != 0) return 2;
                     startup.log("AUTO-INSTALL: GOG assets and SHA256 receipt published");
                     std::cout << "GOG installation verified. Original setup files preserved.\n";
