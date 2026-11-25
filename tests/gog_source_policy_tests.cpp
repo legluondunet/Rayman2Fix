@@ -1,0 +1,59 @@
+#include "rayman2fix/gog_source_policy.hpp"
+#include <chrono>
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
+
+namespace g = r2fix::gog;
+namespace fs = std::filesystem;
+static void require(bool ok, const char* message) {
+    if (!ok) throw std::runtime_error(message);
+}
+int main() {
+    try {
+        const fs::path french = "setup_rayman2_french_86383.exe";
+        const fs::path renamed = "renamed package.EXE";
+        const fs::path polish = "another release (polish).exe";
+        const fs::path other = "unrelated.exe";
+        const fs::path bad = "broken.exe";
+        const fs::path cd = "original.iso";
+        const auto probe = [&](const fs::path& p) {
+            if (p == bad) return g::Probe::unreadable;
+            if (p == other) return g::Probe::unrelated;
+            return g::Probe::rayman2;
+        };
+        require(g::select({}, {french}, probe).source == g::Source::gog, "French");
+        require(g::select({}, {renamed}, probe).path == renamed, "arbitrary name");
+        require(g::select({}, {polish}, probe).source == g::Source::gog, "Polish");
+        require(g::select({}, {other, renamed}, probe).path == renamed, "ignore unrelated");
+        require(g::select({cd}, {other}, probe).source == g::Source::cd, "CD unchanged");
+        require(g::select({cd}, {renamed}, probe).source == g::Source::ambiguous, "mixed sources");
+        require(g::select({}, {french, polish}, probe).source == g::Source::ambiguous, "two setups");
+        require(g::select({}, {other}, probe).source == g::Source::missing, "no source");
+        require(g::select({}, {bad}, probe).source == g::Source::unreadable, "failed probe");
+        require(g::select({cd}, {bad}, probe).source == g::Source::unreadable, "no silent fallback");
+        require(g::matches_product("1207658940\r\n"), "ID");
+        require(!g::matches_product("12076589401"), "wrong ID");
+        require(!g::matches_product("fake 1207658940"), "not exact ID");
+        require(!g::matches_product(""), "missing ID");
+        require(g::matches_executable(g::executable_size, g::executable_sha256), "game profile");
+        require(!g::matches_executable(g::executable_size + 1, g::executable_sha256), "wrong size");
+        require(!g::matches_executable(g::executable_size, "unknown"), "wrong hash");
+
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto dir = fs::temp_directory_path() / ("r2fix-gog-policy-" + std::to_string(stamp));
+        require(fs::create_directory(dir), "private temp directory");
+        struct Cleanup { fs::path p; ~Cleanup(){ std::error_code ec; fs::remove_all(p, ec); } } cleanup{dir};
+        for (const auto& p : {fs::path("Rayman2Fix.exe"), renamed, other, fs::path("part-1.bin")})
+            std::ofstream(dir / p).put('x');
+        fs::create_directory(dir / "directory.exe");
+        const auto found = g::candidates(dir, dir / "Rayman2Fix.exe");
+        require(found.size() == 2, "only regular EXEs other than launcher");
+        require(std::find(found.begin(), found.end(), dir / renamed) != found.end(), "renamed discovered");
+        std::cout << "GOG source policy OK\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << '\n';
+        return 1;
+    }
+}
