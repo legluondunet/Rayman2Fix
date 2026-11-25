@@ -470,8 +470,25 @@ int main() {
           pad_gameplay_ipt_binding(21,jump), "South jumps, resurfaces and advances dialogue");
     check(pad_gameplay_ipt_binding(13,target) && pad_gameplay_ipt_binding(14,target),
           "left trigger targets or dives");
-    check(pad_gameplay_ipt_binding(22,knowledge) && pad_gameplay_ipt_binding(22,murphy),
-          "both dpad directions use shared PC F1 action");
+    check(!pad_gameplay_ipt_binding(22,knowledge) && !pad_gameplay_ipt_binding(22,murphy),
+          "F1 uses native keyboard only, no duplicate predicate");
+    std::uint8_t f1keys[256]{};
+    f1keys[0x39]=0x80;
+    check(merge_pad_f1_key(PadContext::gameplay,true,0,256,f1keys,knowledge) &&
+          f1keys[0x3B]==0x80 && f1keys[0x39]==0x80,"knowledge reaches native F1");
+    f1keys[0x3B]=0;
+    check(merge_pad_f1_key(PadContext::gameplay,true,0,256,f1keys,murphy) &&
+          f1keys[0x3B]==0x80,"Murfy shares native F1");
+    f1keys[0x3B]=0;
+    check(!merge_pad_f1_key(PadContext::gameplay,true,0,256,f1keys,jump) &&
+          !merge_pad_f1_key(PadContext::gameplay,false,0,256,f1keys,knowledge) &&
+          !merge_pad_f1_key(PadContext::gameplay,true,-1,256,f1keys,knowledge) &&
+          !merge_pad_f1_key(PadContext::gameplay,true,0,255,f1keys,knowledge) &&
+          !merge_pad_f1_key(PadContext::pause_menu,true,0,256,f1keys,knowledge) &&
+          !f1keys[0x3B],"F1 refuses invalid or unrelated input");
+    f1keys[0x3B]=0x80;
+    check(!merge_pad_f1_key(PadContext::gameplay,true,0,256,f1keys,0) &&
+          f1keys[0x3B]==0x80,"physical F1 survives controller release");
     check(!pad_gameplay_ipt_binding(14,jump) && !pad_gameplay_ipt_binding(15,target),
           "swimming routes not reversed");
     check(!pad_gameplay_ipt_binding(22,jump) && !pad_gameplay_ipt_binding(22,0),
@@ -479,7 +496,7 @@ int main() {
     for(unsigned index=0;index<138;++index) {
         const auto* b=pad_gameplay_ipt_binding(index,0xffffffffu);
         const bool known=index==10 || index==11 || index==13 || index==14 ||
-            index==15 || index==16 || index==17 || index==21 || index==22 || index==24;
+            index==15 || index==16 || index==17 || index==21 || index==24;
         check(bool(b)==known,"only explicit gameplay action indices");
         if(b) check(!b->name_fragment.empty(),"every binding names its reference action");
     }

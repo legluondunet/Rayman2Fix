@@ -17,8 +17,8 @@ constexpr std::uint32_t pad_action_bit(PadAction a) noexcept {
 }
 
 // Retail IPT reference indices; native live-entry validation remains mandatory.
-// The PC action for Murfy/knowledge is shared. Swimming uses separate
-// native entries, with the original actor script deciding when to consume them.
+// Murfy/knowledge uses the original F1 keyboard path, not the predicate.
+// Swimming uses separate native entries consumed by the original actor.
 struct PadIptBinding {
     unsigned index;
     std::string_view name_fragment;
@@ -33,8 +33,6 @@ inline constexpr PadIptBinding kPadGameplayIptBindings[] = {
     {16, "tournedroite", pad_action_bit(PadAction::camera_right)},
     {17, "tournegauche", pad_action_bit(PadAction::camera_left)},
     {21, "textesuivant", pad_action_bit(PadAction::jump)},
-    {22, "appelermurphy", pad_action_bit(PadAction::murphy) |
-                         pad_action_bit(PadAction::world_knowledge)},
     {24, "affiche_jauge", pad_action_bit(PadAction::statistics)}
 };
 constexpr const PadIptBinding* pad_gameplay_ipt_binding(unsigned index,

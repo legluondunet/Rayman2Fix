@@ -30,6 +30,16 @@ inline unsigned merge_pad_menu_keys(PadContext context, bool foreground,
     }
     return count;
 }
+// Deliver both PC F1 actions through the original keyboard state machine.
+// This preserves native hold/edge semantics and physical keyboard input.
+inline bool merge_pad_f1_key(PadContext context,bool foreground,
+    std::int32_t result,unsigned size,std::uint8_t* keys,std::uint32_t actions) noexcept {
+    constexpr auto mask=pad_action_bit(PadAction::world_knowledge)|pad_action_bit(PadAction::murphy);
+    if(context!=PadContext::gameplay || !foreground || result!=0 ||
+       size!=256 || !keys || !(actions&mask))return false;
+    keys[0x3Bu]|=0x80u; // DIK_F1
+    return true;
+}
 // The read-only controller panel must not activate the old calibration.
 // Apply only after an actual successful draw, with a live authenticated
 // page and foreground owner. Preserve Escape and all unrelated keys.

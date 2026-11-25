@@ -1882,6 +1882,18 @@ void proto_dispatch(proto::Dispatch action) {
                 const std::lock_guard<std::mutex> lock(g_proto_mutex);
                 g_proto.quarantine();
             }
+            if(g_log) {
+                static unsigned reports=0;
+                if(reports<48u) {
+                    ++reports;
+                    char msg[240]{};
+                    std::snprintf(msg,sizeof(msg),"RUNTIME-ESC-STREAM-REJECT: command=%u live_valid=%u same_handle=%u same_theme=%u same_inner=%u",
+                        unsigned(action.command),unsigned(live.valid()),unsigned(live.handle==action.handle),
+                        unsigned(live.native_theme_key==action.native_theme_key),
+                        unsigned(live.native_inner_key==action.native_inner_key));
+                    log_line(msg);
+                }
+            }
             proto_log("driver-command-rejected",
                 "theme-or-sxd-stream-changed-native-passthrough");
             return;
@@ -2126,10 +2138,25 @@ void __cdecl proto_script_pause() {
 #else
         constexpr bool pad_pause=false;
 #endif
-        const bool candidate=game_window_is_foreground() &&
-            ((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0 || pad_pause) &&
-            proto_game_read(0xB9BC8,menu) && menu==0 &&
-            proto_read_depth(depth) && depth>=1u && depth<=8u;
+        const bool foreground=game_window_is_foreground();
+        const bool escape=(GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0;
+        const bool menu_known=proto_game_read(0xB9BC8,menu);
+        const bool depth_known=proto_read_depth(depth);
+        const bool candidate=foreground && (escape || pad_pause) &&
+            menu_known && menu==0 && depth_known && depth>=1u && depth<=8u;
+        // Read-only bounded evidence of rejected openings. Do not relax
+        // depth, source, focus or ownership guards based on a silent menu.
+        if(g_log && !candidate) {
+            static unsigned refused=0;
+            if(refused<48u) {
+                ++refused;
+                char msg[235]{};
+                std::snprintf(msg,sizeof(msg),"RUNTIME-ESC-OPEN-REFUSED: fg=%u escape=%u pad_delivery=%u menu_known=%u menu=%u depth_known=%u depth=%lu",
+                    unsigned(foreground),unsigned(escape),unsigned(pad_pause),unsigned(menu_known),
+                    unsigned(menu),unsigned(depth_known),static_cast<unsigned long>(depth));
+                log_line(msg);
+            }
+        }
         if(candidate) {
             const std::lock_guard<std::mutex> lock(g_proto_mutex);
             adopted=g_proto.begin_script_pause(true,true,true);
@@ -8560,6 +8587,11 @@ bool r2fix_sdl_controller_page() noexcept {
 #else
     return false;
 #endif
+}
+std::uint32_t r2fix_sdl_f1_actions() noexcept {
+    return sdl_fresh_actions(r2fix::PadContext::gameplay) &
+        (r2fix::pad_action_bit(r2fix::PadAction::world_knowledge) |
+         r2fix::pad_action_bit(r2fix::PadAction::murphy));
 }
 std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept {
     if(r2fix_sdl_controller_page())return sdl_fresh_actions(r2fix::PadContext::controller_info);
