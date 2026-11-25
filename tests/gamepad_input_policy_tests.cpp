@@ -157,6 +157,18 @@ int main() {
     check(red.r==255u && red.ar==255u && red.ag==255u && red.ab==255u,"opaque red overlay");
     const auto partial=pad_overlay_from_dib(0x808080u,0xffffffu);
     check(partial.ar==128u && partial.r==128u,"recover antialias coverage");
+    for(int y=0;y<kPadInfoHeight;++y)for(int x=0;x<kPadInfoWidth;++x){
+        unsigned fill=0,border=0;
+        for(int sy=0;sy<4;++sy)for(int sx=0;sx<4;++sx){
+            const int px=x*8+sx*2+1,py=y*8+sy*2+1;
+            if(pad_rounded_sample(px,py,2))++fill;
+            else if(pad_rounded_sample(px,py,0))++border;
+        }
+        const auto fast=pad_panel_coverage(x,y);
+        check(fast.fill==fill && fast.border==border,"optimized panel matches exact coverage");
+    }
+    check(!pad_panel_coverage(-1,0).fill && !pad_panel_coverage(kPadInfoWidth,0).border,
+          "outside coverage refused");
     check(pad_panel_coverage(0,0).fill==0 && pad_panel_coverage(0,0).border==0,
           "rounded corner preserves original scene");
     check(pad_composite565(0xffffu,red,pad_panel_coverage(0,0))==0xffffu,

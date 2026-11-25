@@ -430,3 +430,24 @@ Windows offscreen tests cover the French PlayStation overlay and a synthetic
 scene; cross-platform tests cover bounds, alpha and color ordering. This
 is a private buffer operation only, not yet called by the game. Native
 submenu authentication and live Glide presentation remain pending.
+
+
+## Native controller submenu discovery checkpoint
+
+CI 45546925442 passed Linux and Windows x86 including the offscreen
+controller renderer and private composition. Optimize whole-pixel panel
+coverage outside the four rounded corners; compare every pixel against
+the original 4x coverage algorithm in CTest. No change in appearance.
+Add RUNTIME-CONTROLLER-MENU transition telemetry at the verified native
+flip, on the original camera thread only, with Log=1. Sample at most
+20 Hz and log only changes, separately capped at 256 records. Report
+MENU and PAUSE model behavior indices, verified MENU selection when
+available, and exit. The original menus and input remain untouched.
+The next owner session should enter and leave the existing controller
+submenu in startup Options and in the native pause Options (if present),
+pausing briefly on each screen, then test swimming/knowledge if practical.
+Those observations distinguish the real submenu from adjacent Options
+states; do not infer a writable script or activate the replacement from
+behavior numbers alone. No source asset was available for new offline
+verification in this session. A menu visit is the remaining external
+validation dependency.

@@ -41,6 +41,12 @@ constexpr bool pad_rounded_sample(int x,int y,int inset) noexcept {
 }
 struct PadPanelCoverage {unsigned fill,border;};
 constexpr PadPanelCoverage pad_panel_coverage(int x,int y) noexcept {
+    if(x<0 || y<0 || x>=kPadInfoWidth || y>=kPadInfoHeight)return {};
+    // Straight edges and interior are exact whole-pixel coverage.
+    // Only the four 12x12 corners require subpixel circle sampling.
+    if((x>=12 && x<kPadInfoWidth-12) || (y>=12 && y<kPadInfoHeight-12))
+        return x<2 || y<2 || x>=kPadInfoWidth-2 || y>=kPadInfoHeight-2 ?
+            PadPanelCoverage{0,16}:PadPanelCoverage{16,0};
     PadPanelCoverage c{};
     for(int sy=0;sy<4;++sy)for(int sx=0;sx<4;++sx){
         const int px=x*8+sx*2+1,py=y*8+sy*2+1;

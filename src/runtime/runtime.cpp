@@ -33,6 +33,7 @@
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
 #include "rayman2fix/graphics_menu_trace.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
+#include "rayman2fix/graphics_menu_controller_vars.hpp"
 #include "rayman2fix/graphics_menu_start_policy.hpp"
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
 #include "rayman2fix/native_graphics_info_proto.hpp"
@@ -7486,7 +7487,52 @@ constexpr uintptr_t kColorSpriteSlotRva = 0x104838; // VA 0x504838
 // This is a late native draw endpoint, before the GameFrame swap.
 constexpr uintptr_t kStandaloneFlipSlotRva=0x104538;
 std::atomic<void*> g_standalone_flip_original{nullptr};
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+// Bounded, same-render-thread observation of both native menu models.
+// No provisional behavior number is allowed to activate the new page.
+void trace_controller_menu_at_flip() noexcept {
+    if(!g_log || g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())return;
+    static DWORD last=0;
+    static int previous_scope=-1,previous_normal=-2,previous_reflex=-2,previous_selection=-2;
+    static unsigned count=0;
+    const DWORD now=GetTickCount();
+    if(count>=256u || (last && DWORD(now-last)<50u))return;
+    last=now;
+    int scope=0,normal=-1,reflex=-1,selection=-1;
+    if(r2fix::pause_menu_live_state(normal,reflex))scope=2;
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+    if(!scope && g_current_level && _stricmp(g_current_level,"menu")==0) {
+        r2fix::MenuAiModel model{};
+        r2fix::MenuAiState state{};
+        if(r2fix::get_verified_menu_controller(model,state) && state.normal>=0 && state.reflex>=0) {
+            scope=1;normal=state.normal;reflex=state.reflex;
+            const auto r32=[](std::uintptr_t p,std::uint32_t& v) {
+                SIZE_T copied=0;
+                return ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(p),&v,4,&copied)!=0 && copied==4;
+            };
+            const auto r8=[](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);};
+            const auto vars=r2fix::observe_menu_selection(state.mind,r32,r8);
+            if(vars.selection_valid && vars.selection>=-1 && vars.selection<=31)
+                selection=int(vars.selection);
+        }
+    }
+#endif
+    if(scope==previous_scope && normal==previous_normal &&
+       reflex==previous_reflex && selection==previous_selection)return;
+    previous_scope=scope;previous_normal=normal;previous_reflex=reflex;previous_selection=selection;
+    char msg[220]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-CONTROLLER-MENU: t_ms=%lu scope=%s normal=%d reflex=%d selection=%d read-only=1",
+        static_cast<unsigned long>(now),scope==1?"MENU":scope==2?"PAUSE":"outside",
+        normal,reflex,selection);
+    log_line(msg);
+    if(++count==256u)log_line("RUNTIME-CONTROLLER-MENU: trace-budget-exhausted=1");
+}
+#endif
 void __cdecl standalone_video_flip() {
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    trace_controller_menu_at_flip();
+#endif
     // The original game updates the MENU AI before this native flip.
     // Clamp only the now-invisible VIDEO selection on the SAME game
     // rendering thread, with complete model/mind/DsgMem validation.
