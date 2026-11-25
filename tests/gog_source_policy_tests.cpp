@@ -62,6 +62,36 @@ int main(int argc, char** argv) {
         require(std::find(args.begin(), args.end(), L"--dump") == args.end(), "no unsafe dump");
         require(std::find(args.begin(), args.end(), L"--gog") == args.end(), "no external rar");
         require(args.back() == fs::absolute(dir / renamed).wstring(), "absolute source");
+        require(std::find(args.begin(), args.end(), L"--list-sizes") != args.end(), "complete manifest");
+        require(std::find(args.begin(), args.end(), L"--silent") != args.end(), "machine-readable manifest");
+        const auto manifest = g::parse_extraction_manifest(
+            "1469440 Rayman2.exe\r\n359 DLL\\Snd_Cpa.ini\r\n0 Data/empty file.txt\r\n");
+        require(manifest.size() == 3 && manifest.at("rayman2.exe") == 1469440 &&
+                manifest.at("dll/snd_cpa.ini") == 359 &&
+                manifest.at("data/empty file.txt") == 0, "size manifest parsed");
+        g::verify_extraction_manifest(manifest, manifest);
+        auto reject_manifest = [&](const g::FileSizes& actual) {
+            try { g::verify_extraction_manifest(manifest, actual); }
+            catch (const std::runtime_error&) { return true; }
+            return false;
+        };
+        auto changed = manifest;
+        changed.erase("data/empty file.txt");
+        require(reject_manifest(changed), "missing selected file rejected");
+        changed = manifest;
+        ++changed["dll/snd_cpa.ini"];
+        require(reject_manifest(changed), "truncated file rejected");
+        changed = manifest;
+        changed["unexpected.dll"] = 12;
+        require(reject_manifest(changed), "unexpected extracted file rejected");
+        for (const auto* bad_manifest : {"", "Done.\n", "1 ../outside\n",
+                "1 DATA/a\n1 data/A\n", "1 data//x\n", "4294967297 huge\n",
+                "4294967296 a\n1 b\n", "-1 bad\n", "1 C:\\x\n"}) {
+            bool rejected = false;
+            try { (void)g::parse_extraction_manifest(bad_manifest); }
+            catch (const std::runtime_error&) { rejected = true; }
+            require(rejected, "invalid extraction manifest refused");
+        }
         const auto lang = g::extract_args(dir / polish, dir / "staging", L"pl-PL");
         require(std::find(lang.begin(), lang.end(), L"pl-PL") != lang.end(), "explicit metadata language");
         require(g::quote_arg(L"some path") == L"\"some path\"", "quote spaces");
