@@ -316,6 +316,11 @@ if(BUILD_TESTING)
   add_executable(gog_source_policy_tests tests/gog_source_policy_tests.cpp src/launcher/gog_extractor.cpp src/launcher/gog_offline.cpp)
   target_link_libraries(gog_source_policy_tests PRIVATE rayman2_crypto)
   target_include_directories(gog_source_policy_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  if(WIN32 AND RAYMAN2FIX_INNOEXTRACT_DIR)
+    target_compile_definitions(gog_source_policy_tests PRIVATE RAYMAN2FIX_BUNDLED_INNOEXTRACT=1)
+    target_sources(gog_source_policy_tests PRIVATE
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_innoextract.rc")
+  endif()
   add_test(NAME gog-source-selection-policy COMMAND gog_source_policy_tests)
   if(WIN32)
     # Explicit CI smoke test against an audited absolute DLL path.
