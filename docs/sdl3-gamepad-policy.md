@@ -610,3 +610,14 @@ disconnection and non-controller context extinguish them. Existing native
 menu cancellation remains functional (B/Rond may exit before a highlight
 is visible). No decorative animation added to avoid unnecessary visual load.
 Unit tests cover both aspect widths, physical masks and reset conditions.
+
+
+## Final owner validation and merge
+
+Owner approved build 4467b514 on 25 November 2026. The 072614 session
+records MENU and PAUSE draws, automatic PS4/Xbox-compatible handovers
+and physical indicator changes including return to zero. CI #2001
+passed Windows x86 and Linux. PR #56 merged into main as 5ba2a4c4.
+The preceding sections are historical checkpoints, not current blockers.
+Swimming and world knowledge remain pending actual gameplay validation;
+no speculative input edits or artistic changes are warranted.

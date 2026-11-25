@@ -37,6 +37,7 @@ game/
     rayman2.exe.bak         (si correctif approuvé appliqué)
     fix.dll
     glide2x.dll             (GameFrame Glide 2, vérifié par SHA-256)
+    SDL3.dll                (SDL3 x86, vérifiée par SHA-256)
     glide2x.dll.bak         (ancienne DLL différente, si remplacement)
     rayman2.exe.manifest
     ubi.ini
@@ -48,6 +49,7 @@ mods/
 docs/
     LICENSE                   (licence GNU GPLv3 du projet)
     GameFrame-LICENSE-APACHE.txt
+    SDL3-LICENSE.txt
     build-info.txt
     README.md
 state/
@@ -120,6 +122,39 @@ Ces quatre options sont activées pour une installation neuve. Une valeur
 Le chargement du runtime `game/fix.dll` utilise l'injection validée ; la
 bibliothèque GameFrame est chargée depuis `game/glide2x.dll`.
 Aucune DLL de substitution `winmm.dll` n'est distribuée par Rayman2Fix.
+
+## Manettes
+
+La bibliothèque SDL3 3.4.20 x86 est installée automatiquement. Aucune
+configuration supplémentaire ni activation par Start n'est nécessaire.
+Une seule manette commande le jeu à la fois ; une nouvelle action sur
+une autre manette peut prendre le relais lorsque la précédente est au repos.
+Le clavier reste utilisable.
+
+Dans Options → Contrôles (menu principal ou pause Échap), le dessin
+s'adapte à la famille de manette et les commandes physiques s'illuminent.
+Ce menu est informatif : il ne permet pas de modifier le mappage.
+Rond/B ou Échap permettent de revenir au menu précédent.
+
+| Action | Xbox | PlayStation |
+|---|---|---|
+| Déplacement | Stick gauche | Stick gauche |
+| Sauter / remonter* | A | Croix |
+| Tirer | B | Rond |
+| Caméra gauche / droite | X ou LB / Y ou RB | Carré ou L1 / Triangle ou R1 |
+| Rotation caméra | Stick droit | Stick droit |
+| Cibler / plonger* | LT | L2 |
+| Statistiques | RT | R2 |
+| Connaissance du monde* / appeler Murfy | Croix haut / bas | Croix haut / bas |
+| Pause | Start | Options |
+
+*La nage et la connaissance du monde restent à vérifier spécifiquement
+en jeu. L'illumination valide la réception de l'entrée physique, pas
+l'effet natif dans chaque situation. Les deux familles ont été testées
+sous Wine ; les autres matériels et le jeu sous Windows natif restent
+à vérifier plus largement.
+
+La notice zlib de SDL3 est installée dans `docs/SDL3-LICENSE.txt`.
 
 ## Documentation complète
 
