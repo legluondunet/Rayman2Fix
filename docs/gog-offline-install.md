@@ -24,7 +24,7 @@ References:
 - https://constexpr.org/innoextract/innoextract.1
 - https://constexpr.org/innoextract/
 
-Status: design and evidence collection only. No GOG extraction or runtime support implemented yet.
+Status: extraction/install-only path implemented on the draft branch; real GOG extraction and game launch are not yet validated. The normal GOG launch gate intentionally remains closed.
 
 
 ## Owner-supplied GOG v2 evidence — 25 November 2026
@@ -45,3 +45,12 @@ Owner-extracted GOG_reference.zip:
 Installation candidate: retain original data/ and dll/ plus GOG EXE; keep the supplied snd_cpa.ini rather than requiring the CD MMX template. Review GOG wrapper imports and side effects before excluding ddraw.dll, dinput.dll, 3DfxSpl2.dll and goginput.ini. Replace Glide with GameFrame under existing policy. Exclude installer-only temp/redist/commonappdata and obsolete config utilities after dependency review. Preserve game documentation and language resources.
 
 Local Python can read supplied files and compute hashes; innoextract is not installed in the analysis environment. Full extraction/integrity testing and the Windows extractor build are outstanding. No proprietary bytes added to repository. No launch authorization for this profile yet.
+
+
+## Implementation checkpoint
+
+CI run 45657150340 (3d7c9731) passed Linux and Windows x86, including the synthetic verified extractor process tests and official innoextract audit. The official Windows archive is pinned independently of all GOG setup fingerprints. Its x86 executable is 1218560 bytes, SHA-256 946bd06d8b3722a791fea4d84f496139eef6faef61640924cb72f5f1998a68e1. The audited archive includes the original innoextract, Boost, liblzma, libstdc++ notices and runtime exception; retain these in the single EXE and deploy the combined notices to docs/. Upstream source is linked in the notice.
+
+Subsequent commits embed the executable in resource 1111 and notices in 1112. Only fresh installation probes adjacent EXEs, using the trusted extractor, exact product ID output, and no shell. A private gog.installing workspace holds the temporary extractor and payload. Native files are staged in game.installing, normalized and copied with verified SHA-256, and a separate state.installing/.rayman2fix-gog-files.tsv receipt is published with the existing reversible game/state transaction. The original GOG EXE is retained, GOG audio config is preserved, and ubi.ini uses the common synchronizer. Save directories are initialized empty. GameFrame and SDL3 use the existing bootstrap deployment. GOG setup files are never executed or altered. Existing game verification distinguishes CD and GOG receipts; a normal GOG launch remains blocked until runtime compatibility is established. No proprietary game bytes are in Git or CI.
+
+The first integrated build needs real installer validation (product probe, language selection/collisions, extraction and exact game EXE) plus verification of native DLL dependencies, omitted GOG wrappers, all active hooks and game behavior. Original game manuals/readmes remain in the source archive for now, pending documentation placement. The GOG receipt is a local integrity baseline, not proof of authenticity of the entire archive. --install-only may succeed for a validated extracted layout; that does not authorize game launch.
