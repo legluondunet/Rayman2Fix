@@ -594,3 +594,19 @@ native title, moving companion, localized strings, input and scene
 hooks are untouched. This is an initial production illustration, not
 a pixel-exact reproduction of the concept. Visual validation and
 potential refinements (organic panel border) remain open.
+
+
+## Final decorative polish and live physical-input indicators
+
+Owner approved the enchanted rendering (3c35b1d4). Add a softly glowing
+organic inner rim, carved plaque detail and a subtle text shadow without
+changing the safe panel bounds or original title/companion. Display live
+physical input on the cached diagram: face buttons, Start/Back, shoulders,
+triggers, D-pad and sticks, including vertical right-stick movement and
+stick clicks. Display-only fields do not change mapping or owner selection.
+Indicators are composited in bounded regions after the cached static art,
+with no per-frame GDI allocation/rerasterization. Focus loss, stale sample,
+disconnection and non-controller context extinguish them. Existing native
+menu cancellation remains functional (B/Rond may exit before a highlight
+is visible). No decorative animation added to avoid unnecessary visual load.
+Unit tests cover both aspect widths, physical masks and reset conditions.

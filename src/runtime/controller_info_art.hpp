@@ -65,6 +65,20 @@ inline void leaf(Graphics& g,float x,float y,float dx,float dy) {
     curve(g,rgb(220,240,128,180),.9f,{x,y},{x+dx*.3f,y+dy*.4f},{x+dx*.7f,y+dy*.7f},{x+dx,y+dy});
 }
 inline void ornaments(Graphics& g) {
+    // Organic inner rim: the safe translucent mask still bounds all pixels.
+    GraphicsPath rim;
+    rim.AddBezier(PointF(22,6),PointF(175,13),PointF(284,2),PointF(460,7));
+    rim.AddBezier(PointF(460,7),PointF(636,2),PointF(745,13),PointF(898,6));
+    rim.AddBezier(PointF(898,6),PointF(913,6),PointF(910,29),PointF(913,44));
+    rim.AddBezier(PointF(913,44),PointF(907,160),PointF(919,278),PointF(913,381));
+    rim.AddBezier(PointF(913,381),PointF(912,405),PointF(908,414),PointF(898,414));
+    rim.AddBezier(PointF(898,414),PointF(720,409),PointF(625,416),PointF(460,413));
+    rim.AddBezier(PointF(460,413),PointF(295,416),PointF(200,409),PointF(22,414));
+    rim.AddBezier(PointF(22,414),PointF(7,414),PointF(8,392),PointF(7,376));
+    rim.AddBezier(PointF(7,376),PointF(13,260),PointF(1,142),PointF(7,44));
+    rim.AddBezier(PointF(7,44),PointF(7,26),PointF(7,6),PointF(22,6));rim.CloseFigure();
+    for(int w=8;w>=2;w-=2){Pen glow(rgb(62,199,217,unsigned(8+(8-w)*5)),float(w));glow.SetLineJoin(LineJoinRound);g.DrawPath(&glow,&rim);}
+    Pen edge(rgb(133,237,237,185),1.2f);g.DrawPath(&edge,&rim);
     // Edge-only botanical accents. Stay outside all label rectangles.
     for(int side=0;side<2;++side) {
         const float x=side?902.f:18.f,s=side?-1.f:1.f;
@@ -75,7 +89,9 @@ inline void ornaments(Graphics& g) {
         disk(g,x+s*13,370,3,rgb(158,240,255,180));
     }
     // Carved-looking name plaque; live status text is drawn later.
-    pill(g,349,3,222,39,16,rgb(113,90,142),rgb(51,44,92));
+    pill(g,349,3,222,39,16,rgb(143,115,160),rgb(54,44,83));
+    curve(g,rgb(255,222,158,120),1.4f,{376,6},{412,3},{505,3},{544,6});
+    leaf(g,350,15,-15,-8);leaf(g,570,15,15,-8);
     spiral(g,367,22,8,rgb(237,192,103),1.8f);
     spiral(g,553,22,8,rgb(237,192,103),1.8f,true);
     spiral(g,460,398,13,rgb(113,224,247,215),2.4f);

@@ -2,6 +2,8 @@
 #include "rayman2fix/gamepad_control_info.hpp"
 #include "rayman2fix/controller_info_layout.hpp"
 #include "rayman2fix/controller_info_composite.hpp"
+#include "rayman2fix/controller_info_activity.hpp"
+#include <vector>
 #include "rayman2fix/black_frame_filter.hpp"
 #include "rayman2fix/gamepad_menu_bridge.hpp"
 #include "rayman2fix/native_ipt_probe.hpp"
@@ -234,6 +236,25 @@ int main() {
     check(pad_composite565(0xffffu,transparent,{16,0})!=0xffffu &&
           pad_composite565(0,transparent,{16,0})!=0,"translucent tint on distinct scenes");
     check(!composite_controller_info(nullptr,0,nullptr,0),"invalid overlay refuses");
+    PadSample visual{};visual.connected=true;visual.device_id=1;visual.foreground=true;
+    visual.context=PadContext::controller_info;visual.south=true;visual.right_y_display=-20000;
+    visual.back_display=true;visual.left_trigger=20000;
+    const auto lights=pad_info_activity(visual);
+    check(lights.mask==((1u<<LightSouth)|(1u<<LightRS)|(1u<<LightBack)|(1u<<LightLT)),
+          "physical controls independent of menu action mask");
+    visual.foreground=false;check(!pad_info_activity(visual).mask,"focus loss clears highlights");
+    visual.foreground=true;visual.context=PadContext::gameplay;
+    check(!pad_info_activity(visual).mask,"no highlights outside controller page");
+    visual.context=PadContext::controller_info;visual.connected=false;
+    check(!pad_info_activity(visual).mask,"disconnect clears highlights");
+    for(unsigned width:{690u,920u}){
+        std::vector<std::uint16_t> scene(std::size_t(width)*kPadInfoHeight,0);
+        check(apply_pad_info_lights(scene.data(),scene.size(),width,PadLabelFamily::xbox,{1u<<LightSouth}),
+              "bounded highlight composition");
+        const auto center=pad_light_shape(PadLabelFamily::xbox,LightSouth).center;
+        check(scene[std::size_t(center.y)*width+unsigned(center.x)*width/kPadInfoWidth]!=0&&scene[0]==0,
+              "only physical control region lit in either aspect");
+    }
     check(kPadControlRows.size() == 11, "all approved controls presented");
     for (const auto& row : kPadControlRows) {
         check(!row.action_key.empty() && !row.generic.empty() &&

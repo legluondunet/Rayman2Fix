@@ -65,6 +65,8 @@ bool label(HDC dc,const PadInfoView& v,unsigned row,PadInfoRect r,UINT align){
     const auto& item=v.rows[row];
     std::string action(item.action);
     if(item.pending || (v.swim_pending && (row==1 || row==6)))action+=" *";
+    // Subtle offset shadow behind action labels, then the original fitted text.
+    text_fit(dc,action,{r.left,r.top+1,r.right,r.top+26},19,12,RGB(21,18,47),true,align);
     return text_fit(dc,action,{r.left,r.top,r.right,r.top+25},19,12,ink,true,align) &&
         text_fit(dc,item.control,{r.left,r.top+25,r.right,r.bottom},15,10,muted,false,align);
 }

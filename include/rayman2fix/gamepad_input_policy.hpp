@@ -95,6 +95,9 @@ struct PadSample {
     bool start = false, left_shoulder = false, right_shoulder = false;
     bool fresh_owner_activity = false; // set only by adapter on observed neutral-to-active handover
     std::uint32_t scene_id = 0; // exact live scene identity; 0 for non-gameplay catalog scenes
+    // Display-only telemetry; never used for gameplay or owner selection.
+    int right_y_display=0;
+    bool back_display=false,left_click_display=false,right_click_display=false;
 };
 
 constexpr int kPadAxisDeadzone = 8192;

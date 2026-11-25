@@ -167,6 +167,9 @@ PadSample SdlGamepads::poll(bool foreground, PadContext context) noexcept {
         if(!foreground)return q;
         q.left_x=api_->axis(pad,LeftX);q.left_y=api_->axis(pad,LeftY);
         q.right_x=api_->axis(pad,RightX);
+        q.right_y_display=api_->axis(pad,RightY);
+        q.back_display=api_->button(pad,Back);
+        q.left_click_display=api_->button(pad,LeftStick);q.right_click_display=api_->button(pad,RightStick);
         q.left_trigger=api_->axis(pad,LT);q.right_trigger=api_->axis(pad,RT);
         q.south=api_->button(pad,South);q.east=api_->button(pad,East);
         q.west=api_->button(pad,West);q.north=api_->button(pad,North);

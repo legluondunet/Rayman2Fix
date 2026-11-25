@@ -622,7 +622,7 @@ bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& x
     // itself, all game/world objects and the return-to-Options screen.
     return standalone_video_hide_native_glyphs(visible,drew,true,title);
 }
-bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFamily family,float hud_scale) noexcept {
+bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFamily family,float hud_scale,PadInfoActivity activity) noexcept {
     if(!g_configured.load(std::memory_order_acquire) || !find_glide())return false;
     const auto placement=pad_info_placement(hud_scale);
     if(!placement.width)return false;
@@ -644,6 +644,7 @@ bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFami
                    placement.width*2u,scene.data()))return false;
         if(!composite_controller_info(scene.data(),scene.size(),overlay.data(),overlay.size(),placement.width))
             return false;
+        if(!apply_pad_info_lights(scene.data(),scene.size(),placement.width,family,connected?activity:PadInfoActivity{}))return false;
         return g_write(kBackBuffer,placement.x,kPadInfoY,kRgb565,placement.width,kPadInfoHeight,
                        placement.width*2,scene.data())!=0;
     }catch(...){return false;}

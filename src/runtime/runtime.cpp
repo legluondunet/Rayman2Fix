@@ -5341,6 +5341,8 @@ thread_local bool g_sdl_pause_delivery_pending=false;
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
 thread_local int g_controller_drawn_scope=0;
 thread_local bool g_controller_connected=false;
+thread_local r2fix::PadInfoActivity g_controller_activity{};
+thread_local DWORD g_controller_activity_tick=0;
 thread_local r2fix::PadLabelFamily g_controller_family=r2fix::PadLabelFamily::generic;
 int controller_info_scope() noexcept {
     if(g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())return 0;
@@ -5918,6 +5920,8 @@ void poll_sdl3_native() noexcept {
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
     g_controller_connected=sample.connected;
     g_controller_family=pads.family();
+    g_controller_activity=r2fix::pad_info_activity(sample);
+    g_controller_activity_tick=GetTickCount();
 #endif
     static bool first_sample = true;
     if (first_sample) {
@@ -7710,7 +7714,16 @@ void __cdecl standalone_video_flip() {
     const int scope=controller_info_scope();
     const int previous=g_controller_drawn_scope;
     g_controller_drawn_scope=0;
-    if(scope && r2fix::draw_controller_info_glide(controller_info_locale(),g_controller_connected,g_controller_family,g_hud_scale)) {
+    const auto activity=(game_window_is_foreground() && DWORD(GetTickCount()-g_controller_activity_tick)<=100u)?
+        g_controller_activity:r2fix::PadInfoActivity{};
+    if(scope && r2fix::draw_controller_info_glide(controller_info_locale(),g_controller_connected,g_controller_family,g_hud_scale,activity)) {
+        static unsigned light_reports=0,previous_mask=0;
+        if(activity.mask!=previous_mask){
+            if(g_log&&light_reports<80u){char msg[120]{};
+                std::snprintf(msg,sizeof(msg),"RUNTIME-CONTROLLER-MENU: physical-lights=0x%04x scope=%d",activity.mask,scope);
+                log_line(msg);++light_reports;}
+            previous_mask=activity.mask;
+        }
         g_controller_drawn_scope=scope;
         if(previous!=scope)log_line(scope==1?"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=MENU normal=21 reflex=0":"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=PAUSE normal=17 reflex=2");
     }
