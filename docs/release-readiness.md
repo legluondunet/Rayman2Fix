@@ -10,6 +10,7 @@ public release.
 - Native Learn_10 F248 skip: #35, #3.
 - Read-only VIDEO pages: #53, #49; merged as 9a2f7ab9.
 - Single EXE, verified dependency deployment and initial log retention.
+- SDL3 dependency audit and ABI contract tests: #58, merged as ea077278; CI #2006 passed.
 - SDL3 integration and enchanted controls menu: #56, merged as 5ba2a4c4.
   CI #2001 passed Linux and Windows x86; owner approved build 4467b514
   under Wine with automatic controller handovers and physical indicators.
