@@ -1058,13 +1058,45 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("esc_down=%u",poll)
         self.assertLess(poll.index("old_menu!=static_cast<int>(in_game_menu)"),
                         poll.index("inspect_audio_menu_actor_readonly()"))
-        self.assertNotIn("VK_F1",self.runtime)
+        # F1 is now allowed only at the authenticated script Pause admission,
+        # not in the passive actor observer or anywhere else in the runtime.
+        self.assertEqual(self.runtime.count("VK_F1"),1)
+        self.assertNotIn("VK_F1",poll)
         self.assertNotIn("f1_down=",self.runtime)
         # Scoped by #if RAYMAN2FIX_AUDIO_TRACE and follows existing checks.
         before=self.runtime.split(
             "AudioMenuActorSnapshot inspect_audio_menu_actor_readonly()",1)[0]
         self.assertIn("#if RAYMAN2FIX_AUDIO_TRACE",before)
         self.assertIn('return read_ini_flag(ini,"Features","MusicInPauseMenu","1")',self.config)
+
+    def test_world_knowledge_f1_uses_guarded_script_pause_only(self):
+        wrapper=self.runtime.split("void __cdecl proto_script_pause() {",1)[1].split(
+            "void __cdecl proto_script_resume() {",1)[0]
+        self.assertIn("consume_sdl_f1_delivery()",wrapper)
+        self.assertIn("GetAsyncKeyState(VK_F1)&0x8000",wrapper)
+        self.assertIn("|| f1_source",wrapper)
+        self.assertIn("g_proto_enabled.load(std::memory_order_acquire)",wrapper)
+        self.assertIn("game_window_is_foreground()",wrapper)
+        self.assertIn("proto_game_read(0xB9BC8,menu) && menu==0",wrapper)
+        self.assertIn("proto_read_depth(depth) && depth>=1u && depth<=8u",wrapper)
+        self.assertIn("g_proto.begin_script_pause(true,true,true)",wrapper)
+        self.assertEqual(wrapper.count("proto_call_original(0x536D0)"),1)
+        consume=self.runtime.split("bool consume_sdl_f1_delivery() noexcept {",1)[1].split(
+            "#endif",1)[0]
+        for guard in ("g_sdl_f1_delivery_pending=false",
+                      "game_window_is_foreground()",
+                      "g_sdl_input_owner.load(std::memory_order_acquire)==GetCurrentThreadId()",
+                      "DWORD(GetTickCount()-g_sdl_f1_delivery_tick)<=100u",
+                      "sdl_fresh_actions(r2fix::PadContext::gameplay)",
+                      "PadAction::world_knowledge","PadAction::murphy"):
+            self.assertIn(guard,consume)
+        bridge=(ROOT/"src/runtime/video_navigation_input.cpp").read_text(encoding="utf-8")
+        merge=bridge.split("if(!video && !controller && merge_pad_f1_key(",1)[1].split(
+            "const auto merged=",1)[0]
+        self.assertIn("::r2fix_sdl_note_f1_delivery();",merge)
+        self.assertEqual(bridge.count("::r2fix_sdl_note_f1_delivery();"),1)
+        self.assertIn("proto_esc_menu_actor_open()",self.runtime)
+        self.assertIn("g_proto.owner_same(live)",self.runtime)
 
     def test_current_native_theme_player_identity_is_a_readonly_gate(self):
         section=self.runtime.split(

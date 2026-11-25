@@ -170,6 +170,8 @@ int main() {
     const auto ps_hw=pad_hardware_layout(PadLabelFamily::playstation);
     check(xbox_hw.left_stick.y<xbox_hw.dpad.y && ps_hw.left_stick.y>ps_hw.dpad.y,
           "physical stick/dpad positions reflect controller family");
+    check(xbox_hw.dpad.y+33<290 && xbox_hw.right_stick.y+28<290 &&
+          ps_hw.left_stick.y+28<290,"controls remain inside shell lower edge");
     check(xbox_hw.start.x>460 && xbox_hw.back.x<460 && ps_hw.start.x>460 &&
           ps_hw.back.x<460,"separate top right Start and top left Back");
     PadTransitionGate handover;
@@ -191,15 +193,15 @@ int main() {
     ty0=47.5f;ty1=52.5f;
     check(!pad_info_native_title(false,tx0,ty0,tx1,ty1),"calibration body glyph remains hidden");
     float cy=.5f;
-    check(align_pad_info_companion(true,true,0,.5f,cy,.015f)&&cy>.31f&&cy<.33f,
+    check(align_pad_info_companion(true,true,0,.5f,cy,.015f)&&cy>.32f&&cy<.35f,
           "native companion moves above panel");
-    for(float y:{.16f,.33f,.34f,.54f,.65f,.84f}) {
-        check(align_pad_info_companion(true,true,0,.5f,y,.015f)&&y>.31f&&y<.33f,
+    for(float y:{.08f,.147f,.16f,.33f,.34f,.54f,.65f,.84f}) {
+        check(align_pad_info_companion(true,true,0,.5f,y,.015f)&&y>.32f&&y<.35f,
               "continuous MENU companion travel remains above panel");
     }
     float pause_y=.54f;
-    check(align_pad_info_companion(true,true,0,.5f,pause_y,.015f,true)&&std::fabs(pause_y-.36f)<.0001f,
-          "preserve already validated Pause lift");
+    check(align_pad_info_companion(true,true,0,.5f,pause_y,.015f,true)&&pause_y>.32f&&pause_y<.35f,
+          "Pause companion uses same header gap");
     check(pad_may_take_owner(true,false,true,true)&&!pad_may_take_owner(true,true,true,true)&&
           !pad_may_take_owner(true,false,false,true)&&!pad_may_take_owner(false,false,true,true),
           "neutral-to-active secondary controller ownership, no focus or held-owner steal");
@@ -470,8 +472,25 @@ int main() {
           pad_gameplay_ipt_binding(21,jump), "South jumps, resurfaces and advances dialogue");
     check(pad_gameplay_ipt_binding(13,target) && pad_gameplay_ipt_binding(14,target),
           "left trigger targets or dives");
-    check(pad_gameplay_ipt_binding(22,knowledge) && pad_gameplay_ipt_binding(22,murphy),
-          "both dpad directions use shared PC F1 action");
+    check(!pad_gameplay_ipt_binding(22,knowledge) && !pad_gameplay_ipt_binding(22,murphy),
+          "F1 uses native keyboard only, no duplicate predicate");
+    std::uint8_t f1keys[256]{};
+    f1keys[0x39]=0x80;
+    check(merge_pad_f1_key(PadContext::gameplay,true,0,256,f1keys,knowledge) &&
+          f1keys[0x3B]==0x80 && f1keys[0x39]==0x80,"knowledge reaches native F1");
+    f1keys[0x3B]=0;
+    check(merge_pad_f1_key(PadContext::gameplay,true,0,256,f1keys,murphy) &&
+          f1keys[0x3B]==0x80,"Murfy shares native F1");
+    f1keys[0x3B]=0;
+    check(!merge_pad_f1_key(PadContext::gameplay,true,0,256,f1keys,jump) &&
+          !merge_pad_f1_key(PadContext::gameplay,false,0,256,f1keys,knowledge) &&
+          !merge_pad_f1_key(PadContext::gameplay,true,-1,256,f1keys,knowledge) &&
+          !merge_pad_f1_key(PadContext::gameplay,true,0,255,f1keys,knowledge) &&
+          !merge_pad_f1_key(PadContext::pause_menu,true,0,256,f1keys,knowledge) &&
+          !f1keys[0x3B],"F1 refuses invalid or unrelated input");
+    f1keys[0x3B]=0x80;
+    check(!merge_pad_f1_key(PadContext::gameplay,true,0,256,f1keys,0) &&
+          f1keys[0x3B]==0x80,"physical F1 survives controller release");
     check(!pad_gameplay_ipt_binding(14,jump) && !pad_gameplay_ipt_binding(15,target),
           "swimming routes not reversed");
     check(!pad_gameplay_ipt_binding(22,jump) && !pad_gameplay_ipt_binding(22,0),
@@ -479,7 +498,7 @@ int main() {
     for(unsigned index=0;index<138;++index) {
         const auto* b=pad_gameplay_ipt_binding(index,0xffffffffu);
         const bool known=index==10 || index==11 || index==13 || index==14 ||
-            index==15 || index==16 || index==17 || index==21 || index==22 || index==24;
+            index==15 || index==16 || index==17 || index==21 || index==24;
         check(bool(b)==known,"only explicit gameplay action indices");
         if(b) check(!b->name_fragment.empty(),"every binding names its reference action");
     }

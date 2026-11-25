@@ -137,7 +137,8 @@ constexpr PadInfoView make_pad_info_view(PadInfoLocale locale,bool connected,
         if(i==8)control=s.up;
         if(i==9)control=s.down;
         // World-knowledge and the added swim routes are not hardware-tested.
-        // A future page must show the pending notice, not imply validation.
+        // Keep pending state for engineering validation; the approved
+        // user-facing diagram no longer renders asterisks or a test notice.
         out.rows[i]={s.actions[i],control,i==8};
     }
     return out;

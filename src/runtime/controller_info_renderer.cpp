@@ -2,7 +2,7 @@
 #ifdef _WIN32
 #include <string>
 #include <array>
-#include "controller_info_art.hpp"
+#include "controller_info_atlas.hpp"
 namespace r2fix {
 namespace {
 constexpr COLORREF bg=RGB(15,29,52), blue=RGB(75,149,237),
@@ -63,10 +63,9 @@ void solid_circle(HDC dc,int x,int y,int radius,COLORREF color){
 }
 bool label(HDC dc,const PadInfoView& v,unsigned row,PadInfoRect r,UINT align){
     const auto& item=v.rows[row];
-    std::string action(item.action);
-    if(item.pending || (v.swim_pending && (row==1 || row==6)))action+=" *";
+    const auto action=item.action;
     // Subtle offset shadow behind action labels, then the original fitted text.
-    text_fit(dc,action,{r.left,r.top+1,r.right,r.top+26},19,12,RGB(21,18,47),true,align);
+    text_fit(dc,action,{r.left,r.top+1,r.right,r.top+26},19,12,RGB(8,24,43),true,align);
     return text_fit(dc,action,{r.left,r.top,r.right,r.top+25},19,12,ink,true,align) &&
         text_fit(dc,item.control,{r.left,r.top+25,r.right,r.bottom},15,10,muted,false,align);
 }
@@ -109,13 +108,13 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
         if(frame && !RoundRect(dc,0,0,kPadInfoWidth,kPadInfoHeight,24,24))return false;
         SetBkMode(dc,TRANSPARENT);
         const auto hw=pad_hardware_layout(view.family);
-        if(!controller_art::paint(dc,view.family))return false;
+        if(!controller_atlas::paint(dc,view.family))return false;
         if(!face(dc,view.family))return false;
         const auto back_name=view.family==PadLabelFamily::playstation?"Share":"Back";
         const auto start_name=view.family==PadLabelFamily::playstation?"Options":"Start";
         if(!text_fit(dc,back_name,{hw.back.x-18,hw.back.y-9,hw.back.x+19,hw.back.y+10},11,8,ink,false,DT_CENTER) ||
            !text_fit(dc,start_name,{hw.start.x-18,hw.start.y-9,hw.start.x+19,hw.start.y+10},11,8,ink,false,DT_CENTER))return false;
-        bool ok=text_fit(dc,view.status,{381,6,539,39},24,10,ink,true,DT_CENTER);
+        bool ok=text_fit(dc,view.status,kPadInfoStatus,28,14,ink,true,DT_CENTER);
         for(const auto& a:pad_info_callouts(view.family)){
             const auto endpoint=pad_callout_end(a);
             const int end=endpoint.x,y=endpoint.y;
@@ -128,9 +127,7 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
             ok=label(dc,view,a.row,a.box,a.left?DT_RIGHT:DT_LEFT)&&ok;
         }
         std::string back(view.back);back+=": ";back+=view.back_control;
-        std::string pending("* ");pending+=view.pending_label;
         ok=text_fit(dc,back,kPadInfoBack,15,10,muted,false,DT_RIGHT)&&ok;
-        ok=text_fit(dc,pending,kPadInfoPending,15,10,muted,false,DT_LEFT)&&ok;
         return ok;
     }catch(...){return false;}
 }

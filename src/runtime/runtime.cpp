@@ -1882,6 +1882,21 @@ void proto_dispatch(proto::Dispatch action) {
                 const std::lock_guard<std::mutex> lock(g_proto_mutex);
                 g_proto.quarantine();
             }
+            if(g_log) {
+                static unsigned reports=0;
+                if(reports<48u) {
+                    ++reports;
+                    char msg[300]{};
+                    BYTE menu=0;
+                    const bool known=proto_game_read(0xB9BC8,menu);
+                    std::snprintf(msg,sizeof(msg),"RUNTIME-ESC-STREAM-REJECT: command=%u live_valid=%u same_handle=%u same_theme=%u same_inner=%u menu_known=%u menu=%u fg=%u",
+                        unsigned(action.command),unsigned(live.valid()),unsigned(live.handle==action.handle),
+                        unsigned(live.native_theme_key==action.native_theme_key),
+                        unsigned(live.native_inner_key==action.native_inner_key),
+                        unsigned(known),unsigned(menu),unsigned(game_window_is_foreground()));
+                    log_line(msg);
+                }
+            }
             proto_log("driver-command-rejected",
                 "theme-or-sxd-stream-changed-native-passthrough");
             return;
@@ -2106,6 +2121,7 @@ ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {
 }
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
 bool consume_sdl_pause_delivery() noexcept;
+bool consume_sdl_f1_delivery() noexcept;
 #endif
 void __cdecl proto_script_pause() {
     bool adopted=false;
@@ -2123,11 +2139,18 @@ void __cdecl proto_script_pause() {
         // A hard-coded ==1 silently disabled all subsequent attempts.
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
         const bool pad_pause=consume_sdl_pause_delivery();
+        const bool pad_f1=consume_sdl_f1_delivery();
 #else
         constexpr bool pad_pause=false;
+        constexpr bool pad_f1=false;
 #endif
+        // World knowledge uses the same verified native script Pause/Resume
+        // wrapper as ESC (Learn_30 owner log, normal 10/reflex 0). F1 only
+        // admits a provisional candidate; actor, paired callbacks, Theme
+        // identity, focus, native Stop and timeout gates remain mandatory.
+        const bool f1_source=(GetAsyncKeyState(VK_F1)&0x8000)!=0 || pad_f1;
         const bool candidate=game_window_is_foreground() &&
-            ((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0 || pad_pause) &&
+            (((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0 || pad_pause) || f1_source) &&
             proto_game_read(0xB9BC8,menu) && menu==0 &&
             proto_read_depth(depth) && depth>=1u && depth<=8u;
         if(candidate) {
@@ -5338,6 +5361,8 @@ DWORD g_sdl_input_tick = 0;
 thread_local bool g_sdl_native_joystick_owned=false;
 thread_local DWORD g_sdl_pause_delivery_tick=0;
 thread_local bool g_sdl_pause_delivery_pending=false;
+thread_local DWORD g_sdl_f1_delivery_tick=0;
+thread_local bool g_sdl_f1_delivery_pending=false;
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
 thread_local int g_controller_drawn_scope=0;
 thread_local bool g_controller_connected=false;
@@ -5489,6 +5514,16 @@ bool consume_sdl_pause_delivery() noexcept {
         DWORD(GetTickCount()-g_sdl_pause_delivery_tick)<=100u &&
         sdl_fresh_actions(r2fix::PadContext::gameplay) &
             r2fix::pad_action_bit(r2fix::PadAction::pause);
+}
+bool consume_sdl_f1_delivery() noexcept {
+    const bool pending=g_sdl_f1_delivery_pending;
+    g_sdl_f1_delivery_pending=false;
+    return pending && game_window_is_foreground() &&
+        g_sdl_input_owner.load(std::memory_order_acquire)==GetCurrentThreadId() &&
+        DWORD(GetTickCount()-g_sdl_f1_delivery_tick)<=100u &&
+        (sdl_fresh_actions(r2fix::PadContext::gameplay) &
+            (r2fix::pad_action_bit(r2fix::PadAction::world_knowledge) |
+             r2fix::pad_action_bit(r2fix::PadAction::murphy)))!=0;
 }
 #endif
 
@@ -8561,6 +8596,11 @@ bool r2fix_sdl_controller_page() noexcept {
     return false;
 #endif
 }
+std::uint32_t r2fix_sdl_f1_actions() noexcept {
+    return sdl_fresh_actions(r2fix::PadContext::gameplay) &
+        (r2fix::pad_action_bit(r2fix::PadAction::world_knowledge) |
+         r2fix::pad_action_bit(r2fix::PadAction::murphy));
+}
 std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept {
     if(r2fix_sdl_controller_page())return sdl_fresh_actions(r2fix::PadContext::controller_info);
     if(video) return sdl_fresh_actions(r2fix::PadContext::video);
@@ -8577,6 +8617,12 @@ std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept {
         return sdl_fresh_actions(r2fix::PadContext::world_map) &
             ~r2fix::pad_action_bit(r2fix::PadAction::pause);
     return sdl_fresh_actions(r2fix::PadContext::menu);
+}
+void r2fix_sdl_note_f1_delivery() noexcept {
+    if(r2fix_sdl_f1_actions()) {
+        g_sdl_f1_delivery_tick=GetTickCount();
+        g_sdl_f1_delivery_pending=true;
+    }
 }
 void r2fix_sdl_note_pause_delivery() noexcept {
     if(sdl_fresh_actions(r2fix::PadContext::gameplay) &
