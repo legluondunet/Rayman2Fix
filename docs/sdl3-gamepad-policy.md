@@ -558,3 +558,19 @@ silhouettes using cubic curves, layered stick caps, rounded shoulders
 and Xbox button colors. Use family-specific label order (Xbox movement
 above D-pad actions), edge anchors and a compile-time segment intersection
 check across every callout. No new gamepad mappings, assets or dependencies.
+
+
+## Owner 20261125-064744: visual finish
+
+The last screenshot shows the butterfly above the heading and the owner
+now requests it beneath. Keep the pause heading and companion unchanged.
+Move only the MENU heading to 12..17% and source butterfly to .32 with
+narrow travel, based on the visible center offset from the last capture.
+The panel origin stays y284. Redraw curved shell with a shaded finish,
+recessed shoulder/center buttons, textured stick rings and subtle color
+buttons. Render cached overlays at 2x resolution, box-filter recovered
+premultiplied foreground coverage, and keep the existing RGB565 physical
+aspect correction. Leader geometry stays unchanged and intersection-tested;
+replace arrowheads with small anchor dots for a cleaner reading order.
+No new dependencies or assets; mapping and ownership untouched. Real
+visual bounds/appearance still need validation in-game.

@@ -182,17 +182,17 @@ int main() {
           "controller LFB preserves physical 4:3 geometry");
     check(kPadInfoY==kVideoInfoY && !pad_info_placement(0.f).width,"shared VIDEO origin and invalid scale refused");
     float tx0=19.3f,ty0=24.97f,tx1=23.5f,ty1=30.03f;
-    check(pad_info_native_title(false,tx0,ty0,tx1,ty1)&&ty0==20.f&&ty1==25.f,
+    check(pad_info_native_title(false,tx0,ty0,tx1,ty1)&&ty0==12.f&&ty1==17.f,
           "long native CONTROL title preserved");
     ty0=12.5f;ty1=17.5f;
-    check(pad_info_native_title(false,tx0,ty0,tx1,ty1)&&ty0==20.f,"native MENU 15 percent title band");
+    check(pad_info_native_title(false,tx0,ty0,tx1,ty1)&&ty0==12.f,"native MENU 15 percent title band");
     ty0=47.5f;ty1=52.5f;
     check(!pad_info_native_title(false,tx0,ty0,tx1,ty1),"calibration body glyph remains hidden");
     float cy=.5f;
-    check(align_pad_info_companion(true,true,0,.5f,cy,.015f)&&cy>.13f&&cy<.16f,
+    check(align_pad_info_companion(true,true,0,.5f,cy,.015f)&&cy>.31f&&cy<.33f,
           "native companion moves above panel");
     for(float y:{.16f,.33f,.34f,.54f,.65f,.84f}) {
-        check(align_pad_info_companion(true,true,0,.5f,y,.015f)&&y>.13f&&y<.16f,
+        check(align_pad_info_companion(true,true,0,.5f,y,.015f)&&y>.31f&&y<.33f,
               "continuous MENU companion travel remains above panel");
     }
     float pause_y=.54f;

@@ -23,7 +23,8 @@ inline bool pad_info_native_title(bool pause,float& x0,float& y0,float& x1,float
     if(!std::isfinite(x0)||!std::isfinite(x1)||!std::isfinite(y0)||!std::isfinite(y1)||
        x0<12.f||x1>88.f||y0<(pause?12.f:7.f)||y1>32.f||
        x1<=x0||x1-x0>10.f||y1<=y0||y1-y0>9.f)return false;
-    y0=20.f;y1=25.f;return true;
+    // MENU reserves space beneath the title for the full-size butterfly.
+    y0=pause?20.f:12.f;y1=pause?25.f:17.f;return true;
 }
 // Candidate common header companion position, above the panel. Only
 // the two established 3D menu-actor source routes and center band.
@@ -40,9 +41,10 @@ inline bool align_pad_info_companion(bool page,bool viewport,unsigned route,floa
     // discontinuously stopped lifting when the actor left the old band.
     // Compress only the centered native actor's vertical travel.
     if(y<0.16f||y>0.84f)return false;
-    // The 063547 capture places the butterfly across the title at y=.29.
-    // Reserve a separate header band above the native title (20..25%).
-    y=0.145f+(y-0.5f)*0.04f;
+    // The 064532 capture at source y=.147 showed the visible actor
+    // centered around .095 (model origin is below its visible center).
+    // Target the gap below MENU title 12..17%, above panel y284/768.
+    y=0.32f+(y-0.5f)*0.014f;
     return true;
 }
 constexpr PadInfoRect kPadInfoStatus{12,8,908,42};
