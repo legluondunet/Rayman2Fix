@@ -4,7 +4,7 @@ The single Rayman2Fix.exe accepts one local GOG offline setup EXE plus its match
 
 Use an audited, pinned Windows innoextract executable embedded in the launcher if it supports the actual archive. Do not run the original setup, use Galaxy, download game assets, or require a system extractor. Keep dependency notices and verify the embedded extractor before invoking it by absolute path without a shell. Unknown Inno formats, failed integrity checks, missing parts and unknown game executables fail closed.
 
-The GOG product ID is 1207658940 (GOG support and GOGDB). This is identification, not authentication. Collect local setup names, sizes, SHA-256, Inno data version, game ID, languages and file listing with sizes and checksums before deciding the supported profile. Do not assume all older or newer installers are equivalent.
+The GOG product ID is 1207658940 (GOG support and GOGDB). This is identification, not authentication. Discover candidates without requiring an exact setup filename, version, language, build number, size or SHA-256. Setup hashes are optional diagnostic evidence only; NEVER use them as an allowlist or rejection criterion. Confirm product identity, supported Inno format, completeness and extraction integrity, then independently validate the extracted game executable against the approved runtime profile and check required resources. A repackaged or localized installer containing a compatible game is eligible without code changes; a new game executable requires separate compatibility validation.
 
 Developer-only inventory (not a production installation):
 ```sh
@@ -31,7 +31,7 @@ Status: design and evidence collection only. No GOG extraction or runtime suppor
 
 The combined French/Polish inventory successfully lists Inno Setup 5.6.2 Unicode, product metadata 1207658940. Listing is not an integrity test. Both list the same Rayman2.exe MD5 ef4954015d8b67e3534c9dc40ca3ad6e; localized assets (Textures.cnt, Fix.gpt) differ. Preserve each installation's own resources; do not assume identical archive or data hashes.
 
-French setup build 86383, SHA-256 calculated locally from the actual supplied files:
+French setup build 86383, historical diagnostic fingerprints only (not acceptance criteria), SHA-256 calculated locally from the actual supplied files:
 - setup_rayman_2_-_the_great_escape_1.0_gog_v2_(french)_(86383).exe: 1053624 bytes, 604bb057b69186989404434669e82d833c076131c1be0dcf7fefc1ce94aeaa69
 - setup_rayman_2_-_the_great_escape_1.0_gog_v2_(french)_(86383)-1.bin: 358957056 bytes, 1d73f82cca92be83101901abb78dcb4160d3442147a1b94d9c6963a6310f22b0
 
