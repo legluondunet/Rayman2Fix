@@ -1,5 +1,6 @@
 #include "rayman2fix/gamepad_input_policy.hpp"
 #include "rayman2fix/gamepad_control_info.hpp"
+#include "rayman2fix/controller_info_layout.hpp"
 #include "rayman2fix/gamepad_menu_bridge.hpp"
 #include "rayman2fix/native_ipt_probe.hpp"
 #include <cmath>
@@ -148,6 +149,7 @@ int main() {
     check(!info.update(a).movement.x && !info.update(a).movement.x,
           "held analog cannot cross focus boundary");
 
+    check(pad_info_layout_valid(), "all controller callouts fit the 4:3 panel");
     check(kPadControlRows.size() == 11, "all approved controls presented");
     for (const auto& row : kPadControlRows) {
         check(!row.action_key.empty() && !row.generic.empty() &&

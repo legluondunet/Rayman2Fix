@@ -258,6 +258,12 @@ if(BUILD_TESTING)
     # No link dependency on SDL3 in the launcher or game runtime yet.
     add_executable(sdl3_x86_smoke tests/sdl3_x86_smoke.cpp src/runtime/sdl_gamepads.cpp)
     target_link_libraries(sdl3_x86_smoke PRIVATE rayman2_crypto)
+    add_executable(controller_info_renderer_tests tests/controller_info_renderer_tests.cpp
+      src/runtime/controller_info_renderer.cpp)
+    target_include_directories(controller_info_renderer_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(controller_info_renderer_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(controller_info_renderer_tests PRIVATE gdi32 user32)
+    add_test(NAME controller-info-offscreen-renderer COMMAND controller_info_renderer_tests)
   endif()
   # SDL3 phase 0: pure focus/hotplug transition policy, no runtime input.
   add_executable(gamepad_input_policy_tests tests/gamepad_input_policy_tests.cpp)

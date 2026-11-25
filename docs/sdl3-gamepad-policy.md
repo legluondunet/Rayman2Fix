@@ -402,3 +402,17 @@ controller_info yet; no original scripts, glyphs, cursor, renderer or
 input interception have been changed by this commit. Real source evidence
 for the main and pause controller-menu behaviors is still required before
 activation. The old page remains usable in the interim.
+
+
+## Offscreen controller diagram renderer
+
+The 920x420 panel fits the 1024x768 native 4:3 canvas below the original
+heading. A pure geometry contract validates all eleven distinct action
+callouts, status, pending and back labels. The original polygon silhouette
+and button symbols are drawn by a separate GDI preview renderer, not copied
+from a product image. UTF-8 labels are converted to wide strings and measured
+with GDI; rendering fails instead of clipping a label. The Windows CTest
+renders 20 locale/device variants in a memory DIB with no game or display
+window. This preview is deliberately opaque and linked only to the test;
+production Glide blending, native submenu identification and integration
+are still pending. No gameplay or original menu changes.
