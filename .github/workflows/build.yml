@@ -81,6 +81,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           python tools/audit_innoextract.py "$env:RUNNER_TEMP/r2fix-innoextract"
           if ($LASTEXITCODE -ne 0) { throw 'Innoextract audit failed' }
+          "RAYMAN2FIX_INNOEXTRACT_DIR=$env:RUNNER_TEMP/r2fix-innoextract" >> $env:GITHUB_ENV
       - name: Audit pinned SDL3 3.4.20 x86 candidate
         shell: pwsh
         run: |
@@ -96,7 +97,7 @@ jobs:
         run: |
           $dll = (Resolve-Path 'third_party/game-frame/wrappers/target/i686-pc-windows-msvc/release/glide2x.dll').Path
           $license = (Resolve-Path 'third_party/game-frame/LICENSE-APACHE').Path
-          cmake -S . -B build -A Win32 -DBUILD_TESTING=ON "-DRAYMAN2FIX_GLIDE_DLL=$dll" "-DRAYMAN2FIX_GLIDE_LICENSE=$license" "-DRAYMAN2FIX_GLIDE_SHA256=$env:RAYMAN2FIX_GAMEFRAME_SHA256" "-DRAYMAN2FIX_SDL3_DIR=$env:RAYMAN2FIX_SDL3_AUDIT_DIR"
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=ON "-DRAYMAN2FIX_GLIDE_DLL=$dll" "-DRAYMAN2FIX_GLIDE_LICENSE=$license" "-DRAYMAN2FIX_GLIDE_SHA256=$env:RAYMAN2FIX_GAMEFRAME_SHA256" "-DRAYMAN2FIX_SDL3_DIR=$env:RAYMAN2FIX_SDL3_AUDIT_DIR" "-DRAYMAN2FIX_INNOEXTRACT_DIR=$env:RAYMAN2FIX_INNOEXTRACT_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'Launcher/GameFrame configure failed' }
       - name: Build
         run: cmake --build build --config Release --parallel
