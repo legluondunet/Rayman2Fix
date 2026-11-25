@@ -396,6 +396,8 @@ if(BUILD_TESTING)
   # never executed, even when the rest of the CD receipt looks valid.
   add_executable(game_launch_tests
     tests/game_launch_tests.cpp
+    src/launcher/gog_extractor.cpp
+    src/launcher/gog_offline.cpp
     src/launcher/game_launch.cpp
     src/launcher/display.cpp
     src/launcher/presentation.cpp
