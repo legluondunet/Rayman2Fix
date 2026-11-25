@@ -1,4 +1,4 @@
-#include "rayman2fix/gog_extractor.hpp"
+#include "rayman2fix/gog_offline.hpp"
 #include "rayman2fix/sha256.hpp"
 #include <chrono>
 #include <fstream>
@@ -108,6 +108,72 @@ int main(int argc, char** argv) {
                     {L"--synthetic-child"}, capture, std::chrono::seconds(5));
         } catch (const std::runtime_error&) { collision = true; }
         require(collision, "capture must not overwrite");
+#endif
+        // Exercise extraction inventory and failure paths using only synthetic
+        // files. A positive game hash cannot be fabricated for CI.
+        const auto payload = dir / "payload";
+        fs::create_directory(payload);
+        for (auto name : g::required_files) {
+            auto file = payload / fs::u8path(std::string(name));
+            fs::create_directories(file.parent_path());
+            std::ofstream(file).put('x');
+        }
+        std::ofstream(payload / "goggame-1207658940.info").put('x');
+        std::ofstream(payload / "fix.dll").put('x');
+        auto inventory = g::inventory(payload);
+        require(inventory.size() == g::required_files.size() + 2, "complete inventory");
+        bool wrong_game = false;
+        try { g::validate_payload(payload, inventory); }
+        catch (const std::runtime_error&) { wrong_game = true; }
+        require(wrong_game, "unknown game EXE refused");
+        const auto staging = dir / "game.installing";
+        bool stage_refused = false;
+        try { g::stage_payload(payload, staging); }
+        catch (const std::runtime_error&) { stage_refused = true; }
+        require(stage_refused && !fs::exists(staging), "wrong EXE never staged");
+        fs::remove(payload / "dll" / "snd_cpa.ini");
+        bool incomplete = false;
+        try { g::validate_payload(payload, g::inventory(payload)); }
+        catch (const std::runtime_error&) { incomplete = true; }
+        require(incomplete, "missing audio config refused");
+#ifndef _WIN32
+        std::ofstream(payload / "Rayman2.exe").put('x');
+        bool case_collision = false;
+        try { (void)g::inventory(payload); }
+        catch (const std::runtime_error&) { case_collision = true; }
+        require(case_collision, "case-fold collision refused");
+        fs::remove(payload / "Rayman2.exe");
+        fs::create_symlink(payload / "rayman2.exe", payload / "symlink");
+        bool symlink_refused = false;
+        try { (void)g::inventory(payload); }
+        catch (const std::runtime_error&) { symlink_refused = true; }
+        require(symlink_refused, "payload symlink refused");
+        fs::remove(payload / "symlink");
+#endif
+        const auto state = dir / "state";
+        fs::create_directory(state);
+        const auto game = dir / "game";
+        fs::create_directory(game);
+        std::string problem;
+        require(!g::has_receipt(game) && !g::verify_receipt(game, problem), "missing receipt");
+        std::ofstream(state / g::receipt_name) << "RAYMAN2FIX-GOG-FILES\t1\nPRODUCT\t1207658940\n";
+        require(g::has_receipt(game) && !g::verify_receipt(game, problem), "empty receipt");
+        std::ofstream(state / ".rayman2fix-cd-files.tsv").put('x');
+        require(!g::verify_receipt(game, problem) && problem.find("conflicting") != std::string::npos,
+                "conflicting receipt refused");
+
+#ifdef RAYMAN2FIX_BUNDLED_INNOEXTRACT
+        require(g::OfflineWorkspace::available(), "embedded extractor available");
+        {
+            g::OfflineWorkspace workspace(dir);
+            require(fs::is_regular_file(dir / "gog.installing/tool/innoextract.exe"), "extractor deployed");
+            require(workspace.probe(child) == g::Probe::unrelated, "real innoextract rejects unrelated PE");
+            bool concurrent = false;
+            try { g::OfflineWorkspace second(dir); }
+            catch (const std::exception&) { concurrent = true; }
+            require(concurrent, "no overwrite private workspace");
+        }
+        require(!fs::exists(dir / "gog.installing"), "extractor workspace cleaned");
 #endif
         std::cout << "GOG source policy OK\n";
         return 0;
