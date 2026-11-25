@@ -9,6 +9,7 @@
 #include "rayman2fix/gameframe.hpp"
 #include "rayman2fix/game_launch.hpp"
 #include "rayman2fix/game_config.hpp"
+#include "rayman2fix/gog_offline.hpp"
 #include "rayman2fix/startup.hpp"
 
 #include <algorithm>
@@ -320,7 +321,8 @@ void publish_installation(const fs::path& game_dir, const fs::path& staging) {
     const auto pending_state=root/"state.installing";
     if(fs::exists(state) || fs::is_symlink(state) ||
        !fs::is_directory(pending_state) || fs::is_symlink(pending_state) ||
-       !exists_file(pending_state/kReceipt))
+       (!exists_file(pending_state/kReceipt) &&
+        !exists_file(pending_state/gog::receipt_name)))
         throw std::runtime_error("unsafe pending/active installation receipt state");
     fs::path backup=game_dir; backup+=".bootstrap-backup";
     if(fs::exists(backup) || fs::is_symlink(backup))
@@ -442,6 +444,16 @@ int verify_installation(Startup& startup) {
         std::cerr << "No installed Rayman 2 executable under game/.\n";
         return 2;
     }
+    if (gog::has_receipt(root)) {
+        std::string problem;
+        if (!gog::verify_receipt(root, problem)) {
+            startup.log("VERIFY-GOG: " + problem);
+            std::cerr << "GOG installation verification failed: " << problem << '\n';
+            return 2;
+        }
+        startup.log("VERIFY-GOG: local SHA256 receipt and approved executable verified");
+        return 0;
+    }
     if (!verify_local_receipt(root, startup)) {
         std::cerr << "Installation verification failed. Existing user files are unchanged.\n";
         return 2;
@@ -456,18 +468,74 @@ int run_automatic(Startup& startup, bool install_only) {
             startup.log("AUTO: existing game found; verify before possible launch");
             if (verify_installation(startup) != 0) return 2;
             synchronize_rayman2_ubi_ini(root, startup);
-            patch_executable_if_supported(root, startup);
+            if (!gog::has_receipt(root)) patch_executable_if_supported(root, startup);
             if (verify_installation(startup) != 0) return 2;
             if (install_only) {
                 startup.log("INSTALL-ONLY: existing installation checked, game not launched");
                 std::cout << "Installation verified. Game not launched (--install-only).\n";
                 return 0;
             }
+            if (gog::has_receipt(root)) {
+                startup.log("GOG: runtime profile not yet enabled; game not launched");
+                std::cerr << "GOG installation verified; runtime validation is pending.\n";
+                return 2;
+            }
             return report_runtime_status(root, startup);
         }
 
         check_bootstrap_workspace(root);
         const auto candidates = find_disc_candidates(startup.root());
+        // GOG is inspected only in fresh-install flow. Do not execute a
+        // setup EXE or use its filename/hash as game identity.
+        if (gog::OfflineWorkspace::available()) {
+            const auto adjacent = gog::candidates(startup.root(),
+                Startup::executable_path(startup.root() / "Rayman2Fix.exe"));
+            if (!adjacent.empty()) {
+                gog::OfflineWorkspace workspace(startup.root());
+                const auto selected = gog::select(candidates, adjacent,
+                    [&](const auto& path) { return workspace.probe(path); });
+                if (selected.source == gog::Source::ambiguous ||
+                    selected.source == gog::Source::unreadable) {
+                    startup.log("GOG: ambiguous media or failed installer probe");
+                    std::cerr << "Cannot select a unique supported installation source.\n";
+                    return 2;
+                }
+                if (selected.source == gog::Source::gog) {
+                    startup.log("GOG: recognized product 1207658940");
+                    const auto staging = startup.root() / "game.installing";
+                    const auto pending_state = startup.root() / "state.installing";
+                    if (fs::exists(staging) || fs::is_symlink(staging) ||
+                        fs::exists(pending_state) || fs::is_symlink(pending_state))
+                        throw std::runtime_error("previous installation staging exists; no overwrite");
+                    // Source archives are kept intact. No CD EXE replacement
+                    // or CD audio initialization is applied to this edition.
+                    std::cout << "Extracting and verifying original GOG archives...\n";
+                    const auto payload = workspace.extract(selected.path);
+                    try {
+                        gog::stage_payload(payload, staging);
+                        synchronize_rayman2_ubi_ini(staging, startup);
+                        gog::write_receipt(staging);
+                        copy_bootstrap_files(root, staging);
+                        std::string problem;
+                        if (!gog::verify_receipt(staging, problem))
+                            throw std::runtime_error("GOG staging verification failed: " + problem);
+                        publish_installation(root, staging);
+                    } catch (...) {
+                        std::error_code ignored;
+                        fs::remove_all(staging, ignored);
+                        fs::remove_all(pending_state, ignored);
+                        throw;
+                    }
+                    if (verify_installation(startup) != 0) return 2;
+                    startup.log("AUTO-INSTALL: GOG assets and SHA256 receipt published");
+                    std::cout << "GOG installation verified. Original setup files preserved.\n";
+                    if (install_only) return 0;
+                    startup.log("GOG: runtime profile not yet enabled; game not launched");
+                    std::cerr << "GOG runtime validation is pending.\n";
+                    return 2;
+                }
+            }
+        }
         if (candidates.empty()) {
             startup.log("AUTO: no installed game and no adjacent ISO/CUE media");
             std::cerr << "No installed game or CD image. Place one .iso or .cue beside "
