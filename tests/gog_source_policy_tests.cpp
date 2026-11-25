@@ -1,4 +1,5 @@
 #include "rayman2fix/gog_offline.hpp"
+#include "rayman2fix/gog_hook_diagnostics.hpp"
 #include "rayman2fix/sha256.hpp"
 #include <chrono>
 #include <fstream>
@@ -205,6 +206,39 @@ int main(int argc, char** argv) {
         }
         require(!fs::exists(dir / "gog.installing"), "extractor workspace cleaned");
 #endif
+        // Synthetic PE32 with one file-backed executable section; no game
+        // code or executable contents are needed to test the RVA mapper.
+        std::vector<unsigned char> pe(1024);
+        auto put16 = [&](std::size_t off, unsigned v) {
+            pe[off]=static_cast<unsigned char>(v);
+            pe[off+1]=static_cast<unsigned char>(v>>8);
+        };
+        auto put32 = [&](std::size_t off, unsigned v) {
+            put16(off,v); put16(off+2,v>>16);
+        };
+        put16(0,0x5a4d); put32(0x3c,0x80);
+        put32(0x80,0x4550); put16(0x84,0x14c); put16(0x86,1);
+        put32(0x88,0x3807B68B); put16(0x94,0xe0);
+        put16(0x98,0x10b); put32(0x98+28,0x400000);
+        put32(0x98+56,0x1D7000);
+        constexpr std::size_t sec=0x98+0xe0;
+        put32(sec+12,0x22000); put32(sec+16,512);
+        put32(sec+20,512); put32(sec+36,0x60000020);
+        pe[512+8]=0x83; pe[512+9]=0xec;
+        const g::HookSignature fake{"synthetic",0x22008,{0x83,0xec}};
+        const g::PeDiagnostic image(pe);
+        require(image.timestamp()==0x3807B68B && image.image_size()==0x1D7000 &&
+                image.image_base()==0x400000, "PE32 identity");
+        require(image.check(fake)=="match", "file-backed signature");
+        require(image.check({"changed",0x22008,{0x90,0x90}})=="mismatch", "signature mismatch");
+        require(image.check({"absent",0x50000,{0x90}})=="not-file-backed", "unmapped signature");
+        put32(sec+36,0x40000040);
+        require(g::PeDiagnostic(pe).check(fake)=="non-executable", "data not code");
+        pe.resize(64);
+        bool malformed = false;
+        try { (void)g::PeDiagnostic(pe); }
+        catch (const std::runtime_error&) { malformed = true; }
+        require(malformed, "truncated PE refused");
         std::cout << "GOG source policy OK\n";
         return 0;
     } catch (const std::exception& e) {
