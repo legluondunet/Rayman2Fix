@@ -476,11 +476,7 @@ int run_automatic(Startup& startup, bool install_only) {
                 std::cout << "Installation verified. Game not launched (--install-only).\n";
                 return 0;
             }
-            if (gog::has_receipt(root)) {
-                startup.log("GOG: runtime profile not yet enabled; game not launched");
-                std::cerr << "GOG installation verified; runtime validation is pending.\n";
-                return 2;
-            }
+            if (gog::has_receipt(root)) return launch_verified_game(startup);
             return report_runtime_status(root, startup);
         }
 
@@ -533,9 +529,7 @@ int run_automatic(Startup& startup, bool install_only) {
                     startup.log("AUTO-INSTALL: GOG assets and SHA256 receipt published");
                     std::cout << "GOG installation verified. Original setup files preserved.\n";
                     if (install_only) return 0;
-                    startup.log("GOG: runtime profile not yet enabled; game not launched");
-                    std::cerr << "GOG runtime validation is pending.\n";
-                    return 2;
+                    return launch_verified_game(startup);
                 }
             }
         }
