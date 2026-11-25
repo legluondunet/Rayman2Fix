@@ -1,4 +1,5 @@
-#include "rayman2fix/gog_extract_policy.hpp"
+#include "rayman2fix/gog_extractor.hpp"
+#include "rayman2fix/sha256.hpp"
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -9,7 +10,12 @@ namespace fs = std::filesystem;
 static void require(bool ok, const char* message) {
     if (!ok) throw std::runtime_error(message);
 }
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 4 && std::string(argv[1]) == "--synthetic-child") {
+        std::cout << argv[2] << '|' << argv[3];
+        std::cerr << "synthetic stderr";
+        return 7;
+    }
     try {
         const fs::path french = "setup_rayman2_french_86383.exe";
         const fs::path renamed = "renamed package.EXE";
@@ -78,6 +84,31 @@ int main() {
         require(g::has_required_files(core), "core layout");
         core.erase("dll/snd_cpa.ini");
         require(!g::has_required_files(core), "reject incomplete native audio");
+        const auto self = fs::absolute(fs::u8path(argv[0]));
+        const auto capture = dir / "capture";
+        fs::create_directory(capture);
+        bool bad_pin = false;
+        try {
+            (void)g::run_verified_extractor(self, std::string(64, '0'), {}, capture,
+                                             std::chrono::seconds(5));
+        } catch (const std::runtime_error&) { bad_pin = true; }
+        require(bad_pin && fs::is_empty(capture), "bad dependency hash refuses before process");
+#ifdef _WIN32
+        const auto child = dir / "trusted child.exe";
+        fs::copy_file(self, child);
+        const auto result = g::run_verified_extractor(child, r2fix::sha256_file(child),
+            {L"--synthetic-child", L"argument with spaces", L"slash\\"}, capture,
+            std::chrono::seconds(15));
+        require(result.exit_code == 7, "child exit code");
+        require(result.output == "argument with spaces|slash\\", "child arguments and stdout");
+        require(result.errors == "synthetic stderr", "separate stderr");
+        bool collision = false;
+        try {
+            (void)g::run_verified_extractor(child, r2fix::sha256_file(child),
+                    {L"--synthetic-child"}, capture, std::chrono::seconds(5));
+        } catch (const std::runtime_error&) { collision = true; }
+        require(collision, "capture must not overwrite");
+#endif
         std::cout << "GOG source policy OK\n";
         return 0;
     } catch (const std::exception& e) {
