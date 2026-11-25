@@ -10,6 +10,7 @@
 #include "rayman2fix/game_launch.hpp"
 #include "rayman2fix/game_config.hpp"
 #include "rayman2fix/gog_offline.hpp"
+#include "rayman2fix/gog_hook_diagnostics.hpp"
 #include "rayman2fix/startup.hpp"
 
 #include <algorithm>
@@ -513,6 +514,8 @@ int run_automatic(Startup& startup, bool install_only) {
                     const auto payload = workspace.extract(selected.path);
                     try {
                         gog::stage_payload(payload, staging);
+                        for (const auto& line : gog::hook_diagnostics(staging / "rayman2.exe"))
+                            startup.log(line);
                         synchronize_rayman2_ubi_ini(staging, startup);
                         gog::write_receipt(staging);
                         copy_bootstrap_files(root, staging);
