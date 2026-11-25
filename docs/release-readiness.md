@@ -16,15 +16,22 @@ public release.
 
 ## Remaining priorities
 
-1. #45 — confirm very early Jail_20 input on native Windows, including
-   the queued-before-Playing case if reproducible. #46 is already merged;
+1. #45 — investigate very early Jail_20 input under Wine if reproducible,
+   including the queued-before-Playing case. #46 is already merged;
    normal later skips have passed. Do not add speculative delays.
 2. Targeted controller tests: jump/surface and target/dive in an actual
    swimming scene, and world-knowledge versus Murfy in eligible contexts.
    Keep the pending markers until the actual native effect is confirmed.
-   Check native Windows gameplay and broader controller compatibility.
+   Validate these behaviors under Wine with the available controllers.
 3. Review supported CD editions, installation/launch, source availability,
    notices and release readiness. No commercial assets are distributed;
    the approved local executable requirement remains documented.
+
+## Platform validation policy
+
+The maintainer has no native Windows computer available. Native Windows
+hardware/gameplay testing is deferred to potential community testers and
+is not a release prerequisite. Continue Windows x86 automated CI tests;
+report native Windows gameplay coverage as incomplete, not validated.
 
 No public release is authorized by these engineering milestones alone.
