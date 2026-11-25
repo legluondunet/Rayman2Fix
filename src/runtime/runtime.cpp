@@ -5392,14 +5392,19 @@ r2fix::PadContext sdl_native_context() noexcept {
        intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
        read_u8(base+0xB9BC8u,pause_flag) && !pause_flag)
         return PadContext::world_map;
-    // First playable-scene test only. Never reinterpret the introductory
-    // scene, loading, or an unverified pause as gameplay.
-    bool handover=false;
-    if(r2fix::is_first_playable_level(level) &&
-       intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
-       read_u8(base+0xB9BC8u,pause_flag) && !pause_flag &&
-       g_progress_words && game_story_bit(g_progress_words,kLearnHandoverBit,handover) && handover)
-        return PadContext::gameplay;
+    // Ordinary gameplay must not depend on the Learn_10 intro handover.
+    // Learn_30 is the exact playable level confirmed by the owner log
+    // 20261125-035419 (including a native ESC menu and return to play).
+    // Keep unknown levels fail-closed until their native context is verified.
+    if(intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
+       read_u8(base+0xB9BC8u,pause_flag) && !pause_flag) {
+        if(_stricmp(level,"learn_30")==0)
+            return PadContext::gameplay;
+        bool handover=false;
+        if(r2fix::is_first_playable_level(level) &&
+           g_progress_words && game_story_bit(g_progress_words,kLearnHandoverBit,handover) && handover)
+            return PadContext::gameplay;
+    }
     return PadContext::inactive;
 }
 std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept {
@@ -5712,10 +5717,10 @@ void install_ipt_gameplay_hooks() {
     // All three sites can occupy the same page. Restore in reverse order.
     for(unsigned i=3u;i>0;--i) { DWORD ignored=0; VirtualProtect(base+sites[i-1].rva,5,prot[i-1],&ignored); }
     g_ipt_hooks_installed=true;
-    log_line("RUNTIME-SDL3: IPT-hooks-installed=1 predicate+two-analog-consumers scope=learn10-handover");
+    log_line("RUNTIME-SDL3: IPT-hooks-installed=1 predicate+two-analog-consumers scope=verified-playable-levels");
 }
 
-// First scoped native routes: authenticated MENU/VIDEO, Pause and Learn_10.
+// Scoped native routes: authenticated MENU/VIDEO, Pause, Mapmonde and playable levels.
 void poll_sdl3_native() noexcept {
     static r2fix::SdlGamepads pads;
     static r2fix::PadTransitionGate gate;
