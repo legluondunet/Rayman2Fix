@@ -43,6 +43,9 @@ struct SdlGamepads::Api {
     bool (__cdecl* connected)(void*) = nullptr;
     std::uint32_t (__cdecl* id)(void*) = nullptr;
     int (__cdecl* type)(void*) = nullptr;
+    const char* (__cdecl* name)(void*) = nullptr;
+    std::uint16_t (__cdecl* vendor)(void*) = nullptr;
+    std::uint16_t (__cdecl* product)(void*) = nullptr;
     std::int16_t (__cdecl* axis)(void*, int) = nullptr;
     bool (__cdecl* button)(void*, int) = nullptr;
     ~Api() {
@@ -89,6 +92,9 @@ bool SdlGamepads::initialize(const std::filesystem::path& path,
             !bind(dll, api->connected, "SDL_GamepadConnected") ||
             !bind(dll, api->id, "SDL_GetGamepadID") ||
             !bind(dll, api->type, "SDL_GetGamepadType") ||
+            !bind(dll, api->name, "SDL_GetGamepadName") ||
+            !bind(dll, api->vendor, "SDL_GetGamepadVendor") ||
+            !bind(dll, api->product, "SDL_GetGamepadProduct") ||
             !bind(dll, api->axis, "SDL_GetGamepadAxis") ||
             !bind(dll, api->button, "SDL_GetGamepadButton") ||
             api->version() != kVersion)
@@ -112,76 +118,95 @@ PadSample SdlGamepads::poll(bool foreground, PadContext context) noexcept {
     PadSample sample{};
     if (!api_ || owner_ != GetCurrentThreadId()) return sample;
     api_->update();
-    if (pad_ && !api_->connected(pad_)) {
-        api_->close(pad_);
-        pad_ = nullptr;
-        family_ = PadLabelFamily::generic;
-        scan_due_ = true;
-        if (logger_) logger_("RUNTIME-SDL3: disconnected=1");
-        return sample; // publish a neutral frame before a new owner
+    bool owner_lost=false;
+    for(auto& slot:slots_)if(slot.pad&&!api_->connected(slot.pad)) {
+        if(slot.pad==pad_) {
+            pad_=nullptr;owner_lost=true;family_=PadLabelFamily::generic;
+            if(logger_)logger_("RUNTIME-SDL3: disconnected=1");
+        }
+        api_->close(slot.pad);slot={};scan_due_=true;
     }
-    const DWORD now = GetTickCount();
-    if (!pad_ && (scan_due_ || static_cast<LONG>(now - next_scan_) >= 0)) {
-        scan_due_ = false;
-        next_scan_ = now + 500;
-        int count = 0;
-        auto* ids = api_->ids(&count);
-        if (ids) {
-            if (count > 0 && count <= 256) {
-                std::sort(ids, ids + count);
-                for (int i = 0; i < count && !pad_; ++i) {
-                    if (!ids[i]) continue;
-                    void* candidate = api_->open(ids[i]);
-                    if (candidate && api_->connected(candidate) && api_->id(candidate))
-                        pad_ = candidate;
-                    else if (candidate) api_->close(candidate);
+    const DWORD now=GetTickCount();
+    if(scan_due_||static_cast<LONG>(now-next_scan_)>=0) {
+        scan_due_=false;next_scan_=now+500;
+        int count=0;auto* ids=api_->ids(&count);
+        if(ids) {
+            if(count>0&&count<=256) {
+                std::sort(ids,ids+count);
+                for(int i=0;i<count;++i) {
+                    if(!ids[i])continue;
+                    bool known=false;
+                    for(auto& slot:slots_)if(slot.pad&&api_->id(slot.pad)==ids[i])known=true;
+                    if(known)continue;
+                    auto free=std::find_if(slots_.begin(),slots_.end(),[](const Slot& v){return !v.pad;});
+                    if(free==slots_.end())break;
+                    void* candidate=api_->open(ids[i]);
+                    if(candidate&&api_->connected(candidate)&&api_->id(candidate)) {
+                        free->pad=candidate;free->armed=false;
+                        if(logger_) {
+                            char msg[220]{};
+                            const char* name=api_->name(candidate);
+                            std::snprintf(msg,sizeof(msg),
+                                "RUNTIME-SDL3: device-discovered id=%u type=%d vid=%04x pid=%04x name=%.80s",
+                                unsigned(api_->id(candidate)),api_->type(candidate),
+                                unsigned(api_->vendor(candidate)),unsigned(api_->product(candidate)),name?name:"unknown");
+                            logger_(msg);
+                        }
+                    }else if(candidate)api_->close(candidate);
                 }
             }
             api_->release(ids);
         }
-        if (pad_) {
-            const int type = api_->type(pad_);
-            family_ = (type == 2 || type == 3) ? PadLabelFamily::xbox :
-                      (type >= 4 && type <= 6) ? PadLabelFamily::playstation :
-                      PadLabelFamily::generic;
-            if (logger_) {
-                char msg[160]{};
-                std::snprintf(msg, sizeof(msg), "RUNTIME-SDL3: connected=1 id=%u type=%d family=%s",
-                    unsigned(api_->id(pad_)), type,
-                    family_ == PadLabelFamily::xbox ? "xbox" :
-                    family_ == PadLabelFamily::playstation ? "playstation" : "generic");
-                logger_(msg);
-            }
+    }
+    if(owner_lost)return sample; // neutral release before new owner
+    const auto read_pad=[&](void* pad){
+        PadSample q{};
+        if(!pad)return q;
+        q.connected=true;q.device_id=api_->id(pad);
+        q.foreground=foreground;q.context=context;
+        if(!foreground)return q;
+        q.left_x=api_->axis(pad,LeftX);q.left_y=api_->axis(pad,LeftY);
+        q.right_x=api_->axis(pad,RightX);
+        q.left_trigger=api_->axis(pad,LT);q.right_trigger=api_->axis(pad,RT);
+        q.south=api_->button(pad,South);q.east=api_->button(pad,East);
+        q.west=api_->button(pad,West);q.north=api_->button(pad,North);
+        q.start=api_->button(pad,Start);
+        q.left_shoulder=api_->button(pad,LeftShoulder);q.right_shoulder=api_->button(pad,RightShoulder);
+        q.dpad_up=api_->button(pad,Up);q.dpad_down=api_->button(pad,Down);
+        q.dpad_left=api_->button(pad,Left);q.dpad_right=api_->button(pad,Right);
+        return q;
+    };
+    void* previous=pad_;
+    if(!pad_)for(auto& slot:slots_)if(slot.pad){pad_=slot.pad;break;}
+    sample=read_pad(pad_);
+    const bool owner_active=pad_physically_active(sample);
+    bool switched=false;
+    for(auto& slot:slots_)if(slot.pad) {
+        auto q=slot.pad==pad_?sample:read_pad(slot.pad);
+        const bool active=pad_physically_active(q);
+        if(slot.pad!=pad_&&!switched&&pad_may_take_owner(foreground,owner_active,slot.armed,active)) {
+            pad_=slot.pad;sample=q;switched=true;
+        }
+        slot.armed=foreground&&!active;
+    }
+    if(pad_&&pad_!=previous) {
+        const int type=api_->type(pad_);
+        family_=(type==2||type==3)?PadLabelFamily::xbox:
+            (type>=4&&type<=6)?PadLabelFamily::playstation:PadLabelFamily::generic;
+        if(logger_) {
+            char msg[180]{};
+            std::snprintf(msg,sizeof(msg),"RUNTIME-SDL3: connected=1 id=%u type=%d family=%s owner-switch=%u",
+                unsigned(api_->id(pad_)),type,family_==PadLabelFamily::xbox?"xbox":
+                family_==PadLabelFamily::playstation?"playstation":"generic",unsigned(previous!=nullptr));
+            logger_(msg);
         }
     }
-    if (!pad_) return sample;
-    sample.connected = true;
-    sample.device_id = api_->id(pad_);
-    sample.foreground = foreground;
-    sample.context = context;
-    if (!foreground) return sample; // no background actions
-    sample.left_x = api_->axis(pad_, LeftX);
-    sample.left_y = api_->axis(pad_, LeftY);
-    sample.right_x = api_->axis(pad_, RightX);
-    sample.left_trigger = api_->axis(pad_, LT);
-    sample.right_trigger = api_->axis(pad_, RT);
-    sample.south = api_->button(pad_, South);
-    sample.east = api_->button(pad_, East);
-    sample.west = api_->button(pad_, West);
-    sample.north = api_->button(pad_, North);
-    sample.start = api_->button(pad_, Start);
-    sample.left_shoulder = api_->button(pad_, LeftShoulder);
-    sample.right_shoulder = api_->button(pad_, RightShoulder);
-    sample.dpad_up = api_->button(pad_, Up);
-    sample.dpad_down = api_->button(pad_, Down);
-    sample.dpad_left = api_->button(pad_, Left);
-    sample.dpad_right = api_->button(pad_, Right);
     return sample;
 }
 
 void SdlGamepads::shutdown() noexcept {
     if (!api_ || owner_ != GetCurrentThreadId()) return;
-    if (pad_) api_->close(pad_);
+    for(auto& slot:slots_){if(slot.pad)api_->close(slot.pad);slot={};}
     pad_ = nullptr;
     delete api_;
     api_ = nullptr;

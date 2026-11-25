@@ -20,16 +20,27 @@ inline PadInfoPlacement pad_info_placement(float scale) noexcept {
 // log the first glyph is at x=19.30..23.50, y=24.97..30.03.
 inline bool pad_info_native_title(bool pause,float& x0,float& y0,float& x1,float& y1) noexcept {
     if(!std::isfinite(x0)||!std::isfinite(x1)||!std::isfinite(y0)||!std::isfinite(y1)||
-       x0<12.f||x1>88.f||y0<(pause?12.f:16.f)||y1>32.f||
+       x0<12.f||x1>88.f||y0<(pause?12.f:7.f)||y1>32.f||
        x1<=x0||x1-x0>10.f||y1<=y0||y1-y0>9.f)return false;
     y0=20.f;y1=25.f;return true;
 }
 // Candidate common header companion position, above the panel. Only
 // the two established 3D menu-actor source routes and center band.
-inline bool align_pad_info_companion(bool page,bool viewport,unsigned route,float x,float& y,float depth) noexcept {
+inline bool align_pad_info_companion(bool page,bool viewport,unsigned route,float x,float& y,float depth,
+                                     bool pause=false) noexcept {
     if(!page||!viewport||route>1u||!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(depth)||
-       x<0.40f||x>0.64f||y<0.34f||y>0.64f||depth<0.f||depth>0.25f)return false;
-    y-=0.18f;return true;
+       x<0.40f||x>0.64f||depth<0.f||depth>0.25f)return false;
+    if(pause) {
+        if(y<0.34f||y>0.64f)return false;
+        y-=0.18f;return true;
+    }
+    // Original MENU animation spans the old lower header position.
+    // A fixed subtraction left its center on the panel edge and
+    // discontinuously stopped lifting when the actor left the old band.
+    // Compress only the centered native actor's vertical travel.
+    if(y<0.16f||y>0.84f)return false;
+    y=0.29f+(y-0.5f)*0.12f;
+    return true;
 }
 constexpr PadInfoRect kPadInfoStatus{12,8,908,42};
 constexpr PadInfoRect kPadInfoBack{675,380,908,412};

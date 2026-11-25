@@ -184,6 +184,13 @@ inline bool pad_physically_active(const PadSample& s) noexcept {
         x*x + y*y > std::int64_t(kPadAxisDeadzone)*kPadAxisDeadzone;
 }
 
+// Controller ownership changes only on an observed neutral-to-active
+// transition from another device while the current owner is idle.
+// No simultaneous input merging or hotplug steal from a held owner.
+constexpr bool pad_may_take_owner(bool foreground,bool owner_active,
+                                  bool candidate_armed,bool candidate_active) noexcept {
+    return foreground&&!owner_active&&candidate_armed&&candidate_active;
+}
 // One owner, one semantic context. Require neutral physical controls after
 // attach, focus restoration, owner change and context change; neither a held
 // confirmation nor an ignored button nor analog motion may cross the boundary.

@@ -488,3 +488,23 @@ shows GLI Frame x0..100/y0..100; preserve that full-screen source through
 the native HUD hook, including downstream double-squeeze guard. Original
 material and fade remain untouched; other geometry and levels unaffected.
 This is a candidate visual fix, not yet confirmed in the game.
+
+
+## Owner 20261125-053902: follow-up
+
+The 88ab00fb log confirms the Mapmonde full-width route and the panel
+squeeze. Pause header/luciole visually good, MENU title absent and
+butterfly intermittently behind the panel. Original MENU script CONTROL
+handle 373 target row uses V13[0]=150, V13[1]=500; allow the native 15%
+heading band and retain the native font, with bounded glyph diagnostics.
+MENU companion travel is compressed around y=.29 instead of subtracting
+.18 only on the old narrow band. Preserve Pause lift unchanged.
+The only Xbox type2 device in the provided log appears at the end in
+MENU, after id1 PlayStation disconnects; no Xbox gameplay sample.
+Do not swap SDL South/East globally. Enumerate up to eight SDL devices;
+an idle owner can yield to a previously neutral controller's fresh
+physical activity. The existing gate releases old inputs and requires
+neutral on handover before accepting gameplay; no simultaneous merge.
+Record device name/VID/PID and independent South/East/Start edge traces
+per device. Native legacy input interference remains a hypothesis, and
+this change does not disable the original DirectInput device globally.

@@ -5906,6 +5906,21 @@ void poll_sdl3_native() noexcept {
         boundary_focus=foreground;
         boundary_context=context;
     }
+    // Independent per-device edge budget. The original 128 motion/menu
+    // samples were exhausted before the EasyMSX gameplay report.
+    static std::uint32_t button_device=0,button_mask=0;
+    static unsigned button_reports=0;
+    if(button_device!=sample.device_id){button_device=sample.device_id;button_mask=0;button_reports=0;}
+    const std::uint32_t raw_buttons=(sample.south?1u:0u)|(sample.east?2u:0u)|
+        (sample.start?4u:0u)|(sample.west?8u:0u)|(sample.north?16u:0u);
+    if(g_log && sample.device_id && raw_buttons!=button_mask && button_reports<256u) {
+        char msg[200]{};
+        std::snprintf(msg,sizeof(msg),"RUNTIME-SDL3-BUTTONS: id=%u context=%u scene=%u south=%u east=%u start=%u west=%u north=%u native-actions=0x%04x",
+            unsigned(sample.device_id),unsigned(context),unsigned(scene),unsigned(sample.south),
+            unsigned(sample.east),unsigned(sample.start),unsigned(sample.west),unsigned(sample.north),unsigned(transitions.held));
+        log_line(msg);++button_reports;
+    }
+    button_mask=raw_buttons;
     observe_native_ipt_readonly(context);
     g_sdl_input_context = context;
     g_sdl_input_scene = scene;
@@ -6408,7 +6423,18 @@ void __cdecl native_2d_percent_sprite(void* viewport,
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
     if(producer==Native2DProducer::Glyph && controller_info_owns_page()) {
         // Reuse the verified native title band; never affect other pages.
-        if(!r2fix::pad_info_native_title(g_controller_drawn_scope==2,xmin,ymin,xmax,ymax))return;
+        const float original_ymin=ymin,original_ymax=ymax;
+        const bool title=r2fix::pad_info_native_title(g_controller_drawn_scope==2,xmin,ymin,xmax,ymax);
+        static unsigned accepted[2]{},rejected[2]{};
+        auto& count=title?accepted[g_controller_drawn_scope-1]:rejected[g_controller_drawn_scope-1];
+        if(g_log&&count<12u) {
+            ++count;
+            char msg[200]{};
+            std::snprintf(msg,sizeof(msg),"RUNTIME-CONTROLLER-MENU: native-glyph scope=%d title=%u x=%.2f..%.2f y=%.2f..%.2f",
+                g_controller_drawn_scope,unsigned(title),double(xmin),double(xmax),double(original_ymin),double(original_ymax));
+            log_line(msg);
+        }
+        if(!title)return;
     }
 #endif
     if(producer==Native2DProducer::Glyph &&
@@ -6742,8 +6768,9 @@ void __cdecl centered_native_screen_to_vertex(
             // world rendering retain their original source geometry.
             const float original_y=y;
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
-            if(r2fix::align_pad_info_companion(controller_info_scope()!=0,
-                    viewport==g_approved_overlay_viewport,route,before,y,depth)) {
+            const int controller_scope=controller_info_scope();
+            if(r2fix::align_pad_info_companion(controller_scope!=0,
+                    viewport==g_approved_overlay_viewport,route,before,y,depth,controller_scope==2)) {
                 static unsigned reports=0;
                 if(reports++<8u){
                     char msg[180]{};
