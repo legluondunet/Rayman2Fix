@@ -40,7 +40,9 @@ inline bool align_pad_info_companion(bool page,bool viewport,unsigned route,floa
     // discontinuously stopped lifting when the actor left the old band.
     // Compress only the centered native actor's vertical travel.
     if(y<0.16f||y>0.84f)return false;
-    y=0.29f+(y-0.5f)*0.12f;
+    // The 063547 capture places the butterfly across the title at y=.29.
+    // Reserve a separate header band above the native title (20..25%).
+    y=0.145f+(y-0.5f)*0.04f;
     return true;
 }
 constexpr PadInfoRect kPadInfoStatus{12,8,908,42};
@@ -59,19 +61,48 @@ constexpr PadHardwareLayout pad_hardware_layout(PadLabelFamily family) noexcept 
 }
 constexpr std::array<PadInfoCallout,11> pad_info_callouts(PadLabelFamily family) noexcept {
     const auto hw=pad_hardware_layout(family);
+    const PadInfoPoint move{hw.left_stick.x-23,hw.left_stick.y};
+    const PadInfoPoint up{hw.dpad.x-10,hw.dpad.y-22};
+    const PadInfoPoint down{hw.dpad.x-10,hw.dpad.y+22};
+    const bool xbox=family==PadLabelFamily::xbox;
     return {{
-        {6,{12,52,252,104},{338,94},true},
-        {3,{12,116,252,168},{330,125},true},
-        {8,{12,180,252,232},{hw.dpad.x,hw.dpad.y-20},true},
-        {9,{12,244,252,296},{hw.dpad.x,hw.dpad.y+20},true},
-        {0,{12,308,252,360},hw.left_stick,true},
-        {7,{668,52,908,101},{582,94},false},
-        {10,{668,104,908,153},hw.start,false},
-        {4,{668,156,908,205},hw.face[3],false},
-        {2,{668,208,908,257},hw.face[1],false},
-        {1,{668,260,908,309},hw.face[0],false},
-        {5,{668,312,908,361},hw.right_stick,false},
+        {6,{12,52,252,104},{315,94},true},
+        {3,{12,116,252,168},{307,125},true},
+        {xbox?0u:8u,{12,180,252,232},xbox?move:up,true},
+        {xbox?8u:9u,{12,244,252,296},xbox?up:down,true},
+        {xbox?9u:0u,{12,308,252,360},xbox?down:move,true},
+        {7,{668,52,908,101},{605,94},false},
+        {10,{668,104,908,153},{hw.start.x+19,hw.start.y},false},
+        {4,{668,156,908,205},{hw.face[3].x+13,hw.face[3].y},false},
+        {2,{668,208,908,257},{hw.face[1].x+13,hw.face[1].y},false},
+        {1,{668,260,908,309},{hw.face[0].x+13,hw.face[0].y},false},
+        {5,{668,312,908,361},{hw.right_stick.x+23,hw.right_stick.y},false},
     }};
+}
+constexpr PadInfoPoint pad_callout_end(PadInfoCallout a) noexcept {
+    return {a.left?a.box.right+4:a.box.left-4,(a.box.top+a.box.bottom)/2};
+}
+constexpr int pad_turn(PadInfoPoint a,PadInfoPoint b,PadInfoPoint c) noexcept {
+    return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+}
+constexpr bool pad_between(int a,int b,int c) noexcept {
+    return (a<=c&&c<=b)||(b<=c&&c<=a);
+}
+constexpr bool pad_on_segment(PadInfoPoint a,PadInfoPoint b,PadInfoPoint c) noexcept {
+    return !pad_turn(a,b,c)&&pad_between(a.x,b.x,c.x)&&pad_between(a.y,b.y,c.y);
+}
+constexpr bool pad_segments_intersect(PadInfoPoint a,PadInfoPoint b,
+                                      PadInfoPoint c,PadInfoPoint d) noexcept {
+    const int p=pad_turn(a,b,c),q=pad_turn(a,b,d),r=pad_turn(c,d,a),s=pad_turn(c,d,b);
+    return ((p<0&&q>0)||(p>0&&q<0))&&((r<0&&s>0)||(r>0&&s<0)) ||
+        pad_on_segment(a,b,c)||pad_on_segment(a,b,d)||pad_on_segment(c,d,a)||pad_on_segment(c,d,b);
+}
+constexpr bool pad_callouts_disjoint(PadLabelFamily family) noexcept {
+    const auto all=pad_info_callouts(family);
+    for(unsigned i=0;i<all.size();++i)for(unsigned j=0;j<i;++j)
+        if(pad_segments_intersect(all[i].anchor,pad_callout_end(all[i]),
+                                  all[j].anchor,pad_callout_end(all[j])))return false;
+    return true;
 }
 constexpr bool pad_info_inside(PadInfoRect r) noexcept {
     return r.left>=0 && r.top>=0 && r.right<=kPadInfoWidth &&
@@ -100,7 +131,7 @@ constexpr bool pad_info_layout_valid(PadLabelFamily family=PadLabelFamily::gener
         for(auto r:fixed)if(pad_info_overlap(a.box,r))return false;
         for(unsigned j=0;j<i;++j)if(pad_info_overlap(a.box,callouts[j].box))return false;
     }
-    return seen==0x7ffu;
+    return seen==0x7ffu && pad_callouts_disjoint(family);
 }
 static_assert(pad_info_layout_valid() && pad_info_layout_valid(PadLabelFamily::xbox) &&
     pad_info_layout_valid(PadLabelFamily::playstation),"all controller diagrams fit 4:3");

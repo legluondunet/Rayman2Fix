@@ -544,3 +544,17 @@ symmetric PlayStation sticks, Start/Options upper right, Back/Share
 upper left (drawn only, no new gameplay binding), matching callout
 anchors and French PlayStation button names. B/Rond still exits.
 No change to the native menu companion positioning in this revision.
+
+
+## Owner 20261125-063547: controller artwork refinement
+
+Build 6458ae3d shows the title and family-specific panel; log confirms
+first Xbox South handover delivered to MENU without Start (219–227).
+The source butterfly y=.288–.291 overlaps the title in the supplied
+capture. Move only MENU controller companion to y=.145 with narrow
+animation, preserving pause and other menus. The actual on-screen
+bounds still require owner validation. Redraw both original controller
+silhouettes using cubic curves, layered stick caps, rounded shoulders
+and Xbox button colors. Use family-specific label order (Xbox movement
+above D-pad actions), edge anchors and a compile-time segment intersection
+check across every callout. No new gamepad mappings, assets or dependencies.

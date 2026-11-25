@@ -6,7 +6,7 @@ namespace r2fix {
 namespace {
 constexpr COLORREF bg=RGB(15,29,52), blue=RGB(75,149,237),
                    ink=RGB(235,243,255), muted=RGB(169,197,224),
-                   body=RGB(38,60,89), dark=RGB(17,29,46);
+                   body=RGB(57,75,100), dark=RGB(19,29,43);
 struct GdiObject {
     HGDIOBJ handle;
     ~GdiObject(){if(handle)DeleteObject(handle);}
@@ -54,6 +54,46 @@ void line(HDC dc,int x1,int y1,int x2,int y2){
 void circle(HDC dc,int x,int y,int radius){
     Ellipse(dc,x-radius,y-radius,x+radius+1,y+radius+1);
 }
+// Smooth, original silhouettes using cubic curves. Separate Xbox and
+// PlayStation forms; no external artwork or trademarks in the geometry.
+bool draw_shell(HDC dc,PadLabelFamily family) {
+    const bool xbox=family==PadLabelFamily::xbox;
+    const POINT xbox_path[]={
+        {291,222},{293,171},{304,137},{329,116},
+        {347,99},{378,101},{400,115},
+        {422,130},{498,130},{520,115},
+        {542,101},{573,99},{591,116},
+        {616,137},{627,171},{629,222},
+        {634,264},{633,314},{611,337},
+        {592,357},{570,342},{550,321},
+        {537,307},{523,300},{504,300},
+        {480,300},{440,300},{416,300},
+        {397,300},{383,307},{370,321},
+        {350,342},{328,357},{309,337},
+        {287,314},{286,264},{291,222}
+    };
+    const POINT ps_path[]={
+        {292,219},{298,164},{309,128},{333,115},
+        {357,98},{391,104},{411,117},
+        {434,126},{486,126},{509,117},
+        {529,104},{563,98},{587,115},
+        {611,128},{622,164},{628,219},
+        {638,260},{628,314},{609,336},
+        {591,355},{568,346},{549,324},
+        {532,305},{511,299},{489,298},
+        {468,298},{452,298},{431,298},
+        {409,299},{388,305},{371,324},
+        {352,346},{329,355},{311,336},
+        {292,314},{282,260},{292,219}
+    };
+    const auto* pts=xbox?xbox_path:ps_path;
+    if(!BeginPath(dc))return false;
+    MoveToEx(dc,pts[0].x,pts[0].y,nullptr);
+    if(!PolyBezierTo(dc,pts+1,36)||!CloseFigure(dc)||!EndPath(dc)){
+        AbortPath(dc);return false;
+    }
+    return StrokeAndFillPath(dc)!=0;
+}
 bool label(HDC dc,const PadInfoView& v,unsigned row,PadInfoRect r,UINT align){
     const auto& item=v.rows[row];
     std::string action(item.action);
@@ -68,7 +108,11 @@ bool face(HDC dc,PadLabelFamily family){
     constexpr std::string_view ps[]{u8"\u00d7",u8"\u25cb",u8"\u25a1",u8"\u25b3"};
     bool ok=true;
     for(unsigned i=0;i<4;++i){
-        const auto p=points[i];circle(dc,p.x,p.y,13);
+        const auto p=points[i];
+        const COLORREF xbox_colors[]{RGB(50,129,74),RGB(166,55,58),RGB(45,98,164),RGB(171,135,40)};
+        GdiObject face_fill{CreateSolidBrush(family==PadLabelFamily::xbox?xbox_colors[i]:dark)};
+        if(!face_fill.handle)return false;
+        Selection face_brush(dc,face_fill.handle);circle(dc,p.x,p.y,13);
         const auto symbol=family==PadLabelFamily::xbox?xbox[i]:
                           family==PadLabelFamily::playstation?ps[i]:generic[i];
         if(family==PadLabelFamily::playstation){
@@ -99,32 +143,44 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
         Selection outline(dc,pen.handle), fill(dc,GetStockObject(HOLLOW_BRUSH));
         if(frame && !RoundRect(dc,0,0,kPadInfoWidth,kPadInfoHeight,24,24))return false;
         SetBkMode(dc,TRANSPARENT);
-        // Original vector silhouettes; no product artwork bundled.
         const auto hw=pad_hardware_layout(view.family);
         {
-            Selection shell_sel(dc,shell.handle);
-            if(view.family==PadLabelFamily::xbox){
-                POINT shape[]={{310,132},{321,108},{359,99},{412,119},{508,119},{561,99},
-                    {599,108},{610,132},{628,252},{624,310},{606,339},{582,346},
-                    {558,332},{522,297},{398,297},{362,332},{338,346},{314,339},{296,310},{292,252}};
-                if(!Polygon(dc,shape,int(sizeof(shape)/sizeof(shape[0]))))return false;
-            }else{
-                POINT shape[]={{310,130},{329,104},{389,100},{416,112},{504,112},
-                    {531,100},{591,104},{610,130},{628,252},{617,324},{591,345},
-                    {564,333},{531,297},{389,297},{356,333},{329,345},{303,324},{292,252}};
-                if(!Polygon(dc,shape,int(sizeof(shape)/sizeof(shape[0]))))return false;
-            }
+            GdiObject outer{CreatePen(PS_SOLID,2,RGB(135,176,212))},
+                skin{CreateSolidBrush(view.family==PadLabelFamily::xbox?RGB(65,83,108):RGB(44,56,78))};
+            if(!outer.handle||!skin.handle)return false;
+            Selection edge(dc,outer.handle),shell_sel(dc,skin.handle);
+            if(!draw_shell(dc,view.family))return false;
         }
+        // Recessed shoulder caps and subtle highlights, with the same
+        // coordinates shared by the callout contract.
         {
             Selection controls(dc,button.handle);
-            RoundRect(dc,315,81,361,108,9,9);RoundRect(dc,559,81,605,108,9,9);
-            RoundRect(dc,307,112,354,139,9,9);RoundRect(dc,566,112,613,139,9,9);
+            RoundRect(dc,315,81,361,108,14,14);RoundRect(dc,559,81,605,108,14,14);
+            RoundRect(dc,307,112,354,139,12,12);RoundRect(dc,566,112,613,139,12,12);
+            {
+                GdiObject shine{CreatePen(PS_SOLID,1,RGB(138,164,189))};
+                if(!shine.handle)return false;
+                Selection hl(dc,shine.handle);
+                line(dc,322,86,353,86);line(dc,566,86,597,86);
+                line(dc,314,117,346,117);line(dc,573,117,605,117);
+            }
             const auto d=hw.dpad;
             POINT cross[]={{d.x-10,d.y-30},{d.x+10,d.y-30},{d.x+10,d.y-10},{d.x+30,d.y-10},
                 {d.x+30,d.y+10},{d.x+10,d.y+10},{d.x+10,d.y+30},{d.x-10,d.y+30},
                 {d.x-10,d.y+10},{d.x-30,d.y+10},{d.x-30,d.y-10},{d.x-10,d.y-10}};
             Polygon(dc,cross,12);
-            for(auto stick:{hw.left_stick,hw.right_stick}){circle(dc,stick.x,stick.y,23);circle(dc,stick.x,stick.y,16);}
+            for(auto stick:{hw.left_stick,hw.right_stick}){
+                circle(dc,stick.x,stick.y,25);
+                GdiObject rim{CreateSolidBrush(RGB(80,96,117))}, cap{CreateSolidBrush(RGB(35,47,62))};
+                if(!rim.handle||!cap.handle)return false;
+                Selection ring(dc,rim.handle);circle(dc,stick.x,stick.y,21);
+                Selection grip(dc,cap.handle);circle(dc,stick.x,stick.y,17);
+                GdiObject highlight{CreatePen(PS_SOLID,1,RGB(151,178,202))};
+                if(!highlight.handle)return false;
+                Selection hi(dc,highlight.handle);
+                Arc(dc,stick.x-17,stick.y-17,stick.x+18,stick.y+18,
+                    stick.x+9,stick.y-15,stick.x-15,stick.y-9);
+            }
             if(view.family==PadLabelFamily::playstation)RoundRect(dc,432,117,488,145,8,8);
             else if(view.family==PadLabelFamily::xbox)circle(dc,460,131,10);
             for(auto key:{hw.back,hw.start})RoundRect(dc,key.x-19,key.y-10,key.x+20,key.y+11,7,7);
@@ -136,8 +192,8 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
         }
         bool ok=text_fit(dc,view.status,kPadInfoStatus,24,15,ink,true,DT_CENTER);
         for(const auto& a:pad_info_callouts(view.family)){
-            const int end=a.left?a.box.right+4:a.box.left-4;
-            const int y=(a.box.top+a.box.bottom)/2;
+            const auto endpoint=pad_callout_end(a);
+            const int end=endpoint.x,y=endpoint.y;
             line(dc,a.anchor.x,a.anchor.y,end,y);
             line(dc,end,y,end+(a.left?6:-6),y-4);
             line(dc,end,y,end+(a.left?6:-6),y+4);

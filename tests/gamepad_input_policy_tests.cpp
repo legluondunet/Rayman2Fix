@@ -158,6 +158,12 @@ int main() {
 
     check(pad_info_layout_valid() && pad_info_layout_valid(PadLabelFamily::xbox) &&
         pad_info_layout_valid(PadLabelFamily::playstation), "all controller callouts fit the 4:3 panel");
+    check(pad_callouts_disjoint(PadLabelFamily::xbox) &&
+          pad_callouts_disjoint(PadLabelFamily::playstation) &&
+          pad_callouts_disjoint(PadLabelFamily::generic),"no intersecting leader lines");
+    check(pad_segments_intersect({0,0},{10,10},{0,10},{10,0}) &&
+          !pad_segments_intersect({0,0},{10,0},{0,1},{10,1}),
+          "intersection detector rejects crossed lines");
     const auto xbox_hw=pad_hardware_layout(PadLabelFamily::xbox);
     const auto ps_hw=pad_hardware_layout(PadLabelFamily::playstation);
     check(xbox_hw.left_stick.y<xbox_hw.dpad.y && ps_hw.left_stick.y>ps_hw.dpad.y,
@@ -183,10 +189,10 @@ int main() {
     ty0=47.5f;ty1=52.5f;
     check(!pad_info_native_title(false,tx0,ty0,tx1,ty1),"calibration body glyph remains hidden");
     float cy=.5f;
-    check(align_pad_info_companion(true,true,0,.5f,cy,.015f)&&cy<.34f,
+    check(align_pad_info_companion(true,true,0,.5f,cy,.015f)&&cy>.13f&&cy<.16f,
           "native companion moves above panel");
     for(float y:{.16f,.33f,.34f,.54f,.65f,.84f}) {
-        check(align_pad_info_companion(true,true,0,.5f,y,.015f)&&y>.24f&&y<.34f,
+        check(align_pad_info_companion(true,true,0,.5f,y,.015f)&&y>.13f&&y<.16f,
               "continuous MENU companion travel remains above panel");
     }
     float pause_y=.54f;
