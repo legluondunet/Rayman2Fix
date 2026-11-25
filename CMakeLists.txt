@@ -24,6 +24,7 @@ add_executable(Rayman2Fix
   src/launcher/main.cpp
   src/launcher/auto_flow.cpp
   src/launcher/gog_extractor.cpp
+  src/launcher/gog_offline.cpp
   src/launcher/display.cpp
   src/launcher/extraction_console.cpp
   src/launcher/game_config.cpp
@@ -312,7 +313,7 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
-  add_executable(gog_source_policy_tests tests/gog_source_policy_tests.cpp src/launcher/gog_extractor.cpp)
+  add_executable(gog_source_policy_tests tests/gog_source_policy_tests.cpp src/launcher/gog_extractor.cpp src/launcher/gog_offline.cpp)
   target_link_libraries(gog_source_policy_tests PRIVATE rayman2_crypto)
   target_include_directories(gog_source_policy_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME gog-source-selection-policy COMMAND gog_source_policy_tests)
@@ -351,6 +352,8 @@ if(BUILD_TESTING)
   add_executable(auto_flow_tests
     tests/auto_flow_tests.cpp
     src/launcher/auto_flow.cpp
+    src/launcher/gog_extractor.cpp
+    src/launcher/gog_offline.cpp
     src/launcher/display.cpp
     src/launcher/extraction_console.cpp
     src/launcher/game_config.cpp
