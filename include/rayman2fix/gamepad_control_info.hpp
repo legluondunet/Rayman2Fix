@@ -120,11 +120,18 @@ constexpr PadInfoView make_pad_info_view(PadInfoLocale locale,bool connected,
     PadInfoView out{family, !connected?s.no_pad:
         family==PadLabelFamily::xbox?"Xbox":
         family==PadLabelFamily::playstation?"PlayStation":s.generic_pad,
-        s.back,family==PadLabelFamily::generic?s.generic_back:pad_back_label(family),
+        s.back,family==PadLabelFamily::generic?s.generic_back:
+            family==PadLabelFamily::playstation&&locale==PadInfoLocale::fr?"Rond":pad_back_label(family),
         s.pending,{},true};
     for(unsigned i=0;i<out.rows.size();++i) {
         auto control=family==PadLabelFamily::generic?s.generic_controls[i]:
             pad_control_label(kPadControlRows[i],family);
+        if(family==PadLabelFamily::playstation && locale==PadInfoLocale::fr){
+            if(i==1)control="Croix";
+            if(i==2)control="Rond";
+            if(i==3)control=u8"Carr\u00e9 / L1";
+            if(i==4)control="Triangle / R1";
+        }
         if(i==0)control=s.left_stick;
         if(i==5)control=s.right_stick;
         if(i==8)control=s.up;

@@ -156,7 +156,21 @@ int main() {
     check(!info.update(a).movement.x && !info.update(a).movement.x,
           "held analog cannot cross focus boundary");
 
-    check(pad_info_layout_valid(), "all controller callouts fit the 4:3 panel");
+    check(pad_info_layout_valid() && pad_info_layout_valid(PadLabelFamily::xbox) &&
+        pad_info_layout_valid(PadLabelFamily::playstation), "all controller callouts fit the 4:3 panel");
+    const auto xbox_hw=pad_hardware_layout(PadLabelFamily::xbox);
+    const auto ps_hw=pad_hardware_layout(PadLabelFamily::playstation);
+    check(xbox_hw.left_stick.y<xbox_hw.dpad.y && ps_hw.left_stick.y>ps_hw.dpad.y,
+          "physical stick/dpad positions reflect controller family");
+    check(xbox_hw.start.x>460 && xbox_hw.back.x<460 && ps_hw.start.x>460 &&
+          ps_hw.back.x<460,"separate top right Start and top left Back");
+    PadTransitionGate handover;
+    PadSample idle{};idle.connected=true;idle.foreground=true;idle.device_id=1;idle.context=PadContext::gameplay;
+    handover.update(idle);handover.update(idle);
+    idle.device_id=2;idle.south=true;idle.fresh_owner_activity=true;
+    check(has(handover.update(idle).pressed,PadAction::jump),"first fresh secondary action delivered without Start");
+    idle.device_id=1;idle.context=PadContext::menu;
+    check(!handover.update(idle).held,"fresh owner cannot bypass context boundary");
     const auto classic=pad_info_placement(1.f),wide=pad_info_placement(.75f);
     check(classic.x==52u&&classic.width==920u&&wide.x==167u&&wide.width==690u,
           "controller LFB preserves physical 4:3 geometry");
@@ -253,7 +267,7 @@ int main() {
     }
     const auto fr=make_pad_info_view(PadInfoLocale::fr,true,PadLabelFamily::playstation);
     check(fr.status=="PlayStation" && fr.rows[0].control=="Stick gauche" &&
-          fr.rows[1].control=="Cross" && fr.back_control=="Circle",
+          fr.rows[1].control=="Croix" && fr.back_control=="Rond",
           "French PlayStation labels follow detected family");
     check(make_pad_info_view(static_cast<PadInfoLocale>(999),false,
           PadLabelFamily::xbox).status=="No controller connected","unknown locale fallback");

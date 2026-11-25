@@ -528,3 +528,19 @@ only those output fields on successful poll, fresh foreground SDL
 ownership and supported context. Preserve flags, keyboard, status,
 unknown contexts and no-device fallback. No global DirectInput patch,
 no original assets redistributed. Hardware test still required.
+
+
+## Automatic first useful input and family-specific diagram
+
+Owner 20261125-061927 confirms native joystick neutralization triggered
+and two owner handovers. At MENU controller_info, the first id2 East
+press selects Xbox but is discarded by the generic context/device gate;
+the next press exits. Deliver the first fresh, previously neutral
+secondary-device action only when the old owner was idle and the same
+context/scene remains active. Attach/focus/scene changes retain the
+physical neutral gate. Start remains the pause command, never activation.
+Use family-specific original vector schematics with offset Xbox sticks,
+symmetric PlayStation sticks, Start/Options upper right, Back/Share
+upper left (drawn only, no new gameplay binding), matching callout
+anchors and French PlayStation button names. B/Rond still exits.
+No change to the native menu companion positioning in this revision.

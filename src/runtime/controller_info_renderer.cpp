@@ -62,7 +62,7 @@ bool label(HDC dc,const PadInfoView& v,unsigned row,PadInfoRect r,UINT align){
         text_fit(dc,item.control,{r.left,r.top+25,r.right,r.bottom},15,10,muted,false,align);
 }
 bool face(HDC dc,PadLabelFamily family){
-    constexpr PadInfoPoint points[]{{554,227},{587,197},{521,197},{554,167}};
+    const auto points=pad_hardware_layout(family).face;
     constexpr std::string_view generic[]{"S","E","W","N"};
     constexpr std::string_view xbox[]{"A","B","X","Y"};
     constexpr std::string_view ps[]{u8"\u00d7",u8"\u25cb",u8"\u25a1",u8"\u25b3"};
@@ -71,7 +71,16 @@ bool face(HDC dc,PadLabelFamily family){
         const auto p=points[i];circle(dc,p.x,p.y,13);
         const auto symbol=family==PadLabelFamily::xbox?xbox[i]:
                           family==PadLabelFamily::playstation?ps[i]:generic[i];
-        ok=text_fit(dc,symbol,{p.x-12,p.y-12,p.x+13,p.y+13},17,11,ink,true,DT_CENTER)&&ok;
+        if(family==PadLabelFamily::playstation){
+            GdiObject mark{CreatePen(PS_SOLID,2,ink)};
+            if(!mark.handle)return false;
+            Selection selected(dc,mark.handle), hollow(dc,GetStockObject(HOLLOW_BRUSH));
+            if(i==0){line(dc,p.x-5,p.y-5,p.x+6,p.y+6);line(dc,p.x+5,p.y-5,p.x-6,p.y+6);}
+            else if(i==1)circle(dc,p.x,p.y,6);
+            else if(i==2)Rectangle(dc,p.x-6,p.y-6,p.x+7,p.y+7);
+            else {POINT tri[]{{p.x,p.y-7},{p.x-7,p.y+5},{p.x+7,p.y+5},{p.x,p.y-7}};
+                Polyline(dc,tri,4);}
+        }else ok=text_fit(dc,symbol,{p.x-12,p.y-12,p.x+13,p.y+13},17,11,ink,true,DT_CENTER)&&ok;
     }
     return ok;
 }
@@ -90,27 +99,43 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
         Selection outline(dc,pen.handle), fill(dc,GetStockObject(HOLLOW_BRUSH));
         if(frame && !RoundRect(dc,0,0,kPadInfoWidth,kPadInfoHeight,24,24))return false;
         SetBkMode(dc,TRANSPARENT);
-        // Original generic controller silhouette, not a copied product asset.
+        // Original vector silhouettes; no product artwork bundled.
+        const auto hw=pad_hardware_layout(view.family);
         {
             Selection shell_sel(dc,shell.handle);
-            POINT poly[]={{310,130},{329,104},{389,100},{416,123},{504,123},
-                {531,100},{591,104},{610,130},{628,252},{617,324},{591,345},
-                {564,333},{531,297},{389,297},{356,333},{329,345},{303,324},
-                {292,252}};
-            if(!Polygon(dc,poly,int(sizeof(poly)/sizeof(poly[0]))))return false;
+            if(view.family==PadLabelFamily::xbox){
+                POINT shape[]={{310,132},{321,108},{359,99},{412,119},{508,119},{561,99},
+                    {599,108},{610,132},{628,252},{624,310},{606,339},{582,346},
+                    {558,332},{522,297},{398,297},{362,332},{338,346},{314,339},{296,310},{292,252}};
+                if(!Polygon(dc,shape,int(sizeof(shape)/sizeof(shape[0]))))return false;
+            }else{
+                POINT shape[]={{310,130},{329,104},{389,100},{416,112},{504,112},
+                    {531,100},{591,104},{610,130},{628,252},{617,324},{591,345},
+                    {564,333},{531,297},{389,297},{356,333},{329,345},{303,324},{292,252}};
+                if(!Polygon(dc,shape,int(sizeof(shape)/sizeof(shape[0]))))return false;
+            }
         }
         {
             Selection controls(dc,button.handle);
             RoundRect(dc,315,81,361,108,9,9);RoundRect(dc,559,81,605,108,9,9);
             RoundRect(dc,307,112,354,139,9,9);RoundRect(dc,566,112,613,139,9,9);
-            Rectangle(dc,354,163,378,232);Rectangle(dc,331,185,401,210);
-            circle(dc,409,271,23);circle(dc,409,271,16);
-            circle(dc,512,271,23);circle(dc,512,271,16);
-            RoundRect(dc,446,208,475,228,8,8);
+            const auto d=hw.dpad;
+            POINT cross[]={{d.x-10,d.y-30},{d.x+10,d.y-30},{d.x+10,d.y-10},{d.x+30,d.y-10},
+                {d.x+30,d.y+10},{d.x+10,d.y+10},{d.x+10,d.y+30},{d.x-10,d.y+30},
+                {d.x-10,d.y+10},{d.x-30,d.y+10},{d.x-30,d.y-10},{d.x-10,d.y-10}};
+            Polygon(dc,cross,12);
+            for(auto stick:{hw.left_stick,hw.right_stick}){circle(dc,stick.x,stick.y,23);circle(dc,stick.x,stick.y,16);}
+            if(view.family==PadLabelFamily::playstation)RoundRect(dc,432,117,488,145,8,8);
+            else if(view.family==PadLabelFamily::xbox)circle(dc,460,131,10);
+            for(auto key:{hw.back,hw.start})RoundRect(dc,key.x-19,key.y-10,key.x+20,key.y+11,7,7);
             if(!face(dc,view.family))return false;
+            const auto back_name=view.family==PadLabelFamily::playstation?"Share":"Back";
+            const auto start_name=view.family==PadLabelFamily::playstation?"Options":"Start";
+            if(!text_fit(dc,back_name,{hw.back.x-18,hw.back.y-9,hw.back.x+19,hw.back.y+10},11,8,ink,false,DT_CENTER) ||
+               !text_fit(dc,start_name,{hw.start.x-18,hw.start.y-9,hw.start.x+19,hw.start.y+10},11,8,ink,false,DT_CENTER))return false;
         }
         bool ok=text_fit(dc,view.status,kPadInfoStatus,24,15,ink,true,DT_CENTER);
-        for(const auto& a:kPadInfoCallouts){
+        for(const auto& a:pad_info_callouts(view.family)){
             const int end=a.left?a.box.right+4:a.box.left-4;
             const int y=(a.box.top+a.box.bottom)/2;
             line(dc,a.anchor.x,a.anchor.y,end,y);
@@ -118,9 +143,6 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
             line(dc,end,y,end+(a.left?6:-6),y+4);
             ok=label(dc,view,a.row,a.box,a.left?DT_RIGHT:DT_LEFT)&&ok;
         }
-        line(dc,kPadInfoStart.x,kPadInfoStart.y,460,361);
-        line(dc,460,361,456,355);line(dc,460,361,464,355);
-        ok=label(dc,view,10,kPadInfoPause,DT_CENTER)&&ok;
         std::string back(view.back);back+=": ";back+=view.back_control;
         std::string pending("* ");pending+=view.pending_label;
         ok=text_fit(dc,back,kPadInfoBack,15,10,muted,false,DT_RIGHT)&&ok;

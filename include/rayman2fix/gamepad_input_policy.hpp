@@ -93,6 +93,7 @@ struct PadSample {
     bool dpad_left = false, dpad_right = false, dpad_up = false, dpad_down = false;
     bool south = false, east = false, west = false, north = false;
     bool start = false, left_shoulder = false, right_shoulder = false;
+    bool fresh_owner_activity = false; // set only by adapter on observed neutral-to-active handover
     std::uint32_t scene_id = 0; // exact live scene identity; 0 for non-gameplay catalog scenes
 };
 
@@ -217,11 +218,18 @@ public:
         }
         if (owner_ != sample.device_id || context_ != sample.context || scene_ != sample.scene_id) {
             const auto released = held_;
+            const bool safe_handover=owner_!=0 && owner_!=sample.device_id &&
+                context_==sample.context && scene_==sample.scene_id &&
+                sample.fresh_owner_activity && !blocked_ && held_==0;
             held_ = 0;
             owner_ = sample.device_id;
             context_ = sample.context;
             scene_ = sample.scene_id;
-            blocked_ = pad_physically_active(sample);
+            blocked_ = !safe_handover && pad_physically_active(sample);
+            if(safe_handover){
+                held_=pad_actions(sample);
+                return {held_,held_,released,true,pad_movement(sample)};
+            }
             return {0, 0, released, true, {}};
         }
         if (blocked_) {

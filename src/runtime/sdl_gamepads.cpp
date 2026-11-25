@@ -185,7 +185,7 @@ PadSample SdlGamepads::poll(bool foreground, PadContext context) noexcept {
         auto q=slot.pad==pad_?sample:read_pad(slot.pad);
         const bool active=pad_physically_active(q);
         if(slot.pad!=pad_&&!switched&&pad_may_take_owner(foreground,owner_active,slot.armed,active)) {
-            pad_=slot.pad;sample=q;switched=true;
+            pad_=slot.pad;sample=q;sample.fresh_owner_activity=true;switched=true;
         }
         slot.armed=foreground&&!active;
     }
