@@ -116,6 +116,7 @@ if(WIN32)
   if(RAYMAN2FIX_STANDALONE_VIDEO_PAGE)
     target_sources(Rayman2FixRuntime PRIVATE
       src/runtime/standalone_video_page.cpp
+      src/runtime/controller_info_renderer.cpp
       src/runtime/main_menu_site.cpp
       src/runtime/pause_video_observer.cpp
       src/runtime/video_navigation_input.cpp

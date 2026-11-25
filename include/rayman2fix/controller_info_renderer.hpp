@@ -12,6 +12,7 @@ namespace r2fix {
 // will provide the translucent native scene background.
 bool draw_controller_info_preview(HDC dc,const PadInfoView& view) noexcept;
 // Build a private cached overlay. Output is replaced only on full success.
+bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFamily family) noexcept;
 bool prepare_controller_info_overlay(const PadInfoView& view,
                                      std::vector<PadOverlayPixel>& output) noexcept;
 }

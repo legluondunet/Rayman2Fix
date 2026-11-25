@@ -27,6 +27,7 @@
 #include "rayman2fix/render_poll_gate.hpp"
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
 #include "rayman2fix/sdl_gamepads.hpp"
+#include "rayman2fix/controller_info_renderer.hpp"
 #include "rayman2fix/native_ipt_probe.hpp"
 #include "rayman2fix/pause_video_observer.hpp"
 #endif
@@ -5335,6 +5336,54 @@ r2fix::PadMovement g_sdl_input_movement{};
 DWORD g_sdl_input_tick = 0;
 thread_local DWORD g_sdl_pause_delivery_tick=0;
 thread_local bool g_sdl_pause_delivery_pending=false;
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+thread_local int g_controller_drawn_scope=0;
+thread_local bool g_controller_connected=false;
+thread_local r2fix::PadLabelFamily g_controller_family=r2fix::PadLabelFamily::generic;
+int controller_info_scope() noexcept {
+    if(g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())return 0;
+    int n=-1,f=-1;
+    if(r2fix::pause_menu_live_state(n,f))return n==17 && f==2 ? 2:0;
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    char level[30]{};
+    SIZE_T copied=0;
+    if(!base || !ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(base+kLevelNameRva),
+       level,sizeof(level),&copied) || copied!=sizeof(level) || !std::memchr(level,0,sizeof(level)) ||
+       _stricmp(level,"menu")!=0)return 0;
+    r2fix::MenuAiModel model{};r2fix::MenuAiState state{};
+    if(r2fix::get_verified_menu_controller(model,state) && state.normal==21 && state.reflex==0)return 1;
+#endif
+    return 0;
+}
+bool controller_info_owns_page() noexcept {
+    return g_controller_drawn_scope!=0 && controller_info_scope()==g_controller_drawn_scope;
+}
+r2fix::PadInfoLocale controller_info_locale() noexcept {
+    // Recognize the original LANGUAGE label via the authenticated game
+    // text directory, not a guessed numeric ordering of the five languages.
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    const auto read=[](std::uintptr_t p,void* out,SIZE_T size){
+        SIZE_T copied=0;
+        return p>=0x10000u && p<=0xffffffffu-size &&
+           ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(p),out,size,&copied)!=0 && copied==size;
+    };
+    std::uint32_t directory=0,index=0,table=0,label=0;
+    char text[32]{};
+    if(base && read(base+0x10026Cu,&directory,4) && read(base+0x100FA8u,&index,4) &&
+       directory>=0x10000u && directory<=0xffffffc0u && (index&255u)<8u &&
+       read(directory+(index&255u)*8u,&table,4) && table>=0x10000u && table<=0xfffff000u &&
+       read(table+370u*4u,&label,4) && read(label,text,sizeof(text)) &&
+       std::memchr(text,0,sizeof(text))) {
+        using L=r2fix::PadInfoLocale;
+        if(!std::strcmp(text,"/C:LANGUE"))return L::fr;
+        if(!std::strcmp(text,"/C:IDIOMA"))return L::es;
+        if(!std::strcmp(text,"/C:LINGUA"))return L::it;
+        if(!std::strcmp(text,"/C:SPRACHE"))return L::de;
+    }
+    return r2fix::PadInfoLocale::en;
+}
+#endif
 
 r2fix::PadContext sdl_native_context(std::uint32_t* scene_out=nullptr) noexcept {
     using r2fix::PadContext;
@@ -5369,6 +5418,7 @@ r2fix::PadContext sdl_native_context(std::uint32_t* scene_out=nullptr) noexcept 
     bool main_video = false, pause_video = false;
     const bool video = r2fix::standalone_video_page_owns_navigation(main_video, pause_video);
     if (video && pause_video) return PadContext::video;
+    if(controller_info_owns_page())return PadContext::controller_info;
     int pause_normal=-1,pause_reflex=-1;
     if(r2fix::pause_menu_live_state(pause_normal,pause_reflex)) {
         // Do not send navigation into a transitional VIDEO page.
@@ -5803,6 +5853,10 @@ void poll_sdl3_native() noexcept {
     const auto context = sdl_native_context(&scene);
     auto sample = pads.poll(foreground, context);
     sample.scene_id=scene;
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    g_controller_connected=sample.connected;
+    g_controller_family=pads.family();
+#endif
     static bool first_sample = true;
     if (first_sample) {
         first_sample = false;
@@ -6330,6 +6384,13 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // page after the owned LFB panel rendered, never normal-3/Options.
     // Our own page text is rasterized into Glide's LFB and never
     // passes through this native glyph producer.
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    if(producer==Native2DProducer::Glyph && controller_info_owns_page()) {
+        // Reuse the verified native title band; never affect other pages.
+        if(!r2fix::standalone_video_stabilize_native_title_for_context(
+             g_controller_drawn_scope==2,xmin,ymin,xmax,ymax))return;
+    }
+#endif
     if(producer==Native2DProducer::Glyph &&
        r2fix::standalone_video_page_filter_native_glyphs(
            xmin,ymin,xmax,ymax)) {
@@ -7539,6 +7600,15 @@ void __cdecl standalone_video_flip() {
     // Never intercept keyboard messages or alter parent Options.
     r2fix::native_graphics_info_stabilize_video_cursor_at_flip();
     r2fix::standalone_video_page_draw_before_flip();
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    const int scope=controller_info_scope();
+    const int previous=g_controller_drawn_scope;
+    g_controller_drawn_scope=0;
+    if(scope && r2fix::draw_controller_info_glide(controller_info_locale(),g_controller_connected,g_controller_family)) {
+        g_controller_drawn_scope=scope;
+        if(previous!=scope)log_line(scope==1?"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=MENU normal=21 reflex=0":"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=PAUSE normal=17 reflex=2");
+    }
+#endif
     const auto original=reinterpret_cast<void (__cdecl*)()>(
         g_standalone_flip_original.load(std::memory_order_acquire));
     if(original)original();
@@ -8365,7 +8435,15 @@ void start_hud_monitor() {
 } // namespace
 
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
+bool r2fix_sdl_controller_page() noexcept {
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    return controller_info_owns_page();
+#else
+    return false;
+#endif
+}
 std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept {
+    if(r2fix_sdl_controller_page())return sdl_fresh_actions(r2fix::PadContext::controller_info);
     if(video) return sdl_fresh_actions(r2fix::PadContext::video);
     if(sdl_native_context()==r2fix::PadContext::pause_menu)
         return sdl_fresh_actions(r2fix::PadContext::pause_menu) |

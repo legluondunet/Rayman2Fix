@@ -11,6 +11,7 @@
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
 #include "rayman2fix/gamepad_menu_bridge.hpp"
 std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept;
+bool r2fix_sdl_controller_page() noexcept;
 void r2fix_sdl_note_pause_delivery() noexcept;
 #endif
 
@@ -71,10 +72,19 @@ void __cdecl filter_approved_video_keys(void* keyboard,
     if(!writable_256(keyboard) || result!=0)return;
     const bool foreground=foreground_game();
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
+    const bool controller=::r2fix_sdl_controller_page();
     const auto actions=::r2fix_sdl_menu_actions(video);
-    const auto merged=merge_pad_menu_keys(video ? PadContext::video : PadContext::menu,
+    const auto merged=merge_pad_menu_keys(controller ? PadContext::controller_info :
+        video ? PadContext::video : PadContext::menu,
         foreground,result,kVideoKeyboardBytes,
         static_cast<std::uint8_t*>(keyboard),actions);
+    if(controller && foreground) {
+        // Read-only information: retain native Escape, block calibration
+        // activation through the verified keyboard state only.
+        auto* keys=static_cast<std::uint8_t*>(keyboard);
+        for(unsigned dik:{0x1Cu,0x9Cu,0x39u,0xCBu,0xCDu,0xC8u,0xD0u})keys[dik]&=0x7fu;
+        return;
+    }
     if(merged && !video && (actions & pad_action_bit(PadAction::cancel)))
         ::r2fix_sdl_note_pause_delivery();
     // Bounded proof of actual native buffer delivery, not just SDL sampling.

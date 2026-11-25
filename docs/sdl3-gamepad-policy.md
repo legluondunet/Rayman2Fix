@@ -451,3 +451,8 @@ states; do not infer a writable script or activate the replacement from
 behavior numbers alone. No source asset was available for new offline
 verification in this session. A menu visit is the remaining external
 validation dependency.
+
+
+## Initial live controller panel integration
+
+Owner log 20261125-045122, build 87c11283, confirms three MENU normal21/reflex0 visits and one PAUSE normal17/reflex2 visit. Both distinguish VIDEO and parent Options. Use those exact live authenticated models on the native camera thread. Render cached localized overlay through existing Glide LFB access before original flip. Locale derives from original LANGUAGE handle 370, unknown falls back to English. Only after successful panel rendering, preserve native title glyphs and suppress other native JFFTXT glyphs in the authenticated page. SDL3 context becomes controller_info (East back only); keyboard Enter/Space/arrows are suppressed only in that successfully rendered foreground page. Native Escape and other screens remain intact. Legacy DirectInput gamepad/configuration script dispatch is not yet disabled; visual layout and that remaining route require testing. Log also shows index15 delivery but no proof of swimming or world knowledge. No original game resource changed.
