@@ -75,6 +75,12 @@ jobs:
           $sha = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant()
           "RAYMAN2FIX_GAMEFRAME_SHA256=$sha" >> $env:GITHUB_ENV
           Write-Host "Pinned GameFrame x86 SHA256=$sha"
+      - name: Audit pinned Innoextract 1.9 x86 candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python tools/audit_innoextract.py "$env:RUNNER_TEMP/r2fix-innoextract"
+          if ($LASTEXITCODE -ne 0) { throw 'Innoextract audit failed' }
       - name: Audit pinned SDL3 3.4.20 x86 candidate
         shell: pwsh
         run: |
