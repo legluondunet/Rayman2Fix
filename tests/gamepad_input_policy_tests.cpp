@@ -170,6 +170,8 @@ int main() {
     const auto ps_hw=pad_hardware_layout(PadLabelFamily::playstation);
     check(xbox_hw.left_stick.y<xbox_hw.dpad.y && ps_hw.left_stick.y>ps_hw.dpad.y,
           "physical stick/dpad positions reflect controller family");
+    check(xbox_hw.dpad.y+33<290 && xbox_hw.right_stick.y+28<290 &&
+          ps_hw.left_stick.y+28<290,"controls remain inside shell lower edge");
     check(xbox_hw.start.x>460 && xbox_hw.back.x<460 && ps_hw.start.x>460 &&
           ps_hw.back.x<460,"separate top right Start and top left Back");
     PadTransitionGate handover;
@@ -191,15 +193,15 @@ int main() {
     ty0=47.5f;ty1=52.5f;
     check(!pad_info_native_title(false,tx0,ty0,tx1,ty1),"calibration body glyph remains hidden");
     float cy=.5f;
-    check(align_pad_info_companion(true,true,0,.5f,cy,.015f)&&cy>.31f&&cy<.33f,
+    check(align_pad_info_companion(true,true,0,.5f,cy,.015f)&&cy>.23f&&cy<.28f,
           "native companion moves above panel");
-    for(float y:{.16f,.33f,.34f,.54f,.65f,.84f}) {
-        check(align_pad_info_companion(true,true,0,.5f,y,.015f)&&y>.31f&&y<.33f,
+    for(float y:{.08f,.147f,.16f,.33f,.34f,.54f,.65f,.84f}) {
+        check(align_pad_info_companion(true,true,0,.5f,y,.015f)&&y>.23f&&y<.28f,
               "continuous MENU companion travel remains above panel");
     }
     float pause_y=.54f;
-    check(align_pad_info_companion(true,true,0,.5f,pause_y,.015f,true)&&std::fabs(pause_y-.36f)<.0001f,
-          "preserve already validated Pause lift");
+    check(align_pad_info_companion(true,true,0,.5f,pause_y,.015f,true)&&pause_y>.23f&&pause_y<.28f,
+          "Pause companion uses same header gap");
     check(pad_may_take_owner(true,false,true,true)&&!pad_may_take_owner(true,true,true,true)&&
           !pad_may_take_owner(true,false,false,true)&&!pad_may_take_owner(false,false,true,true),
           "neutral-to-active secondary controller ownership, no focus or held-owner steal");

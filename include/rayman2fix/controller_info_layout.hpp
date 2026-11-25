@@ -21,10 +21,10 @@ inline PadInfoPlacement pad_info_placement(float scale) noexcept {
 // log the first glyph is at x=19.30..23.50, y=24.97..30.03.
 inline bool pad_info_native_title(bool pause,float& x0,float& y0,float& x1,float& y1) noexcept {
     if(!std::isfinite(x0)||!std::isfinite(x1)||!std::isfinite(y0)||!std::isfinite(y1)||
-       x0<12.f||x1>88.f||y0<(pause?12.f:7.f)||y1>32.f||
+       x0<12.f||x1>88.f||y0<7.f||y1>32.f||
        x1<=x0||x1-x0>10.f||y1<=y0||y1-y0>9.f)return false;
     // MENU reserves space beneath the title for the full-size butterfly.
-    y0=pause?20.f:12.f;y1=pause?25.f:17.f;return true;
+    y0=12.f;y1=17.f;return true;
 }
 // Candidate common header companion position, above the panel. Only
 // the two established 3D menu-actor source routes and center band.
@@ -32,19 +32,11 @@ inline bool align_pad_info_companion(bool page,bool viewport,unsigned route,floa
                                      bool pause=false) noexcept {
     if(!page||!viewport||route>1u||!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(depth)||
        x<0.40f||x>0.64f||depth<0.f||depth>0.25f)return false;
-    if(pause) {
-        if(y<0.34f||y>0.64f)return false;
-        y-=0.18f;return true;
-    }
-    // Original MENU animation spans the old lower header position.
-    // A fixed subtraction left its center on the panel edge and
-    // discontinuously stopped lifting when the actor left the old band.
-    // Compress only the centered native actor's vertical travel.
-    if(y<0.16f||y>0.84f)return false;
-    // The 064532 capture at source y=.147 showed the visible actor
-    // centered around .095 (model origin is below its visible center).
-    // Target the gap below MENU title 12..17%, above panel y284/768.
-    y=0.32f+(y-0.5f)*0.014f;
+    // Keep the native butterfly/firefly within the header gap in both
+    // contexts. Accept the lower original anchor seen in MENU, but never
+    // affect other actor routes, non-center objects or the 3D world.
+    if(y<(pause?0.34f:0.08f)||y>0.84f)return false;
+    y=0.255f+(y-0.5f)*0.04f;
     return true;
 }
 constexpr PadInfoRect kPadInfoStatus{12,8,908,42};
@@ -57,8 +49,8 @@ struct PadHardwareLayout {
     std::array<PadInfoPoint,4> face; // South, East, West, North
 };
 constexpr PadHardwareLayout pad_hardware_layout(PadLabelFamily family) noexcept {
-    return {{family==PadLabelFamily::xbox?366:409,family==PadLabelFamily::xbox?184:271},
-        {512,271},{family==PadLabelFamily::xbox?408:366,family==PadLabelFamily::xbox?271:197},
+    return {{family==PadLabelFamily::xbox?366:409,family==PadLabelFamily::xbox?184:253},
+        {512,253},{family==PadLabelFamily::xbox?408:366,family==PadLabelFamily::xbox?245:197},
         {507,155},{413,155},{{{554,227},{587,197},{521,197},{554,167}}}};
 }
 constexpr std::array<PadInfoCallout,11> pad_info_callouts(PadLabelFamily family) noexcept {
