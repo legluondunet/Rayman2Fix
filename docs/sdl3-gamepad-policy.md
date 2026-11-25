@@ -345,3 +345,22 @@ require physical neutral input even between two gameplay scenes that
 share the same semantic context. No changes to native level transitions,
 original keyboard, story state or audio policy. Special bonus/vehicle
 controls and cutscenes within a playable map remain to be verified.
+
+
+## Wine 9385f7d2 / 20261125-041530
+
+The owner log confirms Mapmonde native jump index 10, dialogue frame
+suppression, and Learn_30 (catalog scene 2) transitioning from inactive
+loading to gameplay. Both IPT axis consumers report calibration -50/0/50;
+indices 10/21 and 11 show positive and negative native counter states
+following South and East. The previous gameplay-context blocker is gone.
+START opens the verified native pause menu; two paired audio resumes are
+requested, with voice active and unpaused at the initial snapshots. Later
+stream changes cause the existing safe native passthrough, not a reason to
+relax audio ownership checks. Return to MENU is observed. No subsequent
+playable scene, Alt+Tab or hotplug is established by this log, and actual
+on-screen motion and audible quality are not proved by diagnostics alone.
+The 128-sample cap was exhausted before the end of the first pause test.
+Add a separately bounded context/focus/device/scene transition trace
+(256 entries), including release bits and explicit exhaustion markers.
+No change to input delivery, native audio or rendering in this commit.

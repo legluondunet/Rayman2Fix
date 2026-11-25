@@ -5738,6 +5738,12 @@ void poll_sdl3_native() noexcept {
     static DWORD last_poll = 0;
     static bool polling = false;
     static unsigned reports = 0;
+    // Context/focus transitions have a separate budget from busy gameplay.
+    static unsigned boundary_reports = 0;
+    static bool boundary_seen = false;
+    static std::uint32_t boundary_device = 0, boundary_scene = 0;
+    static bool boundary_focus = false;
+    static r2fix::PadContext boundary_context = r2fix::PadContext::inactive;
     static std::uint32_t last_buttons = 0;
     static bool last_motion = false;
     static bool last_focus = false;
@@ -5808,6 +5814,25 @@ void poll_sdl3_native() noexcept {
         log_line(msg);
     }
     const auto transitions = gate.update(sample);
+    if(g_log && (!boundary_seen || boundary_device!=sample.device_id ||
+       boundary_scene!=scene || boundary_focus!=foreground || boundary_context!=context)) {
+        if(boundary_reports<256u) {
+            char msg[220]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-SDL3-CONTEXT: t_ms=%lu id=%u foreground=%u context=%u scene=%u released=0x%04x",
+                static_cast<unsigned long>(GetTickCount()),unsigned(sample.device_id),
+                unsigned(foreground),unsigned(context),unsigned(scene),unsigned(transitions.released));
+            log_line(msg);
+            ++boundary_reports;
+            if(boundary_reports==256u)
+                log_line("RUNTIME-SDL3: context-log-budget-exhausted=1");
+        }
+        boundary_seen=true;
+        boundary_device=sample.device_id;
+        boundary_scene=scene;
+        boundary_focus=foreground;
+        boundary_context=context;
+    }
     observe_native_ipt_readonly(context);
     g_sdl_input_context = context;
     g_sdl_input_scene = scene;
@@ -5843,6 +5868,8 @@ void poll_sdl3_native() noexcept {
         last_motion = moving;
         last_report = now;
         ++reports;
+        if(reports==128u)
+            log_line("RUNTIME-SDL3: sample-log-budget-exhausted=1 context-log-independent=1");
     }
 }
 #endif
