@@ -14,6 +14,7 @@ std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept;
 std::uint32_t r2fix_sdl_f1_actions() noexcept;
 bool r2fix_sdl_controller_page() noexcept;
 void r2fix_sdl_note_pause_delivery() noexcept;
+void r2fix_sdl_note_f1_delivery() noexcept;
 #endif
 
 #if !defined(_M_IX86)
@@ -77,6 +78,7 @@ void __cdecl filter_approved_video_keys(void* keyboard,
     const auto actions=::r2fix_sdl_menu_actions(video);
     if(!video && !controller && merge_pad_f1_key(PadContext::gameplay,foreground,result,
         kVideoKeyboardBytes,static_cast<std::uint8_t*>(keyboard),::r2fix_sdl_f1_actions())) {
+        ::r2fix_sdl_note_f1_delivery();
         static std::atomic<bool> f1_reported{false};
         if(!f1_reported.exchange(true) && g_log)
             g_log("RUNTIME-SDL3: native-route=F1 merged=1 scope=verified-DirectInput256");
