@@ -14,7 +14,8 @@ For each distinct edition, record:
   copied/expanded rather than merely extracted.
 - EXE header architecture, timestamps, SHA-256, imported libraries, and
   whether its CD protection permits lawful modern use.
-- Results on Windows 11 and Wine/Proton, including language and regression notes.
+- Results under Wine, including language and regression notes. Native Windows
+  and Proton results are welcome when available but not required from the maintainer.
 - Source provenance. Label any assumption or missing test clearly.
 
 Avoid relying on CD volume labels alone. A known edition must match a
