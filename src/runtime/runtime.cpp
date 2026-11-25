@@ -6408,8 +6408,7 @@ void __cdecl native_2d_percent_sprite(void* viewport,
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
     if(producer==Native2DProducer::Glyph && controller_info_owns_page()) {
         // Reuse the verified native title band; never affect other pages.
-        if(!r2fix::standalone_video_stabilize_native_title_for_context(
-             g_controller_drawn_scope==2,xmin,ymin,xmax,ymax))return;
+        if(!r2fix::pad_info_native_title(g_controller_drawn_scope==2,xmin,ymin,xmax,ymax))return;
     }
 #endif
     if(producer==Native2DProducer::Glyph &&
@@ -6617,6 +6616,12 @@ void __cdecl native_2d_percent_sprite(void* viewport,
 #endif
         return;
     }
+    if(r2fix::map_transition_full_width(g_current_level && _stricmp(g_current_level,"mapmonde")==0,
+            producer==Native2DProducer::Frame,xmin,ymin,xmax,ymax)) {
+        left=xmin;right=xmax; // same source and downstream double-squeeze guard
+        static bool reported=false;
+        if(!reported){reported=true;log_line("RUNTIME-MAP-TRANSITION: full-width=1 source=GLI-Frame original-material-preserved=1");}
+    }
     g_native_2d_calls.fetch_add(1,std::memory_order_relaxed);
     if(!g_native_2d_logged.exchange(true,
                                      std::memory_order_relaxed))
@@ -6736,6 +6741,17 @@ void __cdecl centered_native_screen_to_vertex(
             // owned informational VIDEO panel. Other menus and all
             // world rendering retain their original source geometry.
             const float original_y=y;
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+            if(r2fix::align_pad_info_companion(controller_info_scope()!=0,
+                    viewport==g_approved_overlay_viewport,route,before,y,depth)) {
+                static unsigned reports=0;
+                if(reports++<8u){
+                    char msg[180]{};
+                    std::snprintf(msg,sizeof(msg),"RUNTIME-CONTROLLER-MENU: companion-lift=1 route=%u y=%.4f->%.4f",route,double(original_y),double(y));
+                    log_line(msg);
+                }
+            }
+#endif
             if(r2fix::lift_pause_video_companion(
                 r2fix::standalone_video_page_pause_render_ready(),
                 viewport==g_approved_overlay_viewport,
@@ -6778,7 +6794,7 @@ void __cdecl centered_native_screen_to_vertex(
 // six-byte x86 instruction before returning to the original.
 void install_approved_overlay_source_patch() {
     if(g_overlay_source_patch_enabled.load(std::memory_order_acquire) ||
-       g_hud_scale>=0.9999f)return;
+       g_hud_scale>1.0f)return;
     auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
     if(!base)return;
     const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
@@ -7625,7 +7641,7 @@ void __cdecl standalone_video_flip() {
     const int scope=controller_info_scope();
     const int previous=g_controller_drawn_scope;
     g_controller_drawn_scope=0;
-    if(scope && r2fix::draw_controller_info_glide(controller_info_locale(),g_controller_connected,g_controller_family)) {
+    if(scope && r2fix::draw_controller_info_glide(controller_info_locale(),g_controller_connected,g_controller_family,g_hud_scale)) {
         g_controller_drawn_scope=scope;
         if(previous!=scope)log_line(scope==1?"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=MENU normal=21 reflex=0":"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=PAUSE normal=17 reflex=2");
     }
@@ -8608,7 +8624,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         // The source transform covers all four native inverse-projection
         // callers and four independent extent operations as a single
         // guarded stage; only then bypass the older viewport squeeze.
-        if(g_hud_scale<0.9999f)install_approved_overlay_source_patch();
+        // Native companion positioning is also needed at true 4:3.
+        install_approved_overlay_source_patch();
         // Hook the common native 2D entry before the game draws any
         // UI; the downstream driver callback monitor still handles
         // screen sprites submitted through other engine paths.

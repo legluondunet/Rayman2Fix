@@ -470,3 +470,21 @@ DirectInput disabling, and no changes to native cancellation or gameplay.
 This closes the known predicate path, not every possible original input
 consumer: the real calibration menu must still be tested for accidental
 activation. Log successful SDL back delivery and any blocked confirmation.
+
+
+## Owner visual feedback (20261125-050627)
+
+Both controller pages render, keyboard calibration blocked and SDL back
+confirmed. Correct the panel's physical aspect using the existing HUD
+squeeze at the LFB boundary, with box-filtered premultiplied coverage.
+At 16:9, 920 logical pixels occupy 690 internal pixels, centered at x167;
+true 4:3 retains 920 at x52. Shared VIDEO top y284. Preserve longer native
+CONTROL heading glyphs in a bounded title band (owner log x19.3..23.5,
+y24.97..30.03) and normalize title to y20..25. Candidate native companion
+lift of 0.18 on existing validated centered actor source routes in both
+controller pages, including true 4:3. Exact visual match to VIDEO needs
+owner validation; no claim of identical position yet. Mapmonde entry log
+shows GLI Frame x0..100/y0..100; preserve that full-screen source through
+the native HUD hook, including downstream double-squeeze guard. Original
+material and fade remain untouched; other geometry and levels unaffected.
+This is a candidate visual fix, not yet confirmed in the game.

@@ -622,8 +622,10 @@ bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& x
     // itself, all game/world objects and the return-to-Options screen.
     return standalone_video_hide_native_glyphs(visible,drew,true,title);
 }
-bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFamily family) noexcept {
+bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFamily family,float hud_scale) noexcept {
     if(!g_configured.load(std::memory_order_acquire) || !find_glide())return false;
+    const auto placement=pad_info_placement(hud_scale);
+    if(!placement.width)return false;
     try {
         static std::vector<PadOverlayPixel> overlay;
         static std::vector<std::uint16_t> scene;
@@ -634,15 +636,16 @@ bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFami
         if(!cached || locale!=old_locale || connected!=old_connected || family!=old_family) {
             if(!prepare_controller_info_overlay(make_pad_info_view(locale,connected,family),overlay))
                 return false;
-            scene.resize(kPadInfoPixels);
+            scene.resize(std::size_t(placement.width)*kPadInfoHeight);
             cached=true;old_locale=locale;old_connected=connected;old_family=family;
         }
-        if(!g_read(kBackBuffer,kPadInfoX,kPadInfoY,kPadInfoWidth,kPadInfoHeight,
-                   kPadInfoWidth*2u,scene.data()))return false;
-        if(!composite_controller_info(scene.data(),scene.size(),overlay.data(),overlay.size()))
+        scene.resize(std::size_t(placement.width)*kPadInfoHeight);
+        if(!g_read(kBackBuffer,placement.x,kPadInfoY,placement.width,kPadInfoHeight,
+                   placement.width*2u,scene.data()))return false;
+        if(!composite_controller_info(scene.data(),scene.size(),overlay.data(),overlay.size(),placement.width))
             return false;
-        return g_write(kBackBuffer,kPadInfoX,kPadInfoY,kRgb565,kPadInfoWidth,kPadInfoHeight,
-                       kPadInfoWidth*2,scene.data())!=0;
+        return g_write(kBackBuffer,placement.x,kPadInfoY,kRgb565,placement.width,kPadInfoHeight,
+                       placement.width*2,scene.data())!=0;
     }catch(...){return false;}
 }
 bool standalone_video_page_draw_before_flip() noexcept {

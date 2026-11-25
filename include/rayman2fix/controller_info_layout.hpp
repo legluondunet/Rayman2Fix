@@ -2,11 +2,35 @@
 // Pure geometry for the original controller diagram. All positions are
 // in the 1024x768 native 4:3 canvas, relative to this panel.
 #include <array>
+#include <cmath>
+#include "rayman2fix/standalone_video_layout_policy.hpp"
 namespace r2fix {
 struct PadInfoPoint { int x,y; };
 struct PadInfoRect { int left,top,right,bottom; };
 constexpr int kPadInfoWidth=920, kPadInfoHeight=420;
-constexpr int kPadInfoX=52, kPadInfoY=260;
+constexpr int kPadInfoX=52, kPadInfoY=int(kVideoInfoY);
+// Same vertical origin as VIDEO; correct the physical aspect at LFB write.
+struct PadInfoPlacement {unsigned x=0,width=0;};
+inline PadInfoPlacement pad_info_placement(float scale) noexcept {
+    if(!std::isfinite(scale)||scale<=0.25f||scale>1.f)return {};
+    const auto width=unsigned(float(kPadInfoWidth)*scale+0.5f);
+    return {(kVideoCanvasWidth-width)/2u,width};
+}
+// CONTROL has a longer native heading than VIDEO. In the original MENU
+// log the first glyph is at x=19.30..23.50, y=24.97..30.03.
+inline bool pad_info_native_title(bool pause,float& x0,float& y0,float& x1,float& y1) noexcept {
+    if(!std::isfinite(x0)||!std::isfinite(x1)||!std::isfinite(y0)||!std::isfinite(y1)||
+       x0<12.f||x1>88.f||y0<(pause?12.f:16.f)||y1>32.f||
+       x1<=x0||x1-x0>10.f||y1<=y0||y1-y0>9.f)return false;
+    y0=20.f;y1=25.f;return true;
+}
+// Candidate common header companion position, above the panel. Only
+// the two established 3D menu-actor source routes and center band.
+inline bool align_pad_info_companion(bool page,bool viewport,unsigned route,float x,float& y,float depth) noexcept {
+    if(!page||!viewport||route>1u||!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(depth)||
+       x<0.40f||x>0.64f||y<0.34f||y>0.64f||depth<0.f||depth>0.25f)return false;
+    y-=0.18f;return true;
+}
 constexpr PadInfoRect kPadInfoStatus{12,8,908,42};
 constexpr PadInfoRect kPadInfoBack{675,380,908,412};
 constexpr PadInfoRect kPadInfoPause{345,365,575,410};

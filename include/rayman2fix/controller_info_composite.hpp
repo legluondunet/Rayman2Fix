@@ -75,11 +75,25 @@ constexpr std::uint16_t pad_composite565(std::uint16_t dst,PadOverlayPixel fg,
 }
 constexpr std::size_t kPadInfoPixels=std::size_t(kPadInfoWidth)*kPadInfoHeight;
 inline bool composite_controller_info(std::uint16_t* dst,std::size_t count,
-                                      const PadOverlayPixel* overlay,std::size_t overlay_count) noexcept {
-    if(!dst||!overlay||count!=kPadInfoPixels||overlay_count!=kPadInfoPixels)return false;
-    for(int y=0;y<kPadInfoHeight;++y)for(int x=0;x<kPadInfoWidth;++x){
-        const auto i=std::size_t(y)*kPadInfoWidth+x;
-        dst[i]=pad_composite565(dst[i],overlay[i],pad_panel_coverage(x,y));
+                                      const PadOverlayPixel* overlay,std::size_t overlay_count,
+                                      unsigned width=kPadInfoWidth) noexcept {
+    if(!dst||!overlay||!width||width>kPadInfoWidth||count!=std::size_t(width)*kPadInfoHeight||overlay_count!=kPadInfoPixels)return false;
+    for(int y=0;y<kPadInfoHeight;++y)for(unsigned x=0;x<width;++x){
+        const auto i=std::size_t(y)*width+x;
+        // Box-average premultiplied coverage horizontally, preserving
+        // thin lines and glyphs instead of nearest-neighbor truncation.
+        const unsigned begin=x*kPadInfoWidth,end=(x+1u)*kPadInfoWidth;
+        unsigned sum[8]{};
+        for(unsigned sx=begin/width;sx<=(end-1u)/width;++sx){
+            const unsigned weight=std::min(end,(sx+1u)*width)-std::max(begin,sx*width);
+            const auto fg=overlay[std::size_t(y)*kPadInfoWidth+sx];
+            const auto c=pad_panel_coverage(int(sx),y);
+            const unsigned channels[]{fg.r,fg.g,fg.b,fg.ar,fg.ag,fg.ab,c.fill,c.border};
+            for(unsigned j=0;j<8;++j)sum[j]+=channels[j]*weight;
+        }
+        for(auto& n:sum)n=(n+kPadInfoWidth/2u)/kPadInfoWidth;
+        dst[i]=pad_composite565(dst[i],{std::uint8_t(sum[0]),std::uint8_t(sum[1]),std::uint8_t(sum[2]),
+            std::uint8_t(sum[3]),std::uint8_t(sum[4]),std::uint8_t(sum[5])},{sum[6],std::min(sum[7],16u-sum[6])});
     }
     return true;
 }

@@ -2,6 +2,7 @@
 #include "rayman2fix/gamepad_control_info.hpp"
 #include "rayman2fix/controller_info_layout.hpp"
 #include "rayman2fix/controller_info_composite.hpp"
+#include "rayman2fix/black_frame_filter.hpp"
 #include "rayman2fix/gamepad_menu_bridge.hpp"
 #include "rayman2fix/native_ipt_probe.hpp"
 #include <cmath>
@@ -151,6 +152,23 @@ int main() {
           "held analog cannot cross focus boundary");
 
     check(pad_info_layout_valid(), "all controller callouts fit the 4:3 panel");
+    const auto classic=pad_info_placement(1.f),wide=pad_info_placement(.75f);
+    check(classic.x==52u&&classic.width==920u&&wide.x==167u&&wide.width==690u,
+          "controller LFB preserves physical 4:3 geometry");
+    check(kPadInfoY==kVideoInfoY && !pad_info_placement(0.f).width,"shared VIDEO origin and invalid scale refused");
+    float tx0=19.3f,ty0=24.97f,tx1=23.5f,ty1=30.03f;
+    check(pad_info_native_title(false,tx0,ty0,tx1,ty1)&&ty0==20.f&&ty1==25.f,
+          "long native CONTROL title preserved");
+    float cy=.5f;
+    check(align_pad_info_companion(true,true,0,.5f,cy,.015f)&&cy<.34f,
+          "native companion moves above panel");
+    check(!align_pad_info_companion(false,true,0,.5f,cy,.015f)&&
+          !align_pad_info_companion(true,true,2,.5f,cy,.015f),"other pages and text unchanged");
+    check(map_transition_full_width(true,true,0,0,100,100)&&
+          !map_transition_full_width(false,true,0,0,100,100)&&
+          !map_transition_full_width(true,false,0,0,100,100)&&
+          !map_transition_full_width(true,true,14,61.6f,94,73.4f),
+          "only full Mapmonde frame exempt from HUD centering");
     const auto transparent=pad_overlay_from_dib(0,0xffffffu);
     check(!transparent.ar&&!transparent.ag&&!transparent.ab,"black/white empty overlay");
     const auto red=pad_overlay_from_dib(0xff0000u,0xff0000u);

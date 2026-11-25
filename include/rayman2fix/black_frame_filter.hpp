@@ -10,6 +10,14 @@ namespace r2fix {
 // existing centered 4:3 HUD transform. All boundaries are conservative.
 // This is a VISUAL opt-in filter: an opaque material color is not inferred
 // from a rectangle's position. Never use this to erase arbitrary quads.
+// Mapmonde arrival: verified GLI Frame full-screen geometry in owner log.
+// Preserve its material and animation; exempt only this exact source
+// from the 4:3 squeeze. Other frames and all glyph/image producers stay.
+inline bool map_transition_full_width(bool map_scene,bool frame,float x0,float y0,float x1,float y1) noexcept {
+    return map_scene&&frame&&std::fabs(x0)<=0.05f&&std::fabs(y0)<=0.05f&&
+           std::fabs(x1-100.f)<=0.05f&&std::fabs(y1-100.f)<=0.05f;
+}
+
 enum class BlackFrameKind {
     Preserve,
     DialogueBackdrop,
