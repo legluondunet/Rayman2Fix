@@ -26,7 +26,9 @@ The page is informational, not a remapping or calibration tool.
 validation. The physical input indicators are not proof that a particular
 native game action works in every scene. The owner tested both PS4 and
 Xbox-compatible controllers under Wine; broader hardware and native
-Windows gameplay coverage is still pending.
+Windows gameplay coverage is incomplete; native Windows testing is deferred
+to optional community feedback, not a release prerequisite. Automated
+Windows x86 CI remains required.
 
 SDL3 3.4.20 (x86) is bundled with its separate zlib license. No new INI
 setting is required. See [technical notes](docs/sdl3-gamepad-policy.md).

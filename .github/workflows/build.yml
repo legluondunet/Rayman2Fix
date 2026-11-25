@@ -664,6 +664,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify SDL3 dependency pins and runtime ABI contract
+        run: python3 -m unittest discover -s tests -p 'test_sdl3_dependency_contract.py'
       - name: Test pinned GameFrame limiter source integration
         run: python3 -m unittest discover -s tests -p 'test_fps_limit_patch.py'
       - name: Verify production F248 activation gates are independent of Log and environment

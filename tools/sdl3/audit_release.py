@@ -13,11 +13,14 @@ VERSION = "3.4.20"
 ARCHIVE = f"SDL3-{VERSION}-win32-x86.zip"
 ARCHIVE_SHA256 = "f6fbf5afa42195a01b1da8adf25567377d0e212f4b2b6770923903eb3feea254"
 URL = f"https://github.com/libsdl-org/SDL/releases/download/release-{VERSION}/{ARCHIVE}"
+DLL_SHA256 = "6d7e653aa9c762ceda4fffc054a504dcce273e016eb9f1fe079b6409a058a9f7"
+NOTICE_SHA256 = "1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd"
 REQUIRED_EXPORTS = {
     "SDL_GetVersion", "SDL_GetError", "SDL_SetMainReady", "SDL_InitSubSystem",
     "SDL_QuitSubSystem", "SDL_SetHint", "SDL_GetGamepads", "SDL_free",
     "SDL_OpenGamepad", "SDL_CloseGamepad", "SDL_GamepadConnected",
     "SDL_GetGamepadID", "SDL_GetGamepadName", "SDL_GetGamepadType", "SDL_GetGamepadAxis",
+    "SDL_GetGamepadVendor", "SDL_GetGamepadProduct",
     "SDL_GetGamepadButton", "SDL_SetGamepadEventsEnabled", "SDL_UpdateGamepads",
 }
 
@@ -40,6 +43,8 @@ def audit(archive):
     with zipfile.ZipFile(io.BytesIO(archive)) as z:
         dll = select(z, {"sdl3.dll"}, 32 * 1024 * 1024)
         license_data = select(z, {"license", "license.txt"}, 128 * 1024)
+    if digest(dll) != DLL_SHA256 or digest(license_data) != NOTICE_SHA256:
+        raise ValueError("SDL3 payload or zlib notice SHA256 mismatch")
     license_text = license_data.decode("utf-8-sig").lower()
     if ("as-is" not in license_text or "altered source versions" not in license_text
             or "this notice may not be removed" not in license_text):
