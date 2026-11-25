@@ -116,7 +116,12 @@ fs::path OfflineWorkspace::extract(const fs::path& setup) {
         throw std::runtime_error("GOG extraction/checksum verification failed (exit " +
                                  std::to_string(result.exit_code) + "): " +
                                  result.errors.substr(0, 2048));
-    validate_payload(target, inventory(target));
+    const auto files = inventory(target);
+    const auto expected = parse_extraction_manifest(result.output);
+    FileSizes actual;
+    for (const auto& item : files) actual.emplace(item.normalized, item.bytes);
+    verify_extraction_manifest(expected, actual);
+    validate_payload(target, files);
     return target;
 }
 
