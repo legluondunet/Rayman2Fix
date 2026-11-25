@@ -2,7 +2,7 @@
 #ifdef _WIN32
 #include <string>
 #include <array>
-#include "controller_info_art.hpp"
+#include "controller_info_atlas.hpp"
 namespace r2fix {
 namespace {
 constexpr COLORREF bg=RGB(15,29,52), blue=RGB(75,149,237),
@@ -108,7 +108,7 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
         if(frame && !RoundRect(dc,0,0,kPadInfoWidth,kPadInfoHeight,24,24))return false;
         SetBkMode(dc,TRANSPARENT);
         const auto hw=pad_hardware_layout(view.family);
-        if(!controller_art::paint(dc,view.family))return false;
+        if(!controller_atlas::paint(dc,view.family))return false;
         if(!face(dc,view.family))return false;
         const auto back_name=view.family==PadLabelFamily::playstation?"Share":"Back";
         const auto start_name=view.family==PadLabelFamily::playstation?"Options":"Start";

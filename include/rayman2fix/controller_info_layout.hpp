@@ -36,7 +36,9 @@ inline bool align_pad_info_companion(bool page,bool viewport,unsigned route,floa
     // contexts. Accept the lower original anchor seen in MENU, but never
     // affect other actor routes, non-center objects or the 3D world.
     if(y<(pause?0.34f:0.08f)||y>0.84f)return false;
-    y=0.255f+(y-0.5f)*0.04f;
+    // Build c55514d8 showed the visible butterfly overlapping the title
+    // at .255; move the anchor down by .08 of the native canvas.
+    y=0.335f+(y-0.5f)*0.014f;
     return true;
 }
 constexpr PadInfoRect kPadInfoStatus{12,8,908,42};

@@ -1,7 +1,7 @@
 #pragma once
 // Original vector art for Rayman2Fix's enchanted controller page.
 // All physical control coordinates are shared with the layout contract.
-// Rasterize into a private premultiplied-alpha DIB at twice logical size.
+// Build-time original artwork source; the runtime loads three transparent HD PNGs.
 #include "rayman2fix/controller_info_layout.hpp"
 #include <windows.h>
 #include <objidl.h>
@@ -50,27 +50,32 @@ inline void gem(Graphics& g,float x,float y,float r,Color top,Color bottom) {
     disk(g,x,y+2,r+2,rgb(8,29,65,210));
     LinearGradientBrush b(PointF(x,y-r),PointF(x,y+r),top,bottom);
     g.FillEllipse(&b,x-r,y-r,r*2,r*2);
+    GraphicsPath dome;dome.AddEllipse(x-r,y-r,r*2,r*2);
+    PathGradientBrush gloss(&dome);Color dark=rgb(3,18,42,175);INT count=1;
+    gloss.SetSurroundColors(&dark,&count);gloss.SetCenterPoint(PointF(x-r*.32f,y-r*.42f));
+    gloss.SetCenterColor(rgb(255,255,239,100));g.FillPath(&gloss,&dome);
     ring(g,x,y,r,rgb(146,220,251),.9f);
-    SolidBrush shine(rgb(255,255,245,130));
+    SolidBrush shine(rgb(255,255,245,110));
     g.FillEllipse(&shine,x-r*.56f,y-r*.72f,r*.78f,r*.38f);
 }
 inline void shell(Graphics& g,PadLabelFamily family) {
     const bool xbox=family==PadLabelFamily::xbox;
     GraphicsPath p;
     // Slightly different body/shoulder shape; controls stay at exact anchors.
-    const float shoulder=xbox?112.f:105.f;
+    const bool ps=family==PadLabelFamily::playstation;
+    const float shoulder=xbox?112.f:ps?110.f:115.f;
     p.AddBezier(PointF{292,216},PointF{291,161},PointF{305,shoulder+20},PointF{335,shoulder} );
     p.AddBezier(PointF{335,shoulder},PointF{365,shoulder-9},PointF{382,120},PointF{411,124} );
     p.AddBezier(PointF{411,124},PointF{438,130},PointF{482,130},PointF{509,124} );
     p.AddBezier(PointF{509,124},PointF{538,120},PointF{555,shoulder-9},PointF{585,shoulder} );
     p.AddBezier(PointF{585,shoulder},PointF{615,shoulder+20},PointF{629,161},PointF{628,216} );
-    p.AddBezier(PointF{628,216},PointF{641,268},PointF{642,322},PointF{615,342} );
-    p.AddBezier(PointF{615,342},PointF{588,361},PointF{567,329},PointF{549,310} );
+    p.AddBezier(PointF{628,216},PointF{ps?644.f:641.f,268},PointF{ps?641.f:642.f,ps?337.f:322.f},PointF{615,ps?348.f:342.f} );
+    p.AddBezier(PointF{615,ps?348.f:342.f},PointF{588,ps?363.f:361.f},PointF{567,329},PointF{549,310} );
     p.AddBezier(PointF{549,310},PointF{531,293},PointF{508,299},PointF{487,300} );
     p.AddBezier(PointF{487,300},PointF{468,301},PointF{452,301},PointF{433,300} );
     p.AddBezier(PointF{433,300},PointF{412,299},PointF{389,293},PointF{371,310} );
-    p.AddBezier(PointF{371,310},PointF{353,329},PointF{332,361},PointF{305,342} );
-    p.AddBezier(PointF{305,342},PointF{278,322},PointF{279,268},PointF{292,216} );
+    p.AddBezier(PointF{371,310},PointF{353,329},PointF{332,ps?363.f:361.f},PointF{305,ps?348.f:342.f} );
+    p.AddBezier(PointF{305,ps?348.f:342.f},PointF{ps?279.f:278.f,ps?337.f:322.f},PointF{ps?276.f:279.f,268},PointF{292,216} );
     p.CloseFigure();
     // Glossy blue/cyan shell; full-height opaque gradient prevents a tiled seam.
     Pen shadow(rgb(4,23,50,175),7);shadow.SetLineJoin(LineJoinRound);g.DrawPath(&shadow,&p);
@@ -82,6 +87,20 @@ inline void shell(Graphics& g,PadLabelFamily family) {
     REAL stops[]={0,.23f,.64f,1};surface.SetInterpolationColors(colors,stops,4);
     g.FillPath(&surface,&p);
     auto saved=g.Save();g.SetClip(&p,CombineModeIntersect);
+    // Soft light across the sculpted plastic, with dark blue perimeter.
+    PathGradientBrush volume(&p); Color edge=rgb(4,35,96,205); INT n=1;
+    volume.SetSurroundColors(&edge,&n);volume.SetCenterColor(rgb(74,229,226,195));
+    volume.SetCenterPoint(PointF(467,221));volume.SetFocusScales(.38f,.25f);
+    g.FillPath(&volume,&p);
+    const auto hw=pad_hardware_layout(family);
+    // Soft occlusion shadows beneath every physical control.
+    auto recess=[&](float x,float y,float radius){
+        for(int i=8;i>=1;--i)disk(g,x+1,y+4,radius+float(i)*1.5f,rgb(0,20,53,10+unsigned(8-i)*2));
+    };
+    recess(float(hw.left_stick.x),float(hw.left_stick.y),26);
+    recess(float(hw.right_stick.x),float(hw.right_stick.y),26);
+    recess(float(hw.dpad.x),float(hw.dpad.y),31);
+    for(auto f:hw.face)recess(float(f.x),float(f.y),12);
     // Sculpted outer grip shading, soft central glow, and painted curls.
     for(int w=34;w>=4;w-=5) {
         const unsigned alpha=unsigned(7+(34-w)/6);
@@ -95,13 +114,13 @@ inline void shell(Graphics& g,PadLabelFamily family) {
     curve(g,rgb(235,255,210,155),2,{313,165},{325,139},{356,122},{391,128});
     curve(g,rgb(180,249,246,135),2,{529,128},{565,116},{596,133},{608,164});
     // Sweeping spiral decals on both grips, with a central water motif.
-    spiral(g,322,295,24,rgb(138,224,190,145),6.4f);
-    spiral(g,598,295,24,rgb(138,224,190,145),6.4f,true);
+    spiral(g,324,295,27,rgb(141,232,183,175),8.5f);
+    spiral(g,596,295,27,rgb(141,232,183,175),8.5f,true);
     curve(g,rgb(133,227,193,115),7,{430,263},{438,237},{473,221},{478,203});
     spiral(g,474,207,15,rgb(141,229,195,105),5.2f,true);
     curve(g,rgb(129,237,229,120),2,{390,298},{431,290},{489,290},{530,298});
     g.Restore(saved);
-    Pen rim(rgb(103,218,246),1.6f);rim.SetLineJoin(LineJoinRound);g.DrawPath(&rim,&p);
+    Pen rim(rgb(86,188,229),1.1f);rim.SetLineJoin(LineJoinRound);g.DrawPath(&rim,&p);
 }
 inline void draw(Graphics& g,PadLabelFamily family) {
     g.SetSmoothingMode(SmoothingModeAntiAlias);g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
@@ -136,8 +155,8 @@ inline void draw(Graphics& g,PadLabelFamily family) {
     curve(g,rgb(178,224,250,175),1.2f,{x-8,y-28},{x-3,y-29},{x+3,y-29},{x+8,y-28});
     Pen cp(rgb(9,33,71),1.7f);cp.SetLineJoin(LineJoinRound);g.DrawPath(&cp,&cross);
     if(family==PadLabelFamily::playstation) {
-        pill(g,432,117,56,28,6,rgb(47,112,169),rgb(13,46,86));
-        for(int j=122;j<141;j+=4)for(int i=438;i<484;i+=4)disk(g,float(i),float(j),.6f,rgb(118,192,231));
+        pill(g,425,117,70,29,5,rgb(47,112,169),rgb(13,46,86));
+        for(int j=122;j<142;j+=4)for(int i=431;i<491;i+=4)disk(g,float(i),float(j),.6f,rgb(118,192,231));
     }else {
         gem(g,460,131,11,rgb(155,251,232),rgb(37,122,128));
         spiral(g,460,131,6,rgb(255,254,225),1.2f);

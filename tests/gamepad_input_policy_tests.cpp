@@ -193,14 +193,14 @@ int main() {
     ty0=47.5f;ty1=52.5f;
     check(!pad_info_native_title(false,tx0,ty0,tx1,ty1),"calibration body glyph remains hidden");
     float cy=.5f;
-    check(align_pad_info_companion(true,true,0,.5f,cy,.015f)&&cy>.23f&&cy<.28f,
+    check(align_pad_info_companion(true,true,0,.5f,cy,.015f)&&cy>.32f&&cy<.35f,
           "native companion moves above panel");
     for(float y:{.08f,.147f,.16f,.33f,.34f,.54f,.65f,.84f}) {
-        check(align_pad_info_companion(true,true,0,.5f,y,.015f)&&y>.23f&&y<.28f,
+        check(align_pad_info_companion(true,true,0,.5f,y,.015f)&&y>.32f&&y<.35f,
               "continuous MENU companion travel remains above panel");
     }
     float pause_y=.54f;
-    check(align_pad_info_companion(true,true,0,.5f,pause_y,.015f,true)&&pause_y>.23f&&pause_y<.28f,
+    check(align_pad_info_companion(true,true,0,.5f,pause_y,.015f,true)&&pause_y>.32f&&pause_y<.35f,
           "Pause companion uses same header gap");
     check(pad_may_take_owner(true,false,true,true)&&!pad_may_take_owner(true,true,true,true)&&
           !pad_may_take_owner(true,false,false,true)&&!pad_may_take_owner(false,false,true,true),

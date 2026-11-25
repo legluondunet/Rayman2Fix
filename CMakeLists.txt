@@ -97,6 +97,33 @@ if(WIN32)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
     message(FATAL_ERROR "Rayman2Fix runtime must be compiled for 32-bit Windows")
   endif()
+  # Generate the original transparent controller atlas once at build time.
+  # The PNG resources are linked into fix.dll; the generator is never shipped.
+  if(NOT CMAKE_CROSSCOMPILING OR CMAKE_CROSSCOMPILING_EMULATOR)
+    add_executable(rayman2_controller_art_generator tools/controller_art/render.cpp)
+    target_include_directories(rayman2_controller_art_generator PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(rayman2_controller_art_generator PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(rayman2_controller_art_generator PRIVATE gdiplus gdi32 user32 msimg32)
+    set(controller_atlas_dir "${CMAKE_CURRENT_BINARY_DIR}/controller-atlas")
+    set(controller_atlas_pngs "${controller_atlas_dir}/generic.png"
+      "${controller_atlas_dir}/xbox.png" "${controller_atlas_dir}/playstation.png")
+    add_custom_command(OUTPUT ${controller_atlas_pngs}
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${controller_atlas_dir}"
+      COMMAND rayman2_controller_art_generator "${controller_atlas_dir}"
+      DEPENDS rayman2_controller_art_generator
+      VERBATIM)
+    add_custom_target(rayman2_controller_atlas DEPENDS ${controller_atlas_pngs})
+    set(controller_atlas_rc "${CMAKE_CURRENT_BINARY_DIR}/controller_atlas.rc")
+    file(GENERATE OUTPUT "${controller_atlas_rc}"
+      CONTENT "2201 RCDATA \"${controller_atlas_dir}/generic.png\"\n2202 RCDATA \"${controller_atlas_dir}/xbox.png\"\n2203 RCDATA \"${controller_atlas_dir}/playstation.png\"\n")
+    set_source_files_properties("${controller_atlas_rc}" PROPERTIES OBJECT_DEPENDS "${controller_atlas_pngs}")
+    function(embed_controller_atlas target)
+      add_dependencies(${target} rayman2_controller_atlas)
+      target_sources(${target} PRIVATE "${controller_atlas_rc}")
+      target_compile_definitions(${target} PRIVATE RAYMAN2FIX_EMBEDDED_CONTROLLER_ART=1)
+      target_link_libraries(${target} PRIVATE ole32)
+    endfunction()
+  endif()
   add_library(Rayman2FixRuntime SHARED
     src/runtime/runtime.cpp
     src/runtime/game_window_icon.cpp)
@@ -123,6 +150,9 @@ if(WIN32)
       src/runtime/wine_vulkan_driver.cpp)
     target_link_libraries(Rayman2FixRuntime PRIVATE gdi32 setupapi advapi32 gdiplus msimg32)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_STANDALONE_VIDEO_PAGE=1)
+    if(TARGET rayman2_controller_atlas)
+      embed_controller_atlas(Rayman2FixRuntime)
+    endif()
   endif()
   target_compile_definitions(Rayman2FixRuntime PRIVATE
     WIN32_LEAN_AND_MEAN NOMINMAX
@@ -264,6 +294,9 @@ if(BUILD_TESTING)
     target_include_directories(controller_info_renderer_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_definitions(controller_info_renderer_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(controller_info_renderer_tests PRIVATE gdi32 user32 gdiplus msimg32)
+    if(TARGET rayman2_controller_atlas)
+      embed_controller_atlas(controller_info_renderer_tests)
+    endif()
     add_test(NAME controller-info-offscreen-renderer COMMAND controller_info_renderer_tests)
   endif()
   # SDL3 phase 0: pure focus/hotplug transition policy, no runtime input.
