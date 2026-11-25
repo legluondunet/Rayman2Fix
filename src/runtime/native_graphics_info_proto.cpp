@@ -1146,13 +1146,36 @@ DWORD WINAPI worker(void*) {
 } // namespace
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
 void native_graphics_info_stabilize_video_cursor_at_flip() noexcept {
-    // Prepare the exact localized website caption during loading, before
-    // the asynchronous MENU controller discovery and first visible menu.
-    // Stop probing after the first success (subsequent scene loads retain
-    // the existing worker's authenticated replacement).
-    static bool initial_caption_ready=false;
-    if(!initial_caption_ready && g_logger && approved())
-        initial_caption_ready=prepare_main_menu_site_caption(text_slot_table(),g_logger);
+    // The localized table (and its backing text) can be replaced on
+    // language changes or a new scene. A one-shot success in startup
+    // MENU did not cover the Spanish Pause caption in the owner test.
+    // Recheck the exact handle in each available locale on the native
+    // flip thread, including gameplay, before Pause builds its text.
+    // Each write is still gated by the exact original caption and its
+    // writable live buffer; no text scanning or on-disk changes.
+    static DWORD last_site_caption_check=0;
+    const DWORD now=GetTickCount();
+    if(g_logger && (!last_site_caption_check ||
+                    DWORD(now-last_site_caption_check)>=100u)) {
+        last_site_caption_check=now;
+        if(approved()) {
+            const auto base=exe_base();
+            std::uint32_t directory=0,language=0;
+            if(base && read32(base+kTextTableDirRva,directory) &&
+               read32(base+kLanguageIndexRva,language) &&
+               menu_safe_ptr(directory,8u*8u) && (language&255u)<8u) {
+                // Active language first, then other loaded slots.
+                const unsigned active=language&255u;
+                for(unsigned offset=0;offset<8u;++offset) {
+                    const unsigned index=(active+offset)&7u;
+                    std::uint32_t table=0;
+                    if(read32(std::uintptr_t(directory)+index*8u,table) &&
+                       menu_safe_ptr(table,385u*4u+4u))
+                        prepare_main_menu_site_caption(table,g_logger);
+                }
+            }
+        }
+    }
     // Called ONLY on the game's approved native flip thread, never the
     // asynchronous model monitor. The page has no selectable widgets.
     if(!g_protected.load(std::memory_order_acquire) ||
