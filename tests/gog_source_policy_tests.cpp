@@ -1,4 +1,4 @@
-#include "rayman2fix/gog_source_policy.hpp"
+#include "rayman2fix/gog_extract_policy.hpp"
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -50,6 +50,34 @@ int main() {
         const auto found = g::candidates(dir, dir / "Rayman2Fix.exe");
         require(found.size() == 2, "only regular EXEs other than launcher");
         require(std::find(found.begin(), found.end(), dir / renamed) != found.end(), "renamed discovered");
+        const auto args = g::extract_args(dir / renamed, dir / "game.installing");
+        require(std::find(args.begin(), args.end(), L"--test") != args.end(), "strict checksum");
+        require(std::find(args.begin(), args.end(), L"--collisions=error") != args.end(), "collision refusal");
+        require(std::find(args.begin(), args.end(), L"--dump") == args.end(), "no unsafe dump");
+        require(std::find(args.begin(), args.end(), L"--gog") == args.end(), "no external rar");
+        require(args.back() == fs::absolute(dir / renamed).wstring(), "absolute source");
+        const auto lang = g::extract_args(dir / polish, dir / "staging", L"pl-PL");
+        require(std::find(lang.begin(), lang.end(), L"pl-PL") != lang.end(), "explicit metadata language");
+        require(g::quote_arg(L"some path") == L"\"some path\"", "quote spaces");
+        require(g::quote_arg(L"trailing\\") == L"\"trailing\\\\\"", "quote terminal slash");
+        require(g::quote_arg(L"a\"b") == L"\"a\\\"b\"", "quote embedded quote");
+        require(g::normalized_path("DLL/Snd_Cpa.ini") == "dll/snd_cpa.ini", "normalize mixed case");
+        for (const auto* unsafe : {"../x", "data/../x", "data/con.txt", "data/stream:alt", "data/x.", "data/x "}) {
+            bool refused = false;
+            try { (void)g::normalized_path(unsafe); }
+            catch (const std::runtime_error&) { refused = true; }
+            require(refused, "reject unsafe relative name");
+        }
+        require(g::role("dll/snd_cpa.ini") == g::FileRole::config, "native audio config");
+        require(g::role("data/world/levels/menu/menu.sna") == g::FileRole::game, "game data");
+        require(g::role("goggame-1207658940.info") == g::FileRole::metadata, "metadata");
+        require(g::role("ddraw.dll") == g::FileRole::auxiliary, "wrapper candidate");
+        require(g::role("fix.dll") == g::FileRole::unknown, "reserved fix file");
+        std::set<std::string> core;
+        for (auto p : g::required_files) core.emplace(p);
+        require(g::has_required_files(core), "core layout");
+        core.erase("dll/snd_cpa.ini");
+        require(!g::has_required_files(core), "reject incomplete native audio");
         std::cout << "GOG source policy OK\n";
         return 0;
     } catch (const std::exception& e) {
