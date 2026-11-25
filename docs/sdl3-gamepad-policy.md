@@ -574,3 +574,23 @@ aspect correction. Leader geometry stays unchanged and intersection-tested;
 replace arrowheads with small anchor dots for a cleaner reading order.
 No new dependencies or assets; mapping and ownership untouched. Real
 visual bounds/appearance still need validation in-game.
+
+
+## Enchanted controller artwork direction
+
+Owner approved the existing positioning and input behavior, and approved
+an enchanted Rayman-inspired concept. Treat the concept as artistic
+reference, not a screenshot or static localized page. This revision
+implements original scalable illustrations in a separate private
+GDI+ art layer (not a generated raster of the full concept): curved
+ivory/lavender shells, turquoise spiral caps, jewel-like face buttons,
+carved-style status plaque and restrained leaf/spiral accents. Exact
+control centers and the non-crossing leaders remain in the existing
+layout contract. Paint into a 2x transparent premultiplied DIB, blend
+into existing black/white foreground passes, then retain the tested
+GameFrame composition. GDI+ and AlphaBlend are Windows/Wine system
+APIs; no extra runtime redistributable or game asset required. The
+native title, moving companion, localized strings, input and scene
+hooks are untouched. This is an initial production illustration, not
+a pixel-exact reproduction of the concept. Visual validation and
+potential refinements (organic panel border) remain open.

@@ -2,10 +2,11 @@
 #ifdef _WIN32
 #include <string>
 #include <array>
+#include "controller_info_art.hpp"
 namespace r2fix {
 namespace {
 constexpr COLORREF bg=RGB(15,29,52), blue=RGB(75,149,237),
-                   ink=RGB(235,243,255), muted=RGB(169,197,224),
+                   ink=RGB(255,239,211), muted=RGB(152,226,248),
                    body=RGB(57,75,100), dark=RGB(19,29,43);
 struct GdiObject {
     HGDIOBJ handle;
@@ -54,90 +55,11 @@ void line(HDC dc,int x1,int y1,int x2,int y2){
 void circle(HDC dc,int x,int y,int radius){
     Ellipse(dc,x-radius,y-radius,x+radius+1,y+radius+1);
 }
-COLORREF mix(COLORREF a,COLORREF b,unsigned n,unsigned den) {
-    const auto blend=[&](unsigned x,unsigned y){return (x*(den-n)+y*n+den/2)/den;};
-    return RGB(blend(GetRValue(a),GetRValue(b)),blend(GetGValue(a),GetGValue(b)),
-               blend(GetBValue(a),GetBValue(b)));
-}
-void solid_rect(HDC dc,RECT r,COLORREF color){
-    SetDCBrushColor(dc,color);FillRect(dc,&r,static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
-}
 void solid_circle(HDC dc,int x,int y,int radius,COLORREF color){
     GdiObject brush{CreateSolidBrush(color)};
     if(!brush.handle)return;
     Selection b(dc,brush.handle),p(dc,GetStockObject(NULL_PEN));
     circle(dc,x,y,radius);
-}
-void inset_button(HDC dc,PadInfoRect r,COLORREF top,COLORREF bottom,int radius){
-    GdiObject edge{CreatePen(PS_SOLID,1,RGB(12,20,30))},fill{CreateSolidBrush(bottom)};
-    if(!edge.handle||!fill.handle)return;
-    Selection p(dc,edge.handle),b(dc,fill.handle);
-    RoundRect(dc,r.left,r.top,r.right,r.bottom,radius,radius);
-    GdiObject cap{CreateSolidBrush(top)};
-    if(!cap.handle)return;
-    Selection h(dc,cap.handle),none(dc,GetStockObject(NULL_PEN));
-    RoundRect(dc,r.left+2,r.top+2,r.right-2,r.bottom-4,radius,radius);
-}
-// Original curves with a softly lit shell and recessed dark controls.
-bool shell_path(HDC dc,PadLabelFamily family) {
-    const bool xbox=family==PadLabelFamily::xbox;
-    const POINT xbox_path[]={
-        {288,218},{289,166},{305,134},{330,118},
-        {352,103},{376,105},{401,116},
-        {426,126},{494,126},{519,116},
-        {544,105},{568,103},{590,118},
-        {615,134},{631,166},{632,218},
-        {641,269},{641,309},{620,332},
-        {600,351},{578,341},{559,317},
-        {545,299},{530,290},{509,290},
-        {485,290},{435,290},{411,290},
-        {390,290},{375,299},{361,317},
-        {342,341},{320,351},{300,332},
-        {279,309},{279,269},{288,218}
-    };
-    const POINT ps_path[]={
-        {292,219},{298,164},{309,128},{333,115},
-        {357,98},{391,104},{411,117},
-        {434,126},{486,126},{509,117},
-        {529,104},{563,98},{587,115},
-        {611,128},{622,164},{628,219},
-        {638,260},{628,314},{609,336},
-        {591,355},{568,346},{549,324},
-        {532,305},{511,299},{489,298},
-        {468,298},{452,298},{431,298},
-        {409,299},{388,305},{371,324},
-        {352,346},{329,355},{311,336},
-        {292,314},{282,260},{292,219}
-    };
-    const auto* pts=xbox?xbox_path:ps_path;
-    if(!BeginPath(dc))return false;
-    MoveToEx(dc,pts[0].x,pts[0].y,nullptr);
-    if(!PolyBezierTo(dc,pts+1,36)||!CloseFigure(dc)||!EndPath(dc)){
-        AbortPath(dc);return false;
-    }
-    return true;
-}
-bool draw_shell(HDC dc,PadLabelFamily family) {
-    const bool xbox=family==PadLabelFamily::xbox;
-    const auto light=xbox?RGB(181,192,203):RGB(112,125,146);
-    const auto mid=xbox?RGB(111,128,146):RGB(61,75,96);
-    const auto shade=xbox?RGB(47,61,79):RGB(24,34,51);
-    const int saved=SaveDC(dc);
-    if(!saved)return false;
-    if(!shell_path(dc,family)||!SelectClipPath(dc,RGN_AND)){
-        RestoreDC(dc,saved);return false;
-    }
-    for(int y=98;y<360;++y){
-        const auto c=y<195?mix(light,mid,unsigned(std::max(0,y-98)),97):
-                          mix(mid,shade,unsigned(y-195),165);
-        solid_rect(dc,{277,y,643,y+1},c);
-    }
-    RestoreDC(dc,saved);
-    // Thin neutral outline rather than a neon stroke around every surface.
-    GdiObject edge{CreatePen(PS_SOLID,1,RGB(140,161,182))};
-    if(!edge.handle)return false;
-    Selection p(dc,edge.handle);
-    return shell_path(dc,family)&&StrokePath(dc)!=0;
 }
 bool label(HDC dc,const PadInfoView& v,unsigned row,PadInfoRect r,UINT align){
     const auto& item=v.rows[row];
@@ -154,15 +76,6 @@ bool face(HDC dc,PadLabelFamily family){
     bool ok=true;
     for(unsigned i=0;i<4;++i){
         const auto p=points[i];
-        const COLORREF xbox_colors[]{RGB(50,129,74),RGB(166,55,58),RGB(45,98,164),RGB(171,135,40)};
-        GdiObject face_fill{CreateSolidBrush(family==PadLabelFamily::xbox?xbox_colors[i]:dark)};
-        if(!face_fill.handle)return false;
-        Selection face_brush(dc,face_fill.handle);
-        solid_circle(dc,p.x,p.y+1,16,RGB(19,26,37));
-        solid_circle(dc,p.x,p.y,14,RGB(97,111,130));
-        const auto base=family==PadLabelFamily::xbox?xbox_colors[i]:RGB(46,57,73);
-        for(int radius=13;radius>=1;--radius)
-            solid_circle(dc,p.x,p.y-(13-radius)/5,radius,mix(base,RGB(245,250,255),unsigned(13-radius),55));
         const auto symbol=family==PadLabelFamily::xbox?xbox[i]:
                           family==PadLabelFamily::playstation?ps[i]:generic[i];
         if(family==PadLabelFamily::playstation){
@@ -194,84 +107,18 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
         if(frame && !RoundRect(dc,0,0,kPadInfoWidth,kPadInfoHeight,24,24))return false;
         SetBkMode(dc,TRANSPARENT);
         const auto hw=pad_hardware_layout(view.family);
-        {
-            GdiObject outer{CreatePen(PS_SOLID,2,RGB(135,176,212))},
-                skin{CreateSolidBrush(view.family==PadLabelFamily::xbox?RGB(65,83,108):RGB(44,56,78))};
-            if(!outer.handle||!skin.handle)return false;
-            Selection edge(dc,outer.handle),shell_sel(dc,skin.handle);
-            if(!draw_shell(dc,view.family))return false;
-        }
-        // Recessed shoulder caps and subtle highlights, with the same
-        // coordinates shared by the callout contract.
-        {
-            Selection controls(dc,button.handle);
-            for(auto cap:{PadInfoRect{315,81,361,108},PadInfoRect{559,81,605,108},
-                          PadInfoRect{307,112,354,139},PadInfoRect{566,112,613,139}})
-                inset_button(dc,cap,RGB(66,82,101),RGB(22,32,46),14);
-            {
-                GdiObject shine{CreatePen(PS_SOLID,1,RGB(138,164,189))};
-                if(!shine.handle)return false;
-                Selection hl(dc,shine.handle);
-                line(dc,322,86,353,86);line(dc,566,86,597,86);
-                line(dc,314,117,346,117);line(dc,573,117,605,117);
-            }
-            const auto d=hw.dpad;
-            POINT cross[]={{d.x-10,d.y-30},{d.x+10,d.y-30},{d.x+10,d.y-10},{d.x+30,d.y-10},
-                {d.x+30,d.y+10},{d.x+10,d.y+10},{d.x+10,d.y+30},{d.x-10,d.y+30},
-                {d.x-10,d.y+10},{d.x-30,d.y+10},{d.x-30,d.y-10},{d.x-10,d.y-10}};
-            solid_circle(dc,d.x,d.y,34,RGB(37,48,64));
-            solid_circle(dc,d.x,d.y,31,RGB(87,103,122));
-            {
-                GdiObject cp{CreatePen(PS_SOLID,1,RGB(13,20,30))},cb{CreateSolidBrush(RGB(33,43,57))};
-                if(!cp.handle||!cb.handle)return false;
-                Selection p(dc,cp.handle),b(dc,cb.handle);
-                Polygon(dc,cross,12);
-                GdiObject hi{CreatePen(PS_SOLID,1,RGB(98,116,137))};
-                if(!hi.handle)return false;
-                Selection h(dc,hi.handle);
-                line(dc,d.x-8,d.y-27,d.x+8,d.y-27);
-                line(dc,d.x-27,d.y-8,d.x-11,d.y-8);
-            }
-            for(auto stick:{hw.left_stick,hw.right_stick}){
-                solid_circle(dc,stick.x,stick.y+1,27,RGB(20,29,41));
-                solid_circle(dc,stick.x,stick.y,24,RGB(112,128,147));
-                solid_circle(dc,stick.x,stick.y,22,RGB(36,47,62));
-                for(int rad=20;rad>=1;--rad)
-                    solid_circle(dc,stick.x,stick.y,rad,mix(RGB(68,81,99),RGB(31,42,57),unsigned(20-rad),19));
-                GdiObject grip{CreatePen(PS_SOLID,1,RGB(130,147,165))};
-                if(!grip.handle)return false;
-                Selection hi(dc,grip.handle);
-                for(int i=0;i<12;++i){
-                    constexpr double pi=3.141592653589793;
-                    const double a=double(i)*pi/6.0;
-                    line(dc,stick.x+int(17*std::cos(a)),stick.y+int(17*std::sin(a)),
-                        stick.x+int(19*std::cos(a)),stick.y+int(19*std::sin(a)));
-                }
-            }
-            if(view.family==PadLabelFamily::playstation){
-                inset_button(dc,{432,117,488,145},RGB(57,70,87),RGB(19,28,40),8);
-                for(int y=122;y<141;y+=4)for(int x=438;x<484;x+=4)
-                    SetPixelV(dc,x,y,RGB(87,102,121));
-            }else if(view.family==PadLabelFamily::xbox){
-                solid_circle(dc,460,131,12,RGB(24,36,49));
-                solid_circle(dc,460,131,9,RGB(104,146,115));
-                solid_circle(dc,460,131,6,RGB(49,65,62));
-            }
-            for(auto key:{hw.back,hw.start})
-                inset_button(dc,{key.x-19,key.y-10,key.x+20,key.y+11},
-                    RGB(65,80,98),RGB(18,27,39),12);
-            if(!face(dc,view.family))return false;
-            const auto back_name=view.family==PadLabelFamily::playstation?"Share":"Back";
-            const auto start_name=view.family==PadLabelFamily::playstation?"Options":"Start";
-            if(!text_fit(dc,back_name,{hw.back.x-18,hw.back.y-9,hw.back.x+19,hw.back.y+10},11,8,ink,false,DT_CENTER) ||
-               !text_fit(dc,start_name,{hw.start.x-18,hw.start.y-9,hw.start.x+19,hw.start.y+10},11,8,ink,false,DT_CENTER))return false;
-        }
-        bool ok=text_fit(dc,view.status,kPadInfoStatus,24,15,ink,true,DT_CENTER);
+        if(!controller_art::paint(dc,view.family))return false;
+        if(!face(dc,view.family))return false;
+        const auto back_name=view.family==PadLabelFamily::playstation?"Share":"Back";
+        const auto start_name=view.family==PadLabelFamily::playstation?"Options":"Start";
+        if(!text_fit(dc,back_name,{hw.back.x-18,hw.back.y-9,hw.back.x+19,hw.back.y+10},11,8,ink,false,DT_CENTER) ||
+           !text_fit(dc,start_name,{hw.start.x-18,hw.start.y-9,hw.start.x+19,hw.start.y+10},11,8,ink,false,DT_CENTER))return false;
+        bool ok=text_fit(dc,view.status,{381,6,539,39},24,10,ink,true,DT_CENTER);
         for(const auto& a:pad_info_callouts(view.family)){
             const auto endpoint=pad_callout_end(a);
             const int end=endpoint.x,y=endpoint.y;
             // Small terminal dot and restrained leader, no crossing arrowheads.
-            GdiObject leader{CreatePen(PS_SOLID,1,RGB(145,199,236))};
+            GdiObject leader{CreatePen(PS_SOLID,1,RGB(155,227,249))};
             if(!leader.handle)return false;
             Selection lp(dc,leader.handle);
             line(dc,a.anchor.x,a.anchor.y,end,y);

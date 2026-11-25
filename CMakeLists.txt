@@ -121,7 +121,7 @@ if(WIN32)
       src/runtime/pause_video_observer.cpp
       src/runtime/video_navigation_input.cpp
       src/runtime/wine_vulkan_driver.cpp)
-    target_link_libraries(Rayman2FixRuntime PRIVATE gdi32 setupapi advapi32)
+    target_link_libraries(Rayman2FixRuntime PRIVATE gdi32 setupapi advapi32 gdiplus msimg32)
     target_compile_definitions(Rayman2FixRuntime PRIVATE RAYMAN2FIX_STANDALONE_VIDEO_PAGE=1)
   endif()
   target_compile_definitions(Rayman2FixRuntime PRIVATE
@@ -263,7 +263,7 @@ if(BUILD_TESTING)
       src/runtime/controller_info_renderer.cpp)
     target_include_directories(controller_info_renderer_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_definitions(controller_info_renderer_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(controller_info_renderer_tests PRIVATE gdi32 user32)
+    target_link_libraries(controller_info_renderer_tests PRIVATE gdi32 user32 gdiplus msimg32)
     add_test(NAME controller-info-offscreen-renderer COMMAND controller_info_renderer_tests)
   endif()
   # SDL3 phase 0: pure focus/hotplug transition policy, no runtime input.
