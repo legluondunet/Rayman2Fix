@@ -239,6 +239,29 @@ int main(int argc, char** argv) {
         try { (void)g::PeDiagnostic(pe); }
         catch (const std::runtime_error&) { malformed = true; }
         require(malformed, "truncated PE refused");
+        // Entire static profile synthesized from the checked-in guard
+        // signatures; this is not a playable PE or a retail game fixture.
+        pe.assign(0xB0000,0);
+        put16(0,0x5a4d); put32(0x3c,0x80);
+        put32(0x80,0x4550); put16(0x84,0x14c); put16(0x86,6);
+        put32(0x88,0x3807B68B); put16(0x94,0xe0);
+        put16(0x98,0x10b); put32(0x98+16,0x5FCC0);
+        put32(0x98+28,0x400000); put32(0x98+56,0x1D7000);
+        put32(sec+12,0x1000); put32(sec+16,0x9B000);
+        put32(sec+20,0x1000); put32(sec+36,0x60000020);
+        put32(sec+40+12,0x9F000); put32(sec+40+16,0x10000);
+        put32(sec+40+20,0x9F000); put32(sec+40+36,0xC0000040);
+        for (const auto& site:g::diagnostic_signatures())
+            std::copy(site.bytes.begin(),site.bytes.end(),pe.begin()+site.rva);
+        for (const auto& site:g::diagnostic_slots())
+            std::copy(site.bytes.begin(),site.bytes.end(),pe.begin()+site.rva);
+        require(g::shared_runtime_preflight(g::PeDiagnostic(pe)), "static GOG profile matches");
+        pe[0x22AB0]^=1;
+        require(!g::shared_runtime_preflight(g::PeDiagnostic(pe)), "camera mutation refused");
+        pe[0x22AB0]^=1;
+        pe[0xA5C20]^=1;
+        require(!g::shared_runtime_preflight(g::PeDiagnostic(pe)), "native table mutation refused");
+
         std::cout << "GOG source policy OK\n";
         return 0;
     } catch (const std::exception& e) {
