@@ -386,3 +386,19 @@ knowledge activation may depend on the original PC F1 hold behavior and
 actor state, swimming behavior is not yet confirmed. Keep the full retail
 fingerprint, foreground, thread, freshness and scene checks. Move the
 explicit gameplay action table into the pure policy for regression tests.
+
+
+## Controller information page: localized presentation contract
+
+Prepare the five original PC language variants (English, French, Spanish,
+Italian, German), independent of runtime menu detection. The model builds
+all eleven rows from the same semantic controls and verified SDL family;
+disconnection switches to a localized generic layout immediately. Explicit
+pending markers distinguish the untested world-knowledge and swimming
+routes. UTF-8 authored labels must be converted to wide text by the future
+GDI renderer. The menu bridge now has a pure back-only controller_info
+case, matching VIDEO semantics. No native menu state is classified as
+controller_info yet; no original scripts, glyphs, cursor, renderer or
+input interception have been changed by this commit. Real source evidence
+for the main and pause controller-menu behaviors is still required before
+activation. The old page remains usable in the interim.

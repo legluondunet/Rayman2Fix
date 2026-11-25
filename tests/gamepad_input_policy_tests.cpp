@@ -166,6 +166,31 @@ int main() {
         pad_back_label(PadLabelFamily::xbox) == "B" &&
         pad_back_label(PadLabelFamily::generic) == "East",
         "physical east labeling");
+    for(unsigned l=0;l<5;++l) {
+        const auto locale=static_cast<PadInfoLocale>(l);
+        for(auto family:{PadLabelFamily::generic,PadLabelFamily::xbox,PadLabelFamily::playstation}) {
+            const auto view=make_pad_info_view(locale,true,family);
+            const auto unplugged=make_pad_info_view(locale,false,family);
+            check(!view.status.empty() && !view.back.empty() && !view.back_control.empty(),
+                  "localized connected presentation");
+            check(unplugged.family==PadLabelFamily::generic &&
+                  unplugged.status==pad_info_strings(locale).no_pad &&
+                  unplugged.back_control==pad_info_strings(locale).generic_back,
+                  "disconnected view immediately returns to generic controls");
+            for(unsigned i=0;i<view.rows.size();++i) {
+                check(!view.rows[i].action.empty() && !view.rows[i].control.empty(),
+                      "localized row completeness");
+                check(view.rows[i].pending==(i==8),"unverified knowledge route marked pending");
+            }
+            check(view.swim_pending && !view.pending_label.empty(),"swimming pending notice");
+        }
+    }
+    const auto fr=make_pad_info_view(PadInfoLocale::fr,true,PadLabelFamily::playstation);
+    check(fr.status=="PlayStation" && fr.rows[0].control=="Stick gauche" &&
+          fr.rows[1].control=="Cross" && fr.back_control=="Circle",
+          "French PlayStation labels follow detected family");
+    check(make_pad_info_view(static_cast<PadInfoLocale>(999),false,
+          PadLabelFamily::xbox).status=="No controller connected","unknown locale fallback");
     // Native DirectInput keyboard merge never replaces physical keyboard
     // state or changes failed reads, unauthenticated contexts or background.
     std::uint8_t keys[256]{};
@@ -193,6 +218,12 @@ int main() {
     check(merge_pad_menu_keys(PadContext::video, true, 0, 256, video_keys, menu_actions) == 1 &&
           video_keys[0x01] == 0x80 && !video_keys[0x1C] &&
           !video_keys[0xC8] && !video_keys[0xD0], "VIDEO receives only back");
+    std::uint8_t info_keys[256]{};
+    info_keys[0x39]=0x80;
+    check(merge_pad_menu_keys(PadContext::controller_info,true,0,256,info_keys,
+          menu_actions)==1 && info_keys[0x01]==0x80 && info_keys[0x39]==0x80 &&
+          !info_keys[0x1C] && !info_keys[0xC8] && !info_keys[0xD0],
+          "authenticated controller page receives only back, preserves keyboard");
 
     // Candidate retail IPT inspection rejects implausible addresses/layouts.
     check(!ipt_header_plausible({0,0}) &&

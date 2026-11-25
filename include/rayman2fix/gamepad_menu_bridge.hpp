@@ -9,7 +9,8 @@ inline unsigned merge_pad_menu_keys(PadContext context, bool foreground,
     std::int32_t result, unsigned size, std::uint8_t* keys,
     std::uint32_t actions) noexcept {
     if (!foreground || result != 0 || size != 256 || !keys ||
-        (context != PadContext::menu && context != PadContext::pause_menu && context != PadContext::video))
+        (context != PadContext::menu && context != PadContext::pause_menu && context != PadContext::video &&
+         context != PadContext::controller_info))
         return 0;
     unsigned count = 0;
     const auto set = [&](PadAction action, unsigned dik) {
