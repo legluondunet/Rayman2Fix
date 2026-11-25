@@ -1,3 +1,36 @@
+## Controller support (SDL3)
+
+Connect a compatible gamepad and play: SDL3 is installed automatically
+and no separate configuration or Start-to-activate step is required.
+One controller owns input at a time; a fresh input on a second controller
+can take over when the previous one is idle. Keyboard input is preserved.
+
+Open Options → Controls in the main or Escape pause menu to see the
+fixed mapping, with Xbox, PlayStation or generic artwork and live
+physical button/stick indicators. Press B / Circle or Escape to return.
+The page is informational, not a remapping or calibration tool.
+
+| Action | Xbox | PlayStation |
+|---|---|---|
+| Move | Left stick | Left stick |
+| Jump / surface* | A | Cross |
+| Shoot | B | Circle |
+| Camera left / right | X or LB / Y or RB | Square or L1 / Triangle or R1 |
+| Camera rotation | Right stick | Right stick |
+| Target / dive* | LT | L2 |
+| Statistics | RT | R2 |
+| World knowledge* / call Murfy | D-pad up / down | D-pad up / down |
+| Pause | Start | Options |
+
+*Swimming and world-knowledge behavior remain pending targeted in-game
+validation. The physical input indicators are not proof that a particular
+native game action works in every scene. The owner tested both PS4 and
+Xbox-compatible controllers under Wine; broader hardware and native
+Windows gameplay coverage is still pending.
+
+SDL3 3.4.20 (x86) is bundled with its separate zlib license. No new INI
+setting is required. See [technical notes](docs/sdl3-gamepad-policy.md).
+
 ## Read-only Video information
 
 The regular Rayman2Fix installer includes a read-only Video page in both
@@ -22,12 +55,13 @@ No extra INI setting is required. See [technical documentation](docs/standalone-
 
 Rayman2Fix is licensed under **GNU GPL version 3 only**
 (`SPDX-License-Identifier: GPL-3.0-only`; see [LICENSE](LICENSE)).
-The bundled GameFrame renderer retains its **separate Apache 2.0 license**.
-The single Windows launcher installs both notices under `docs/`.
+The bundled GameFrame renderer retains its **separate Apache 2.0 license**;
+SDL3 retains its zlib license. The launcher installs the notices under `docs/`.
 
 **No immediate release is planned.** Before revisiting publication, the
-remaining engineering priorities are verifying the very-early Jail_20 skip
-and integrating SDL3 controller support without changing keyboard controls.
+remaining engineering priorities are verifying the very-early Jail_20 skip,
+targeted swimming and world-knowledge tests, and release readiness. SDL3
+controller support and its read-only Controls page are merged (#56).
 Track these in the [work-in-progress roadmap](docs/release-readiness.md).
 The standard Windows x86 CI artifact is a test build, not a final release.
 
@@ -51,6 +85,7 @@ game/
   rayman2.exe.manifest
   fix.dll                 (one injected Rayman2Fix runtime)
   glide2x.dll             (SHA256-pinned GameFrame Glide 2)
+  SDL3.dll                (SHA256-pinned SDL3 x86)
   ubi.ini
   data/
   dll/
@@ -60,6 +95,7 @@ mods/
 docs/
   LICENSE                  (GNU GPLv3 project license)
   GameFrame-LICENSE-APACHE.txt
+  SDL3-LICENSE.txt
   build-info.txt
   README.md              (user guide bundled by the launcher)
 state/
