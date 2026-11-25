@@ -463,7 +463,22 @@ class AudioTraceGuardTests(unittest.TestCase):
         self.assertIn("proto_note_sampled_sxd(owner,known && menu!=0 && actor_ok);",tick)
         self.assertLess(tick.index("proto_dispatch(action);"),
                         tick.index("proto_note_sampled_sxd(owner,known && menu!=0 && actor_ok);"))
-        self.assertEqual(tick.count("inspect_audio_theme_owner(probe.first_handle,true)"),1)
+        # The rejected-opening report and accepted-opening report are
+        # mutually exclusive. Keep the original single accepted scan
+        # and independently enforce the rejected path's read-only scope.
+        rejected, active = tick.split("if(phase==proto::Phase::pending_menu &&\n",1)
+        rejected = rejected.split("if(phase==proto::Phase::idle) {",1)[1]
+        self.assertEqual(active.count("inspect_audio_theme_owner(probe.first_handle,true)"),1)
+        self.assertEqual(rejected.count("inspect_audio_theme_owner(probe.first_handle,true)"),1)
+        self.assertIn("RUNTIME-ESC-REJECTED-OPEN:",rejected)
+        self.assertIn("g_log && rejected.ready",rejected)
+        self.assertIn("g_proto_predriver_probe_budget.load(std::memory_order_relaxed)<=16u",rejected)
+        self.assertIn("g_proto_predriver_report.ready=false;",rejected)
+        self.assertTrue(rejected.rstrip().endswith("return;\n    }"))
+        for forbidden in ("proto_dispatch(", "proto_note_sampled_sxd(",
+                          "g_proto.reset(", "g_proto.quarantine(",
+                          "g_audio_original[", "VirtualProtect("):
+            self.assertNotIn(forbidden,rejected)
 
         resume=self.runtime.split(
             "void __cdecl proto_script_resume() {",1)[1].split(

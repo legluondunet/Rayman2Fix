@@ -106,6 +106,9 @@ void write_receipt(const fs::path& staged, const DiscInfo& info) {
         if (file.skipped_by_cd_recipe || file.invalid_extent ||
             file.relative_path.generic_u8string() == "ubi.ini") continue;
         const auto name = file.relative_path.generic_u8string();
+        // SDL3 is launcher-owned, never an immutable CD receipt member.
+        if (upper(name) == "SDL3.DLL")
+            throw std::runtime_error("CD conflicts with reserved SDL3.dll");
         // Reject a retail file that conflicts with the launcher-owned fix.dll.
         if (name=="rayman2fix" || name.rfind("rayman2fix/",0)==0)
             throw std::runtime_error("CD conflicts with reserved rayman2fix/ directory");
@@ -126,11 +129,15 @@ void write_receipt(const fs::path& staged, const DiscInfo& info) {
 
 bool bootstrap_fix_file(const std::string& name) {
     return name=="FIX.DLL" || name=="FIX.DLL.BAK" ||
-           name=="GLIDE2X.DLL" || name=="GLIDE2X.DLL.BAK";
+           name=="GLIDE2X.DLL" || name=="GLIDE2X.DLL.BAK"
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+           || name=="SDL3.DLL"
+#endif
+           ;
 }
 
-// Fresh bootstrap game/ may contain only the launcher-owned fix and Glide
-// DLLs and their optional backups, never unrelated game/user files.
+// Fresh bootstrap game/ may contain only launcher-owned runtime DLLs
+// and permitted backups, never unrelated game/user files.
 void check_bootstrap_workspace(const fs::path& game_dir) {
     if(fs::exists(layout::state(game_dir.parent_path())) ||
        fs::is_symlink(layout::state(game_dir.parent_path())))
@@ -267,6 +274,18 @@ void copy_bootstrap_files(const fs::path& original, const fs::path& staged) {
     fs::copy_file(original/"glide2x.dll",glide);
     if (!gameframe_glide_ready(staged))
         throw std::runtime_error("staged game-local glide2x.dll verification failed");
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    // Stage the exact pinned dependency, not any file supplied by the CD.
+    constexpr auto sdl_sha = "6d7e653aa9c762ceda4fffc054a504dcce273e016eb9f1fe079b6409a058a9f7";
+    const auto sdl_source = original / "SDL3.dll";
+    const auto sdl_dest = staged / "SDL3.dll";
+    if (!exists_file(sdl_source) || sha256_file(sdl_source) != sdl_sha ||
+        fs::exists(sdl_dest) || fs::is_symlink(sdl_dest))
+        throw std::runtime_error("cannot stage verified game-local SDL3.dll");
+    fs::copy_file(sdl_source, sdl_dest);
+    if (sha256_file(sdl_dest) != sdl_sha)
+        throw std::runtime_error("staged game-local SDL3.dll verification failed");
+#endif
     // Keep any previous user DLL preserved by the single .bak rotation.
     const auto old_backup=original/"glide2x.dll.bak";
     if (fs::exists(old_backup) || fs::is_symlink(old_backup)) {

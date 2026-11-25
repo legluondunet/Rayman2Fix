@@ -10,6 +10,14 @@ namespace r2fix {
 // existing centered 4:3 HUD transform. All boundaries are conservative.
 // This is a VISUAL opt-in filter: an opaque material color is not inferred
 // from a rectangle's position. Never use this to erase arbitrary quads.
+// Mapmonde arrival: verified GLI Frame full-screen geometry in owner log.
+// Preserve its material and animation; exempt only this exact source
+// from the 4:3 squeeze. Other frames and all glyph/image producers stay.
+inline bool map_transition_full_width(bool map_scene,bool frame,float x0,float y0,float x1,float y1) noexcept {
+    return map_scene&&frame&&std::fabs(x0)<=0.05f&&std::fabs(y0)<=0.05f&&
+           std::fabs(x1-100.f)<=0.05f&&std::fabs(y1-100.f)<=0.05f;
+}
+
 enum class BlackFrameKind {
     Preserve,
     DialogueBackdrop,
@@ -46,6 +54,14 @@ inline BlackFrameKind black_frame_kind(float x0, float y0,
         height >= 5.0f && height <= 25.0f)
         return BlackFrameKind::DialogueBackdrop;
 
+    // Mapmonde tutorial: owner log 20261124-223631 reports the exact
+    // GLI Frame source at 14..94 / 61.60..73.40, matching the screenshot
+    // after the centered 4:3 transform. Do not lower the broad dialogue
+    // threshold: unrelated UI panels can occupy the same vertical band.
+    const auto frame_coord_matches=[](float a,float b){return std::fabs(a-b)<=0.15f;};
+    if(frame_coord_matches(x0,14.f) && frame_coord_matches(x1,94.f) &&
+       frame_coord_matches(y0,61.6f) && frame_coord_matches(y1,73.4f))
+        return BlackFrameKind::DialogueBackdrop;
     return BlackFrameKind::Preserve;
 }
 

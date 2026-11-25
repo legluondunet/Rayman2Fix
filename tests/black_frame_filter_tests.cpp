@@ -13,6 +13,15 @@ int main() {
     CHECK(cls(13.0f,81.0f,88.0f,94.0f) == K::DialogueBackdrop);
     CHECK(cls(14.0f,80.6f,94.0f,92.4f) == K::DialogueBackdrop);
 
+    // Mapmonde tutorial screenshot + original GLI frame trace.
+    CHECK(cls(14.f,61.6f,94.f,73.4f)==K::DialogueBackdrop);
+    CHECK(cls(14.05f,61.65f,93.95f,73.35f)==K::DialogueBackdrop);
+    CHECK(cls(14.f,60.f,94.f,74.f)==K::Preserve);
+    CHECK(cls(10.f,61.6f,90.f,73.4f)==K::Preserve);
+    CHECK(!r2fix::remove_black_frame(false,true,true,14,61.6f,94,73.4f));
+    CHECK(!r2fix::remove_black_frame(true,false,false,14,61.6f,94,73.4f));
+    CHECK(r2fix::remove_black_frame(true,false,true,14,61.6f,94,73.4f));
+
     // Plausible engine-drawn cinematic top and bottom letterbox strips.
     // Confirmation of those strips in a live cinematic is still needed.
     CHECK(cls(0.0f,0.0f,100.0f,15.0f) == K::CinematicLetterbox);

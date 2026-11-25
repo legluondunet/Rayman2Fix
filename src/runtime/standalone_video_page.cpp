@@ -1,4 +1,5 @@
 #include "rayman2fix/standalone_video_page.hpp"
+#include "rayman2fix/controller_info_renderer.hpp"
 #include "rayman2fix/standalone_video_device_policy.hpp"
 #include "rayman2fix/standalone_video_layout_policy.hpp"
 #include "rayman2fix/video_navigation_input.hpp"
@@ -620,6 +621,33 @@ bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& x
     // the read-only Pause VIDEO panel is visible, but preserve VIDEO
     // itself, all game/world objects and the return-to-Options screen.
     return standalone_video_hide_native_glyphs(visible,drew,true,title);
+}
+bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFamily family,float hud_scale,PadInfoActivity activity) noexcept {
+    if(!g_configured.load(std::memory_order_acquire) || !find_glide())return false;
+    const auto placement=pad_info_placement(hud_scale);
+    if(!placement.width)return false;
+    try {
+        static std::vector<PadOverlayPixel> overlay;
+        static std::vector<std::uint16_t> scene;
+        static bool cached=false;
+        static PadInfoLocale old_locale=PadInfoLocale::en;
+        static PadLabelFamily old_family=PadLabelFamily::generic;
+        static bool old_connected=false;
+        if(!cached || locale!=old_locale || connected!=old_connected || family!=old_family) {
+            if(!prepare_controller_info_overlay(make_pad_info_view(locale,connected,family),overlay))
+                return false;
+            scene.resize(std::size_t(placement.width)*kPadInfoHeight);
+            cached=true;old_locale=locale;old_connected=connected;old_family=family;
+        }
+        scene.resize(std::size_t(placement.width)*kPadInfoHeight);
+        if(!g_read(kBackBuffer,placement.x,kPadInfoY,placement.width,kPadInfoHeight,
+                   placement.width*2u,scene.data()))return false;
+        if(!composite_controller_info(scene.data(),scene.size(),overlay.data(),overlay.size(),placement.width))
+            return false;
+        if(!apply_pad_info_lights(scene.data(),scene.size(),placement.width,family,connected?activity:PadInfoActivity{}))return false;
+        return g_write(kBackBuffer,placement.x,kPadInfoY,kRgb565,placement.width,kPadInfoHeight,
+                       placement.width*2,scene.data())!=0;
+    }catch(...){return false;}
 }
 bool standalone_video_page_draw_before_flip() noexcept {
     const bool menu=g_visible.load(std::memory_order_acquire);

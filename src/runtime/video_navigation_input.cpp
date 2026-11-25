@@ -8,6 +8,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+#include "rayman2fix/gamepad_menu_bridge.hpp"
+std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept;
+bool r2fix_sdl_controller_page() noexcept;
+void r2fix_sdl_note_pause_delivery() noexcept;
+#endif
 
 #if !defined(_M_IX86)
 #error This hook uses exact approved Rayman 2 Windows x86 instructions
@@ -20,7 +26,7 @@ namespace {
 // 0x49669C and 0x4966B0. The calls converge at 0x4966B3.
 // Intercept AFTER the native COM call, BEFORE the game's keyboard
 // navigation interpretation. No keyboard driver, COM object, IAT,
-// system-wide key state or SDL input is patched.
+// system-wide key state is patched. Scoped SDL3 input can be OR-ed into this buffer.
 constexpr std::uintptr_t kPostKeyboardStateRva=0x966B3u;
 constexpr std::uintptr_t kContinueNormalRva=0x966BAu;
 constexpr std::uintptr_t kContinueGreaterRva=0x966C5u;
@@ -62,10 +68,42 @@ bool foreground_game() noexcept {
 void __cdecl filter_approved_video_keys(void* keyboard,
                                         std::int32_t result) noexcept {
     bool menu=false,pause=false;
-    if(!standalone_video_page_owns_navigation(menu,pause) ||
-       !writable_256(keyboard))return;
+    const bool video=standalone_video_page_owns_navigation(menu,pause);
+    if(!writable_256(keyboard) || result!=0)return;
+    const bool foreground=foreground_game();
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    const bool controller=::r2fix_sdl_controller_page();
+    const auto actions=::r2fix_sdl_menu_actions(video);
+    const auto merged=merge_pad_menu_keys(controller ? PadContext::controller_info :
+        video ? PadContext::video : PadContext::menu,
+        foreground,result,kVideoKeyboardBytes,
+        static_cast<std::uint8_t*>(keyboard),actions);
+    if(controller && foreground) {
+        // Read-only information: retain native Escape, block calibration
+        // activation through the verified keyboard state only.
+        const auto blocked=suppress_controller_info_keys(controller,foreground,result,
+            kVideoKeyboardBytes,static_cast<std::uint8_t*>(keyboard));
+        static std::atomic<bool> blocked_reported{false},back_reported{false};
+        if(blocked && !blocked_reported.exchange(true) && g_log)
+            g_log("RUNTIME-CONTROLLER-MENU: keyboard-calibration-blocked=1 native-Escape-preserved=1");
+        if(merged && !back_reported.exchange(true) && g_log)
+            g_log("RUNTIME-CONTROLLER-MENU: SDL3-back-delivered=1 native-DirectInput256");
+        return;
+    }
+    if(merged && !video && (actions & pad_action_bit(PadAction::cancel)))
+        ::r2fix_sdl_note_pause_delivery();
+    // Bounded proof of actual native buffer delivery, not just SDL sampling.
+    static std::atomic<bool> menu_reported{false},video_reported{false};
+    if(merged && !(video ? video_reported : menu_reported).exchange(true) && g_log)
+        g_log(video ?
+            "RUNTIME-SDL3: native-route=VIDEO-back merged=1 scope=verified-DirectInput256" :
+            "RUNTIME-SDL3: native-route=MENU merged=1 scope=verified-DirectInput256");
+#endif
+    // VIDEO suppression is applied after the merge. Physical Escape and
+    // native HRESULT semantics are preserved, as before.
+    if(!video)return;
     const unsigned consumed=suppress_video_navigation_keys(
-        menu,pause,foreground_game(),result,kVideoKeyboardBytes,
+        menu,pause,foreground,result,kVideoKeyboardBytes,
         static_cast<std::uint8_t*>(keyboard));
     if(consumed && !g_ever_filtered.exchange(true) && g_log)
         g_log("RUNTIME-VIDEO-INPUT: source=retail-x86-DirectInput-GetDeviceState256 navigation-arrows-suppressed=1 scope=authenticated-MENU-or-ESC-VIDEO preserved=Escape,Enter,other-keys game-input=untouched");

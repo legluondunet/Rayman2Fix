@@ -75,17 +75,33 @@ jobs:
           $sha = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant()
           "RAYMAN2FIX_GAMEFRAME_SHA256=$sha" >> $env:GITHUB_ENV
           Write-Host "Pinned GameFrame x86 SHA256=$sha"
+      - name: Audit pinned SDL3 3.4.20 x86 candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'SDL3-3.4.20-win32-x86.zip'
+          Invoke-WebRequest -Uri 'https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-3.4.20-win32-x86.zip' -OutFile $archive
+          $dest = Join-Path $env:RUNNER_TEMP 'rayman2fix-sdl3-audited'
+          python tools/sdl3/audit_release.py $archive --output $dest
+          if ($LASTEXITCODE -ne 0) { throw 'SDL3 x86 provenance/ABI audit failed' }
+          "RAYMAN2FIX_SDL3_AUDIT_DIR=$dest" >> $env:GITHUB_ENV
       - name: Configure 32-bit Windows with embedded GameFrame
         shell: pwsh
         run: |
           $dll = (Resolve-Path 'third_party/game-frame/wrappers/target/i686-pc-windows-msvc/release/glide2x.dll').Path
           $license = (Resolve-Path 'third_party/game-frame/LICENSE-APACHE').Path
-          cmake -S . -B build -A Win32 -DBUILD_TESTING=ON "-DRAYMAN2FIX_GLIDE_DLL=$dll" "-DRAYMAN2FIX_GLIDE_LICENSE=$license" "-DRAYMAN2FIX_GLIDE_SHA256=$env:RAYMAN2FIX_GAMEFRAME_SHA256"
+          cmake -S . -B build -A Win32 -DBUILD_TESTING=ON "-DRAYMAN2FIX_GLIDE_DLL=$dll" "-DRAYMAN2FIX_GLIDE_LICENSE=$license" "-DRAYMAN2FIX_GLIDE_SHA256=$env:RAYMAN2FIX_GAMEFRAME_SHA256" "-DRAYMAN2FIX_SDL3_DIR=$env:RAYMAN2FIX_SDL3_AUDIT_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'Launcher/GameFrame configure failed' }
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Smoke test audited SDL3 on x86 without game or display
+        shell: pwsh
+        run: |
+          $dll = Join-Path $env:RAYMAN2FIX_SDL3_AUDIT_DIR 'SDL3.dll'
+          & ./build/Release/sdl3_x86_smoke.exe $dll
+          if ($LASTEXITCODE -ne 0) { throw 'SDL3 x86 gamepad subsystem smoke test failed' }
       - name: Audit default single-EXE VIDEO feature inclusion
         shell: pwsh
         run: |
@@ -106,9 +122,13 @@ jobs:
               'RUNTIME-VIDEO-INPUT: status=installed',
               'RUNTIME-STANDALONE-VIDEO: configured independent-page=1',
               'RUNTIME-PAUSE-VIDEO-PAGE: frame-rendered=1',
-              'RUNTIME-MENU-SITE: status=installed handle=362')) {
+              'RUNTIME-MENU-SITE: status=installed handle=362',
+              'RUNTIME-SDL3: compiled=1 owner=native-camera-thread',
+              'RUNTIME-SDL3: poll-entered=1',
+              'RUNTIME-SDL3: initialized=1 version=3.4.20',
+              'RUNTIME-SDL3: native-route=MENU merged=1')) {
             if (!$text.Contains($marker)) {
-              throw "Default x86 fix.dll missing required VIDEO feature: $marker"
+              throw "Default x86 fix.dll missing required VIDEO/SDL3 feature: $marker"
             }
           }
           if ($text.Contains('RUNTIME-AUDIO-TRACE: enabled=1')) {
@@ -356,6 +376,16 @@ jobs:
             throw 'Expected runtime deployment log: unchanged backups_removed=0'
           }
           Write-Host 'Single authoritative game/fix.dll replacement, no backup: PASS'
+          $sdl = 'package-smoke/game/SDL3.dll'
+          $sdlNotice = 'package-smoke/docs/SDL3-LICENSE.txt'
+          if (!(Test-Path $sdl) -or !(Test-Path $sdlNotice) -or (Test-Path 'package-smoke/mods/SDL3.dll')) {
+            throw 'SDL3 must deploy beside the game executable, with its notice in docs/'
+          }
+          if ((Get-FileHash $sdl -Algorithm SHA256).Hash.ToLowerInvariant() -cne '6d7e653aa9c762ceda4fffc054a504dcce273e016eb9f1fe079b6409a058a9f7' -or
+              (Get-FileHash $sdlNotice -Algorithm SHA256).Hash.ToLowerInvariant() -cne '1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd') {
+            throw 'Deployed SDL3 payload differs from audited dependency'
+          }
+
           if (!(Test-Path package-smoke/game/glide2x.dll) -or
               !(Test-Path package-smoke/docs/GameFrame-LICENSE-APACHE.txt) -or
               (Test-Path package-smoke/game/GameFrame-LICENSE-APACHE.txt)) {
@@ -423,7 +453,7 @@ jobs:
             throw 'Verified GameFrame must preserve its previous backup'
           }
           Remove-Item package-smoke -Recurse -Force
-          if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix_installer.log,fix.dll,glide2x.dll) {
+          if (Get-ChildItem -Path package -Recurse -File -Include Rayman2Fix.ini,Rayman2Fix.log,Rayman2Fix_installer.log,fix.dll,glide2x.dll,SDL3.dll) {
             throw 'One-file build must never include generated INI, logs or DLL sidecars'
           }
           $global:LASTEXITCODE = 0

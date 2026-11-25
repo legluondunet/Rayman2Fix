@@ -25,9 +25,17 @@
 #endif
 #include "rayman2fix/game_window_icon.hpp"
 #include "rayman2fix/render_poll_gate.hpp"
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+#include "rayman2fix/sdl_gamepads.hpp"
+#include "rayman2fix/controller_info_renderer.hpp"
+#include "rayman2fix/native_ipt_probe.hpp"
+#include "rayman2fix/gamepad_menu_bridge.hpp"
+#include "rayman2fix/pause_video_observer.hpp"
+#endif
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
 #include "rayman2fix/graphics_menu_trace.hpp"
 #include "rayman2fix/graphics_menu_controller_trace.hpp"
+#include "rayman2fix/graphics_menu_controller_vars.hpp"
 #include "rayman2fix/graphics_menu_start_policy.hpp"
 #if defined(RAYMAN2FIX_GRAPHICS_INFO_PROTO) && RAYMAN2FIX_GRAPHICS_INFO_PROTO
 #include "rayman2fix/native_graphics_info_proto.hpp"
@@ -2096,6 +2104,9 @@ ProtoAdpcmVoiceSnapshot proto_sample_adpcm_voice_after_dispatch(DWORD ref) {
     out.mode1_output=mode1_output;
     return out;
 }
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+bool consume_sdl_pause_delivery() noexcept;
+#endif
 void __cdecl proto_script_pause() {
     bool adopted=false;
     DWORD depth_before=0,depth_after=0;
@@ -2110,8 +2121,13 @@ void __cdecl proto_script_pause() {
         // menu entered at depth 1, but a subsequent ESC menu in the same
         // session was entered at depth 2 (Nov 14 Wine evidence).
         // A hard-coded ==1 silently disabled all subsequent attempts.
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        const bool pad_pause=consume_sdl_pause_delivery();
+#else
+        constexpr bool pad_pause=false;
+#endif
         const bool candidate=game_window_is_foreground() &&
-            (GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0 &&
+            ((GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0 || pad_pause) &&
             proto_game_read(0xB9BC8,menu) && menu==0 &&
             proto_read_depth(depth) && depth>=1u && depth<=8u;
         if(candidate) {
@@ -2895,7 +2911,39 @@ void proto_menu_tick() {
         generation=g_proto_generation.load(std::memory_order_relaxed);
         started=g_proto_pending_at.load(std::memory_order_relaxed);
     }
-    if(phase==proto::Phase::idle)return;
+    if(phase==proto::Phase::idle) {
+        // A rejected provisional pair clears the coordinator before its
+        // first render tick. Preserve the bounded opening report instead
+        // of silently losing the evidence. Never authorize compensation.
+        ProtoPreDriverReport rejected{};
+        {
+            const std::lock_guard<std::mutex> lock(g_proto_mutex);
+            if(g_proto_predriver_report.ready) {
+                rejected=g_proto_predriver_report;
+                g_proto_predriver_report.ready=false;
+            }
+        }
+        if(g_log && rejected.ready &&
+           g_proto_predriver_probe_budget.load(std::memory_order_relaxed)<=16u) {
+            const auto& probe=rejected.probe;
+            const auto owner=inspect_audio_theme_owner(probe.first_handle,true);
+            char line[520]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-ESC-REJECTED-OPEN: t_ms=%lu callbacks=%u pauses=%u other_slots=%u other_handles=%u depth=%d->%d transition_type=%d owner_driver=%u outer_candidates=%u ref_class=%d ref_match=%d outer_complete=%u outer_candidates_bank=%u outer_bank=%d outer_index=%d inner_complete=%u inner_candidates_bank=%u inner_bank=%d inner_index=%d (post-wrapper read-only; no audio authorization)",
+                static_cast<unsigned long>(rejected.t_ms),
+                probe.callback_count,probe.pause_count,probe.unrelated_slots,
+                probe.other_handle_count,rejected.depth_before,rejected.depth_after,
+                rejected.transition_type_post_pause,owner.theme_owned_driver,
+                owner.outer_candidates,owner.native_theme_player_ref_class,
+                owner.native_theme_player_ref_matches_outer,
+                owner.outer_bank_provenance.list_complete,owner.outer_bank_provenance.candidates,
+                owner.outer_bank_provenance.bank_id,owner.outer_bank_provenance.resource_index,
+                owner.inner_bank_provenance.list_complete,owner.inner_bank_provenance.candidates,
+                owner.inner_bank_provenance.bank_id,owner.inner_bank_provenance.resource_index);
+            log_line(line);
+        }
+        return;
+    }
     if(phase==proto::Phase::pending_menu &&
        DWORD(GetTickCount()-started)>1500u) {
         BYTE expired_menu=0;
@@ -5108,7 +5156,16 @@ int intro_next_level_status(std::uintptr_t base) {
     if(name[0]==0)return 0; // none
     return std::strcmp(name,kAfterIntroLevel)==0 ? 1 : 2; // expected / other
 }
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept;
+#endif
 void poll_second_intro_skip() {
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    const bool pad_skip_down=(sdl_fresh_actions(r2fix::PadContext::cinematic) &
+        r2fix::pad_action_bit(r2fix::PadAction::skip)) != 0;
+#else
+    constexpr bool pad_skip_down=false;
+#endif
     if(!g_skip_cinematics)return;
     const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
     if (!native_change || !g_current_level) return;
@@ -5162,7 +5219,7 @@ void poll_second_intro_skip() {
     const bool down = foreground &&
         ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0 ||
          (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0 ||
-         (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
+         (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0 || pad_skip_down);
     if(in_intro) {
         ++input_polls;
         if(down)++down_polls;
@@ -5179,7 +5236,10 @@ void poll_second_intro_skip() {
     // A queued press must survive Alt-Tab; dispatch only in foreground.
     const bool ready=foreground && mode==int(kIntroEnginePlaying);
     const bool was_pending=g_intro_guard.pending;
+    const bool was_requested=g_intro_guard.requested;
     const bool requested=g_intro_guard.update(g_current_level,down,ready);
+    if(in_intro && pad_skip_down && !was_requested && g_intro_guard.requested)
+        log_line("RUNTIME-SDL3: native-route=jail_20 source=South accepted-by-original-guard=1");
     if(in_intro && g_log && !was_pending && g_intro_guard.pending) {
         char line[185]{};
         std::snprintf(line,sizeof(line),
@@ -5267,6 +5327,687 @@ void poll_second_intro_skip() {
     }
 }
 
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+// Cache is owned exclusively by the authenticated original game thread.
+std::atomic<DWORD> g_sdl_input_owner{0};
+r2fix::PadContext g_sdl_input_context = r2fix::PadContext::inactive;
+std::uint32_t g_sdl_input_scene = 0;
+std::uint32_t g_sdl_input_actions = 0;
+r2fix::PadMovement g_sdl_input_movement{};
+DWORD g_sdl_input_tick = 0;
+thread_local bool g_sdl_native_joystick_owned=false;
+thread_local DWORD g_sdl_pause_delivery_tick=0;
+thread_local bool g_sdl_pause_delivery_pending=false;
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+thread_local int g_controller_drawn_scope=0;
+thread_local bool g_controller_connected=false;
+thread_local r2fix::PadInfoActivity g_controller_activity{};
+thread_local DWORD g_controller_activity_tick=0;
+thread_local r2fix::PadLabelFamily g_controller_family=r2fix::PadLabelFamily::generic;
+int controller_info_scope() noexcept {
+    if(g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())return 0;
+    int n=-1,f=-1;
+    if(r2fix::pause_menu_live_state(n,f))return n==17 && f==2 ? 2:0;
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    char level[30]{};
+    SIZE_T copied=0;
+    if(!base || !ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(base+kLevelNameRva),
+       level,sizeof(level),&copied) || copied!=sizeof(level) || !std::memchr(level,0,sizeof(level)) ||
+       _stricmp(level,"menu")!=0)return 0;
+    r2fix::MenuAiModel model{};r2fix::MenuAiState state{};
+    if(r2fix::get_verified_menu_controller(model,state) && state.normal==21 && state.reflex==0)return 1;
+#endif
+    return 0;
+}
+bool controller_info_owns_page() noexcept {
+    return g_controller_drawn_scope!=0 && controller_info_scope()==g_controller_drawn_scope;
+}
+r2fix::PadInfoLocale controller_info_locale() noexcept {
+    // Recognize the original LANGUAGE label via the authenticated game
+    // text directory, not a guessed numeric ordering of the five languages.
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    const auto read=[](std::uintptr_t p,void* out,SIZE_T size){
+        SIZE_T copied=0;
+        return p>=0x10000u && p<=0xffffffffu-size &&
+           ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(p),out,size,&copied)!=0 && copied==size;
+    };
+    std::uint32_t directory=0,index=0,table=0,label=0;
+    char text[32]{};
+    if(base && read(base+0x10026Cu,&directory,4) && read(base+0x100FA8u,&index,4) &&
+       directory>=0x10000u && directory<=0xffffffc0u && (index&255u)<8u &&
+       read(directory+(index&255u)*8u,&table,4) && table>=0x10000u && table<=0xfffff000u &&
+       read(table+370u*4u,&label,4) && read(label,text,sizeof(text)) &&
+       std::memchr(text,0,sizeof(text))) {
+        using L=r2fix::PadInfoLocale;
+        if(!std::strcmp(text,"/C:LANGUE"))return L::fr;
+        if(!std::strcmp(text,"/C:IDIOMA"))return L::es;
+        if(!std::strcmp(text,"/C:LINGUA"))return L::it;
+        if(!std::strcmp(text,"/C:SPRACHE"))return L::de;
+    }
+    return r2fix::PadInfoLocale::en;
+}
+#endif
+
+r2fix::PadContext sdl_native_context(std::uint32_t* scene_out=nullptr) noexcept {
+    using r2fix::PadContext;
+    if(scene_out) *scene_out=0;
+    if (g_game_camera_thread_id.load(std::memory_order_acquire) != GetCurrentThreadId())
+        return PadContext::inactive;
+    char level[30]{};
+    SIZE_T copied = 0;
+    const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    if (!base || !ReadProcessMemory(GetCurrentProcess(),
+        reinterpret_cast<const void*>(base + kLevelNameRva), level, sizeof(level), &copied) ||
+        copied != sizeof(level) || !std::memchr(level, 0, sizeof(level)))
+        return PadContext::inactive;
+    const auto scene=r2fix::pad_playable_scene_id(level);
+    if(scene_out) *scene_out=scene;
+    if (g_skip_cinematics && r2fix::is_second_intro(level))
+        return PadContext::cinematic;
+    if(g_skip_cinematics && _stricmp(level,"jail_10")==0 &&
+       intro_native_engine_mode(base)==int(kIntroEnginePlaying))
+        return PadContext::first_cinematic;
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+    bool intro_handed_over=false;
+    if(g_skip_cinematics && g_f248_enabled.load(std::memory_order_acquire) &&
+       r2fix::is_first_playable_level(level) &&
+       intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
+       g_progress_words &&
+       game_story_bit(g_progress_words,kLearnHandoverBit,intro_handed_over) &&
+       !intro_handed_over)
+        return PadContext::learn_cinematic;
+#endif
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    bool main_video = false, pause_video = false;
+    const bool video = r2fix::standalone_video_page_owns_navigation(main_video, pause_video);
+    if (video && pause_video) return PadContext::video;
+    if(controller_info_owns_page())return PadContext::controller_info;
+    int pause_normal=-1,pause_reflex=-1;
+    if(r2fix::pause_menu_live_state(pause_normal,pause_reflex)) {
+        // Do not send navigation into a transitional VIDEO page.
+        return pause_normal==9 ? PadContext::inactive : PadContext::pause_menu;
+    }
+#endif
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+    if (_stricmp(level, "menu") == 0) {
+        r2fix::MenuAiModel model{};
+        r2fix::MenuAiState state{};
+        if (r2fix::get_verified_menu_controller(model, state) &&
+            state.normal >= 0 && state.reflex >= 0) {
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+            if (video && main_video) return PadContext::video;
+            if (state.normal == 5) return PadContext::inactive;
+#endif
+            return PadContext::menu;
+        }
+    }
+#endif
+    // Exact world-map level observed in the owner's retail session.
+    // Keep native arrows/confirm/back, plus the authenticated native
+    // jump predicate. Do not assume the world map uses Rayman's axes.
+    std::uint8_t pause_flag=0;
+    if(_stricmp(level,"mapmonde")==0 &&
+       intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
+       read_u8(base+0xB9BC8u,pause_flag) && !pause_flag)
+        return PadContext::world_map;
+    // The first level alone has the special story handover requirement.
+    // Never classify unknown maps or dedicated cinematic scenes as gameplay.
+    if(scene) {
+        const bool playing=intro_native_engine_mode(base)==int(kIntroEnginePlaying);
+        const bool pause_clear=read_u8(base+0xB9BC8u,pause_flag) && !pause_flag;
+        bool handover=false;
+        const bool handover_known=scene==1 && g_progress_words &&
+            game_story_bit(g_progress_words,kLearnHandoverBit,handover);
+        if(r2fix::pad_gameplay_scene_ready(scene,playing,pause_clear,handover_known && handover))
+            return PadContext::gameplay;
+    }
+    return PadContext::inactive;
+}
+bool sdl_context_matches(r2fix::PadContext expected) noexcept {
+    std::uint32_t scene=0;
+    const auto context=sdl_native_context(&scene);
+    return context==expected && scene==g_sdl_input_scene;
+}
+std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept {
+    if (g_sdl_input_owner.load(std::memory_order_acquire) != GetCurrentThreadId() ||
+        !game_window_is_foreground() || g_sdl_input_context != expected ||
+        DWORD(GetTickCount() - g_sdl_input_tick) > 100u ||
+        !sdl_context_matches(expected))
+        return 0;
+    return g_sdl_input_actions;
+}
+#if RAYMAN2FIX_ESC_MUSIC_ACTIVE
+// One-shot proof of delivery at the approved keyboard-buffer route.
+// Retain the original script-only source, native menu/depth guards and
+// audio pairing; do not treat a merely held unrelated button as ESC.
+bool consume_sdl_pause_delivery() noexcept {
+    const bool pending=g_sdl_pause_delivery_pending;
+    g_sdl_pause_delivery_pending=false;
+    return pending && game_window_is_foreground() &&
+        g_sdl_input_owner.load(std::memory_order_acquire)==GetCurrentThreadId() &&
+        DWORD(GetTickCount()-g_sdl_pause_delivery_tick)<=100u &&
+        sdl_fresh_actions(r2fix::PadContext::gameplay) &
+            r2fix::pad_action_bit(r2fix::PadAction::pause);
+}
+#endif
+
+// Candidate IPT layout from RayTools' documented PC reference.
+// No writes, hooks, native function calls or raw pointers in diagnostics.
+// Only the authenticated camera thread, only when Log=1. Read the
+// descriptor again after the array; refuse unstable or implausible data.
+void observe_native_ipt_readonly(r2fix::PadContext context) noexcept {
+    if(!g_log || !game_window_is_foreground()) return;
+    using namespace r2fix;
+    static DWORD last=0;
+    static unsigned attempts=0;
+    static unsigned reports[3][kIptObservedActions]{};
+    static bool exhausted=false;
+    static unsigned layouts=0;
+    static IptTableHeader prior_header{};
+    static IptReadbacks prior{};
+    static IptNames names{};
+    static unsigned prior_scope=3u;
+    static bool have_names=false;
+    const DWORD now=GetTickCount();
+    if(last && DWORD(now-last)<125u)return;
+    last=now;
+    if(exhausted)return;
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    const auto read=[](std::uintptr_t addr,void* out,SIZE_T size) {
+        SIZE_T got=0;
+        return addr>=0x10000u && addr<=0xffffffffu-size &&
+            ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(addr),
+                              out,size,&got) && got==size;
+    };
+    IptTableHeader h{},after{};
+    IptReadbacks rows{};
+    const auto header=base+kIptCandidateRva+kIptTableHeaderOffset;
+    // Reserve separate samples for the actual playable scene. Early MENU
+    // and loading counters must not exhaust the later movement budget.
+    const unsigned scope=(context==PadContext::menu || context==PadContext::video) ? 0u :
+        (context==PadContext::gameplay) ? 2u : 1u;
+    const auto refuse=[&](const char* reason) {
+        have_names=false;
+        if(attempts++<3u) {
+            char msg[140]{};
+            std::snprintf(msg,sizeof(msg),"RUNTIME-IPT-PROBE: candidate-refused=%s read-only=1",reason);
+            log_line(msg);
+        }
+    };
+    if(!base || !read(header,&h,sizeof(h)) || !ipt_header_plausible(h)) {
+        refuse("header"); return;
+    }
+    if(!read(h.table,rows.data(),sizeof(rows)) ||
+       !read(header,&after,sizeof(after)) ||
+       h.count!=after.count || h.table!=after.table) {
+        refuse("unstable-table"); return;
+    }
+    bool identity_changed=!have_names || h.table!=prior_header.table ||
+        h.count!=prior_header.count;
+    for(unsigned i=0;i<rows.size();++i) {
+        if(!ipt_entry_plausible(rows[i])) { refuse("entry-layout"); return; }
+        identity_changed=identity_changed || rows[i].name!=prior[i].name;
+    }
+    if(identity_changed) {
+        if(layouts>=4u) { exhausted=true; return; }
+        IptNames observed{};
+        for(unsigned i=0;i<rows.size();++i) {
+            auto& n=observed[i];
+            if(!rows[i].name) continue; // unused slots are legal (42E0E2)
+            if(!read(rows[i].name,n.data(),n.size())) {
+                refuse("entry-name-unreadable"); return;
+            }
+            if(!ipt_name_plausible(n)) { refuse("entry-name-format"); return; }
+        }
+        names=observed;
+        have_names=true;
+        ++layouts;
+        const unsigned anchors=ipt_reference_anchors(names);
+        char msg[160]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-IPT-PROBE: table-candidate count=%u anchors=0x%X expected=0xF read-only=1",
+            unsigned(h.count),anchors);
+        log_line(msg);
+        for(unsigned i=0;i<rows.size();++i) {
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-IPT-PROBE: entry=%u name=%s active=%u keyword-count=%u",
+                i,names[i][0]?names[i].data():"(unnamed)",unsigned(rows[i].active),unsigned(rows[i].keyword_count));
+            log_line(msg);
+        }
+        // Require all four independent reference names before recording
+        // any changing native values. Names alone never authorize writes.
+        if(anchors!=15u && !ipt_retail_structure(h,rows)) {
+            have_names=false;
+            log_line("RUNTIME-IPT-PROBE: reference-anchors-and-retail-fingerprint-unconfirmed");
+            return;
+        }
+        if(anchors!=15u)
+            log_line("RUNTIME-IPT-PROBE: retail-fingerprint=matched entries=138 names=stripped read-only=1");
+    }
+    const bool scope_changed=prior_scope!=scope;
+    for(unsigned i=0;i<rows.size();++i) {
+        const unsigned limit=scope==2u ? 8u : 2u;
+        if(reports[scope][i]>=limit)continue;
+        if(!identity_changed && !scope_changed && !ipt_entry_changed(rows[i],prior[i]))continue;
+        // Raw bits deliberately avoid assuming float or integer representation.
+        char msg[200]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-IPT-STATE: scope=%u context=%u entry=%u name=%s state=%ld analog-bits=0x%08X active=%u",
+            scope,unsigned(context),i,names[i].data(),long(rows[i].state),
+            unsigned(rows[i].analog_bits),unsigned(rows[i].active));
+        log_line(msg);
+        ++reports[scope][i];
+    }
+    prior_header=h;
+    prior=rows;
+    prior_scope=scope;
+}
+
+// Exact input-action evaluator callsite and two analog consumer calls
+// verified against uploaded retail PE SHA256 9bae484b...a72713.
+// The engine itself keeps all counters; only merge the predicate return.
+// Never write to the candidate action table.
+using IptPredicate=unsigned char (__cdecl*)(void*);
+using IptAnalogGetter=float (__cdecl*)(void*);
+bool g_ipt_hooks_installed=false;
+bool ipt_read(std::uintptr_t at,void* out,SIZE_T bytes) noexcept {
+    SIZE_T got=0;
+    return at>=0x10000u && at<=0xffffffffu-bytes &&
+        ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(at),
+                          out,bytes,&got) && got==bytes;
+}
+bool ipt_live_entry(void* entry,r2fix::IptActionReadback& row,
+                    unsigned& index,std::array<char,64>& name) noexcept {
+    using namespace r2fix;
+    const auto base=intro_game_base();
+    IptTableHeader h{},after{};
+    const auto at=reinterpret_cast<std::uintptr_t>(entry);
+    const auto hdr=base+kIptCandidateRva+kIptTableHeaderOffset;
+    IptReadbacks rows{};
+    if(!base || !ipt_read(hdr,&h,sizeof(h)) || !ipt_header_plausible(h) ||
+       at<h.table || (at-h.table)%sizeof(row) ||
+       (at-h.table)/sizeof(row)>=h.count ||
+       !ipt_read(h.table,rows.data(),sizeof(rows)) ||
+       !ipt_retail_structure(h,rows) ||
+       !ipt_read(at,&row,sizeof(row)) || !ipt_entry_plausible(row) ||
+       !(row.active == 1u) || !ipt_read(hdr,&after,sizeof(after)) ||
+       h.count!=after.count || h.table!=after.table) return false;
+    index=unsigned((at-h.table)/sizeof(row));
+    if(row.name && (!ipt_read(row.name,name.data(),name.size()) ||
+                    !ipt_name_plausible(name)))return false;
+    return true;
+}
+bool ipt_current_gameplay() noexcept {
+    return g_sdl_input_owner.load(std::memory_order_acquire)==GetCurrentThreadId() &&
+        game_window_is_foreground() &&
+        g_sdl_input_context==r2fix::PadContext::gameplay &&
+        DWORD(GetTickCount()-g_sdl_input_tick)<=100u &&
+        sdl_context_matches(r2fix::PadContext::gameplay);
+}
+unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
+    const auto original=reinterpret_cast<IptPredicate>(intro_game_base()+0x2EAC0u);
+    const unsigned char native=original(entry);
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    // Legacy native gamepad validation can bypass the keyboard bridge.
+    // Only suppress the existing authenticated predicate's confirm action,
+    // while the replacement page owns the live state; do not write counters.
+    if(native && g_controller_drawn_scope && controller_info_owns_page() &&
+       game_window_is_foreground()) {
+        r2fix::IptActionReadback row{};
+        std::array<char,64> name{};
+        unsigned index=0;
+        if(ipt_live_entry(entry,row,index,name) &&
+           r2fix::suppress_controller_info_ipt(true,true,true,index,name.data())) {
+            static bool reported=false;
+            if(!reported) {
+                reported=true;
+                log_line("RUNTIME-CONTROLLER-MENU: native-IPT-confirm-blocked=1 index=9 source=retail-fingerprint back=untouched");
+            }
+            return 0;
+        }
+    }
+#endif
+    if(native || !g_sdl_input_actions ||
+       g_sdl_input_owner.load(std::memory_order_acquire)!=GetCurrentThreadId())return native;
+    using r2fix::PadContext;
+    using r2fix::PadAction;
+    const auto context=g_sdl_input_context;
+    const bool gameplay=ipt_current_gameplay();
+    const bool native_cinematic=(context==PadContext::first_cinematic ||
+        context==PadContext::learn_cinematic) &&
+        (sdl_fresh_actions(context)&r2fix::pad_action_bit(PadAction::skip));
+    const bool map_jump=context==PadContext::world_map &&
+        (sdl_fresh_actions(PadContext::world_map)&r2fix::pad_action_bit(PadAction::jump));
+    if(!gameplay && !native_cinematic && !map_jump)return native;
+    r2fix::IptActionReadback row{};
+    std::array<char,64> name{};
+    unsigned index=0;
+    if(!ipt_live_entry(entry,row,index,name)) return native;
+    // The approved CD has stripped names. Match the entire observed
+    // 28-entry structural fingerprint and exact table membership first.
+    // Reference action indices remain subject to hardware confirmation.
+    const auto matches=[&](unsigned id,const char* suffix,PadAction action) {
+        if(index!=id || !(g_sdl_input_actions&r2fix::pad_action_bit(action)))return false;
+        std::string_view n(name.data());
+        return n.empty() || r2fix::ipt_name_contains(n,suffix);
+    };
+    // Native action 20 = CouperCinematique, 21 = TexteSuivant in the
+    // reference enumeration. Leave Jail_20 to its existing guarded
+    // level request, avoiding a simultaneous native skip and level change.
+    const auto* binding=gameplay ?
+        r2fix::pad_gameplay_ipt_binding(index,g_sdl_input_actions) : nullptr;
+    const std::string_view entry_name(name.data());
+    const bool requested=map_jump ?
+        matches(10,"sauter",PadAction::jump) :
+        native_cinematic ? (index==20u || index==21u) :
+        (binding && (entry_name.empty() ||
+         r2fix::ipt_name_contains(entry_name,binding->name_fragment)));
+    if(requested) {
+        static bool map_jump_reported=false;
+        if(map_jump && !map_jump_reported) {
+            map_jump_reported=true;
+            log_line("RUNTIME-SDL3: native-route=MAP-jump IPT-index=10 source=retail-fingerprint");
+        }
+        static std::uint32_t seen=0;
+        if(index<32u && !(seen&(1u<<index))) {
+            seen|=1u<<index;
+            char msg[160]{};
+            std::snprintf(msg,sizeof(msg),"RUNTIME-SDL3: native-route=IPT-action index=%u source=retail-fingerprint",index);
+            log_line(msg);
+        }
+        return 1;
+    }
+    return native;
+}
+float ipt_gameplay_axis(void* entry,bool vertical) noexcept {
+    const auto base=intro_game_base();
+    const auto original=reinterpret_cast<IptAnalogGetter>(base+0x2E8D0u);
+    const float native=original(entry);
+    if(!ipt_current_gameplay() ||
+       (g_sdl_input_movement.x==0.f && g_sdl_input_movement.y==0.f)) return native;
+    r2fix::IptActionReadback row{};
+    unsigned index=0;
+    std::array<char,64> name{};
+    std::uint32_t slot=0;
+    const auto slot_rva=vertical?0xB9B58u:0xB9B54u;
+    if(!ipt_read(base+slot_rva,&slot,4) ||
+       slot!=reinterpret_cast<std::uintptr_t>(entry) ||
+       !ipt_live_entry(entry,row,index,name))return native;
+    // This consumer's script-owned pointer is the axis identity, not
+    // a reference enum index (the script can select a different entry).
+    if(name[0] && !r2fix::ipt_name_contains(name.data(),vertical?"axey":"axex"))return native;
+    std::int8_t lo=0,center=0,hi=0;
+    if(!ipt_read(base+(vertical?0xA40ACu:0xA40A4u),&lo,1) ||
+       !ipt_read(base+(vertical?0xB9B60u:0xB9B5Cu),&center,1) ||
+       !ipt_read(base+(vertical?0xA40B0u:0xA40A8u),&hi,1) ||
+       lo>=center || hi<=center)return native;
+    const float unit=vertical?g_sdl_input_movement.y:g_sdl_input_movement.x;
+    const float value=r2fix::ipt_calibrated_axis(unit,lo,center,hi);
+    static bool reported[2]{};
+    if(!reported[vertical]) {
+        reported[vertical]=true;
+        char msg[180]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-SDL3: native-route=IPT-axis axis=%c index=%u calibration=%d,%d,%d",
+            vertical?'Y':'X',index,int(lo),int(center),int(hi));
+        log_line(msg);
+    }
+    return value;
+}
+float __cdecl ipt_gameplay_x(void* entry) { return ipt_gameplay_axis(entry,false); }
+float __cdecl ipt_gameplay_y(void* entry) { return ipt_gameplay_axis(entry,true); }
+// The retail CD PE SHA256 9bae484b...a72713 has a separate joystick
+// poll, VA 496DE0, called at VA 496ACA. Its successful output contains
+// a button mask and six center-relative axes. The caller subsequently
+// calculates directional bits (497050) and history (4970C0).
+// Neutralize that normalized output only; keep COM acquisition, status,
+// keyboard GetDeviceState(256), and the native direction/history logic.
+using NativeJoystickPoll=unsigned short (__cdecl*)(void*);
+unsigned short __cdecl sdl_owned_joystick_poll(void* device) noexcept {
+    const auto original=reinterpret_cast<NativeJoystickPoll>(intro_game_base()+0x96DE0u);
+    const auto result=original(device);
+    if(result!=1u || !g_sdl_native_joystick_owned ||
+       g_sdl_input_owner.load(std::memory_order_acquire)!=GetCurrentThreadId() ||
+       DWORD(GetTickCount()-g_sdl_input_tick)>100u ||
+       !game_window_is_foreground() ||
+       g_sdl_input_context==r2fix::PadContext::inactive ||
+       g_sdl_input_context==r2fix::PadContext::cinematic) return result;
+    std::uint32_t state=0;
+    std::uint32_t words[9]{};
+    const auto ptr=reinterpret_cast<std::uintptr_t>(device);
+    if(!ipt_read(ptr+8u,&state,4) || !state ||
+       !ipt_read(state,words,sizeof(words)))return result;
+    if(!r2fix::neutralize_native_joystick(true,true,true,true,words,9))return result;
+    // Write only the two verified ranges, never flags/direction bits.
+    // Direction/history are recomputed by the original caller.
+    MEMORY_BASIC_INFORMATION page{};
+    if(VirtualQuery(reinterpret_cast<void*>(state),&page,sizeof(page))!=sizeof(page) ||
+       page.State!=MEM_COMMIT || (page.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
+       (page.Protect&0xffu)!=PAGE_READWRITE ||
+       std::uintptr_t(state)<reinterpret_cast<std::uintptr_t>(page.BaseAddress) ||
+       page.RegionSize<sizeof(words) ||
+       std::uintptr_t(state)-reinterpret_cast<std::uintptr_t>(page.BaseAddress)>page.RegionSize-sizeof(words))
+        return result;
+    std::memcpy(reinterpret_cast<void*>(state+4u),words+1,4u);
+    std::memcpy(reinterpret_cast<void*>(state+12u),words+3,24u);
+    static bool reported=false;
+    if(!reported){reported=true;log_line("RUNTIME-SDL3: native-joystick-neutralized=1 source=retail-DirectInput-poll96DE0 keyboard=preserved");}
+    return result;
+}
+void install_ipt_gameplay_hooks() {
+    if(g_ipt_hooks_installed)return;
+    auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+    if(!base)return;
+    const auto* mz=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if(mz->e_magic!=IMAGE_DOS_SIGNATURE || mz->e_lfanew<=0 || mz->e_lfanew>=0x1000)return;
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS32*>(base+mz->e_lfanew);
+    if(pe->Signature!=IMAGE_NT_SIGNATURE || pe->FileHeader.TimeDateStamp!=kOriginalTimestamp ||
+       pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
+       pe->OptionalHeader.SizeOfImage!=0x1D7000u)return;
+    struct Site { std::uintptr_t rva; BYTE expected[5]; std::uintptr_t dest; };
+    const Site sites[]={
+        {0x2E7ADu,{0xE8,0x0E,0x03,0x00,0x00},reinterpret_cast<std::uintptr_t>(&ipt_gameplay_predicate)},
+        {0x6E755u,{0xE8,0x76,0x01,0xFC,0xFF},reinterpret_cast<std::uintptr_t>(&ipt_gameplay_x)},
+        {0x6E774u,{0xE8,0x57,0x01,0xFC,0xFF},reinterpret_cast<std::uintptr_t>(&ipt_gameplay_y)},
+        {0x96ACAu,{0xE8,0x11,0x03,0x00,0x00},reinterpret_cast<std::uintptr_t>(&sdl_owned_joystick_poll)}
+    };
+    // Verify all sites before changing any, then acquire all protections.
+    for(const auto& s:sites)if(std::memcmp(base+s.rva,s.expected,5)!=0) {
+        log_line("RUNTIME-SDL3: IPT-hooks-refused=signature");return;
+    }
+    constexpr unsigned site_count=sizeof(sites)/sizeof(sites[0]);
+    DWORD prot[site_count]{};
+    unsigned writable=0;
+    for(;writable<site_count;++writable)
+        if(!VirtualProtect(base+sites[writable].rva,5,PAGE_EXECUTE_READWRITE,&prot[writable]))break;
+    if(writable!=site_count) {
+        while(writable) { --writable; DWORD ignored=0; VirtualProtect(base+sites[writable].rva,5,prot[writable],&ignored); }
+        log_line("RUNTIME-SDL3: IPT-hooks-refused=protection");return;
+    }
+    for(unsigned i=0;i<site_count;++i) {
+        auto* at=base+sites[i].rva;
+        BYTE patch[5]{0xE8};
+        const auto delta=std::uint32_t(sites[i].dest-reinterpret_cast<std::uintptr_t>(at+5));
+        std::memcpy(patch+1,&delta,4);
+        std::memcpy(at,patch,5);
+        FlushInstructionCache(GetCurrentProcess(),at,5);
+    }
+    // Sites can occupy the same page. Restore in reverse order.
+    for(unsigned i=site_count;i>0;--i) { DWORD ignored=0; VirtualProtect(base+sites[i-1].rva,5,prot[i-1],&ignored); }
+    g_ipt_hooks_installed=true;
+    log_line("RUNTIME-SDL3: IPT-hooks-installed=1 predicate+two-analog-consumers+native-joystick-poll scope=verified-playable-levels");
+}
+
+// Scoped native routes: authenticated MENU/VIDEO, Pause, Mapmonde and playable levels.
+void poll_sdl3_native() noexcept {
+    static r2fix::SdlGamepads pads;
+    static r2fix::PadTransitionGate gate;
+    static bool attempted = false;
+    static bool initialized = false;
+    static DWORD owner = 0;
+    static DWORD last_report = 0;
+    static DWORD last_poll = 0;
+    static bool polling = false;
+    static unsigned reports = 0;
+    // Context/focus transitions have a separate budget from busy gameplay.
+    static unsigned boundary_reports = 0;
+    static bool boundary_seen = false;
+    static std::uint32_t boundary_device = 0, boundary_scene = 0;
+    static bool boundary_focus = false;
+    static r2fix::PadContext boundary_context = r2fix::PadContext::inactive;
+    static std::uint32_t last_buttons = 0;
+    static bool last_motion = false;
+    static bool last_focus = false;
+    static std::uint32_t last_device = 0;
+    static std::uint32_t last_native_actions = 0;
+    static std::uint32_t last_scene = 0;
+    static r2fix::PadContext last_context = r2fix::PadContext::inactive;
+    const DWORD tid = GetCurrentThreadId();
+    const DWORD camera_tid = g_game_camera_thread_id.load(std::memory_order_acquire);
+    if (camera_tid != tid || (owner && owner != tid) || polling) return;
+    // The native camera callback proves the game thread. Wine or a
+    // graphics wrapper may own its foreground HWND on a different thread.
+    // Require the SAME PROCESS, not the HWND's creating thread.
+    static bool reported_entry = false;
+    if (!reported_entry) {
+        reported_entry = true;
+        DWORD pid = 0;
+        const DWORD window_tid = GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+        char msg[220]{};
+        std::snprintf(msg, sizeof(msg),
+            "RUNTIME-SDL3: poll-entered=1 camera-thread=%lu window-thread=%lu same-process=%u",
+            static_cast<unsigned long>(camera_tid), static_cast<unsigned long>(window_tid),
+            unsigned(pid == GetCurrentProcessId()));
+        log_line(msg);
+    }
+    const DWORD poll_now = GetTickCount();
+    if (last_poll && DWORD(poll_now-last_poll) < 12u) return;
+    last_poll = poll_now;
+    polling = true;
+    struct ClearPolling { bool& busy; ~ClearPolling() { busy = false; } } clear{polling};
+    const bool foreground = game_window_is_foreground();
+    if (!attempted) {
+        if (!foreground) {
+            static bool reported_wait = false;
+            if (!reported_wait) {
+                reported_wait = true;
+                log_line("RUNTIME-SDL3: init-deferred=foreground-not-game-process");
+            }
+            return;
+        }
+        attempted = true;
+        log_line("RUNTIME-SDL3: init-attempt=1 source=native-camera-thread foreground-process-verified=1");
+        owner = tid;
+        try {
+            std::wstring exe(32768, L'\0');
+            const DWORD n = GetModuleFileNameW(nullptr, exe.data(), DWORD(exe.size()));
+            if (!n || n >= exe.size()) {
+                log_line("RUNTIME-SDL3: init-refused=game-path-unavailable");
+                return;
+            }
+            exe.resize(n);
+            initialized = pads.initialize(std::filesystem::path(exe).parent_path() / L"SDL3.dll", &log_line);
+        } catch (...) {
+            log_line("RUNTIME-SDL3: init-refused=game-path-exception");
+        }
+    }
+    if (!initialized || owner != tid) return;
+    std::uint32_t scene=0;
+    const auto context = sdl_native_context(&scene);
+    auto sample = pads.poll(foreground, context);
+    sample.scene_id=scene;
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    g_controller_connected=sample.connected;
+    g_controller_family=pads.family();
+    g_controller_activity=r2fix::pad_info_activity(sample);
+    g_controller_activity_tick=GetTickCount();
+#endif
+    static bool first_sample = true;
+    if (first_sample) {
+        first_sample = false;
+        char msg[140]{};
+        std::snprintf(msg, sizeof(msg), "RUNTIME-SDL3: first-sample=1 connected=%u context=%u foreground=%u",
+            unsigned(sample.connected), unsigned(context), unsigned(foreground));
+        log_line(msg);
+    }
+    const auto transitions = gate.update(sample);
+    if(g_log && (!boundary_seen || boundary_device!=sample.device_id ||
+       boundary_scene!=scene || boundary_focus!=foreground || boundary_context!=context)) {
+        if(boundary_reports<256u) {
+            char msg[220]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-SDL3-CONTEXT: t_ms=%lu id=%u foreground=%u context=%u scene=%u released=0x%04x",
+                static_cast<unsigned long>(GetTickCount()),unsigned(sample.device_id),
+                unsigned(foreground),unsigned(context),unsigned(scene),unsigned(transitions.released));
+            log_line(msg);
+            ++boundary_reports;
+            if(boundary_reports==256u)
+                log_line("RUNTIME-SDL3: context-log-budget-exhausted=1");
+        }
+        boundary_seen=true;
+        boundary_device=sample.device_id;
+        boundary_scene=scene;
+        boundary_focus=foreground;
+        boundary_context=context;
+    }
+    // Independent per-device edge budget. The original 128 motion/menu
+    // samples were exhausted before the EasyMSX gameplay report.
+    static std::uint32_t button_device=0,button_mask=0;
+    static unsigned button_reports=0;
+    if(button_device!=sample.device_id){button_device=sample.device_id;button_mask=0;button_reports=0;}
+    const std::uint32_t raw_buttons=(sample.south?1u:0u)|(sample.east?2u:0u)|
+        (sample.start?4u:0u)|(sample.west?8u:0u)|(sample.north?16u:0u);
+    if(g_log && sample.device_id && raw_buttons!=button_mask && button_reports<256u) {
+        char msg[200]{};
+        std::snprintf(msg,sizeof(msg),"RUNTIME-SDL3-BUTTONS: id=%u context=%u scene=%u south=%u east=%u start=%u west=%u north=%u native-actions=0x%04x",
+            unsigned(sample.device_id),unsigned(context),unsigned(scene),unsigned(sample.south),
+            unsigned(sample.east),unsigned(sample.start),unsigned(sample.west),unsigned(sample.north),unsigned(transitions.held));
+        log_line(msg);++button_reports;
+    }
+    button_mask=raw_buttons;
+    observe_native_ipt_readonly(context);
+    g_sdl_native_joystick_owned=sample.connected && sample.device_id!=0 && foreground;
+    g_sdl_input_context = context;
+    g_sdl_input_scene = scene;
+    g_sdl_input_actions = transitions.held;
+    g_sdl_input_movement = transitions.movement;
+    g_sdl_input_tick = GetTickCount();
+    g_sdl_input_owner.store(tid, std::memory_order_release);
+    // Abstract gameplay diagnostics only; native output stays scoped.
+    auto diagnostic = sample;
+    diagnostic.context = r2fix::PadContext::gameplay;
+    const auto buttons = r2fix::pad_actions(diagnostic);
+    const auto motion = r2fix::pad_movement(diagnostic);
+    const bool moving = motion.x != 0 || motion.y != 0;
+    const DWORD now = GetTickCount();
+    const bool changed = sample.device_id != last_device || foreground != last_focus ||
+        buttons != last_buttons || moving != last_motion ||
+        context != last_context || scene != last_scene || transitions.held != last_native_actions;
+    // Diagnostics only, bounded to avoid flooding the original render thread.
+    if (g_log && changed && reports < 128 && (!reports || DWORD(now-last_report)>=50)) {
+        char msg[256]{};
+        std::snprintf(msg, sizeof(msg),
+            "RUNTIME-SDL3-SAMPLE: id=%u foreground=%u actions=0x%04x lx=%d ly=%d rx=%d lt=%d rt=%d context=%u native-actions=0x%04x scene=%u",
+            unsigned(sample.device_id), unsigned(foreground), unsigned(buttons),
+            sample.left_x, sample.left_y, sample.right_x, sample.left_trigger, sample.right_trigger,
+            unsigned(context), unsigned(transitions.held), unsigned(scene));
+        log_line(msg);
+        last_device = sample.device_id;
+        last_context = context;
+        last_scene = scene;
+        last_native_actions = transitions.held;
+        last_focus = foreground;
+        last_buttons = buttons;
+        last_motion = moving;
+        last_report = now;
+        ++reports;
+        if(reports==128u)
+            log_line("RUNTIME-SDL3: sample-log-budget-exhausted=1 context-log-independent=1");
+    }
+}
+#endif
+
 // Service the existing skip and ESC music decision machines exclusively
 // on the original GLI/game thread. Cinematic 4:3 rendering may not call
 // the 3D camera for 20+ seconds, while its 2D/viewport callbacks run.
@@ -5325,6 +6066,9 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     // Diagnostics remain gated by Debug.Log, not feature activation.
     poll_learn_intro_skip();
 #endif
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    poll_sdl3_native();
+#endif
     if(first_fallback && g_log) {
         char msg[220]{};
         std::snprintf(msg,sizeof(msg),
@@ -5366,7 +6110,14 @@ int __cdecl native_frame_flip_for_intro(int first,int second) {
             pending_at=g_proto_pending_at.load(std::memory_order_relaxed);
     }
 #endif
-    if(!intro && !audio_pending)return result;
+    if(!intro && !audio_pending) {
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        // Independent read/merge snapshot refresh; does not run audio or
+        // native level changes outside the pre-existing fallback scopes.
+        poll_sdl3_native();
+#endif
+        return result;
+    }
     const DWORD current_tid=GetCurrentThreadId();
     const DWORD camera_tid=g_game_camera_thread_id.load(
         std::memory_order_acquire);
@@ -5715,6 +6466,23 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     // page after the owned LFB panel rendered, never normal-3/Options.
     // Our own page text is rasterized into Glide's LFB and never
     // passes through this native glyph producer.
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    if(producer==Native2DProducer::Glyph && controller_info_owns_page()) {
+        // Reuse the verified native title band; never affect other pages.
+        const float original_ymin=ymin,original_ymax=ymax;
+        const bool title=r2fix::pad_info_native_title(g_controller_drawn_scope==2,xmin,ymin,xmax,ymax);
+        static unsigned accepted[2]{},rejected[2]{};
+        auto& count=title?accepted[g_controller_drawn_scope-1]:rejected[g_controller_drawn_scope-1];
+        if(g_log&&count<12u) {
+            ++count;
+            char msg[200]{};
+            std::snprintf(msg,sizeof(msg),"RUNTIME-CONTROLLER-MENU: native-glyph scope=%d title=%u x=%.2f..%.2f y=%.2f..%.2f",
+                g_controller_drawn_scope,unsigned(title),double(xmin),double(xmax),double(original_ymin),double(original_ymax));
+            log_line(msg);
+        }
+        if(!title)return;
+    }
+#endif
     if(producer==Native2DProducer::Glyph &&
        r2fix::standalone_video_page_filter_native_glyphs(
            xmin,ymin,xmax,ymax)) {
@@ -5920,6 +6688,12 @@ void __cdecl native_2d_percent_sprite(void* viewport,
 #endif
         return;
     }
+    if(r2fix::map_transition_full_width(g_current_level && _stricmp(g_current_level,"mapmonde")==0,
+            producer==Native2DProducer::Frame,xmin,ymin,xmax,ymax)) {
+        left=xmin;right=xmax; // same source and downstream double-squeeze guard
+        static bool reported=false;
+        if(!reported){reported=true;log_line("RUNTIME-MAP-TRANSITION: full-width=1 source=GLI-Frame original-material-preserved=1");}
+    }
     g_native_2d_calls.fetch_add(1,std::memory_order_relaxed);
     if(!g_native_2d_logged.exchange(true,
                                      std::memory_order_relaxed))
@@ -6039,6 +6813,18 @@ void __cdecl centered_native_screen_to_vertex(
             // owned informational VIDEO panel. Other menus and all
             // world rendering retain their original source geometry.
             const float original_y=y;
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+            const int controller_scope=controller_info_scope();
+            if(r2fix::align_pad_info_companion(controller_scope!=0,
+                    viewport==g_approved_overlay_viewport,route,before,y,depth,controller_scope==2)) {
+                static unsigned reports=0;
+                if(reports++<8u){
+                    char msg[180]{};
+                    std::snprintf(msg,sizeof(msg),"RUNTIME-CONTROLLER-MENU: companion-lift=1 route=%u y=%.4f->%.4f",route,double(original_y),double(y));
+                    log_line(msg);
+                }
+            }
+#endif
             if(r2fix::lift_pause_video_companion(
                 r2fix::standalone_video_page_pause_render_ready(),
                 viewport==g_approved_overlay_viewport,
@@ -6081,7 +6867,7 @@ void __cdecl centered_native_screen_to_vertex(
 // six-byte x86 instruction before returning to the original.
 void install_approved_overlay_source_patch() {
     if(g_overlay_source_patch_enabled.load(std::memory_order_acquire) ||
-       g_hud_scale>=0.9999f)return;
+       g_hud_scale>1.0f)return;
     auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
     if(!base)return;
     const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
@@ -6872,16 +7658,84 @@ constexpr uintptr_t kColorSpriteSlotRva = 0x104838; // VA 0x504838
 // This is a late native draw endpoint, before the GameFrame swap.
 constexpr uintptr_t kStandaloneFlipSlotRva=0x104538;
 std::atomic<void*> g_standalone_flip_original{nullptr};
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+// Bounded, same-render-thread observation of both native menu models.
+// No provisional behavior number is allowed to activate the new page.
+void trace_controller_menu_at_flip() noexcept {
+    if(!g_log || g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())return;
+    static DWORD last=0;
+    static int previous_scope=-1,previous_normal=-2,previous_reflex=-2,previous_selection=-2;
+    static unsigned count=0;
+    const DWORD now=GetTickCount();
+    if(count>=256u || (last && DWORD(now-last)<50u))return;
+    last=now;
+    int scope=0,normal=-1,reflex=-1,selection=-1;
+    if(r2fix::pause_menu_live_state(normal,reflex))scope=2;
+#if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
+    if(!scope && g_current_level && _stricmp(g_current_level,"menu")==0) {
+        r2fix::MenuAiModel model{};
+        r2fix::MenuAiState state{};
+        if(r2fix::get_verified_menu_controller(model,state) && state.normal>=0 && state.reflex>=0) {
+            scope=1;normal=state.normal;reflex=state.reflex;
+            const auto r32=[](std::uintptr_t p,std::uint32_t& v) {
+                SIZE_T copied=0;
+                return ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(p),&v,4,&copied)!=0 && copied==4;
+            };
+            const auto r8=[](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);};
+            const auto vars=r2fix::observe_menu_selection(state.mind,r32,r8);
+            if(vars.selection_valid && vars.selection>=-1 && vars.selection<=31)
+                selection=int(vars.selection);
+        }
+    }
+#endif
+    if(scope==previous_scope && normal==previous_normal &&
+       reflex==previous_reflex && selection==previous_selection)return;
+    previous_scope=scope;previous_normal=normal;previous_reflex=reflex;previous_selection=selection;
+    char msg[220]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-CONTROLLER-MENU: t_ms=%lu scope=%s normal=%d reflex=%d selection=%d read-only=1",
+        static_cast<unsigned long>(now),scope==1?"MENU":scope==2?"PAUSE":"outside",
+        normal,reflex,selection);
+    log_line(msg);
+    if(++count==256u)log_line("RUNTIME-CONTROLLER-MENU: trace-budget-exhausted=1");
+}
+#endif
 void __cdecl standalone_video_flip() {
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    trace_controller_menu_at_flip();
+#endif
     // The original game updates the MENU AI before this native flip.
     // Clamp only the now-invisible VIDEO selection on the SAME game
     // rendering thread, with complete model/mind/DsgMem validation.
     // Never intercept keyboard messages or alter parent Options.
     r2fix::native_graphics_info_stabilize_video_cursor_at_flip();
     r2fix::standalone_video_page_draw_before_flip();
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    const int scope=controller_info_scope();
+    const int previous=g_controller_drawn_scope;
+    g_controller_drawn_scope=0;
+    const auto activity=(game_window_is_foreground() && DWORD(GetTickCount()-g_controller_activity_tick)<=100u)?
+        g_controller_activity:r2fix::PadInfoActivity{};
+    if(scope && r2fix::draw_controller_info_glide(controller_info_locale(),g_controller_connected,g_controller_family,g_hud_scale,activity)) {
+        static unsigned light_reports=0,previous_mask=0;
+        if(activity.mask!=previous_mask){
+            if(g_log&&light_reports<80u){char msg[120]{};
+                std::snprintf(msg,sizeof(msg),"RUNTIME-CONTROLLER-MENU: physical-lights=0x%04x scope=%d",activity.mask,scope);
+                log_line(msg);++light_reports;}
+            previous_mask=activity.mask;
+        }
+        g_controller_drawn_scope=scope;
+        if(previous!=scope)log_line(scope==1?"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=MENU normal=21 reflex=0":"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=PAUSE normal=17 reflex=2");
+    }
+#endif
     const auto original=reinterpret_cast<void (__cdecl*)()>(
         g_standalone_flip_original.load(std::memory_order_acquire));
     if(original)original();
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    // Also refresh on the verified VIDEO flip route used in MENU.
+    // The acquisition function still requires the original camera thread.
+    poll_sdl3_native();
+#endif
 }
 #endif
 constexpr float kInternalGlideWidth = 1024.0f;
@@ -7699,6 +8553,41 @@ void start_hud_monitor() {
 }
 } // namespace
 
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+bool r2fix_sdl_controller_page() noexcept {
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    return controller_info_owns_page();
+#else
+    return false;
+#endif
+}
+std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept {
+    if(r2fix_sdl_controller_page())return sdl_fresh_actions(r2fix::PadContext::controller_info);
+    if(video) return sdl_fresh_actions(r2fix::PadContext::video);
+    if(sdl_native_context()==r2fix::PadContext::pause_menu)
+        return sdl_fresh_actions(r2fix::PadContext::pause_menu) |
+            ((sdl_fresh_actions(r2fix::PadContext::pause_menu) &
+              r2fix::pad_action_bit(r2fix::PadAction::pause)) ?
+                r2fix::pad_action_bit(r2fix::PadAction::cancel):0u);
+    if(sdl_native_context()==r2fix::PadContext::gameplay)
+        return (sdl_fresh_actions(r2fix::PadContext::gameplay) &
+                r2fix::pad_action_bit(r2fix::PadAction::pause)) ?
+                r2fix::pad_action_bit(r2fix::PadAction::cancel):0u;
+    if(sdl_native_context()==r2fix::PadContext::world_map)
+        return sdl_fresh_actions(r2fix::PadContext::world_map) &
+            ~r2fix::pad_action_bit(r2fix::PadAction::pause);
+    return sdl_fresh_actions(r2fix::PadContext::menu);
+}
+void r2fix_sdl_note_pause_delivery() noexcept {
+    if(sdl_fresh_actions(r2fix::PadContext::gameplay) &
+       r2fix::pad_action_bit(r2fix::PadAction::pause)) {
+        // Called only after a successful native keyboard buffer merge.
+        g_sdl_pause_delivery_tick=GetTickCount();
+        g_sdl_pause_delivery_pending=true;
+    }
+}
+#endif
+
 extern "C" __declspec(dllexport) unsigned int __cdecl Rayman2Fix_RuntimeApiVersion() {
     return 2;
 }
@@ -7817,7 +8706,8 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
         // The source transform covers all four native inverse-projection
         // callers and four independent extent operations as a single
         // guarded stage; only then bypass the older viewport squeeze.
-        if(g_hud_scale<0.9999f)install_approved_overlay_source_patch();
+        // Native companion positioning is also needed at true 4:3.
+        install_approved_overlay_source_patch();
         // Hook the common native 2D entry before the game draws any
         // UI; the downstream driver callback monitor still handles
         // screen sprites submitted through other engine paths.
@@ -7843,6 +8733,10 @@ DWORD WINAPI Rayman2Fix_Initialize(void* input) {
             install_cinematic_viewport_hook();
         initialize_native_intro_skip();
         install_native_frame_flip_hook();
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        install_ipt_gameplay_hooks();
+        log_line("RUNTIME-SDL3: compiled=1 owner=native-camera-thread init=deferred-to-foreground-game");
+#endif
         start_hud_monitor();
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
         // The read-only observer is also the VERIFIED controller source

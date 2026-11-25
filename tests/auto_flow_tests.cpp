@@ -284,6 +284,46 @@ int main() {
               contents(root / "docs" / "LICENSE").find("Version 3, 29 June 2007") !=
                   std::string::npos,
               "single EXE deploys full GPLv3 license in docs/ only, separate from GameFrame");
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        const auto sdl = root / "game" / "SDL3.dll";
+        const auto notice = root / "docs" / "SDL3-LICENSE.txt";
+        check(fs::is_regular_file(sdl) && fs::is_regular_file(notice) &&
+              !fs::exists(root / "mods" / "SDL3.dll"),
+              "SDL3 beside game runtime; notice under docs");
+        const auto sdl_bytes = contents(sdl);
+        const auto notice_bytes = contents(notice);
+        check(r2fix::sha256_file(sdl) == "6d7e653aa9c762ceda4fffc054a504dcce273e016eb9f1fe079b6409a058a9f7" &&
+              r2fix::sha256_file(notice) == "1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd",
+              "embedded PE and zlib notice deployed");
+        // A new launcher invocation owns a fresh log stream. Do not
+        // reopen the original Startup's stream while it is still open.
+        const auto repair_root = root / "sdl-repair-test";
+        fs::create_directory(repair_root);
+        const auto repair_sdl = repair_root / "game" / "SDL3.dll";
+        const auto repair_notice = repair_root / "docs" / "SDL3-LICENSE.txt";
+        const auto repair_log = repair_root / "Rayman2Fix_installer.log";
+        const auto provision = [&] {
+            r2fix::Startup invocation(repair_root / "Rayman2Fix.exe");
+            invocation.initialize();
+        };
+        provision();
+        const auto unchanged_time = fs::last_write_time(repair_sdl);
+        provision();
+        check(contents(repair_sdl) == sdl_bytes && contents(repair_notice) == notice_bytes &&
+              fs::last_write_time(repair_sdl) == unchanged_time &&
+              contents(repair_log).find("status=unchanged runtime-active=0") != std::string::npos,
+              "identical SDL3 payload remains unchanged");
+        write(repair_sdl, "CORRUPTED-SDL3");
+        write(repair_notice, "CORRUPTED-NOTICE");
+        provision();
+        check(contents(repair_sdl) == sdl_bytes && contents(repair_notice) == notice_bytes &&
+              !fs::exists(repair_root / "game" / "SDL3.dll.installing") &&
+              !fs::exists(repair_root / "game" / "SDL3.dll.bak"),
+              "corrupt SDL3 and notice restored without permanent backups");
+        check(contents(repair_log).find("status=replaced runtime-active=0") != std::string::npos,
+              "replacement is logged without claiming runtime activation");
+        fs::remove_all(repair_root);
+#endif
         const auto installed_guide=contents(root / "docs" / "README.md");
         check(installed_guide.find("Installation neuve uniquement") !=
                     std::string::npos &&
@@ -586,6 +626,13 @@ int main() {
 #ifdef _WIN32
         check(r2fix::gameframe_glide_ready(game),
               "published ISO game contains the verified local GameFrame DLL");
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        check(contents(game / "SDL3.dll") == sdl_bytes &&
+              !fs::exists(root / "mods" / "SDL3.dll"),
+              "atomic CD installation preserves the exact bundled SDL3");
+        check(contents(root / "state" / ".rayman2fix-cd-files.tsv").find("SDL3.dll") == std::string::npos,
+              "SDL3 must not be recorded as original CD content");
+#endif
         check(contents(game/"glide2x.dll.bak")=="PRESERVE-OLD-GLIDE",
               "atomic CD installation preserves the user's Glide backup");
 #endif
