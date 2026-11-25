@@ -9,9 +9,10 @@
 #include <vector>
 
 namespace r2fix::gog {
-// Diagnostic only. CD signatures copied from the existing runtime.cpp
+// Static preflight. CD signatures copied from the existing runtime.cpp
 // and video_navigation_input.cpp guards. A match is NOT authorization
-// to install hooks or a proof of full ABI compatibility.
+// to install hooks without the exact approved file hash and native runtime guards,
+// nor a proof of full ABI compatibility.
 struct HookSignature {
     const char* name;
     std::uint32_t rva;
@@ -29,7 +30,21 @@ inline const std::vector<HookSignature>& diagnostic_signatures() {
         {"ipt-x",0x6E755,{0xE8,0x76,0x01,0xFC,0xFF}},
         {"ipt-y",0x6E774,{0xE8,0x57,0x01,0xFC,0xFF}},
         {"ipt-poll",0x96ACA,{0xE8,0x11,0x03,0,0}},
-        {"video-navigation",0x966B3,{0x3D,0x0C,0,0x07,0x80,0x7F,0x0B}}
+        {"video-navigation",0x966B3,{0x3D,0x0C,0,0x07,0x80,0x7F,0x0B}},
+        {"actor-extent-409",0x7122A,{0xD8,0x0D,0x58,0xCC,0x49,0}},
+        {"actor-extent-independent",0x718CF,{0xD8,0x0D,0x58,0xCC,0x49,0}},
+        {"text-extent-x",0x75BEF,{0xD8,0x0D,0xA4,0xCC,0x49,0}},
+        {"text-extent-z",0x75BF7,{0xD8,0x0D,0xA8,0xCC,0x49,0}},
+        {"actor-store-edi",0x71230,{0xD9,0x57,0x34,0xD9,0x5F,0x54}},
+        {"actor-store-esi",0x718D6,{0xD9,0x56,0x34,0xD9,0x5E,0x54}},
+        {"f248",0x7A8E0,{0x83,0xEC,0x10,0x8B,0x44,0x24,0x18,0x53,0x55,0x56,0x8B,0x48,0xF8,0x57,0x89,0x4C}},
+        {"menu-select",0x6FE00,{0x8B,0x4C,0x24,0x08,0x8B,0x54,0x24,0x04,0x83,0xEC,0x10,0x8D,0x44,0x24,0}},
+        {"menu-save",0x7AC70,{0xE8,0xEB,0x76,0xFA,0xFF,0x8B,0x4C,0x24,0x0C,0x89,0x01,0x8B,0x44,0x24,0x08}},
+        {"menu-eval",0x80B90,{0x8B,0x44,0x24,0x08,0x8B,0x54,0x24,0x0C,0x33,0xC9,0x52}},
+        {"focus-pause",0x1C9C,{0xE8,0x2F,0x1A,0x05,0}},
+        {"focus-resume",0x1CE9,{0xE8,0x12,0x1A,0x05,0}},
+        {"script-pause",0x71E70,{0xE8,0x5B,0x18,0xFE,0xFF}},
+        {"script-resume",0x71E67,{0xE8,0x94,0x18,0xFE,0xFF}}
     };
     return sites;
 }
@@ -52,14 +67,16 @@ public:
     std::uint32_t image_size() const { return u32(opt_+56); }
     std::uint32_t image_base() const { return u32(opt_+28); }
     std::uint32_t entry_rva() const { return u32(opt_+16); }
-    std::string check(const HookSignature& site) const {
+    unsigned section_count() const { return sections_; }
+    std::string check(const HookSignature& site, bool code = true) const {
         for (unsigned i=0;i<sections_;++i) {
             const auto s=table_+40u*i;
             const auto va=u32(s+12), raw_size=u32(s+16), raw=u32(s+20);
             if (site.rva<va) continue;
             const auto delta=std::uint64_t(site.rva)-va;
             if (delta>raw_size || site.bytes.size()>raw_size-delta) continue;
-            if (!(u32(s+36)&0x20000000u)) return "non-executable";
+            if (code && !(u32(s+36)&0x20000000u)) return "non-executable";
+            if (!code && !(u32(s+36)&0x80000000u)) return "non-writable";
             const auto off=std::uint64_t(raw)+delta;
             if (off>bytes_.size() || site.bytes.size()>bytes_.size()-off)
                 return "out-of-file";
@@ -85,7 +102,25 @@ private:
     }
 };
 
-inline std::vector<std::string> hook_diagnostics(const std::filesystem::path& exe) {
+inline const std::vector<HookSignature>& diagnostic_slots() {
+    static const std::vector<HookSignature> slots{
+        {"f248-slot",0xA5C20,{0xE0,0xA8,0x47,0}},
+        {"menu-select-slot",0xA4F00,{0,0xFE,0x46,0}},
+        {"menu-save-slot",0xA5C88,{0x70,0xAC,0x47,0}}
+    };
+    return slots;
+}
+inline bool shared_runtime_preflight(const PeDiagnostic& pe) {
+    if (pe.timestamp()!=0x3807B68Bu || pe.image_size()!=0x1D7000u ||
+        pe.image_base()!=0x400000u || pe.entry_rva()!=0x5FCC0u ||
+        pe.section_count()!=6) return false;
+    for (const auto& site:diagnostic_signatures())
+        if (pe.check(site)!="match") return false;
+    for (const auto& slot:diagnostic_slots())
+        if (pe.check(slot,false)!="match") return false;
+    return true;
+}
+inline PeDiagnostic read_pe_diagnostic(const std::filesystem::path& exe) {
     if (std::filesystem::file_size(exe)>8u*1024u*1024u)
         throw std::runtime_error("oversized PE diagnostic");
     std::ifstream in(exe,std::ios::binary);
@@ -94,7 +129,11 @@ inline std::vector<std::string> hook_diagnostics(const std::filesystem::path& ex
         static_cast<std::size_t>(std::filesystem::file_size(exe)));
     if (!in.read(reinterpret_cast<char*>(bytes.data()),static_cast<std::streamsize>(bytes.size())))
         throw std::runtime_error("truncated PE diagnostic");
-    const PeDiagnostic pe(std::move(bytes));
+    return PeDiagnostic(std::move(bytes));
+}
+
+inline std::vector<std::string> hook_diagnostics(const std::filesystem::path& exe) {
+    const auto pe=read_pe_diagnostic(exe);
     std::ostringstream header;
     header<<"GOG-PE: timestamp=0x"<<std::hex<<pe.timestamp()
           <<" image_size=0x"<<pe.image_size()<<" image_base=0x"<<pe.image_base()
@@ -111,9 +150,17 @@ inline std::vector<std::string> hook_diagnostics(const std::filesystem::path& ex
             <<" status="<<status;
         lines.push_back(line.str());
     }
+    for (const auto& site:diagnostic_slots()) {
+        const auto status=pe.check(site,false);
+        std::ostringstream line;
+        line<<"GOG-HOOK-PROBE: "<<site.name<<" rva=0x"<<std::hex<<site.rva
+            <<" status="<<status;
+        lines.push_back(line.str());
+    }
+    lines.push_back("GOG-HOOK-PROBE: shared_runtime_preflight="+std::string(shared_runtime_preflight(pe)?"passed":"refused"));
     lines.push_back("GOG-HOOK-PROBE: matched="+std::to_string(matched)+"/"+
                     std::to_string(diagnostic_signatures().size())+
-                    " diagnostic-only; full runtime ABI not authorized");
+                    " static evidence only; gameplay validation pending");
     return lines;
 }
 } // namespace r2fix::gog
