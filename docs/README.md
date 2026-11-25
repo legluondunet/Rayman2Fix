@@ -151,8 +151,9 @@ Rond/B ou Échap permettent de revenir au menu précédent.
 *La nage et la connaissance du monde restent à vérifier spécifiquement
 en jeu. L'illumination valide la réception de l'entrée physique, pas
 l'effet natif dans chaque situation. Les deux familles ont été testées
-sous Wine ; les autres matériels et le jeu sous Windows natif restent
-à vérifier plus largement.
+sous Wine. Les tests de jeu sous Windows natif sont différés faute de
+matériel disponible et ne bloquent pas la publication ; les retours de la
+communauté seront bienvenus. La CI Windows x86 reste obligatoire.
 
 La notice zlib de SDL3 est installée dans `docs/SDL3-LICENSE.txt`.
 
