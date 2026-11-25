@@ -25,3 +25,23 @@ References:
 - https://constexpr.org/innoextract/
 
 Status: design and evidence collection only. No GOG extraction or runtime support implemented yet.
+
+
+## Owner-supplied GOG v2 evidence — 25 November 2026
+
+The combined French/Polish inventory successfully lists Inno Setup 5.6.2 Unicode, product metadata 1207658940. Listing is not an integrity test. Both list the same Rayman2.exe MD5 ef4954015d8b67e3534c9dc40ca3ad6e; localized assets (Textures.cnt, Fix.gpt) differ. Preserve each installation's own resources; do not assume identical archive or data hashes.
+
+French setup build 86383, SHA-256 calculated locally from the actual supplied files:
+- setup_rayman_2_-_the_great_escape_1.0_gog_v2_(french)_(86383).exe: 1053624 bytes, 604bb057b69186989404434669e82d833c076131c1be0dcf7fefc1ce94aeaa69
+- setup_rayman_2_-_the_great_escape_1.0_gog_v2_(french)_(86383)-1.bin: 358957056 bytes, 1d73f82cca92be83101901abb78dcb4160d3442147a1b94d9c6963a6310f22b0
+
+Owner-extracted GOG_reference.zip:
+- Rayman2.exe: 1469440 bytes, SHA-256 82e56041bde6b135a29af70ec213d716ef9d3253d46fa2c893bd25a6cff7f891, x86 PE, timestamp 1999-10-15 23:19:39 UTC, image base 0x400000, entry RVA 0x5fcc0.
+- ubi.ini: 141 bytes, SHA-256 946e8049cd824007eac00be2b56c93991dbd499f2d0f38974ce606cdaa2a4fb4; Glide2/GliVd1, 1024x768x16, Language=English, ParticuleRate=High.
+- DLL/Snd_Cpa.ini: 359 bytes, SHA-256 39f30bfff1265a9669c23ed986993d2c1d654258b8e4d665b5d67401cd00006d; CD audio OFF, WAV/MPEG/ADPCM ON, SXD default WAVPW / MMX WAVMW, ADPCM default APMPW / MMX APMMX.
+- GOG original EXE differs from approved local CD EXE (1468928 bytes, 9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713). Do not infer equivalent ABI from size.
+- Compared actual GOG .text bytes to owner-validated CD runtime log Rayman2Fix(20261125-153417).log: all 500 bytes across nine logged overlay regions match (RVAs 710C0, 75C7F, 75C96, 7135C, 7115C, 7126B, 71100, 71346, 7131E). This is limited read-only evidence; all active hooks and native data structures still require preflight. No GOG gameplay validated.
+
+Installation candidate: retain original data/ and dll/ plus GOG EXE; keep the supplied snd_cpa.ini rather than requiring the CD MMX template. Review GOG wrapper imports and side effects before excluding ddraw.dll, dinput.dll, 3DfxSpl2.dll and goginput.ini. Replace Glide with GameFrame under existing policy. Exclude installer-only temp/redist/commonappdata and obsolete config utilities after dependency review. Preserve game documentation and language resources.
+
+Local Python can read supplied files and compute hashes; innoextract is not installed in the analysis environment. Full extraction/integrity testing and the Windows extractor build are outstanding. No proprietary bytes added to repository. No launch authorization for this profile yet.
