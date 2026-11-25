@@ -5335,6 +5335,7 @@ std::uint32_t g_sdl_input_scene = 0;
 std::uint32_t g_sdl_input_actions = 0;
 r2fix::PadMovement g_sdl_input_movement{};
 DWORD g_sdl_input_tick = 0;
+thread_local bool g_sdl_native_joystick_owned=false;
 thread_local DWORD g_sdl_pause_delivery_tick=0;
 thread_local bool g_sdl_pause_delivery_pending=false;
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
@@ -5754,6 +5755,44 @@ float ipt_gameplay_axis(void* entry,bool vertical) noexcept {
 }
 float __cdecl ipt_gameplay_x(void* entry) { return ipt_gameplay_axis(entry,false); }
 float __cdecl ipt_gameplay_y(void* entry) { return ipt_gameplay_axis(entry,true); }
+// The retail CD PE SHA256 9bae484b...a72713 has a separate joystick
+// poll, VA 496DE0, called at VA 496ACA. Its successful output contains
+// a button mask and six center-relative axes. The caller subsequently
+// calculates directional bits (497050) and history (4970C0).
+// Neutralize that normalized output only; keep COM acquisition, status,
+// keyboard GetDeviceState(256), and the native direction/history logic.
+using NativeJoystickPoll=unsigned short (__cdecl*)(void*);
+unsigned short __cdecl sdl_owned_joystick_poll(void* device) noexcept {
+    const auto original=reinterpret_cast<NativeJoystickPoll>(intro_game_base()+0x96DE0u);
+    const auto result=original(device);
+    if(result!=1u || !g_sdl_native_joystick_owned ||
+       g_sdl_input_owner.load(std::memory_order_acquire)!=GetCurrentThreadId() ||
+       DWORD(GetTickCount()-g_sdl_input_tick)>100u ||
+       !game_window_is_foreground() ||
+       g_sdl_input_context==r2fix::PadContext::inactive ||
+       g_sdl_input_context==r2fix::PadContext::cinematic) return result;
+    std::uint32_t state=0;
+    std::uint32_t words[9]{};
+    const auto ptr=reinterpret_cast<std::uintptr_t>(device);
+    if(!ipt_read(ptr+8u,&state,4) || !state ||
+       !ipt_read(state,words,sizeof(words)))return result;
+    if(!r2fix::neutralize_native_joystick(true,true,true,true,words,9))return result;
+    // Write only the two verified ranges, never flags/direction bits.
+    // Direction/history are recomputed by the original caller.
+    MEMORY_BASIC_INFORMATION page{};
+    if(VirtualQuery(reinterpret_cast<void*>(state),&page,sizeof(page))!=sizeof(page) ||
+       page.State!=MEM_COMMIT || (page.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
+       (page.Protect&0xffu)!=PAGE_READWRITE ||
+       std::uintptr_t(state)<reinterpret_cast<std::uintptr_t>(page.BaseAddress) ||
+       page.RegionSize<sizeof(words) ||
+       std::uintptr_t(state)-reinterpret_cast<std::uintptr_t>(page.BaseAddress)>page.RegionSize-sizeof(words))
+        return result;
+    std::memcpy(reinterpret_cast<void*>(state+4u),words+1,4u);
+    std::memcpy(reinterpret_cast<void*>(state+12u),words+3,24u);
+    static bool reported=false;
+    if(!reported){reported=true;log_line("RUNTIME-SDL3: native-joystick-neutralized=1 source=retail-DirectInput-poll96DE0 keyboard=preserved");}
+    return result;
+}
 void install_ipt_gameplay_hooks() {
     if(g_ipt_hooks_installed)return;
     auto* base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
@@ -5768,21 +5807,23 @@ void install_ipt_gameplay_hooks() {
     const Site sites[]={
         {0x2E7ADu,{0xE8,0x0E,0x03,0x00,0x00},reinterpret_cast<std::uintptr_t>(&ipt_gameplay_predicate)},
         {0x6E755u,{0xE8,0x76,0x01,0xFC,0xFF},reinterpret_cast<std::uintptr_t>(&ipt_gameplay_x)},
-        {0x6E774u,{0xE8,0x57,0x01,0xFC,0xFF},reinterpret_cast<std::uintptr_t>(&ipt_gameplay_y)}
+        {0x6E774u,{0xE8,0x57,0x01,0xFC,0xFF},reinterpret_cast<std::uintptr_t>(&ipt_gameplay_y)},
+        {0x96ACAu,{0xE8,0x11,0x03,0x00,0x00},reinterpret_cast<std::uintptr_t>(&sdl_owned_joystick_poll)}
     };
     // Verify all sites before changing any, then acquire all protections.
     for(const auto& s:sites)if(std::memcmp(base+s.rva,s.expected,5)!=0) {
         log_line("RUNTIME-SDL3: IPT-hooks-refused=signature");return;
     }
-    DWORD prot[3]{};
+    constexpr unsigned site_count=sizeof(sites)/sizeof(sites[0]);
+    DWORD prot[site_count]{};
     unsigned writable=0;
-    for(;writable<3u;++writable)
+    for(;writable<site_count;++writable)
         if(!VirtualProtect(base+sites[writable].rva,5,PAGE_EXECUTE_READWRITE,&prot[writable]))break;
-    if(writable!=3u) {
+    if(writable!=site_count) {
         while(writable) { --writable; DWORD ignored=0; VirtualProtect(base+sites[writable].rva,5,prot[writable],&ignored); }
         log_line("RUNTIME-SDL3: IPT-hooks-refused=protection");return;
     }
-    for(unsigned i=0;i<3u;++i) {
+    for(unsigned i=0;i<site_count;++i) {
         auto* at=base+sites[i].rva;
         BYTE patch[5]{0xE8};
         const auto delta=std::uint32_t(sites[i].dest-reinterpret_cast<std::uintptr_t>(at+5));
@@ -5790,10 +5831,10 @@ void install_ipt_gameplay_hooks() {
         std::memcpy(at,patch,5);
         FlushInstructionCache(GetCurrentProcess(),at,5);
     }
-    // All three sites can occupy the same page. Restore in reverse order.
-    for(unsigned i=3u;i>0;--i) { DWORD ignored=0; VirtualProtect(base+sites[i-1].rva,5,prot[i-1],&ignored); }
+    // Sites can occupy the same page. Restore in reverse order.
+    for(unsigned i=site_count;i>0;--i) { DWORD ignored=0; VirtualProtect(base+sites[i-1].rva,5,prot[i-1],&ignored); }
     g_ipt_hooks_installed=true;
-    log_line("RUNTIME-SDL3: IPT-hooks-installed=1 predicate+two-analog-consumers scope=verified-playable-levels");
+    log_line("RUNTIME-SDL3: IPT-hooks-installed=1 predicate+two-analog-consumers+native-joystick-poll scope=verified-playable-levels");
 }
 
 // Scoped native routes: authenticated MENU/VIDEO, Pause, Mapmonde and playable levels.
@@ -5922,6 +5963,7 @@ void poll_sdl3_native() noexcept {
     }
     button_mask=raw_buttons;
     observe_native_ipt_readonly(context);
+    g_sdl_native_joystick_owned=sample.connected && sample.device_id!=0 && foreground;
     g_sdl_input_context = context;
     g_sdl_input_scene = scene;
     g_sdl_input_actions = transitions.held;

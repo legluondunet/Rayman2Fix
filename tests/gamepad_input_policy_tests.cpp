@@ -18,6 +18,11 @@ PadSample active(PadContext context = PadContext::gameplay) {
     return s;
 }
 int main() {
+    std::uint32_t native_pad[9]{0xabcdef03u,0x1234u,0xdeadbeefu,1,2,3,4,5,6};
+    check(!neutralize_native_joystick(false,true,true,true,native_pad,9)&&native_pad[1]==0x1234u,"native fallback without SDL owner");
+    check(!neutralize_native_joystick(true,false,true,true,native_pad,9)&&!neutralize_native_joystick(true,true,false,true,native_pad,9)&&!neutralize_native_joystick(true,true,true,false,native_pad,9)&&!neutralize_native_joystick(true,true,true,true,native_pad,8),"neutralizer requires fresh supported successful poll and exact layout");
+    check(neutralize_native_joystick(true,true,true,true,native_pad,9)&&native_pad[0]==0xabcdef03u&&native_pad[2]==0xdeadbeefu&&!native_pad[1],"buttons cleared, flags and direction preserved");
+    for(unsigned i=3;i<9;++i)check(!native_pad[i],"native calibrated axes neutral");
     PadTransitionGate gate;
     auto a = active();
     a.south = true;

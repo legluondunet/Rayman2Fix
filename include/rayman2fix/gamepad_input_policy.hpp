@@ -191,6 +191,17 @@ constexpr bool pad_may_take_owner(bool foreground,bool owner_active,
                                   bool candidate_armed,bool candidate_active) noexcept {
     return foreground&&!owner_active&&candidate_armed&&candidate_active;
 }
+// The approved retail DirectInput joystick poll emits a normalized
+// button mask at +4 and six signed, center-relative axes at +0xc..0x20.
+// Neutralize only those fields, before the native direction/history
+// update. Preserve flags, padding, and the keyboard's independent path.
+inline bool neutralize_native_joystick(bool sdl_owner,bool fresh,bool supported_context,
+    bool poll_success,std::uint32_t* words,std::size_t count) noexcept {
+    if(!sdl_owner||!fresh||!supported_context||!poll_success||!words||count!=9u)return false;
+    words[1]=0;
+    for(unsigned i=3;i<9;++i)words[i]=0;
+    return true;
+}
 // One owner, one semantic context. Require neutral physical controls after
 // attach, focus restoration, owner change and context change; neither a held
 // confirmation nor an ignored button nor analog motion may cross the boundary.

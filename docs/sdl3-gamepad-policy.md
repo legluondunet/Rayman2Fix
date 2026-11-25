@@ -508,3 +508,23 @@ neutral on handover before accepting gameplay; no simultaneous merge.
 Record device name/VID/PID and independent South/East/Start edge traces
 per device. Native legacy input interference remains a hypothesis, and
 this change does not disable the original DirectInput device globally.
+
+
+## Owner 20261125-055436: duplicate native joystick actions
+
+Build 4c420c7f: SDL owner switches between PS4 054c:05c4 and Xbox
+045e:028e. In Learn_30, id2 south=1 east=0 produces SDL mask 0x0010
+while native IPT 10,11,21 become positive together (log lines 858–864,
+875–880,896–901). East produces only SDL 0x0020; Start produces 0x0040
+and the game enters pause. Do not swap mapping. Offline objdump of the
+owner retail PE SHA256 9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713
+confirms real joystick GetDeviceState(80) at 496F37/496F4C, distinct from
+keyboard GetDeviceState(256). At 496F9C..49701D, native code computes six
+center-relative axes at state+0x0c..0x20 and button mask at state+4.
+The sole direct call at 496ACA returns to 496ACF before 497050 computes
+directions and 4970C0 records history. Hook that exact call as a fourth
+atomic verified IPT installation site; invoke original and neutralize
+only those output fields on successful poll, fresh foreground SDL
+ownership and supported context. Preserve flags, keyboard, status,
+unknown contexts and no-device fallback. No global DirectInput patch,
+no original assets redistributed. Hardware test still required.
