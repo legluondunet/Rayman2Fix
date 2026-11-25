@@ -4,6 +4,7 @@
 // Rasterize into a private premultiplied-alpha DIB at twice logical size.
 #include "rayman2fix/controller_info_layout.hpp"
 #include <windows.h>
+#include <objidl.h>
 #include <gdiplus.h>
 #include <cmath>
 namespace r2fix::controller_art {
@@ -55,10 +56,10 @@ inline void gem(Graphics& g,float x,float y,float r,Color top,Color bottom) {
 }
 inline void leaf(Graphics& g,float x,float y,float dx,float dy) {
     GraphicsPath p;
-    p.AddBezier({x,y},{x+dx*.15f-dy*.36f,y+dy*.15f+dx*.36f},
-        {x+dx*.7f-dy*.36f,y+dy*.7f+dx*.36f},{x+dx,y+dy});
-    p.AddBezier({x+dx,y+dy},{x+dx*.68f+dy*.3f,y+dy*.68f-dx*.3f},
-        {x+dx*.18f+dy*.2f,y+dy*.18f-dx*.2f},{x,y});p.CloseFigure();
+    p.AddBezier(PointF{x,y},PointF{x+dx*.15f-dy*.36f,y+dy*.15f+dx*.36f},
+        PointF{x+dx*.7f-dy*.36f,y+dy*.7f+dx*.36f},PointF{x+dx,y+dy} );
+    p.AddBezier(PointF{x+dx,y+dy},PointF{x+dx*.68f+dy*.3f,y+dy*.68f-dx*.3f},
+        PointF{x+dx*.18f+dy*.2f,y+dy*.18f-dx*.2f},PointF{x,y} );p.CloseFigure();
     LinearGradientBrush b(PointF(x,y),PointF(x+dx,y+dy),rgb(32,96,87),rgb(168,222,82));
     g.FillPath(&b,&p);Pen edge(rgb(46,120,98),.8f);g.DrawPath(&edge,&p);
     curve(g,rgb(220,240,128,180),.9f,{x,y},{x+dx*.3f,y+dy*.4f},{x+dx*.7f,y+dy*.7f},{x+dx,y+dy});
@@ -86,18 +87,18 @@ inline void shell(Graphics& g,PadLabelFamily family) {
     GraphicsPath p;
     // Slightly different body/shoulder shape; controls stay at exact anchors.
     const float shoulder=xbox?112.f:105.f;
-    p.AddBezier({292,216},{291,161},{305,shoulder+20},{335,shoulder});
-    p.AddBezier({335,shoulder},{365,shoulder-9},{382,120},{411,124});
-    p.AddBezier({411,124},{438,130},{482,130},{509,124});
-    p.AddBezier({509,124},{538,120},{555,shoulder-9},{585,shoulder});
-    p.AddBezier({585,shoulder},{615,shoulder+20},{629,161},{628,216});
-    p.AddBezier({628,216},{641,268},{642,322},{615,342});
-    p.AddBezier({615,342},{588,361},{567,329},{549,310});
-    p.AddBezier({549,310},{531,293},{508,299},{487,300});
-    p.AddBezier({487,300},{468,301},{452,301},{433,300});
-    p.AddBezier({433,300},{412,299},{389,293},{371,310});
-    p.AddBezier({371,310},{353,329},{332,361},{305,342});
-    p.AddBezier({305,342},{278,322},{279,268},{292,216});
+    p.AddBezier(PointF{292,216},PointF{291,161},PointF{305,shoulder+20},PointF{335,shoulder} );
+    p.AddBezier(PointF{335,shoulder},PointF{365,shoulder-9},PointF{382,120},PointF{411,124} );
+    p.AddBezier(PointF{411,124},PointF{438,130},PointF{482,130},PointF{509,124} );
+    p.AddBezier(PointF{509,124},PointF{538,120},PointF{555,shoulder-9},PointF{585,shoulder} );
+    p.AddBezier(PointF{585,shoulder},PointF{615,shoulder+20},PointF{629,161},PointF{628,216} );
+    p.AddBezier(PointF{628,216},PointF{641,268},PointF{642,322},PointF{615,342} );
+    p.AddBezier(PointF{615,342},PointF{588,361},PointF{567,329},PointF{549,310} );
+    p.AddBezier(PointF{549,310},PointF{531,293},PointF{508,299},PointF{487,300} );
+    p.AddBezier(PointF{487,300},PointF{468,301},PointF{452,301},PointF{433,300} );
+    p.AddBezier(PointF{433,300},PointF{412,299},PointF{389,293},PointF{371,310} );
+    p.AddBezier(PointF{371,310},PointF{353,329},PointF{332,361},PointF{305,342} );
+    p.AddBezier(PointF{305,342},PointF{278,322},PointF{279,268},PointF{292,216} );
     p.CloseFigure();
     // Soft rim light and shaded ivory/lavender body.
     Pen shadow(rgb(24,19,55,145),7);shadow.SetLineJoin(LineJoinRound);g.DrawPath(&shadow,&p);
