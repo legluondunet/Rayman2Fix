@@ -253,6 +253,27 @@ int main() {
           menu_actions)==1 && info_keys[0x01]==0x80 && info_keys[0x39]==0x80 &&
           !info_keys[0x1C] && !info_keys[0xC8] && !info_keys[0xD0],
           "authenticated controller page receives only back, preserves keyboard");
+    // Separate scoped suppression, never part of the general merge.
+    info_keys[0x1C]=0x81;info_keys[0x9C]=0x80;
+    info_keys[0xC8]=0x80;info_keys[0x1E]=0x80;
+    check(!suppress_controller_info_keys(false,true,0,256,info_keys) &&
+          !suppress_controller_info_keys(true,false,0,256,info_keys) &&
+          !suppress_controller_info_keys(true,true,-1,256,info_keys) &&
+          !suppress_controller_info_keys(true,true,0,255,info_keys) &&
+          info_keys[0x1C]==0x81,"unowned/failed/background keyboard untouched");
+    check(suppress_controller_info_keys(true,true,0,256,info_keys)==4 &&
+          info_keys[0x1C]==1 && !info_keys[0x9C] && !info_keys[0x39] &&
+          !info_keys[0xC8] && info_keys[0x01]==0x80 && info_keys[0x1E]==0x80,
+          "controller page suppresses calibration keys only");
+    for(unsigned i=0;i<138;++i)
+        check(suppress_controller_info_ipt(true,true,true,i,{})==(i==9),
+              "only native menu confirm is blocked");
+    check(!suppress_controller_info_ipt(false,true,true,9,{}) &&
+          !suppress_controller_info_ipt(true,false,true,9,{}) &&
+          !suppress_controller_info_ipt(true,true,false,9,{}) &&
+          !suppress_controller_info_ipt(true,true,true,9,"Menu_Annuler") &&
+          suppress_controller_info_ipt(true,true,true,9,"Action_Menu_Valider"),
+          "IPT suppression refuses unknown state, name or table");
 
     // Candidate retail IPT inspection rejects implausible addresses/layouts.
     check(!ipt_header_plausible({0,0}) &&

@@ -81,8 +81,13 @@ void __cdecl filter_approved_video_keys(void* keyboard,
     if(controller && foreground) {
         // Read-only information: retain native Escape, block calibration
         // activation through the verified keyboard state only.
-        auto* keys=static_cast<std::uint8_t*>(keyboard);
-        for(unsigned dik:{0x1Cu,0x9Cu,0x39u,0xCBu,0xCDu,0xC8u,0xD0u})keys[dik]&=0x7fu;
+        const auto blocked=suppress_controller_info_keys(controller,foreground,result,
+            kVideoKeyboardBytes,static_cast<std::uint8_t*>(keyboard));
+        static std::atomic<bool> blocked_reported{false},back_reported{false};
+        if(blocked && !blocked_reported.exchange(true) && g_log)
+            g_log("RUNTIME-CONTROLLER-MENU: keyboard-calibration-blocked=1 native-Escape-preserved=1");
+        if(merged && !back_reported.exchange(true) && g_log)
+            g_log("RUNTIME-CONTROLLER-MENU: SDL3-back-delivered=1 native-DirectInput256");
         return;
     }
     if(merged && !video && (actions & pad_action_bit(PadAction::cancel)))

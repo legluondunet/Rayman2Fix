@@ -29,6 +29,7 @@
 #include "rayman2fix/sdl_gamepads.hpp"
 #include "rayman2fix/controller_info_renderer.hpp"
 #include "rayman2fix/native_ipt_probe.hpp"
+#include "rayman2fix/gamepad_menu_bridge.hpp"
 #include "rayman2fix/pause_video_observer.hpp"
 #endif
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
@@ -5644,6 +5645,26 @@ bool ipt_current_gameplay() noexcept {
 unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
     const auto original=reinterpret_cast<IptPredicate>(intro_game_base()+0x2EAC0u);
     const unsigned char native=original(entry);
+#if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
+    // Legacy native gamepad validation can bypass the keyboard bridge.
+    // Only suppress the existing authenticated predicate's confirm action,
+    // while the replacement page owns the live state; do not write counters.
+    if(native && g_controller_drawn_scope && controller_info_owns_page() &&
+       game_window_is_foreground()) {
+        r2fix::IptActionReadback row{};
+        std::array<char,64> name{};
+        unsigned index=0;
+        if(ipt_live_entry(entry,row,index,name) &&
+           r2fix::suppress_controller_info_ipt(true,true,true,index,name.data())) {
+            static bool reported=false;
+            if(!reported) {
+                reported=true;
+                log_line("RUNTIME-CONTROLLER-MENU: native-IPT-confirm-blocked=1 index=9 source=retail-fingerprint back=untouched");
+            }
+            return 0;
+        }
+    }
+#endif
     if(native || !g_sdl_input_actions ||
        g_sdl_input_owner.load(std::memory_order_acquire)!=GetCurrentThreadId())return native;
     using r2fix::PadContext;

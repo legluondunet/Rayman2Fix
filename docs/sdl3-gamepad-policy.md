@@ -456,3 +456,17 @@ validation dependency.
 ## Initial live controller panel integration
 
 Owner log 20261125-045122, build 87c11283, confirms three MENU normal21/reflex0 visits and one PAUSE normal17/reflex2 visit. Both distinguish VIDEO and parent Options. Use those exact live authenticated models on the native camera thread. Render cached localized overlay through existing Glide LFB access before original flip. Locale derives from original LANGUAGE handle 370, unknown falls back to English. Only after successful panel rendering, preserve native title glyphs and suppress other native JFFTXT glyphs in the authenticated page. SDL3 context becomes controller_info (East back only); keyboard Enter/Space/arrows are suppressed only in that successfully rendered foreground page. Native Escape and other screens remain intact. Legacy DirectInput gamepad/configuration script dispatch is not yet disabled; visual layout and that remaining route require testing. Log also shows index15 delivery but no proof of swimming or world knowledge. No original game resource changed.
+
+
+## Read-only controller page: native confirmation guard
+
+The keyboard filter is now a separately tested pure policy, retaining
+Escape and unrelated physical keys. The existing authenticated IPT
+predicate additionally suppresses only original Menu_Valider (index 9)
+when the foreground render owner has a successfully drawn controller
+panel in the live MENU21/0 or PAUSE17/2 state, and the full retail table
+fingerprint and entry membership pass. No action table writes, no blanket
+DirectInput disabling, and no changes to native cancellation or gameplay.
+This closes the known predicate path, not every possible original input
+consumer: the real calibration menu must still be tested for accidental
+activation. Log successful SDL back delivery and any blocked confirmation.
