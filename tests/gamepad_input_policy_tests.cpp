@@ -256,8 +256,18 @@ int main() {
     a.left_x=32767;a.south=true;
     const auto map=map_gate.update(a);
     check(has(map.held,PadAction::right) && has(map.held,PadAction::confirm) &&
-          !has(map.held,PadAction::jump) && map.movement.x==0.f,
-          "world map uses native menu directions and confirm, not gameplay");
+          has(map.held,PadAction::jump) && map.movement.x==0.f &&
+          !has(map.held,PadAction::fire),
+          "world map uses directions and confirm plus native jump, not general gameplay");
+    a.south=false;
+    check(!has(map_gate.update(a).held,PadAction::jump),"map jump release");
+    a.south=true;
+    check(has(map_gate.update(a).pressed,PadAction::jump),"fresh map jump");
+    a=active(PadContext::menu);a.south=true;
+    check(!has(pad_actions(a),PadAction::jump),"ordinary menu has no native jump");
+    a=active(PadContext::world_map);a.south=true;a.foreground=false;
+    check(!pad_actions(a),"background map jump refused");
+    a.foreground=true;
     a.context=PadContext::gameplay;
     check(!map_gate.update(a).held,"map confirm cannot leak into gameplay");
     std::cout << "SDL3 Dreamcast mapping / focus / hotplug policy: OK\n";

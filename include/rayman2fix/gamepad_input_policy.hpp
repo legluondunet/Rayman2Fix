@@ -75,6 +75,9 @@ constexpr std::uint32_t pad_actions(const PadSample& s) noexcept {
                bit(up && !down, PadAction::up) |
                bit(down && !up, PadAction::down) |
                bit(s.south, PadAction::confirm) |
+               // Mapmonde uses arrows for the Lums route, but its native
+               // jump is a separate IPT action, not Return.
+               bit(s.context == PadContext::world_map && s.south, PadAction::jump) |
                bit(s.east, PadAction::cancel) |
                bit(s.start, PadAction::pause);
     }

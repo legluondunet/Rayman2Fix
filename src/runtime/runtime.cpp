@@ -5385,7 +5385,8 @@ r2fix::PadContext sdl_native_context() noexcept {
     }
 #endif
     // Exact world-map level observed in the owner's retail session.
-    // Use the native menu keyboard route, never world movement or fire.
+    // Keep native arrows/confirm/back, plus the authenticated native
+    // jump predicate. Do not assume the world map uses Rayman's axes.
     std::uint8_t pause_flag=0;
     if(_stricmp(level,"mapmonde")==0 &&
        intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
@@ -5589,7 +5590,9 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
     const bool native_cinematic=(context==PadContext::first_cinematic ||
         context==PadContext::learn_cinematic) &&
         (sdl_fresh_actions(context)&r2fix::pad_action_bit(PadAction::skip));
-    if(!gameplay && !native_cinematic)return native;
+    const bool map_jump=context==PadContext::world_map &&
+        (sdl_fresh_actions(PadContext::world_map)&r2fix::pad_action_bit(PadAction::jump));
+    if(!gameplay && !native_cinematic && !map_jump)return native;
     r2fix::IptActionReadback row{};
     std::array<char,64> name{};
     unsigned index=0;
@@ -5605,8 +5608,9 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
     // Native action 20 = CouperCinematique, 21 = TexteSuivant in the
     // reference enumeration. Leave Jail_20 to its existing guarded
     // level request, avoiding a simultaneous native skip and level change.
-    const bool requested=native_cinematic ?
-        (index==20u || index==21u) :
+    const bool requested=map_jump ?
+        matches(10,"sauter",PadAction::jump) :
+        native_cinematic ? (index==20u || index==21u) :
         (matches(21,"textesuivant",PadAction::jump) ||
         matches(10,"sauter",PadAction::jump) ||
        matches(11,"tirer",PadAction::fire) ||
@@ -5616,6 +5620,11 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
        matches(22,"appelermurphy",PadAction::murphy) ||
        matches(24,"affiche_jauge",PadAction::statistics));
     if(requested) {
+        static bool map_jump_reported=false;
+        if(map_jump && !map_jump_reported) {
+            map_jump_reported=true;
+            log_line("RUNTIME-SDL3: native-route=MAP-jump IPT-index=10 source=retail-fingerprint");
+        }
         static std::uint32_t seen=0;
         if(index<32u && !(seen&(1u<<index))) {
             seen|=1u<<index;

@@ -305,3 +305,18 @@ separate world-map context only in Playing with generic pause flag clear;
 use existing DirectInput menu navigation/confirm/cancel, not gameplay axes.
 The player can still use physical keys. World-map behavior needs hardware
 validation. General level gameplay and knowledge action remain pending.
+
+## Wine 184fbd50 / 20261124-223631
+
+Mapmonde is a 3D Lums traversal scene, not just a menu. Owner reports
+South cannot jump on the fairy-glade portal. Context 9 samples show
+South mapped only to confirm, with no native jump. Preserve the working
+arrow/confirm/back route and additionally merge native IPT jump index 10
+only for live world-map context, foreground, fresh sample and authenticated
+retail table. This is a candidate native jump (hardware test required),
+not a general gameplay/analog expansion; no verified map substate split.
+Original Frame producer logged 14..94 / 61.60..73.40 in the map, matching
+the visible tutorial rectangle after 4:3 centering. Add that exact geometry
+with 0.15 percent-point tolerance to RemoveDialogueBackgrounds; do not
+broaden the existing lower-screen rule or suppress other producers.
+The screenshot-to-source correspondence is a hypothesis until retested.

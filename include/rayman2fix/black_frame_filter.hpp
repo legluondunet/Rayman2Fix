@@ -46,6 +46,14 @@ inline BlackFrameKind black_frame_kind(float x0, float y0,
         height >= 5.0f && height <= 25.0f)
         return BlackFrameKind::DialogueBackdrop;
 
+    // Mapmonde tutorial: owner log 20261124-223631 reports the exact
+    // GLI Frame source at 14..94 / 61.60..73.40, matching the screenshot
+    // after the centered 4:3 transform. Do not lower the broad dialogue
+    // threshold: unrelated UI panels can occupy the same vertical band.
+    const auto near=[](float a,float b){return std::fabs(a-b)<=0.15f;};
+    if(near(x0,14.f) && near(x1,94.f) &&
+       near(y0,61.6f) && near(y1,73.4f))
+        return BlackFrameKind::DialogueBackdrop;
     return BlackFrameKind::Preserve;
 }
 
