@@ -31,4 +31,11 @@ struct InventoryEntry {
 std::vector<InventoryEntry> inventory(const fs::path& extracted);
 void validate_payload(const fs::path& extracted,
                       const std::vector<InventoryEntry>& files);
+// Copy only reviewed native game/config paths into the common game staging
+// directory. Original wrappers remain in the untouched setup archives.
+void stage_payload(const fs::path& extracted, const fs::path& staging);
+inline constexpr auto receipt_name = ".rayman2fix-gog-files.tsv";
+bool has_receipt(const fs::path& game);
+void write_receipt(const fs::path& staged);
+bool verify_receipt(const fs::path& game, std::string& problem);
 } // namespace r2fix::gog
