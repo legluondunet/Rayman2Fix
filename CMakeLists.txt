@@ -202,6 +202,33 @@ if(WIN32)
   target_sources(Rayman2Fix PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_readme.rc")
 
+  # Audited official innoextract 1.9 Windows PE32. Only the extractor
+  # and original dependency notices are embedded, never game/setup bytes.
+  set(RAYMAN2FIX_INNOEXTRACT_DIR "" CACHE PATH "Audited innoextract 1.9 x86 directory")
+  if(RAYMAN2FIX_INNOEXTRACT_DIR)
+    set(INNO_EXE "${RAYMAN2FIX_INNOEXTRACT_DIR}/innoextract.exe")
+    file(SHA256 "${INNO_EXE}" INNO_SHA)
+    if(NOT INNO_SHA STREQUAL "946bd06d8b3722a791fea4d84f496139eef6faef61640924cb72f5f1998a68e1")
+      message(FATAL_ERROR "Innoextract binary differs from audited upstream 1.9")
+    endif()
+    set(INNO_NOTICES "${CMAKE_CURRENT_BINARY_DIR}/innoextract-notices.txt")
+    file(WRITE "${INNO_NOTICES}" "innoextract 1.9 - https://constexpr.org/innoextract/\nSource: https://constexpr.org/innoextract/files/innoextract-1.9/innoextract-1.9.tar.gz\n")
+    foreach(notice IN ITEMS innoextract.license.txt boost.license_1_0.txt
+        liblzma.copying.txt libstdc++.copying.runtime.txt libstdc++.copying3.txt readme.txt)
+      file(READ "${RAYMAN2FIX_INNOEXTRACT_DIR}/${notice}" INNO_TEXT)
+      file(APPEND "${INNO_NOTICES}" "\n--- ${notice} ---\n${INNO_TEXT}\n")
+    endforeach()
+    target_compile_definitions(Rayman2Fix PRIVATE RAYMAN2FIX_BUNDLED_INNOEXTRACT=1)
+    file(GENERATE
+      OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_innoextract.rc"
+      CONTENT "1111 RCDATA \"${INNO_EXE}\"\n1112 RCDATA \"${INNO_NOTICES}\"\n")
+    set_source_files_properties(
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_innoextract.rc"
+      PROPERTIES GENERATED TRUE)
+    target_sources(Rayman2Fix PRIVATE
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/rayman2fix_innoextract.rc")
+  endif()
+
   set(RAYMAN2FIX_GLIDE_DLL "" CACHE FILEPATH "Pinned Windows x86 GameFrame glide2x.dll")
   set(RAYMAN2FIX_GLIDE_LICENSE "" CACHE FILEPATH "Pinned Apache 2.0 license from GameFrame")
   set(RAYMAN2FIX_GLIDE_SHA256 "" CACHE STRING "Exact SHA256 of bundled GameFrame x86 DLL")
