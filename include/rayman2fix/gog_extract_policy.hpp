@@ -2,6 +2,8 @@
 #include "rayman2fix/gog_source_policy.hpp"
 #include <array>
 #include <set>
+#include <map>
+#include <sstream>
 
 namespace r2fix::gog {
 
@@ -16,7 +18,8 @@ inline Args product_args(const fs::path& setup) {
 }
 inline Args extract_args(const fs::path& setup, const fs::path& staging,
                          const std::wstring& language = {}) {
-    Args args{L"--extract", L"--test", L"--no-extract-unknown",
+    Args args{L"--extract", L"--test", L"--list-sizes", L"--silent",
+              L"--no-extract-unknown",
               L"--exclude-temp", L"--lowercase", L"--collisions=error",
               L"--color=0", L"--progress=0",
               L"--output-dir", fs::absolute(staging).wstring()};
@@ -106,6 +109,57 @@ inline FileRole role(std::string_view path) {
         path.rfind("app/",0) == 0) return FileRole::auxiliary;
     return FileRole::unknown;
 }
+// Innoextract 1.9 --silent --list-sizes prints one "bytes path" line
+// per selected file. Combined with --extract --test this independently
+// describes the expected payload, including files skipped on warnings.
+using FileSizes = std::map<std::string, std::uintmax_t>;
+inline FileSizes parse_extraction_manifest(std::string_view output) {
+    constexpr std::uintmax_t limit = 4ull * 1024 * 1024 * 1024;
+    FileSizes files;
+    std::uintmax_t total = 0;
+    std::istringstream in{std::string(output)};
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        const auto space = line.find(' ');
+        if (line.size() > 8192 || space == std::string::npos ||
+            space == 0 || space > 20 || space + 1 == line.size())
+            throw std::runtime_error("invalid extractor file manifest");
+        std::uintmax_t size = 0;
+        for (std::size_t i = 0; i < space; ++i) {
+            const char c = line[i];
+            if (c < '0' || c > '9' || size > (limit - (c - '0')) / 10)
+                throw std::runtime_error("invalid extractor manifest size");
+            size = size * 10 + static_cast<unsigned>(c - '0');
+        }
+        auto name = line.substr(space + 1);
+        std::replace(name.begin(), name.end(), '\\', '/');
+        // Reject double/leading/trailing separators rather than letting
+        // filesystem::path silently collapse them.
+        if (name.front() == '/' || name.back() == '/' ||
+            name.find("//") != std::string::npos)
+            throw std::runtime_error("invalid extractor manifest path");
+        name = normalized_path(fs::u8path(name));
+        if (!files.emplace(name, size).second || files.size() > 50000 ||
+            size > limit - total)
+            throw std::runtime_error("duplicate or oversized extractor manifest");
+        total += size;
+    }
+    if (files.empty()) throw std::runtime_error("empty extractor file manifest");
+    return files;
+}
+inline void verify_extraction_manifest(const FileSizes& expected,
+                                       const FileSizes& actual) {
+    for (const auto& item : expected) {
+        const auto found = actual.find(item.first);
+        if (found == actual.end() || found->second != item.second)
+            throw std::runtime_error("GOG extracted file missing or wrong size: " + item.first);
+    }
+    if (actual.size() != expected.size())
+        throw std::runtime_error("GOG payload contains unlisted files");
+}
+
 inline constexpr std::array<std::string_view,8> required_files{
     "rayman2.exe", "ubi.ini", "dll/snd_cpa.ini", "dll/glivd1vf.dll",
     "data/game.dsb", "data/textures.cnt", "data/vignette.cnt",
