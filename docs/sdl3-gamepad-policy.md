@@ -416,3 +416,17 @@ renders 20 locale/device variants in a memory DIB with no game or display
 window. This preview is deliberately opaque and linked only to the test;
 production Glide blending, native submenu identification and integration
 are still pending. No gameplay or original menu changes.
+
+
+## Private translucent controller composition
+
+The offscreen GDI renderer can now draw the identical foreground over
+black and white, recovering channel-wise premultiplied coverage instead
+of copying the preview background into the native scene. The pure
+RGB565 compositor uses the existing VIDEO panel's 40% midnight-blue tint,
+2-pixel blue border, 12-pixel radius and 4x corner coverage, with explicit
+GameFrame LFB red/blue ordering. Outside rounded corners remain unchanged.
+Windows offscreen tests cover the French PlayStation overlay and a synthetic
+scene; cross-platform tests cover bounds, alpha and color ordering. This
+is a private buffer operation only, not yet called by the game. Native
+submenu authentication and live Glide presentation remain pending.

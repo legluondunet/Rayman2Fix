@@ -27,6 +27,18 @@ int main(){
         }
         if(ok)ok=draw_controller_info_preview(dc,make_pad_info_view(static_cast<PadInfoLocale>(i),false,PadLabelFamily::xbox));
     }
+    if(ok){
+        std::vector<PadOverlayPixel> overlay;
+        ok=prepare_controller_info_overlay(make_pad_info_view(PadInfoLocale::fr,true,PadLabelFamily::playstation),overlay);
+        if(ok){
+            std::vector<std::uint16_t> scene(kPadInfoPixels,0xffffu);
+            const auto body=overlay[145u*kPadInfoWidth+460u];
+            ok=overlay.size()==kPadInfoPixels && body.ar==255u && body.ag==255u && body.ab==255u &&
+                !overlay[45u*kPadInfoWidth+20u].ar &&
+                composite_controller_info(scene.data(),scene.size(),overlay.data(),overlay.size()) &&
+                scene[0]==0xffffu && scene[45u*kPadInfoWidth+20u]!=0xffffu;
+        }
+    }
     if(old && old!=HGDI_ERROR)SelectObject(dc,old);
     DeleteObject(bitmap);DeleteDC(dc);
     if(ok)std::cout<<"20 localized controller diagram variants rendered without clipping\n";

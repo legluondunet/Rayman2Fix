@@ -1,6 +1,7 @@
 #include "rayman2fix/gamepad_input_policy.hpp"
 #include "rayman2fix/gamepad_control_info.hpp"
 #include "rayman2fix/controller_info_layout.hpp"
+#include "rayman2fix/controller_info_composite.hpp"
 #include "rayman2fix/gamepad_menu_bridge.hpp"
 #include "rayman2fix/native_ipt_probe.hpp"
 #include <cmath>
@@ -150,6 +151,20 @@ int main() {
           "held analog cannot cross focus boundary");
 
     check(pad_info_layout_valid(), "all controller callouts fit the 4:3 panel");
+    const auto transparent=pad_overlay_from_dib(0,0xffffffu);
+    check(!transparent.ar&&!transparent.ag&&!transparent.ab,"black/white empty overlay");
+    const auto red=pad_overlay_from_dib(0xff0000u,0xff0000u);
+    check(red.r==255u && red.ar==255u && red.ag==255u && red.ab==255u,"opaque red overlay");
+    const auto partial=pad_overlay_from_dib(0x808080u,0xffffffu);
+    check(partial.ar==128u && partial.r==128u,"recover antialias coverage");
+    check(pad_panel_coverage(0,0).fill==0 && pad_panel_coverage(0,0).border==0,
+          "rounded corner preserves original scene");
+    check(pad_composite565(0xffffu,red,pad_panel_coverage(0,0))==0xffffu,
+          "outside panel untouched");
+    check(pad_composite565(0,red,{16,0})==0x001fu,"Glide LFB red channel swap");
+    check(pad_composite565(0xffffu,transparent,{16,0})!=0xffffu &&
+          pad_composite565(0,transparent,{16,0})!=0,"translucent tint on distinct scenes");
+    check(!composite_controller_info(nullptr,0,nullptr,0),"invalid overlay refuses");
     check(kPadControlRows.size() == 11, "all approved controls presented");
     for (const auto& row : kPadControlRows) {
         check(!row.action_key.empty() && !row.generic.empty() &&

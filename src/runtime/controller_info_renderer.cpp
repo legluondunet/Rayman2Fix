@@ -76,19 +76,19 @@ bool face(HDC dc,PadLabelFamily family){
     return ok;
 }
 }
-bool draw_controller_info_preview(HDC dc,const PadInfoView& view) noexcept {
+static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,bool frame) noexcept {
     if(!dc)return false;
     const int state=SaveDC(dc);
     if(!state)return false;
     struct Restore{HDC dc;int state;~Restore(){RestoreDC(dc,state);}}restore{dc,state};
     try {
-        GdiObject background{CreateSolidBrush(bg)}, shell{CreateSolidBrush(body)},
+        GdiObject background{CreateSolidBrush(canvas)}, shell{CreateSolidBrush(body)},
                   button{CreateSolidBrush(dark)}, pen{CreatePen(PS_SOLID,1,blue)};
         if(!background.handle || !shell.handle || !button.handle || !pen.handle)return false;
         RECT all{0,0,kPadInfoWidth,kPadInfoHeight};
         if(!FillRect(dc,&all,static_cast<HBRUSH>(background.handle)))return false;
         Selection outline(dc,pen.handle), fill(dc,GetStockObject(HOLLOW_BRUSH));
-        if(!RoundRect(dc,0,0,kPadInfoWidth,kPadInfoHeight,24,24))return false;
+        if(frame && !RoundRect(dc,0,0,kPadInfoWidth,kPadInfoHeight,24,24))return false;
         SetBkMode(dc,TRANSPARENT);
         // Original generic controller silhouette, not a copied product asset.
         {
@@ -126,6 +126,37 @@ bool draw_controller_info_preview(HDC dc,const PadInfoView& view) noexcept {
         ok=text_fit(dc,back,kPadInfoBack,15,10,muted,false,DT_RIGHT)&&ok;
         ok=text_fit(dc,pending,kPadInfoPending,15,10,muted,false,DT_LEFT)&&ok;
         return ok;
+    }catch(...){return false;}
+}
+bool draw_controller_info_preview(HDC dc,const PadInfoView& view) noexcept {
+    return draw_controller_info(dc,view,bg,true);
+}
+bool prepare_controller_info_overlay(const PadInfoView& view,
+                                     std::vector<PadOverlayPixel>& output) noexcept {
+    try {
+        HDC dc=CreateCompatibleDC(nullptr);
+        if(!dc)return false;
+        struct DCGuard {HDC dc;~DCGuard(){DeleteDC(dc);}} guard{dc};
+        BITMAPINFO bmi{};
+        bmi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth=kPadInfoWidth;
+        bmi.bmiHeader.biHeight=-kPadInfoHeight;
+        bmi.bmiHeader.biPlanes=1;
+        bmi.bmiHeader.biBitCount=32;
+        bmi.bmiHeader.biCompression=BI_RGB;
+        void* raw=nullptr;
+        GdiObject bitmap{CreateDIBSection(dc,&bmi,DIB_RGB_COLORS,&raw,nullptr,0)};
+        if(!bitmap.handle||!raw)return false;
+        Selection selected(dc,bitmap.handle);
+        if(!selected.previous||selected.previous==HGDI_ERROR)return false;
+        const auto* pixels=static_cast<const std::uint32_t*>(raw);
+        if(!draw_controller_info(dc,view,RGB(0,0,0),false)||!GdiFlush())return false;
+        std::vector<std::uint32_t> black(pixels,pixels+kPadInfoPixels);
+        if(!draw_controller_info(dc,view,RGB(255,255,255),false)||!GdiFlush())return false;
+        std::vector<PadOverlayPixel> staged(kPadInfoPixels);
+        for(std::size_t i=0;i<kPadInfoPixels;++i)staged[i]=pad_overlay_from_dib(black[i],pixels[i]);
+        output.swap(staged);
+        return true;
     }catch(...){return false;}
 }
 } // namespace r2fix
