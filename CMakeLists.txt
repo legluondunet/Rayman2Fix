@@ -284,6 +284,9 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(gog_source_policy_tests tests/gog_source_policy_tests.cpp)
+  target_include_directories(gog_source_policy_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME gog-source-selection-policy COMMAND gog_source_policy_tests)
   if(WIN32)
     # Explicit CI smoke test against an audited absolute DLL path.
     # No link dependency on SDL3 in the launcher or game runtime yet.
