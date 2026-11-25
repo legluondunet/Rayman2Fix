@@ -16,6 +16,34 @@ constexpr std::uint32_t pad_action_bit(PadAction a) noexcept {
     return std::uint32_t{1} << static_cast<unsigned>(a);
 }
 
+// Retail IPT reference indices; native live-entry validation remains mandatory.
+// The PC action for Murfy/knowledge is shared. Swimming uses separate
+// native entries, with the original actor script deciding when to consume them.
+struct PadIptBinding {
+    unsigned index;
+    std::string_view name_fragment;
+    std::uint32_t actions;
+};
+inline constexpr PadIptBinding kPadGameplayIptBindings[] = {
+    {10, "sauter", pad_action_bit(PadAction::jump)},
+    {11, "tirer", pad_action_bit(PadAction::fire)},
+    {13, "strafe", pad_action_bit(PadAction::target)},
+    {14, "plonger", pad_action_bit(PadAction::target)},
+    {15, "remonter", pad_action_bit(PadAction::jump)},
+    {16, "tournedroite", pad_action_bit(PadAction::camera_right)},
+    {17, "tournegauche", pad_action_bit(PadAction::camera_left)},
+    {21, "textesuivant", pad_action_bit(PadAction::jump)},
+    {22, "appelermurphy", pad_action_bit(PadAction::murphy) |
+                         pad_action_bit(PadAction::world_knowledge)},
+    {24, "affiche_jauge", pad_action_bit(PadAction::statistics)}
+};
+constexpr const PadIptBinding* pad_gameplay_ipt_binding(unsigned index,
+                                                       std::uint32_t actions) noexcept {
+    for (const auto& binding : kPadGameplayIptBindings)
+        if (binding.index == index && (binding.actions & actions)) return &binding;
+    return nullptr;
+}
+
 // Exact PC scene catalog, cross-checked against the PC depot and map
 // classification documented in docs/sdl3-gamepad-policy.md. Names alone
 // do not authorize input: the live Playing/pause/IPT guards still apply.

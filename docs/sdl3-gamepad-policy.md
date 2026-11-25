@@ -364,3 +364,25 @@ The 128-sample cap was exhausted before the end of the first pause test.
 Add a separately bounded context/focus/device/scene transition trace
 (256 entries), including release bits and explicit exhaustion markers.
 No change to input delivery, native audio or rendering in this commit.
+
+
+## Completing the Dreamcast-style semantic routes
+
+Reference: original Dreamcast US manual, controls and swimming sections:
+https://segaretro.org/images/f/f2/Rayman2_DC_US_Manual.pdf . Left trigger
+is used to dive and South/A to surface. D-pad Up accesses world knowledge;
+D-pad Down calls Murfy. Original PC manual:
+https://raymanpc.com/wiki/images/0/02/R2UKPCManual.pdf . The PC version
+combines world knowledge and Murfy in F1. Reference action enumeration:
+https://github.com/raytools/ACP_Ray2/blob/master/src/IPT/IPT_Const.h .
+The retail fingerprint matches the first 28 native action descriptors;
+reference indices 14/15 are Nage_Plonger/Nage_Remonter and index 22 is
+AppelerMurphy. Route the existing target/jump semantics also to the native
+swim entries and route world_knowledge/murphy to the same native entry 22.
+The actor script retains ownership of when each action is consumed; no
+new global keyboard emulation, no memory writes, and no expansion of
+menu, map or cinematic scope. These additions are hardware-test candidates:
+knowledge activation may depend on the original PC F1 hold behavior and
+actor state, swimming behavior is not yet confirmed. Keep the full retail
+fingerprint, foreground, thread, freshness and scene checks. Move the
+explicit gameplay action table into the pure policy for regression tests.

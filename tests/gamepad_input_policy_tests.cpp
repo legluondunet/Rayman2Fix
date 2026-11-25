@@ -303,5 +303,26 @@ int main() {
     a.south=true;a.left_x=32767;
     const auto fresh=scene_gate.update(a);
     check(has(fresh.pressed,PadAction::jump) && fresh.movement.x>0.f, "fresh input in next level");
+    const auto jump=pad_action_bit(PadAction::jump);
+    const auto target=pad_action_bit(PadAction::target);
+    const auto knowledge=pad_action_bit(PadAction::world_knowledge);
+    const auto murphy=pad_action_bit(PadAction::murphy);
+    check(pad_gameplay_ipt_binding(10,jump) && pad_gameplay_ipt_binding(15,jump) &&
+          pad_gameplay_ipt_binding(21,jump), "South jumps, resurfaces and advances dialogue");
+    check(pad_gameplay_ipt_binding(13,target) && pad_gameplay_ipt_binding(14,target),
+          "left trigger targets or dives");
+    check(pad_gameplay_ipt_binding(22,knowledge) && pad_gameplay_ipt_binding(22,murphy),
+          "both dpad directions use shared PC F1 action");
+    check(!pad_gameplay_ipt_binding(14,jump) && !pad_gameplay_ipt_binding(15,target),
+          "swimming routes not reversed");
+    check(!pad_gameplay_ipt_binding(22,jump) && !pad_gameplay_ipt_binding(22,0),
+          "knowledge cannot leak from unrelated buttons");
+    for(unsigned index=0;index<138;++index) {
+        const auto* b=pad_gameplay_ipt_binding(index,0xffffffffu);
+        const bool known=index==10 || index==11 || index==13 || index==14 ||
+            index==15 || index==16 || index==17 || index==21 || index==22 || index==24;
+        check(bool(b)==known,"only explicit gameplay action indices");
+        if(b) check(!b->name_fragment.empty(),"every binding names its reference action");
+    }
     std::cout << "SDL3 Dreamcast mapping / focus / hotplug policy: OK\n";
 }

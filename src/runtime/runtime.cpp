@@ -5620,17 +5620,14 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
     // Native action 20 = CouperCinematique, 21 = TexteSuivant in the
     // reference enumeration. Leave Jail_20 to its existing guarded
     // level request, avoiding a simultaneous native skip and level change.
+    const auto* binding=gameplay ?
+        r2fix::pad_gameplay_ipt_binding(index,g_sdl_input_actions) : nullptr;
+    const std::string_view entry_name(name.data());
     const bool requested=map_jump ?
         matches(10,"sauter",PadAction::jump) :
         native_cinematic ? (index==20u || index==21u) :
-        (matches(21,"textesuivant",PadAction::jump) ||
-        matches(10,"sauter",PadAction::jump) ||
-       matches(11,"tirer",PadAction::fire) ||
-       matches(13,"strafe",PadAction::target) ||
-       matches(16,"tournedroite",PadAction::camera_right) ||
-       matches(17,"tournegauche",PadAction::camera_left) ||
-       matches(22,"appelermurphy",PadAction::murphy) ||
-       matches(24,"affiche_jauge",PadAction::statistics));
+        (binding && (entry_name.empty() ||
+         r2fix::ipt_name_contains(entry_name,binding->name_fragment)));
     if(requested) {
         static bool map_jump_reported=false;
         if(map_jump && !map_jump_reported) {
