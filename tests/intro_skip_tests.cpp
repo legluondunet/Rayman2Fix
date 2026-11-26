@@ -16,6 +16,11 @@
 
 
 int main() {
+    CHECK(r2fix::intro_direct_transition_allowed(true,false));
+    CHECK(!r2fix::intro_direct_transition_allowed(true,true));
+    CHECK(r2fix::intro_direct_transition_allowed(false,false));
+    CHECK(r2fix::intro_direct_transition_allowed(false,true));
+
     CHECK(r2fix::is_second_intro("jail_20"));
     CHECK(r2fix::is_second_intro("Jail_20"));
     CHECK(!r2fix::is_second_intro("jail_10"));
