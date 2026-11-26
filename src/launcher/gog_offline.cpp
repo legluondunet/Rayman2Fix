@@ -107,21 +107,58 @@ Probe OfflineWorkspace::probe(const fs::path& candidate) {
     return Probe::unreadable;
 }
 
-fs::path OfflineWorkspace::extract(const fs::path& setup) {
+fs::path OfflineWorkspace::extract(const fs::path& setup,
+                                const std::function<void(const std::string&)>& log) {
     const auto target = workspace_ / "payload";
+    const auto report = [&](const std::string& line) { if (log) log(line); };
+    const auto checked_run = [&](const Args& args, std::chrono::seconds timeout,
+                                 const char* phase) {
+        const auto started = std::chrono::steady_clock::now();
+        report(std::string("GOG-EXTRACT: phase=") + phase + " started");
+        auto result = run(args, timeout);
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now()-started).count();
+        report(std::string("GOG-EXTRACT: phase=") + phase +
+               " exit=" + std::to_string(result.exit_code) +
+               " elapsed_ms=" + std::to_string(ms));
+        if (!result.errors.empty()) {
+            auto diagnostic = result.errors.substr(0,4096);
+            for (auto& ch : diagnostic)
+                if (static_cast<unsigned char>(ch)<32) ch=' ';
+            report(std::string("GOG-EXTRACT: diagnostic=") + diagnostic);
+        }
+        if (result.exit_code != 0)
+            throw std::runtime_error(std::string("GOG ") + phase +
+                " failed (exit " + std::to_string(result.exit_code) + "): " +
+                result.errors.substr(0,2048));
+        return result;
+    };
+    // No archive bytes are written during the first manifest pass.
+    const auto listing = checked_run(list_args(setup,target),
+                                     std::chrono::minutes(2),"list");
+    const auto expected = parse_extraction_manifest(listing.output);
+    validate_manifest_layout(expected);
+    std::uintmax_t total = 0;
+    for (const auto& item : expected) total += item.second;
+    report("GOG-EXTRACT: manifest_files=" + std::to_string(expected.size()) +
+           " manifest_bytes=" + std::to_string(total));
+    // The extracted payload and staged game coexist until publication.
+    // Reserve the declared full size twice plus a modest staging margin.
+    const auto available = fs::space(workspace_).available;
+    constexpr std::uintmax_t margin = 32ull * 1024 * 1024;
+    if (available < total*2 + margin)
+        throw std::runtime_error("insufficient free space for GOG extraction and staging");
     if (!fs::create_directory(target))
         throw std::runtime_error("GOG extraction target already exists");
-    const auto result = run(extract_args(setup, target), std::chrono::minutes(15));
-    if (result.exit_code != 0)
-        throw std::runtime_error("GOG extraction/checksum verification failed (exit " +
-                                 std::to_string(result.exit_code) + "): " +
-                                 result.errors.substr(0, 2048));
+    const auto result = checked_run(extract_args(setup,target),
+                                    std::chrono::minutes(15),"extract-and-test");
     const auto files = inventory(target);
-    const auto expected = parse_extraction_manifest(result.output);
+    verify_extraction_manifest(expected, parse_extraction_manifest(result.output));
     FileSizes actual;
-    for (const auto& item : files) actual.emplace(item.normalized, item.bytes);
+    for (const auto& item : files) actual.emplace(item.normalized,item.bytes);
     verify_extraction_manifest(expected, actual);
     validate_payload(target, files);
+    report("GOG-EXTRACT: manifest verified; approved game executable verified");
     return target;
 }
 
