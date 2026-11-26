@@ -275,6 +275,36 @@ int main() {
     CHECK(route.ready());
     route.observe(nullptr);
     CHECK(!route.ready());
+    // Pause B13/R0 can request Jail_10 directly, without MENU.
+    r2fix::ReplayIntroRoute pause_route;
+    pause_route.observe("Learn_10",true);
+    pause_route.observe("jail_10"); pause_route.observe("jail_20");
+    CHECK(!pause_route.ready());
+    pause_route.note_handover();
+    pause_route.observe("Learn_10",true);
+    pause_route.observe("Learn_10",false,true);
+    pause_route.observe(nullptr,false,true);
+    pause_route.observe("jail_10");
+    pause_route.observe("",false,false,true);
+    pause_route.observe("jail_20");
+    CHECK(pause_route.ready());
+    pause_route.consume();
+    pause_route.note_handover();
+    pause_route.observe("Learn_10",true);
+    pause_route.observe("Learn_10",false); // cancelled/resumed gameplay
+    pause_route.observe("jail_10"); pause_route.observe("jail_20");
+    CHECK(!pause_route.ready());
+    pause_route.observe("Learn_10",true);
+    pause_route.observe("mapmonde"); // alternative native branch
+    pause_route.observe("jail_10"); pause_route.observe("jail_20");
+    CHECK(!pause_route.ready());
+    pause_route.observe("Learn_10",true);
+    pause_route.observe(nullptr,false,false,true); // wrong queued target
+    pause_route.observe("jail_10"); pause_route.observe("jail_20");
+    CHECK(!pause_route.ready());
+    pause_route.observe("Learn_10",true);
+    pause_route.observe("jail_10"); pause_route.observe("jail_20");
+    CHECK(pause_route.ready());
     for(unsigned bit=0;bit<32;++bit) {
         const auto word=std::uint32_t(1u)<<bit;
         CHECK(r2fix::replay_handover_reset_word(word)==(bit==2?0u:word));
