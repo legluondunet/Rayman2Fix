@@ -5026,8 +5026,55 @@ void observe_learn10_f248_director_without_log(DWORD elapsed) {
 }
 #endif
 
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept;
+#endif
+// Read-only input trace, independent of whether the F248 slot is armed.
+// A refused or completed intro must not look like a lost button press.
+void trace_learn10_skip_input() {
+    static unsigned previous=0,reports=0;
+    if(!g_current_level || !r2fix::is_first_playable_level(g_current_level)) {
+        previous=reports=0;
+        return;
+    }
+    if(!g_log || !g_f248_enabled.load(std::memory_order_acquire) ||
+       !game_window_is_foreground()) {
+        previous=0;
+        return;
+    }
+    unsigned mask=0;
+    if(GetAsyncKeyState(VK_RETURN)&0x8000)mask|=1u;
+    if(GetAsyncKeyState(VK_SPACE)&0x8000)mask|=2u;
+    if(GetAsyncKeyState(VK_ESCAPE)&0x8000)mask|=4u;
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    if(sdl_fresh_actions(r2fix::PadContext::learn_cinematic)&
+       r2fix::pad_action_bit(r2fix::PadAction::skip))mask|=8u;
+#endif
+    const auto edges=mask&~previous;
+    previous=mask;
+    // Once the first handover is complete, gameplay Space is not an
+    // intro request. Still report the initial already-playable refusal
+    // in the existing entry diagnostic.
+    if(!edges || !g_learn_intro_seen || g_learn_handover || reports>=32u)return;
+    ++reports;
+    bool handover=false;
+    const bool known=game_story_bit(g_progress_words,kLearnHandoverBit,handover);
+    char line[280]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-LEARN10-INPUT: elapsed_ms=%lu edges=0x%x (1=Enter,2=Space,4=Esc,8=pad) armed=%u slot=%u story1091_known=%u story1091=%u director=%d overrides=%u",
+        static_cast<unsigned long>(DWORD(GetTickCount()-g_learn_intro_start)),
+        edges,unsigned(g_f248_armed.load(std::memory_order_acquire)),
+        unsigned(g_f248_slot_installed.load(std::memory_order_acquire)),
+        unsigned(known),unsigned(handover),g_observed_director_index,
+        g_f248_overrides.load(std::memory_order_relaxed));
+    log_line(line);
+}
+#endif
+
 void poll_learn_intro_skip() {
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
+    trace_learn10_skip_input();
     learn10_f248_poll();
 #endif
     if (!g_current_level) {
@@ -5825,6 +5872,17 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
         (binding && (entry_name.empty() ||
          r2fix::ipt_name_contains(entry_name,binding->name_fragment)));
     if(requested) {
+        if(g_log && context==PadContext::learn_cinematic) {
+            static DWORD last_report=0;
+            const DWORD now=GetTickCount();
+            if(!last_report || DWORD(now-last_report)>=250u) {
+                last_report=now;
+                char msg[160]{};
+                std::snprintf(msg,sizeof(msg),
+                    "RUNTIME-LEARN10-INPUT: native-IPT-index=%u pad-skip-forwarded=1",index);
+                log_line(msg);
+            }
+        }
         static bool map_jump_reported=false;
         if(map_jump && !map_jump_reported) {
             map_jump_reported=true;
