@@ -5454,19 +5454,44 @@ r2fix::PadInfoLocale controller_info_locale() noexcept {
        read(directory+(index&255u)*8u,&table,4) && table>=0x10000u && table<=0xfffff000u &&
        read(table+370u*4u,&label,4) && read(label,text,sizeof(text)) &&
        std::memchr(text,0,sizeof(text))) {
-        const auto locale=r2fix::pad_info_locale_from_label(text);
+        auto locale=r2fix::pad_info_locale_from_label(text);
+        // Polish GOG can encode accented LANGUAGE differently. Check
+        // only the active menu's bounded native text-handle range.
+        // Cache the result briefly to avoid scanning every frame.
+        static std::uint32_t cached_table=0,cached_index=0;
+        static DWORD checked_at=0;
+        static unsigned markers=0;
+        if(locale==r2fix::PadInfoLocale::en) {
+            const DWORD now=GetTickCount();
+            if(cached_table!=table || cached_index!=index ||
+               !checked_at || DWORD(now-checked_at)>=500u) {
+                cached_table=table;cached_index=index;checked_at=now;markers=0;
+                for(unsigned handle=350;handle<=385;++handle) {
+                    std::uint32_t pointer=0;
+                    char caption[48]{};
+                    if(read(table+handle*4u,&pointer,4) &&
+                       read(pointer,caption,sizeof(caption)) &&
+                       std::memchr(caption,0,sizeof(caption)))
+                        markers|=r2fix::pad_polish_caption_marker(caption);
+                }
+            }
+            if(r2fix::pad_polish_caption_set(markers))
+                locale=r2fix::PadInfoLocale::pl;
+        }
         // Report only the bounded native language label (not arbitrary
         // game memory), once per change, to identify unusual glyph encodings.
         static char previous[32]{};
-        if(g_log && std::strcmp(previous,text)!=0) {
+        static unsigned previous_locale=999u;
+        if(g_log && (std::strcmp(previous,text)!=0 || previous_locale!=unsigned(locale))) {
+            previous_locale=unsigned(locale);
             std::memcpy(previous,text,sizeof(previous));
             char hex[65]{};
             const auto length=std::strlen(text);
             for(std::size_t n=0;n<length;++n)
                 std::snprintf(hex+n*2,3,"%02X",unsigned(static_cast<unsigned char>(text[n])));
             char line[150]{};
-            std::snprintf(line,sizeof(line),"RUNTIME-CONTROLLER-MENU: locale=%u native-label-hex=%s",
-                unsigned(locale),hex);
+            std::snprintf(line,sizeof(line),"RUNTIME-CONTROLLER-MENU: locale=%u native-label-hex=%s polish-markers=0x%x",
+                unsigned(locale),hex,markers);
             log_line(line);
         }
         return locale;
