@@ -5352,6 +5352,25 @@ void poll_second_intro_skip() {
     }
     if (!requested || !foreground) return;
 
+    // A replay of New Game in the same process can reach jail_20 with
+    // the previous Learn_10 handover bit still set. The direct level
+    // change would bypass native scene transition logic in this state.
+    // Do not clear the bit or force the level; allow the original
+    // cinematic/transition to finish. Unknown story lookup is logged
+    // separately and does not change the established first-visit path.
+    const auto intro_words=find_story_words();
+    bool previous_handover=false;
+    const bool story_known=game_story_bit(intro_words,kLearnHandoverBit,previous_handover);
+    {
+        char msg[180]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-INTRO: jail_20 pre-transition story1091_known=%u story1091=%u action=%s",
+            unsigned(story_known),unsigned(previous_handover),
+            story_known&&previous_handover?"native-transition-only":"guarded-level-request");
+        log_line(msg);
+    }
+    if(story_known && previous_handover)return;
+
     // The game itself queues the level change for its next engine tick.
     // Do not force a renderer switch, destroy a video window or write
     // save data. This is the same native API used by script transitions.
@@ -5435,11 +5454,22 @@ r2fix::PadInfoLocale controller_info_locale() noexcept {
        read(directory+(index&255u)*8u,&table,4) && table>=0x10000u && table<=0xfffff000u &&
        read(table+370u*4u,&label,4) && read(label,text,sizeof(text)) &&
        std::memchr(text,0,sizeof(text))) {
-        using L=r2fix::PadInfoLocale;
-        if(!std::strcmp(text,"/C:LANGUE"))return L::fr;
-        if(!std::strcmp(text,"/C:IDIOMA"))return L::es;
-        if(!std::strcmp(text,"/C:LINGUA"))return L::it;
-        if(!std::strcmp(text,"/C:SPRACHE"))return L::de;
+        const auto locale=r2fix::pad_info_locale_from_label(text);
+        // Report only the bounded native language label (not arbitrary
+        // game memory), once per change, to identify unusual glyph encodings.
+        static char previous[32]{};
+        if(g_log && std::strcmp(previous,text)!=0) {
+            std::memcpy(previous,text,sizeof(previous));
+            char hex[65]{};
+            const auto length=std::strlen(text);
+            for(std::size_t n=0;n<length;++n)
+                std::snprintf(hex+n*2,3,"%02X",unsigned(static_cast<unsigned char>(text[n])));
+            char line[150]{};
+            std::snprintf(line,sizeof(line),"RUNTIME-CONTROLLER-MENU: locale=%u native-label-hex=%s",
+                unsigned(locale),hex);
+            log_line(line);
+        }
+        return locale;
     }
     return r2fix::PadInfoLocale::en;
 }
