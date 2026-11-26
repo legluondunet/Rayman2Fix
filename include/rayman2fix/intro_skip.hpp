@@ -30,6 +30,16 @@ constexpr bool intro_direct_transition_allowed(bool story_known,
     return !story_known || !already_handed_over;
 }
 
+// Replay fallback is deliberately separate from the direct level request.
+// Only the original cinematic action is eligible, never gameplay,
+// dialogue advance, a background window or an unknown engine mode.
+constexpr bool intro_replay_native_action_allowed(bool replay_only,
+    bool in_jail20, bool foreground, bool playing, bool skip_down,
+    unsigned ipt_index) noexcept {
+    return replay_only && in_jail20 && foreground && playing &&
+           skip_down && ipt_index==20u;
+}
+
 struct IntroSkipGuard {
     bool inside = false;
     bool released = false;
