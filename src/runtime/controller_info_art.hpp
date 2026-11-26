@@ -113,11 +113,9 @@ inline void shell(Graphics& g,PadLabelFamily family) {
     curve(g,rgb(140,232,250,125),5,{539,132},{574,124},{601,145},{611,181});
     curve(g,rgb(235,255,210,155),2,{313,165},{325,139},{356,122},{391,128});
     curve(g,rgb(180,249,246,135),2,{529,128},{565,116},{596,133},{608,164});
-    // Sweeping spiral decals on both grips, with a central water motif.
+    // Sweeping spiral decals on both grips; keep the central shell clean.
     spiral(g,324,295,27,rgb(141,232,183,175),8.5f);
     spiral(g,596,295,27,rgb(141,232,183,175),8.5f,true);
-    curve(g,rgb(133,227,193,115),7,{430,263},{438,237},{473,221},{478,203});
-    spiral(g,474,207,15,rgb(141,229,195,105),5.2f,true);
     curve(g,rgb(129,237,229,120),2,{390,298},{431,290},{489,290},{530,298});
     g.Restore(saved);
     Pen rim(rgb(86,188,229),1.1f);rim.SetLineJoin(LineJoinRound);g.DrawPath(&rim,&p);
