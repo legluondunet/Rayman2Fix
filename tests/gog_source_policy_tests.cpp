@@ -227,7 +227,13 @@ int main(int argc, char** argv) {
         {
             g::OfflineWorkspace workspace(dir);
             require(fs::is_regular_file(dir / "gog.installing/tool/innoextract.exe"), "extractor deployed");
-            require(workspace.probe(child) == g::Probe::unrelated, "real innoextract rejects unrelated PE");
+            std::vector<std::string> probe_log;
+            require(workspace.probe(child, [&](const auto& line) { probe_log.push_back(line); })
+                    == g::Probe::unrelated, "real innoextract rejects unrelated PE");
+            require(probe_log.size()==2 &&
+                    probe_log.front().find("exit=")!=std::string::npos &&
+                    probe_log.back().find("status=unrecognized-inno-format-or-non-installer")!=std::string::npos,
+                    "rejected installer reason logged");
             bool concurrent = false;
             try { g::OfflineWorkspace second(dir); }
             catch (const std::exception&) { concurrent = true; }
