@@ -4,6 +4,7 @@
 #include <set>
 #include <map>
 #include <sstream>
+#include <iterator>
 
 namespace r2fix::gog {
 
@@ -30,6 +31,20 @@ inline Args extract_args(const fs::path& setup, const fs::path& staging,
     }
     args.push_back(L"--");
     args.push_back(fs::absolute(setup).wstring());
+    return args;
+}
+
+// List exactly the same selected files without writing anything. The
+// listing preflight rejects incomplete or oversized archives before extraction.
+inline Args list_args(const fs::path& setup, const fs::path& staging,
+                      const std::wstring& language = {}) {
+    auto args = extract_args(setup, staging, language);
+    args.erase(std::remove(args.begin(), args.end(), L"--extract"), args.end());
+    args.erase(std::remove(args.begin(), args.end(), L"--test"), args.end());
+    const auto output = std::find(args.begin(), args.end(), L"--output-dir");
+    if (output == args.end() || std::next(output) == args.end())
+        throw std::runtime_error("missing extractor output argument");
+    args.erase(output, std::next(output, 2));
     return args;
 }
 
@@ -169,5 +184,18 @@ inline bool has_required_files(const std::set<std::string>& files) {
     for (auto path : required_files)
         if (!files.count(std::string(path))) return false;
     return true;
+}
+// Preflight the selection without relying on archive name, build or hash.
+inline void validate_manifest_layout(const FileSizes& files) {
+    for (auto path : required_files) {
+        const auto found = files.find(std::string(path));
+        if (found == files.end() || !found->second)
+            throw std::runtime_error("GOG setup lacks required file: " + std::string(path));
+    }
+    if (files.at("rayman2.exe") != executable_size)
+        throw std::runtime_error("GOG setup declares an unsupported game executable size");
+    const auto metadata = files.find("goggame-1207658940.info");
+    if (metadata == files.end() || !metadata->second)
+        throw std::runtime_error("GOG setup lacks product metadata");
 }
 } // namespace r2fix::gog
