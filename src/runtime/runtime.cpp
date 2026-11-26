@@ -5369,7 +5369,7 @@ void poll_second_intro_skip() {
             story_known&&previous_handover?"native-transition-only":"guarded-level-request");
         log_line(msg);
     }
-    if(story_known && previous_handover)return;
+    if(!r2fix::intro_direct_transition_allowed(story_known,previous_handover))return;
 
     // The game itself queues the level change for its next engine tick.
     // Do not force a renderer switch, destroy a video window or write
