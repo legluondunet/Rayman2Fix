@@ -5309,7 +5309,7 @@ bool jail20_owner_shape(const Jail20TraceActor& a) {
     return a.count==3 && jail20_ids(a,2,12,12) &&
            jail20_rule(a,1,0,n) &&
            jail20_node(n,2,46,2,3) && jail20_node(n,9,6,2,4) &&
-           jail20_node(n,30,2,5,12) && jail20_node(n,33,86,4,4) &&
+           jail20_node(n,31,2,5,12) && jail20_node(n,33,86,4,4) &&
            jail20_node(n,39,99,6,12) && jail20_node(n,41,86,5,4) &&
            jail20_node(n,43,0,0,8);
 }
@@ -5409,6 +5409,7 @@ void poll_jail20_command_trace(bool in_intro,std::uintptr_t base,DWORD elapsed,b
         last_scan=last_emit=0; lines=0; previous[0]=0;
         return;
     }
+    if(lines>=160)return;
     if(intro_native_engine_mode(base)!=int(kIntroEnginePlaying)) {
         found[0]=found[1]=found[2]=0;
         last_scan=0;
