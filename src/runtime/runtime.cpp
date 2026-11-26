@@ -5465,10 +5465,34 @@ void poll_jail20_command_trace(bool in_intro,std::uintptr_t base,DWORD elapsed,b
 // progress buffer, never the default/initial arrays or a save file.
 // Read back both initial copies and the same location used by the legacy
 // read-only guard. No F248 override or cinematic actor writes.
-r2fix::ReplayHandoverWord replay_intro_word(std::uintptr_t base) {
+r2fix::ReplayHandoverWord replay_intro_word(std::uintptr_t base,
+                                       r2fix::ReplayHandoverAudit* audit=nullptr) {
     return r2fix::locate_replay_handover_word(base+kFixActorListRva,
         [](std::uintptr_t p,std::uint32_t& v){return read_u32(p,v);},
-        [](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);});
+        [](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);},audit);
+}
+void log_replay_intro_audit(const char* phase,std::uintptr_t base,
+                           std::uintptr_t legacy_words) {
+    if(!g_log)return;
+    r2fix::ReplayHandoverAudit d{};
+    const auto word=replay_intro_word(base,&d);
+    MEMORY_BASIC_INFORMATION region{};
+    const bool region_ok=word.address &&
+        VirtualQuery(reinterpret_cast<const void*>(word.address),&region,sizeof(region));
+    char msg[570]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-REPLAY-INTRO: audit=%s reason=%s actors=%u candidates=%u vars=%u bytes=%u offset=%u kind=%u "
+        "current=%u/%u/%d initial=%u/%u/%d default=%u/%u/%d initial_present=%u default_present=%u separate=%u "
+        "legacy_match=%u aligned=%u region=%u protection=0x%lx (types/counts/bits only; read-only)",
+        phase,d.reason,d.actors,d.candidates,d.variables,d.bytes,d.offset,d.kind,
+        d.current_kind,d.current_count,d.current_bit,
+        d.initial_kind,d.initial_count,d.initial_bit,
+        d.default_kind,d.default_count,d.default_bit,
+        unsigned(d.initial_present),unsigned(d.default_present),unsigned(d.separate_buffers),
+        unsigned(word.address && legacy_words && word.address==legacy_words+34u*4u),
+        unsigned(word.address && !(word.address&3u)),unsigned(region_ok),
+        static_cast<unsigned long>(region_ok?region.Protect:0));
+    log_line(msg);
 }
 bool replay_intro_compare_exchange(std::uintptr_t address,std::uint32_t old_word,
                                    std::uint32_t new_word) {
@@ -5480,38 +5504,48 @@ bool replay_intro_compare_exchange(std::uintptr_t address,std::uint32_t old_word
     const auto start=reinterpret_cast<std::uintptr_t>(region.BaseAddress);
     if(address<start || region.RegionSize<sizeof(LONG) ||
        address-start>region.RegionSize-sizeof(LONG))return false;
-    // The existing render poll serializes this game-camera-thread route.
-    // Atomic compare/exchange still refuses a changed value.
     return static_cast<std::uint32_t>(InterlockedCompareExchange(
         reinterpret_cast<volatile LONG*>(address),static_cast<LONG>(new_word),
         static_cast<LONG>(old_word)))==old_word;
 }
 r2fix::ReplayHandoverWord try_replay_intro_reset(std::uintptr_t base,
                                                 std::uintptr_t legacy_words) {
-    if(!g_replay_intro_route.ready() ||
-       !g_current_level || !r2fix::is_second_intro(g_current_level) ||
-       !game_window_is_foreground() ||
-       intro_native_engine_mode(base)!=int(kIntroEnginePlaying) ||
-       g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())
-        return {};
-    // Confirm the same native controller and both command producers already
-    // validated on GOG. Do this only on a fresh replay skip request, even
-    // when logging is disabled. A different edition fails closed.
+    const auto refuse=[](const char* reason) {
+        char msg[180]{};
+        std::snprintf(msg,sizeof(msg),"RUNTIME-REPLAY-INTRO: reset=refused reason=%s",reason);
+        log_line(msg);
+        return r2fix::ReplayHandoverWord{};
+    };
+    if(!g_replay_intro_route.ready())return refuse("route");
+    if(!g_current_level || !r2fix::is_second_intro(g_current_level))
+        return refuse("level");
+    if(!game_window_is_foreground())return refuse("foreground");
+    if(intro_native_engine_mode(base)!=int(kIntroEnginePlaying))return refuse("engine-mode");
+    if(g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())
+        return refuse("camera-thread");
     std::uint32_t actors[3]{};
     Jail20TraceActor owner{},p1{},p2{};
     std::uint8_t hp=0;
-    if(!jail20_find_actors(base,actors) || !jail20_actor(actors[0],owner) ||
-       !jail20_owner_shape(owner) || jail20_behaviour(owner)!=1 ||
-       !read_u8(std::uintptr_t(owner.standard)+0x22,hp) || hp!=0 ||
-       !jail20_actor(actors[1],p1) || !jail20_producer_shape(p1,14,3,actors[0]) ||
-       !jail20_actor(actors[2],p2) || !jail20_producer_shape(p2,17,2,actors[0]) ||
-       p1.model!=p2.model)return {};
-    const auto word=replay_intro_word(base);
-    if(!word.address || !legacy_words ||
-       word.address!=legacy_words+34u*4u ||
-       !(word.value&r2fix::replay_handover_mask))return {};
+    if(!jail20_find_actors(base,actors))return refuse("actor-search");
+    if(!jail20_actor(actors[0],owner) || !jail20_owner_shape(owner))
+        return refuse("owner-shape");
+    if(jail20_behaviour(owner)!=1)return refuse("owner-behaviour");
+    if(!read_u8(std::uintptr_t(owner.standard)+0x22,hp) || hp!=0)
+        return refuse("owner-hp");
+    if(!jail20_actor(actors[1],p1) || !jail20_producer_shape(p1,14,3,actors[0]))
+        return refuse("producer-1");
+    if(!jail20_actor(actors[2],p2) || !jail20_producer_shape(p2,17,2,actors[0]))
+        return refuse("producer-2");
+    if(p1.model!=p2.model)return refuse("producer-model");
+    r2fix::ReplayHandoverAudit d{};
+    const auto word=replay_intro_word(base,&d);
+    if(!word.address)return refuse(d.reason);
+    if(!legacy_words || word.address!=legacy_words+34u*4u)
+        return refuse("legacy-address-mismatch");
+    if(!(word.value&r2fix::replay_handover_mask))return refuse("handover-already-clear");
     const auto reset=r2fix::replay_handover_reset_word(word.value);
-    if(!replay_intro_compare_exchange(word.address,word.value,reset))return {};
+    if(!replay_intro_compare_exchange(word.address,word.value,reset))
+        return refuse("compare-exchange-or-protection");
     g_replay_intro_route.consume();
     log_line("RUNTIME-REPLAY-INTRO: reset=applied bit=1091 route=handover-menu-or-pause-jail10-jail20 initial_and_default_clear=1 other_bits_preserved=1 current_memory_only=1");
     return word;
@@ -5701,6 +5735,7 @@ void poll_second_intro_skip() {
     bool previous_handover=false;
     const bool story_known=game_story_bit(intro_words,kLearnHandoverBit,previous_handover);
     const bool replay_route=g_replay_intro_route.ready();
+    log_replay_intro_audit(replay_route?"replay-request":"first-request",game_base,intro_words);
     r2fix::ReplayHandoverWord replay_reset{};
     if(story_known && previous_handover && replay_route)
         replay_reset=try_replay_intro_reset(game_base,intro_words);
