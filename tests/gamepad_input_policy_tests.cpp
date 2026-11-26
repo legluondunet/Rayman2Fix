@@ -301,7 +301,8 @@ int main() {
     const auto pl=make_pad_info_view(PadInfoLocale::pl,true,PadLabelFamily::playstation);
     check(pl.rows[0].action=="Ruch" && pl.rows[1].control==u8"Krzy\u017cyk" &&
           pl.back_control==u8"K\u00f3\u0142ko","Polish PlayStation labels");
-    check(pad_info_locale_from_label("/C:JEZYK")==PadInfoLocale::pl &&
+    check(pad_info_locale_from_label("/C:J\xe4ZYK")==PadInfoLocale::pl &&
+          pad_info_locale_from_label("/C:JEZYK")==PadInfoLocale::pl &&
           pad_info_locale_from_label("/C:J\xcaZYK")==PadInfoLocale::pl &&
           pad_info_locale_from_label(u8"/C:J\u0118ZYK")==PadInfoLocale::pl,
           "Polish native label encodings");
