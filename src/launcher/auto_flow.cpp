@@ -488,10 +488,14 @@ int run_automatic(Startup& startup, bool install_only) {
         if (gog::OfflineWorkspace::available()) {
             const auto adjacent = gog::candidates(startup.root(),
                 Startup::executable_path(startup.root() / "Rayman2Fix.exe"));
+            startup.log("GOG-DISCOVERY: adjacent_exe_candidates=" + std::to_string(adjacent.size()) +
+                        " disc_candidates=" + std::to_string(candidates.size()));
             if (!adjacent.empty()) {
                 auto workspace = std::make_unique<gog::OfflineWorkspace>(startup.root());
                 const auto selected = gog::select(candidates, adjacent,
-                    [&](const auto& path) { return workspace->probe(path); });
+                    [&](const auto& path) {
+                        return workspace->probe(path, [&](const auto& line) { startup.log(line); });
+                    });
                 if (selected.source == gog::Source::ambiguous ||
                     selected.source == gog::Source::unreadable) {
                     startup.log("GOG: ambiguous media or failed installer probe");
