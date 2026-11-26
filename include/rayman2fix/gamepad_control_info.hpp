@@ -113,7 +113,9 @@ constexpr PadInfoLocale pad_info_locale_from_label(std::string_view text) noexce
     if(text=="/C:IDIOMA")return PadInfoLocale::es;
     if(text=="/C:LINGUA")return PadInfoLocale::it;
     if(text=="/C:SPRACHE")return PadInfoLocale::de;
-    if(text=="/C:JEZYK" || text=="/C:J\xcaZYK" ||
+    // Actual Polish GOG native label, owner log 2026-11-26:
+    // 2F433A4AE45A594B. 0xE4 is the game's own glyph encoding.
+    if(text=="/C:J\xe4ZYK" || text=="/C:JEZYK" || text=="/C:J\xcaZYK" ||
        text==u8"/C:J\u0118ZYK")return PadInfoLocale::pl;
     return PadInfoLocale::en;
 }
