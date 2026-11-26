@@ -305,6 +305,13 @@ int main() {
           pad_info_locale_from_label("/C:J\xcaZYK")==PadInfoLocale::pl &&
           pad_info_locale_from_label(u8"/C:J\u0118ZYK")==PadInfoLocale::pl,
           "Polish native label encodings");
+    check(pad_polish_caption_set(pad_polish_caption_marker("/C:Sterowanie")|
+          pad_polish_caption_marker("/C:Nowa gra")), "Polish independent native captions");
+    check(pad_polish_caption_set(pad_polish_caption_marker("STEROWANIE")|
+          pad_polish_caption_marker("/C:OPCJE")), "Polish controls and options");
+    check(!pad_polish_caption_set(pad_polish_caption_marker("/C:OPCJE")) &&
+          !pad_polish_caption_set(pad_polish_caption_marker("/C:STEROWANIE")) &&
+          !pad_polish_caption_marker("/C:STEROWANIE TEST"), "single or unrelated caption refused");
     check(make_pad_info_view(static_cast<PadInfoLocale>(999),false,
           PadLabelFamily::xbox).status=="No controller connected","unknown locale fallback");
     // Native DirectInput keyboard merge never replaces physical keyboard
