@@ -214,6 +214,7 @@ using RequestLevel = void (__cdecl*)(const char*, unsigned char);
 std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
 r2fix::IntroSkipGuard g_intro_guard;
+r2fix::ReplayIntroRoute g_replay_intro_route;
 bool g_intro_level_logged = false;
 // Diagnostic-only timestamp of render sources. These do not authorize
 // audio compensation, skip inputs, or changes in foreground policy.
@@ -5205,6 +5206,7 @@ void poll_learn_intro_skip() {
 #endif
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
+        g_replay_intro_route.note_handover();
         g_learn_handover_start = GetTickCount();
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
         if(g_f248_ever_armed.load(std::memory_order_acquire))
@@ -5459,6 +5461,62 @@ void poll_jail20_command_trace(bool in_intro,std::uintptr_t base,DWORD elapsed,b
     }
 }
 
+// Candidate replay repair: only one bit in the current, verified new-game
+// progress buffer, never the default/initial arrays or a save file.
+// Read back both initial copies and the same location used by the legacy
+// read-only guard. No F248 override or cinematic actor writes.
+r2fix::ReplayHandoverWord replay_intro_word(std::uintptr_t base) {
+    return r2fix::locate_replay_handover_word(base+kFixActorListRva,
+        [](std::uintptr_t p,std::uint32_t& v){return read_u32(p,v);},
+        [](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);});
+}
+bool replay_intro_compare_exchange(std::uintptr_t address,std::uint32_t old_word,
+                                   std::uint32_t new_word) {
+    if(!address || (address&3u))return false;
+    MEMORY_BASIC_INFORMATION region{};
+    if(!VirtualQuery(reinterpret_cast<const void*>(address),&region,sizeof(region)) ||
+       region.State!=MEM_COMMIT || (region.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
+       (region.Protect&0xffu)!=PAGE_READWRITE)return false;
+    const auto start=reinterpret_cast<std::uintptr_t>(region.BaseAddress);
+    if(address<start || region.RegionSize<sizeof(LONG) ||
+       address-start>region.RegionSize-sizeof(LONG))return false;
+    // The existing render poll serializes this game-camera-thread route.
+    // Atomic compare/exchange still refuses a changed value.
+    return static_cast<std::uint32_t>(InterlockedCompareExchange(
+        reinterpret_cast<volatile LONG*>(address),static_cast<LONG>(new_word),
+        static_cast<LONG>(old_word)))==old_word;
+}
+r2fix::ReplayHandoverWord try_replay_intro_reset(std::uintptr_t base,
+                                                std::uintptr_t legacy_words) {
+    if(!g_replay_intro_route.ready() ||
+       !g_current_level || !r2fix::is_second_intro(g_current_level) ||
+       !game_window_is_foreground() ||
+       intro_native_engine_mode(base)!=int(kIntroEnginePlaying) ||
+       g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())
+        return {};
+    // Confirm the same native controller and both command producers already
+    // validated on GOG. Do this only on a fresh replay skip request, even
+    // when logging is disabled. A different edition fails closed.
+    std::uint32_t actors[3]{};
+    Jail20TraceActor owner{},p1{},p2{};
+    std::uint8_t hp=0;
+    if(!jail20_find_actors(base,actors) || !jail20_actor(actors[0],owner) ||
+       !jail20_owner_shape(owner) || jail20_behaviour(owner)!=1 ||
+       !read_u8(std::uintptr_t(owner.standard)+0x22,hp) || hp!=0 ||
+       !jail20_actor(actors[1],p1) || !jail20_producer_shape(p1,14,3,actors[0]) ||
+       !jail20_actor(actors[2],p2) || !jail20_producer_shape(p2,17,2,actors[0]) ||
+       p1.model!=p2.model)return {};
+    const auto word=replay_intro_word(base);
+    if(!word.address || !legacy_words ||
+       word.address!=legacy_words+34u*4u ||
+       !(word.value&r2fix::replay_handover_mask))return {};
+    const auto reset=r2fix::replay_handover_reset_word(word.value);
+    if(!replay_intro_compare_exchange(word.address,word.value,reset))return {};
+    g_replay_intro_route.consume();
+    log_line("RUNTIME-REPLAY-INTRO: reset=applied bit=1091 route=handover-menu-jail10-jail20 initial_and_default_clear=1 other_bits_preserved=1 current_memory_only=1");
+    return word;
+}
+
 void poll_second_intro_skip() {
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
     const bool pad_skip_down=(sdl_fresh_actions(r2fix::PadContext::cinematic) &
@@ -5468,7 +5526,11 @@ void poll_second_intro_skip() {
 #endif
     if(!g_skip_cinematics)return;
     const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
-    if (!native_change || !g_current_level) return;
+    if (!native_change || !g_current_level) {
+        g_replay_intro_route.observe(nullptr);
+        return;
+    }
+    g_replay_intro_route.observe(g_current_level);
     // These counters measure the sampling cadence of the EXISTING camera
     // callback; they do not add a key hook, change the input guard or skip.
     static DWORD entered_at=0,requested_at=0,last_input_diag=0;
@@ -5600,24 +5662,27 @@ void poll_second_intro_skip() {
     }
     if (!requested || !foreground) return;
 
-    // A replay of New Game in the same process can reach jail_20 with
-    // the previous Learn_10 handover bit still set. The direct level
-    // change would bypass native scene transition logic in this state.
-    // Do not clear the bit or force the level; allow the original
-    // cinematic/transition to finish. Unknown story lookup is logged
-    // separately and does not change the established first-visit path.
+    // Keep the original refusal for a stale handover unless the exact
+    // new-game route and the verified original clear state both match.
     const auto intro_words=find_story_words();
     bool previous_handover=false;
     const bool story_known=game_story_bit(intro_words,kLearnHandoverBit,previous_handover);
+    const bool replay_route=g_replay_intro_route.ready();
+    r2fix::ReplayHandoverWord replay_reset{};
+    if(story_known && previous_handover && replay_route)
+        replay_reset=try_replay_intro_reset(game_base,intro_words);
+    const bool allowed=replay_reset.address ||
+        ((!replay_route || story_known) &&
+         r2fix::intro_direct_transition_allowed(story_known,previous_handover));
     {
-        char msg[180]{};
+        char msg[240]{};
         std::snprintf(msg,sizeof(msg),
-            "RUNTIME-INTRO: jail_20 pre-transition story1091_known=%u story1091=%u action=%s",
-            unsigned(story_known),unsigned(previous_handover),
-            story_known&&previous_handover?"native-transition-only":"guarded-level-request");
+            "RUNTIME-INTRO: jail_20 pre-transition story1091_known=%u story1091=%u replay_route=%u action=%s",
+            unsigned(story_known),unsigned(previous_handover),unsigned(replay_route),
+            replay_reset.address?"verified-replay-reset":allowed?"guarded-level-request":"native-transition-only");
         log_line(msg);
     }
-    if(!r2fix::intro_direct_transition_allowed(story_known,previous_handover))return;
+    if(!allowed)return;
 
     // The game itself queues the level change for its next engine tick.
     // Do not force a renderer switch, destroy a video window or write
@@ -5632,6 +5697,26 @@ void poll_second_intro_skip() {
         input_polls,down_polls);
     log_line(line);
     native_change(kAfterIntroLevel, 0);
+    // If the original call did not queue a change and the same live
+    // word is still present in Playing, undo only our own exact write.
+    // Never use an old address across a level load or overwrite a word
+    // modified by the game. Accepted transitions keep native ownership.
+    if(replay_reset.address) {
+        const auto mode_after=intro_native_engine_mode(game_base);
+        const auto next_after=intro_next_level_status(game_base);
+        if(mode_after==int(kIntroEnginePlaying) && next_after!=1 &&
+           r2fix::is_second_intro(g_current_level)) {
+            const auto still=replay_intro_word(game_base);
+            const auto reset=r2fix::replay_handover_reset_word(replay_reset.value);
+            const bool undone=still.address==replay_reset.address &&
+                still.value==reset &&
+                replay_intro_compare_exchange(still.address,reset,replay_reset.value);
+            log_line(undone?"RUNTIME-REPLAY-INTRO: transition-not-queued rollback=restored":
+                            "RUNTIME-REPLAY-INTRO: transition-not-queued rollback=refused-changed-state");
+        } else {
+            log_line("RUNTIME-REPLAY-INTRO: native-transition-dispatched; await Learn_10 handover");
+        }
+    }
     if(g_log) {
         const int mode_after=intro_native_engine_mode(game_base);
         const int next_after=intro_next_level_status(game_base);
