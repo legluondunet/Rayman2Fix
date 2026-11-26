@@ -5806,6 +5806,41 @@ bool ipt_live_entry(void* entry,r2fix::IptActionReadback& row,
                     !ipt_name_plausible(name)))return false;
     return true;
 }
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+// Read-only correlation: the two authenticated C45 button nodes in
+// the director rule may reference an IPT entry other than the two
+// currently forwarded cinematic actions. Never dereference an opaque
+// operand unless ipt_live_entry proves it belongs to the live table.
+void trace_learn10_native_button() noexcept {
+    static DWORD observed_arm=0;
+    if(!g_log || !g_f248_armed.load(std::memory_order_acquire)) {
+        observed_arm=0;
+        return;
+    }
+    const auto arm=g_f248_armed_at.load(std::memory_order_acquire);
+    if(observed_arm==arm)return;
+    const auto root=g_f248_root.load(std::memory_order_acquire);
+    std::uint32_t a=0,b=0,c1=0,c2=0;
+    std::uint8_t t1=0,t2=0,d1=0,d2=0;
+    if(!root || !read_u32(root+8u*8u,c1) || c1!=45u ||
+       !read_u32(root+106u*8u,c2) || c2!=45u ||
+       !read_u32(root+9u*8u,a) || !read_u32(root+107u*8u,b) ||
+       a!=b || !read_u8(root+9u*8u+7u,t1) || t1!=14u ||
+       !read_u8(root+107u*8u+7u,t2) || t2!=14u ||
+       !read_u8(root+9u*8u+6u,d1) || d1!=4u ||
+       !read_u8(root+107u*8u+6u,d2) || d2!=6u)return;
+    observed_arm=arm;
+    r2fix::IptActionReadback row{};
+    std::array<char,64> name{};
+    unsigned index=0;
+    const bool match=ipt_live_entry(reinterpret_cast<void*>(std::uintptr_t(a)),row,index,name);
+    char msg[180]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-LEARN10-INPUT: script-C45-operand live-IPT-match=%u index=%d existing-route=%u read-only=1",
+        unsigned(match),match?int(index):-1,unsigned(match&&(index==20u||index==21u)));
+    log_line(msg);
+}
+#endif
 bool ipt_current_gameplay() noexcept {
     return g_sdl_input_owner.load(std::memory_order_acquire)==GetCurrentThreadId() &&
         game_window_is_foreground() &&
@@ -6145,6 +6180,42 @@ void poll_sdl3_native() noexcept {
         log_line(msg);++button_reports;
     }
     button_mask=raw_buttons;
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+    trace_learn10_native_button();
+    // Independent per-cinematic physical edge trace. The global button
+    // budget must not hide a late South press, and a gated-out press
+    // must not be mistaken for an input that never reached SDL.
+    static bool learn_trace_active=false,learn_south=false;
+    static unsigned learn_edges=0,learn_polls=0,learn_gap=0;
+    static DWORD learn_last=0;
+    const bool learn_trace=context==r2fix::PadContext::learn_cinematic;
+    if(learn_trace) {
+        if(!learn_trace_active) {
+            learn_south=false;learn_edges=learn_polls=learn_gap=0;learn_last=0;
+        }
+        ++learn_polls;
+        if(learn_last)learn_gap=std::max(learn_gap,unsigned(DWORD(poll_now-learn_last)));
+        learn_last=poll_now;
+        if(g_log && sample.south!=learn_south && learn_edges<64u) {
+            ++learn_edges;
+            char msg[220]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-LEARN10-INPUT: SDL-physical south=%u held-skip=%u pressed-skip=%u device=%u fg=%u",
+                unsigned(sample.south),unsigned(!!(transitions.held&r2fix::pad_action_bit(r2fix::PadAction::skip))),
+                unsigned(!!(transitions.pressed&r2fix::pad_action_bit(r2fix::PadAction::skip))),
+                unsigned(sample.device_id),unsigned(foreground));
+            log_line(msg);
+        }
+        learn_south=sample.south;
+    } else if(learn_trace_active && g_log) {
+        char msg[180]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-LEARN10-INPUT: SDL-context-exit polls=%u physical-edges=%u max-poll-gap-ms=%u",
+            learn_polls,learn_edges,learn_gap);
+        log_line(msg);
+    }
+    learn_trace_active=learn_trace;
+#endif
     observe_native_ipt_readonly(context);
     g_sdl_native_joystick_owned=sample.connected && sample.device_id!=0 && foreground;
     g_sdl_input_context = context;
