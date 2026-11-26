@@ -106,6 +106,17 @@ inline constexpr std::array<PadInfoStrings,6> kPadInfoStrings{{
       u8"Krzy\u017cak w g\u00f3r\u0119",u8"Krzy\u017cak w d\u00f3\u0142","Start"},
      u8"Lewy dr\u0105\u017cek",u8"Prawy dr\u0105\u017cek",u8"Krzy\u017cak w g\u00f3r\u0119",u8"Krzy\u017cak w d\u00f3\u0142","Prawy przycisk"}
 }};
+// Original game label, with explicit ASCII, CP1250 and UTF-8 Polish
+// representations. Unknown native glyph encodings remain unrecognized.
+constexpr PadInfoLocale pad_info_locale_from_label(std::string_view text) noexcept {
+    if(text=="/C:LANGUE")return PadInfoLocale::fr;
+    if(text=="/C:IDIOMA")return PadInfoLocale::es;
+    if(text=="/C:LINGUA")return PadInfoLocale::it;
+    if(text=="/C:SPRACHE")return PadInfoLocale::de;
+    if(text=="/C:JEZYK" || text=="/C:J\xcaZYK" ||
+       text==u8"/C:J\u0118ZYK")return PadInfoLocale::pl;
+    return PadInfoLocale::en;
+}
 constexpr const PadInfoStrings& pad_info_strings(PadInfoLocale locale) noexcept {
     const auto i=static_cast<unsigned>(locale);
     return kPadInfoStrings[i<kPadInfoStrings.size()?i:0];
@@ -129,7 +140,7 @@ constexpr PadInfoView make_pad_info_view(PadInfoLocale locale,bool connected,
         family==PadLabelFamily::playstation?"PlayStation":s.generic_pad,
         s.back,family==PadLabelFamily::generic?s.generic_back:
             family==PadLabelFamily::playstation&&locale==PadInfoLocale::fr?"Rond":
-            family==PadLabelFamily::playstation&&locale==PadInfoLocale::pl?u8"Kółko":pad_back_label(family),
+            family==PadLabelFamily::playstation&&locale==PadInfoLocale::pl?u8"K\u00f3\u0142ko":pad_back_label(family),
         s.pending,{},true};
     for(unsigned i=0;i<out.rows.size();++i) {
         auto control=family==PadLabelFamily::generic?s.generic_controls[i]:
