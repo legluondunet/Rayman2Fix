@@ -11,7 +11,8 @@ public:
     ~OfflineWorkspace();
     OfflineWorkspace(const OfflineWorkspace&) = delete;
     OfflineWorkspace& operator=(const OfflineWorkspace&) = delete;
-    Probe probe(const fs::path& candidate);
+    Probe probe(const fs::path& candidate,
+                const std::function<void(const std::string&)>& log = {});
     // Extracts into an empty directory owned by this workspace.
     // The return path is valid only for the lifetime of the workspace.
     fs::path extract(const fs::path& setup,
