@@ -200,8 +200,8 @@ int main() {
               "continuous MENU companion travel remains above panel");
     }
     float pause_y=.54f;
-    check(align_pad_info_companion(true,true,0,.5f,pause_y,.015f,true)&&pause_y>.32f&&pause_y<.35f,
-          "Pause companion uses same header gap");
+    check(align_pad_info_companion(true,true,0,.5f,pause_y,.015f,true)&&pause_y>.28f&&pause_y<.31f,
+          "Pause firefly raised separately from MENU butterfly");
     check(pad_may_take_owner(true,false,true,true)&&!pad_may_take_owner(true,true,true,true)&&
           !pad_may_take_owner(true,false,false,true)&&!pad_may_take_owner(false,false,true,true),
           "neutral-to-active secondary controller ownership, no focus or held-owner steal");
@@ -275,7 +275,7 @@ int main() {
         pad_back_label(PadLabelFamily::xbox) == "B" &&
         pad_back_label(PadLabelFamily::generic) == "East",
         "physical east labeling");
-    for(unsigned l=0;l<5;++l) {
+    for(unsigned l=0;l<kPadInfoStrings.size();++l) {
         const auto locale=static_cast<PadInfoLocale>(l);
         for(auto family:{PadLabelFamily::generic,PadLabelFamily::xbox,PadLabelFamily::playstation}) {
             const auto view=make_pad_info_view(locale,true,family);
@@ -298,6 +298,13 @@ int main() {
     check(fr.status=="PlayStation" && fr.rows[0].control=="Stick gauche" &&
           fr.rows[1].control=="Croix" && fr.back_control=="Rond",
           "French PlayStation labels follow detected family");
+    const auto pl=make_pad_info_view(PadInfoLocale::pl,true,PadLabelFamily::playstation);
+    check(pl.rows[0].action=="Ruch" && pl.rows[1].control==u8"Krzy\u017cyk" &&
+          pl.back_control==u8"K\u00f3\u0142ko","Polish PlayStation labels");
+    check(pad_info_locale_from_label("/C:JEZYK")==PadInfoLocale::pl &&
+          pad_info_locale_from_label("/C:J\xcaZYK")==PadInfoLocale::pl &&
+          pad_info_locale_from_label(u8"/C:J\u0118ZYK")==PadInfoLocale::pl,
+          "Polish native label encodings");
     check(make_pad_info_view(static_cast<PadInfoLocale>(999),false,
           PadLabelFamily::xbox).status=="No controller connected","unknown locale fallback");
     // Native DirectInput keyboard merge never replaces physical keyboard
