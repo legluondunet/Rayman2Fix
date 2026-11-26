@@ -35,3 +35,21 @@ With the supplied GOG file, the local actor/backlink scan identifies 25 actors w
 Negative comparisons using the supplied GOG files found zero literal Learn_10 change-map calls in Jail_10 (7 actors / 91 scripts), Learn_10 (77 / 280) and Menu (26 / 189), with no traversal failures. The offline tool was exercised with the equivalent PC SNA byte-mask decoder and block layout; no Windows runtime test or compilation was involved.
 
 Next: resolve cross-block references with the original Jail_20 RTB if available, or observe the verified controller's max-HP byte and current normal behaviour during natural playback versus a replay. Do not change the byte, reset bit 1091 or call native scene functions until the producer and required cleanup are understood.
+
+
+## Text-command producers (shared Fix + Jail_20)
+
+Decoded the owner-supplied GOG Fix SNA (SHA-256 `62c3f44504731808745b03ee69c1d6bef442b34a30996a0db300005e3197308d`) together with the previously identified Jail_20 SNA. A bounded local/shared pointer walk found 30 actors (25 level-local, 5 shared), 301 distinct normal/reflex scripts and zero script traversal failures. There were 41 candidate maximum-HP writer sites, counting shared models per actor. No relocation records or live execution were used.
+
+Two local actors at module 4/1 offsets 0x3a20 and 0x48d0 share the same AI model (13/1:0x2960; type IDs 13,14,14 and 13,14,17). Their designer variable V0 is a PersoArray (element type 9, header 8 bytes, capacity 20), with the transition controller at index 3 and index 2 respectively. V65 is a temporary Perso reference, initially null. V84 is a byte index and V96 a signed integer. The references were verified against the controller's superobject and actor backlink. The previously unresolved V65 writers are therefore explained by array lookup rather than a fixed stored pointer.
+
+The common model's normal behaviour 3/rule 2 and behaviour 7/rule 1 contain the same command dispatcher:
+
+- F158 (TEXT_DisplayText) supplies V96 (nodes 23 and 36 in B3/R2, node 8 in B7/R1 are the assignments).
+- For 1300 < V96 < 1400, V84 = V96 - 1301; after a valid-object check, V65 = V0[V84] (B3/R2 nodes 834–838; B7/R1 nodes 806–810). If necessary the actor is activated and custom bit 17 cleared.
+- For 1399 < V96 < 1500, with a valid V65, subtract 1400 from V96 and call P6 SetHitPointsMax(V65,V96) (B3/R2 nodes 864–869; B7/R1 nodes 836–841).
+- Therefore selection events 1304 and 1303 would target the level controller on the first and second actor respectively. Subsequent 1402 or 1499 would deliver state 2 or 99. These are conditional static interpretations, not a measured runtime sequence.
+
+The shared Fix SNA text block (14/0) contains /E1303:, /E1304:, /E1402: and /E1499: control markers (and lowercase variants), consistent with the dispatcher. Exact text-handle-to-record mapping and actual active script instance on each visit remain unverified. F158 may have other side effects; overriding its return or injecting a command is not yet justified. The presence of these markers in the shared resource does not establish that the specific Jail_20 scene executes them on every visit.
+
+The correct next runtime observation is a bounded read-only sample of the two actors' current behaviour, V84, V96, V65 target match, and the controller max-HP byte, correlated with the existing skip request and engine transition log. No game state, script or text may be modified. Do not treat story bit 1091 as the established root cause. The earlier conclusion that no producer was statically identifiable is superseded by this conditional array-dispatch path.
