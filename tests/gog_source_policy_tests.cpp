@@ -93,6 +93,35 @@ int main(int argc, char** argv) {
             catch (const std::runtime_error&) { rejected = true; }
             require(rejected, "invalid extraction manifest refused");
         }
+        const auto list = g::list_args(dir / renamed, dir / "game.installing");
+        require(std::find(list.begin(), list.end(), L"--extract") == list.end(), "list never extracts");
+        require(std::find(list.begin(), list.end(), L"--test") == list.end(), "list never reads payload");
+        require(std::find(list.begin(), list.end(), L"--output-dir") == list.end(), "list has no output directory");
+        require(std::find(list.begin(), list.end(), L"--collisions=error") != list.end(), "same collision policy");
+        require(std::find(list.begin(), list.end(), L"--list-sizes") != list.end(), "same size policy");
+        require(list.back() == args.back(), "same input");
+        g::FileSizes layout;
+        for (auto path : g::required_files) layout.emplace(std::string(path),1);
+        layout["rayman2.exe"] = g::executable_size;
+        layout["goggame-1207658940.info"] = 1;
+        g::validate_manifest_layout(layout);
+        const auto rejects_layout = [](const g::FileSizes& candidate) {
+            try { g::validate_manifest_layout(candidate); }
+            catch (const std::runtime_error&) { return true; }
+            return false;
+        };
+        auto broken_layout = layout;
+        broken_layout.erase("data/world/levels/levels0.dat");
+        require(rejects_layout(broken_layout), "missing game data before extraction");
+        broken_layout = layout;
+        broken_layout["rayman2.exe"]++;
+        require(rejects_layout(broken_layout), "unknown EXE size before extraction");
+        broken_layout = layout;
+        broken_layout["goggame-1207658940.info"]=0;
+        require(rejects_layout(broken_layout), "empty product metadata before extraction");
+        broken_layout = layout;
+        broken_layout["data/game.dsb"]=0;
+        require(rejects_layout(broken_layout), "empty required resource before extraction");
         const auto lang = g::extract_args(dir / polish, dir / "staging", L"pl-PL");
         require(std::find(lang.begin(), lang.end(), L"pl-PL") != lang.end(), "explicit metadata language");
         require(g::quote_arg(L"some path") == L"\"some path\"", "quote spaces");
