@@ -214,8 +214,6 @@ using RequestLevel = void (__cdecl*)(const char*, unsigned char);
 std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
 r2fix::IntroSkipGuard g_intro_guard;
-// Native replay route is exclusive with the direct level-change request.
-std::atomic<bool> g_intro_replay_native_only{false};
 bool g_intro_level_logged = false;
 // Diagnostic-only timestamp of render sources. These do not authorize
 // audio compensation, skip inputs, or changes in foreground policy.
@@ -5281,7 +5279,6 @@ void poll_second_intro_skip() {
     static DWORD last_engine_probe_at=0;
     const bool in_intro = r2fix::is_second_intro(g_current_level);
     if (in_intro && !g_intro_level_logged) {
-        g_intro_replay_native_only.store(false,std::memory_order_release);
         entered_at=GetTickCount();
         requested_at=last_input_diag=0;
         input_polls=down_polls=down_edges=0;
@@ -5300,14 +5297,6 @@ void poll_second_intro_skip() {
         }
         g_intro_level_logged = true;
     } else if (!in_intro && g_intro_level_logged) {
-        const bool replay=g_intro_replay_native_only.exchange(false,std::memory_order_acq_rel);
-        if(g_log && replay) {
-            char msg[180]{};
-            std::snprintf(msg,sizeof(msg),"RUNTIME-INTRO: jail_20 replay-native-exit elapsed_ms=%lu next_is_learn10=%u no-direct-request=1",
-                static_cast<unsigned long>(DWORD(GetTickCount()-entered_at)),
-                unsigned(r2fix::is_first_playable_level(g_current_level)));
-            log_line(msg);
-        }
         if(g_log && requested_at) {
             char line[180]{};
             std::snprintf(line,sizeof(line),
@@ -5427,13 +5416,7 @@ void poll_second_intro_skip() {
             story_known&&previous_handover?"native-transition-only":"guarded-level-request");
         log_line(msg);
     }
-    if(!r2fix::intro_direct_transition_allowed(story_known,previous_handover)) {
-        // Forward subsequent physical requests through the original IPT
-        // cinematic predicate only. Never combine with native_change.
-        g_intro_replay_native_only.store(true,std::memory_order_release);
-        log_line("RUNTIME-INTRO: jail_20 replay-native-route=armed IPT-index=20 no-story-write=1 no-direct-request=1");
-        return;
-    }
+    if(!r2fix::intro_direct_transition_allowed(story_known,previous_handover))return;
 
     // The game itself queues the level change for its next engine tick.
     // Do not force a renderer switch, destroy a video window or write
@@ -5868,39 +5851,6 @@ bool ipt_current_gameplay() noexcept {
 unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
     const auto original=reinterpret_cast<IptPredicate>(intro_game_base()+0x2EAC0u);
     const unsigned char native=original(entry);
-    // The replay guard has declined the direct level change. Allow only
-    // the game's own cinematic predicate to consume keyboard/SDL input.
-    // The current scene and original game thread must still be valid.
-    if(g_intro_replay_native_only.load(std::memory_order_acquire) &&
-       g_game_camera_thread_id.load(std::memory_order_acquire)==GetCurrentThreadId() &&
-       g_skip_cinematics && g_current_level &&
-       r2fix::is_second_intro(g_current_level) && game_window_is_foreground() &&
-       intro_native_engine_mode(intro_game_base())==int(kIntroEnginePlaying)) {
-        const bool down=(GetAsyncKeyState(VK_RETURN)&0x8000) ||
-            (GetAsyncKeyState(VK_SPACE)&0x8000) || (GetAsyncKeyState(VK_ESCAPE)&0x8000) ||
-            (sdl_fresh_actions(r2fix::PadContext::cinematic)&
-             r2fix::pad_action_bit(r2fix::PadAction::skip));
-        if(down) {
-            r2fix::IptActionReadback row{};
-            std::array<char,64> name{};
-            unsigned index=0;
-            if(ipt_live_entry(entry,row,index,name) &&
-               r2fix::intro_replay_native_action_allowed(true,true,true,true,down,index) &&
-               (name[0]==0 || r2fix::ipt_name_contains(name.data(),"coupercinematique"))) {
-                static DWORD last_replay_report=0;
-                const DWORD now=GetTickCount();
-                if(g_log && (!last_replay_report || DWORD(now-last_replay_report)>=250u)) {
-                    last_replay_report=now;
-                    char msg[180]{};
-                    std::snprintf(msg,sizeof(msg),
-                        "RUNTIME-INTRO: jail_20 replay-native-consumer IPT-index=20 original=%u result=1 no-direct-request=1",
-                        unsigned(native));
-                    log_line(msg);
-                }
-                return native?native:1;
-            }
-        }
-    }
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
     // Legacy native gamepad validation can bypass the keyboard bridge.
     // Only suppress the existing authenticated predicate's confirm action,
