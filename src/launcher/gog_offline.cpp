@@ -89,21 +89,40 @@ ExtractorResult OfflineWorkspace::run(const Args& args, std::chrono::seconds tim
     return run_verified_extractor(executable_, pin, args, capture, timeout);
 }
 
-Probe OfflineWorkspace::probe(const fs::path& candidate) {
-    if (!safe_entry(candidate) || !fs::is_regular_file(candidate)) return Probe::unreadable;
+Probe OfflineWorkspace::probe(const fs::path& candidate,
+                             const std::function<void(const std::string&)>& log) {
+    const auto bounded = [](std::string value) {
+        if (value.size()>512) value.resize(512);
+        for (auto& ch : value)
+            if (static_cast<unsigned char>(ch)<32 || ch==127) ch=' ';
+        return value;
+    };
+    const auto report = [&](const std::string& line) {
+        if (log) log("GOG-PROBE: candidate=" + bounded(candidate.filename().u8string()) + " " + line);
+    };
+    if (!safe_entry(candidate) || !fs::is_regular_file(candidate)) {
+        report("status=unsafe-or-unreadable");
+        return Probe::unreadable;
+    }
     const auto result = run(product_args(candidate), std::chrono::seconds(30));
+    report("exit=" + std::to_string(result.exit_code) +
+           " stdout=" + bounded(result.output) + " stderr=" + bounded(result.errors));
     if (result.exit_code == 0) {
-        if (matches_product(result.output)) return Probe::rayman2;
-        // An Inno installer with no product ID or a different ID is not
-        // the supported GOG product.
+        if (matches_product(result.output)) {
+            report("status=recognized");
+            return Probe::rayman2;
+        }
+        report(result.output.find_first_not_of(" \t\r\n")==std::string::npos
+            ? "status=no-product-id" : "status=different-or-invalid-product-id");
         return Probe::unrelated;
     }
     const auto diagnostic = ascii_lower(result.errors + "\n" + result.output);
-    // Ordinary adjacent PE executables are allowed (e.g. local CD EXE).
-    // Unknown versions and failed reads are not silently treated as CD.
     if (diagnostic.find("not a supported inno setup installer!") != std::string::npos &&
-        diagnostic.find("unexpected") == std::string::npos)
+        diagnostic.find("unexpected") == std::string::npos) {
+        report("status=unrecognized-inno-format-or-non-installer");
         return Probe::unrelated;
+    }
+    report("status=probe-failed");
     return Probe::unreadable;
 }
 
