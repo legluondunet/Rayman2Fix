@@ -20,3 +20,18 @@ Opcode names cross-checked against [Raymap R2 AI tables](https://github.com/byva
 ## Next validation
 
 Identify the owning actor and all writers of its maximum-hit-points state; follow the native scene's control and cleanup paths. Resolve the actual native button operand rather than assuming IPT20. Preserve first-visit behavior, do not clear story bit 1091, write actor state, force a behaviour, or reintroduce a global input override based on these static findings alone. No new runtime change is proposed by this note. The owner need not retest the same build.
+
+
+## Actor ownership follow-up
+
+The local pointer walk confirms the transition's owner: module 4/1 offset 0x1198 (actor), 0x12f0 (standard-game properties), 0x1378 (brain); module 5/2 offset 0x3d8c4 (superobject, with a matching actor backlink). Its normal AI behaviour table is module 13/1 offset 0xee8 (three behaviours). The actor has one designer variable, V0, and on-disk max HP is 0. Object-type IDs are (2,12,12); the nearby object-type name lists suggest World / Leveljail_20, but the complete cross-block name-table resolution is not established without the level relocation table. Do not rely on the guessed name for runtime targeting.
+
+The two map calls are in normal behaviour 1, rule 0, nodes 33 and 41. The same rule's node 9 calls SetHitPointsMax(Me, 0) before the V0 branches. In particular V0=1 clears (not sets) bit 17 on two actors. The next behaviour's effect branch can return to behaviour 1; it is not itself a map change.
+
+Reproduction: python3 tools/inspect_jail20_transition.py /path/to/jail_20.sna
+
+With the supplied GOG file, the local actor/backlink scan identifies 25 actors with a valid local AI model, 78 distinct normal/reflex scripts and no script traversal failures. Exactly two literal Learn_10 change-map calls are found, both in the same actor. Of 38 candidate max-HP writer sites (per actor, including shared models), only the self-reset above resolves to this actor using the stored local references; eight have unresolved/null targets. Dynamic variable assignments, macros, relocation records and engine-side writes are outside this audit. In particular, this is not evidence that no other writer can target the actor at runtime.
+
+Negative comparisons using the supplied GOG files found zero literal Learn_10 change-map calls in Jail_10 (7 actors / 91 scripts), Learn_10 (77 / 280) and Menu (26 / 189), with no traversal failures. The offline tool was exercised with the equivalent PC SNA byte-mask decoder and block layout; no Windows runtime test or compilation was involved.
+
+Next: resolve cross-block references with the original Jail_20 RTB if available, or observe the verified controller's max-HP byte and current normal behaviour during natural playback versus a replay. Do not change the byte, reset bit 1091 or call native scene functions until the producer and required cleanup are understood.
