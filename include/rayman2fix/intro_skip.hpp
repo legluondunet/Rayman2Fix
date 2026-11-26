@@ -22,6 +22,14 @@ inline bool is_second_intro(const char* level) {
 // A deliberate key-down edge AFTER entering jail_20 is needed. Holding
 // Enter from the New Game menu must not auto-skip the cinematic.
 // The latch resets when the level changes, supporting later new games.
+// Do not force the jail_20 -> learn_10 transition when the native
+// story already reports handover. Let the game's original scene
+// transition resolve that state without changing the saved flags.
+constexpr bool intro_direct_transition_allowed(bool story_known,
+                                                bool already_handed_over) noexcept {
+    return !story_known || !already_handed_over;
+}
+
 struct IntroSkipGuard {
     bool inside = false;
     bool released = false;
