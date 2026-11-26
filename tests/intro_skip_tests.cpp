@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 // Explicitly check in both Debug and Release (assert is disabled by NDEBUG).
@@ -332,21 +333,30 @@ int main() {
             exact.u32[ptr+offset]=0;
         }
         exact.u32[buffer+offset]=0x80000007u;
+        r2fix::ReplayHandoverAudit audit{};
         auto get=[&] {
             return r2fix::locate_replay_handover_word(list,
                 [&](std::uintptr_t p,std::uint32_t& v){return exact.rd32(p,v);},
-                [&](std::uintptr_t p,std::uint8_t& v){return exact.rd8(p,v);});
+                [&](std::uintptr_t p,std::uint8_t& v){return exact.rd8(p,v);},&audit);
         };
         CHECK(get().address==buffer+offset);
         CHECK(get().value==0x80000007u);
+        CHECK(std::strcmp(audit.reason,"verified")==0);
+        CHECK(audit.current_bit==1 && audit.initial_bit==0 && audit.default_bit==0);
+        CHECK(audit.separate_buffers && audit.current_count==45);
         CHECK(r2fix::replay_handover_reset_word(get().value)==0x80000003u);
         exact.u32[initial+offset]=4; CHECK(!get().address);
+        CHECK(std::strcmp(audit.reason,"story-reference-bit-set")==0);
+        CHECK(audit.current_bit==1 && audit.initial_bit==1 && audit.default_bit==0);
         exact.u32[initial+offset]=0;
         exact.u32[defaults+offset]=4; CHECK(!get().address);
         exact.u32[defaults+offset]=0;
         exact.u32[dsg+4]=buffer; CHECK(!get().address);
+        CHECK(std::strcmp(audit.reason,"story-buffer-identity")==0);
         exact.u32[dsg+4]=initial;
         exact.u8[buffer+148]=44; CHECK(!get().address);
+        CHECK(std::strcmp(audit.reason,"story-current-array")==0);
+        CHECK(audit.current_count==44 && audit.initial_bit==0 && audit.default_bit==0);
         exact.u8[buffer+148]=45;
         exact.u32[stdg+8]=3; CHECK(!get().address);
         exact.u32[stdg+8]=2;
