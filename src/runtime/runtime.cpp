@@ -5513,7 +5513,7 @@ r2fix::ReplayHandoverWord try_replay_intro_reset(std::uintptr_t base,
     const auto reset=r2fix::replay_handover_reset_word(word.value);
     if(!replay_intro_compare_exchange(word.address,word.value,reset))return {};
     g_replay_intro_route.consume();
-    log_line("RUNTIME-REPLAY-INTRO: reset=applied bit=1091 route=handover-menu-jail10-jail20 initial_and_default_clear=1 other_bits_preserved=1 current_memory_only=1");
+    log_line("RUNTIME-REPLAY-INTRO: reset=applied bit=1091 route=handover-menu-or-pause-jail10-jail20 initial_and_default_clear=1 other_bits_preserved=1 current_memory_only=1");
     return word;
 }
 
@@ -5526,11 +5526,44 @@ void poll_second_intro_skip() {
 #endif
     if(!g_skip_cinematics)return;
     const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
-    if (!native_change || !g_current_level) {
-        g_replay_intro_route.observe(nullptr);
-        return;
+    if (!native_change) return;
+    // The original Pause menu can restart directly in Jail_10 without
+    // loading MENU. Authenticate its B13/R0 state with the existing live
+    // controller observer. The shared Fix B13 rule requests Jail_10
+    // (or Mapmonde according to story bit 1133); an unrelated destination
+    // cannot earn the replay route.
+    bool pause_restart=false,loading_jail10=false,loading_jail20=false;
+    if(g_replay_intro_route.completed) {
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        int normal=-1,reflex=-1;
+        if(r2fix::is_first_playable_level(g_current_level))
+            pause_restart=r2fix::pause_menu_live_state(normal,reflex) &&
+                          normal==13 && reflex==0;
+#endif
+        const auto replay_base=intro_game_base();
+        if(replay_base && intro_native_engine_mode(replay_base)!=int(kIntroEnginePlaying)) {
+            char next[30]{};
+            SIZE_T got=0;
+            if(ReadProcessMemory(GetCurrentProcess(),
+                reinterpret_cast<const void*>(replay_base+kIntroNextLevelRva),
+                next,sizeof(next),&got) && got==sizeof(next) &&
+                std::memchr(next,0,sizeof(next))) {
+                loading_jail10=r2fix::ReplayIntroRoute::equal(next,"jail_10");
+                loading_jail20=r2fix::ReplayIntroRoute::equal(next,"jail_20");
+            }
+        }
     }
-    g_replay_intro_route.observe(g_current_level);
+    const auto prior_stage=g_replay_intro_route.stage;
+    g_replay_intro_route.observe(g_current_level,pause_restart,loading_jail10,loading_jail20);
+    if(prior_stage!=g_replay_intro_route.stage) {
+        char msg[210]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-REPLAY-INTRO: route-stage=%u previous=%u pause_restart=%u queued_jail10=%u queued_jail20=%u",
+            unsigned(g_replay_intro_route.stage),unsigned(prior_stage),
+            unsigned(pause_restart),unsigned(loading_jail10),unsigned(loading_jail20));
+        log_line(msg);
+    }
+    if(!g_current_level)return;
     // These counters measure the sampling cadence of the EXISTING camera
     // callback; they do not add a key hook, change the input guard or skip.
     static DWORD entered_at=0,requested_at=0,last_input_diag=0;
