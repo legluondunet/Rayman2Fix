@@ -122,11 +122,12 @@ struct LearnIntroGuard {
 };
 
 // A replay repair is eligible only after a real Learn_10 handover in this
-// process, followed by the exact menu -> jail_10 -> jail_20 path.
-// Any different level cancels the pending route; loading a save in
+// process, followed by menu OR an authenticated Pause restart, then
+// jail_10 -> jail_20. A native queued target bridges the loading gap.
+// Any unrelated level cancels the pending route; loading a save in
 // Learn_10 does not earn a handover. Never infer a new game from bit 1091.
 struct ReplayIntroRoute {
-    enum class Stage { none, menu, first_intro, second_intro };
+    enum class Stage { none, menu, pause_restart, first_intro, second_intro };
     Stage stage = Stage::none;
     bool completed = false;
 
@@ -142,17 +143,28 @@ struct ReplayIntroRoute {
         return *a==*b;
     }
     void note_handover() noexcept { completed=true; }
-    void observe(const char* level) noexcept {
+    void observe(const char* level, bool verified_pause_restart=false,
+                 bool loading_jail10=false, bool loading_jail20=false) noexcept {
         if(!completed) { stage=Stage::none; return; }
         if(equal(level,"menu")) stage=Stage::menu;
         else if(equal(level,"jail_10")) {
-            if(stage==Stage::menu || stage==Stage::first_intro)
+            if(stage==Stage::menu || stage==Stage::pause_restart ||
+               stage==Stage::first_intro)
                 stage=Stage::first_intro;
             else stage=Stage::none;
         } else if(equal(level,"jail_20")) {
             if(stage==Stage::first_intro || stage==Stage::second_intro)
                 stage=Stage::second_intro;
             else stage=Stage::none;
+        } else if(equal(level,"learn_10") && verified_pause_restart) {
+            stage=Stage::pause_restart;
+        } else if((!level || !*level || equal(level,"learn_10")) &&
+                  loading_jail10 &&
+                  (stage==Stage::pause_restart || stage==Stage::menu)) {
+            // A verified departure may unload the live Pause controller.
+        } else if((!level || !*level) && loading_jail20 &&
+                  stage==Stage::first_intro) {
+            // Only the expected native destination bridges an empty name.
         } else stage=Stage::none;
     }
     bool ready() const noexcept {
