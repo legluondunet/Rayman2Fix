@@ -117,6 +117,28 @@ constexpr PadInfoLocale pad_info_locale_from_label(std::string_view text) noexce
        text==u8"/C:J\u0118ZYK")return PadInfoLocale::pl;
     return PadInfoLocale::en;
 }
+// The Polish GOG release may use a proprietary glyph for the accented
+// LANGUAGE label. Identify its unaccented native captions instead,
+// within the active localization table only. Two distinct captions are
+// required, so a single incidental string cannot switch the UI language.
+constexpr unsigned pad_polish_caption_marker(std::string_view text) noexcept {
+    if(text.size()>=3 && text.substr(0,3)=="/C:")text.remove_prefix(3);
+    const auto equals_ascii=[&](std::string_view expected) {
+        if(text.size()!=expected.size())return false;
+        for(std::size_t i=0;i<text.size();++i) {
+            char c=text[i];
+            if(c>='a'&&c<='z')c=char(c-'a'+'A');
+            if(c!=expected[i])return false;
+        }
+        return true;
+    };
+    return equals_ascii("STEROWANIE")?1u:
+           equals_ascii("NOWA GRA")?2u:
+           equals_ascii("OPCJE")?4u:0u;
+}
+constexpr bool pad_polish_caption_set(unsigned markers) noexcept {
+    return (markers&1u)!=0 && (markers&6u)!=0;
+}
 constexpr const PadInfoStrings& pad_info_strings(PadInfoLocale locale) noexcept {
     const auto i=static_cast<unsigned>(locale);
     return kPadInfoStrings[i<kPadInfoStrings.size()?i:0];
