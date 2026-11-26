@@ -508,7 +508,8 @@ int run_automatic(Startup& startup, bool install_only) {
                     // Source archives are kept intact. No CD EXE replacement
                     // or CD audio initialization is applied to this edition.
                     std::cout << "Extracting and verifying original GOG archives...\n";
-                    const auto payload = workspace->extract(selected.path);
+                    const auto payload = workspace->extract(selected.path,
+                        [&](const auto& line) { startup.log(line); });
                     try {
                         gog::stage_payload(payload, staging);
                         for (const auto& line : gog::hook_diagnostics(staging / "rayman2.exe"))
@@ -536,6 +537,12 @@ int run_automatic(Startup& startup, bool install_only) {
             }
         }
         if (candidates.empty()) {
+            if (gog::OfflineWorkspace::available()) {
+                startup.log("AUTO: no installed game, recognized GOG setup or ISO/CUE media");
+                std::cerr << "No supported installation source. Place one original CD image "
+                             "or one GOG offline setup with its companion BIN files beside Rayman2Fix.exe.\n";
+                return 2;
+            }
             startup.log("AUTO: no installed game and no adjacent ISO/CUE media");
             std::cerr << "No installed game or CD image. Place one .iso or .cue beside "
                          "Rayman2Fix.exe, then run it without arguments.\n";
