@@ -4732,7 +4732,7 @@ void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output
     // All ordinary F248 calls have ALREADY forwarded to the native
     // handler. Only inspect the exact function child of the approved
     // director's b3/rule1 K1 root. No general keyword interception.
-    std::uint32_t root_keyword=0,func_id=0,active_b=0,live_root=0;
+    std::uint32_t root_keyword=0,func_id=0,active_b=0,live_rules=0,live_root=0;
     std::uint32_t result_value=0,result_type=0;
     std::uint8_t root_depth=0,root_type=0,func_type=0;
     bool nomovies=false,handed_over=false;
@@ -4743,6 +4743,7 @@ void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output
         read_u32(root+8u,func_id) && func_id==248u &&
         read_u8(root+15u,func_type) && func_type==3u &&
         read_u32(intel+8u,active_b) && std::uintptr_t(active_b)==b3 &&
+        read_u32(b3,live_rules) && std::uintptr_t(live_rules)==rules &&
         read_u32(rules+4u,live_root) && std::uintptr_t(live_root)==root &&
         game_story_bit(words,kNoMoviesCheatBit,nomovies) && !nomovies &&
         game_story_bit(words,kLearnHandoverBit,handed_over) && !handed_over &&
@@ -4768,7 +4769,8 @@ void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output
     sample.approved_cd=true; // code/table checked exactly before installing
     sample.skip_cinematics_enabled=g_f248_enabled.load(std::memory_order_acquire);
     sample.exact_script=true; // fingerprinted on this exact b3/rule1 during arm
-    sample.live_learn10=g_f248_armed.load(std::memory_order_acquire);
+    sample.live_learn10=g_f248_armed.load(std::memory_order_acquire) &&
+        g_current_level && r2fix::is_first_playable_level(g_current_level);
     sample.first_visit=true; // story1091 was read as false above
     sample.nomovies_bit_known_off=true; // story1188 read as false above
     sample.handover_incomplete=true;
@@ -4831,13 +4833,14 @@ void learn10_f248_disarm(const char* reason) {
         g_f248_slot_installed.store(false,std::memory_order_release);
     char line[256]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-LEARN10-F248: phase=disarmed reason=%s slot_restored=%u calls=%u matches=%u overrides=%u foreign_thread=%u enter_edges=%u story_bit1188_never_written=1",
+        "RUNTIME-LEARN10-F248: phase=disarmed reason=%s slot_restored=%u calls=%u matches=%u overrides=%u foreign_thread=%u enter_edges=%u active_ms=%lu story_bit1188_never_written=1",
         reason,unsigned(restored),
         g_f248_calls.load(std::memory_order_relaxed),
         g_f248_matches.load(std::memory_order_relaxed),
         g_f248_overrides.load(std::memory_order_relaxed),
         g_f248_foreign_thread.load(std::memory_order_relaxed),
-        g_f248_enter_edges);
+        g_f248_enter_edges,
+        static_cast<unsigned long>(DWORD(GetTickCount()-g_f248_armed_at.load(std::memory_order_acquire))));
     log_line(line);
     if(!restored)
         log_line("RUNTIME-LEARN10-F248: WARNING callback slot restoration failed; overrides disabled");
@@ -4899,7 +4902,7 @@ void learn10_f248_try_arm(bool handed_over,DWORD elapsed) {
     g_f248_ever_armed.store(true,std::memory_order_release);
     char line[220]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-LEARN10-F248: phase=armed t=%ums director=3 native=F248 temporary_output_0_to_1=1 story_bit1188_readonly=1 max_active_ms=5000",
+        "RUNTIME-LEARN10-F248: phase=armed t=%ums director=3 native=F248 temporary_output_0_to_1=1 story_bit1188_readonly=1 lifetime=verified-director-context",
         unsigned(DWORD(GetTickCount()-g_learn_intro_start)));
     log_line(line);
 }
@@ -4910,18 +4913,46 @@ void learn10_f248_poll() {
         learn10_f248_disarm("not-armed");
         return;
     }
+
+    // Maintain the exact original native input branch throughout the
+    // verified cinematic, including an input after five seconds. The
+    // callback also checks its exact actor/rule/story on every call.
+    r2fix::Learn10F248Lifetime lifetime{};
+    lifetime.enabled=g_f248_enabled.load(std::memory_order_acquire);
+    lifetime.live_learn10=g_current_level &&
+        r2fix::is_first_playable_level(g_current_level);
+    if (lifetime.enabled && lifetime.live_learn10) {
+        const auto words=g_f248_words.load(std::memory_order_acquire);
+        lifetime.story_readable=words &&
+            game_story_bit(words,kNoMoviesCheatBit,lifetime.nomovies) &&
+            game_story_bit(words,kLearnHandoverBit,lifetime.handed_over);
+        const auto intel=g_f248_intel.load(std::memory_order_acquire);
+        const auto b3=g_f248_b3.load(std::memory_order_acquire);
+        const auto rules=g_f248_rules.load(std::memory_order_acquire);
+        const auto root=g_f248_root.load(std::memory_order_acquire);
+        std::uint32_t behaviour=0,live_rules=0,live_root=0,keyword=0,fn=0;
+        std::uint8_t depth=0,type=0,fn_type=0;
+        lifetime.director_readable=intel && b3 &&
+            read_u32(intel+8u,behaviour);
+        lifetime.same_behaviour=lifetime.director_readable &&
+            std::uintptr_t(behaviour)==b3;
+        lifetime.same_rule_root=lifetime.same_behaviour && rules && root &&
+            read_u32(b3,live_rules) && std::uintptr_t(live_rules)==rules &&
+            read_u32(rules+4u,live_root) && std::uintptr_t(live_root)==root &&
+            read_u32(root,keyword) && keyword==1u &&
+            read_u8(root+6u,depth) && depth==1u &&
+            read_u8(root+7u,type) && type==0u &&
+            read_u32(root+8u,fn) && fn==248u &&
+            read_u8(root+15u,fn_type) && fn_type==3u;
+    }
+    const char* reason=r2fix::learn10_f248_disarm_reason(lifetime);
+    if(reason) {
+        learn10_f248_disarm(reason);
+        return;
+    }
     const bool down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
     if(down && !g_f248_enter_was_down) ++g_f248_enter_edges;
     g_f248_enter_was_down=down;
-    const auto intel=g_f248_intel.load(std::memory_order_acquire);
-    std::uint32_t behaviour=0;
-    bool left=false;
-    if(intel && read_u32(intel+8u,behaviour) &&
-       std::uintptr_t(behaviour)!=g_f248_b3.load(std::memory_order_acquire))
-        left=true;
-    const DWORD age=DWORD(GetTickCount()-g_f248_armed_at.load(std::memory_order_acquire));
-    if(left || age>=5000u)
-        learn10_f248_disarm(left?"director-left-b3":"max-active-5000ms");
 }
 
 void learn10_f248_handover() {
