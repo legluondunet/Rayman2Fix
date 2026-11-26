@@ -16,6 +16,15 @@
 
 
 int main() {
+    CHECK(r2fix::intro_replay_native_action_allowed(true,true,true,true,true,20));
+    CHECK(!r2fix::intro_replay_native_action_allowed(false,true,true,true,true,20));
+    CHECK(!r2fix::intro_replay_native_action_allowed(true,false,true,true,true,20));
+    CHECK(!r2fix::intro_replay_native_action_allowed(true,true,false,true,true,20));
+    CHECK(!r2fix::intro_replay_native_action_allowed(true,true,true,false,true,20));
+    CHECK(!r2fix::intro_replay_native_action_allowed(true,true,true,true,false,20));
+    CHECK(!r2fix::intro_replay_native_action_allowed(true,true,true,true,true,21));
+    CHECK(!r2fix::intro_replay_native_action_allowed(true,true,true,true,true,10));
+
     CHECK(r2fix::intro_direct_transition_allowed(true,false));
     CHECK(!r2fix::intro_direct_transition_allowed(true,true));
     CHECK(r2fix::intro_direct_transition_allowed(false,false));
