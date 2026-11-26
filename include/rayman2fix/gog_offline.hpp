@@ -14,7 +14,8 @@ public:
     Probe probe(const fs::path& candidate);
     // Extracts into an empty directory owned by this workspace.
     // The return path is valid only for the lifetime of the workspace.
-    fs::path extract(const fs::path& setup);
+    fs::path extract(const fs::path& setup,
+                     const std::function<void(const std::string&)>& log = {});
     static bool available() noexcept;
 private:
     fs::path workspace_, executable_;
