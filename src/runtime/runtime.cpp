@@ -5260,6 +5260,204 @@ int intro_next_level_status(std::uintptr_t base) {
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
 std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept;
 #endif
+// Read-only Jail_20 command-chain diagnostic. GOG data fingerprints,
+// never an input override, scene function call, or write to game memory.
+// Pointers are only cached while the same level is in native Playing.
+struct Jail20TraceActor {
+    std::uint32_t so=0, standard=0, mind=0, model=0, table=0, count=0;
+};
+bool jail20_field(std::uint32_t base,unsigned offset,std::uint32_t& v) {
+    return base>=0x10000u && base<=0xffffffffu-offset &&
+           read_u32(std::uintptr_t(base)+offset,v);
+}
+bool jail20_actor(std::uint32_t so,Jail20TraceActor& a) {
+    std::uint32_t type=0,actor=0,back=0,brain=0,desc=0;
+    a={};
+    a.so=so;
+    return jail20_field(so,0,type) && type==2 &&
+           jail20_field(so,4,actor) && jail20_field(actor,4,a.standard) &&
+           jail20_field(a.standard,12,back) && back==so &&
+           jail20_field(actor,12,brain) && jail20_field(brain,0,a.mind) &&
+           jail20_field(a.mind,0,a.model) && jail20_field(a.model,0,desc) &&
+           jail20_field(desc,0,a.table) && a.table>=0x10000u &&
+           jail20_field(desc,4,a.count) && a.count>0 && a.count<=100;
+}
+bool jail20_ids(const Jail20TraceActor& a,unsigned family,unsigned model,unsigned personal) {
+    std::uint32_t f=0,m=0,p=0;
+    return jail20_field(a.standard,0,f) && jail20_field(a.standard,4,m) &&
+           jail20_field(a.standard,8,p) && f==family && m==model && p==personal;
+}
+bool jail20_node(std::uint32_t nodes,unsigned i,unsigned param,
+                 unsigned depth,unsigned type) {
+    std::uint32_t p=0;
+    std::uint8_t d=0,t=0;
+    return i<8192 && jail20_field(nodes,8*i,p) && p==param &&
+           nodes<=0xffffffffu-(8*i+7) &&
+           read_u8(std::uintptr_t(nodes)+8*i+6,d) && d==depth &&
+           read_u8(std::uintptr_t(nodes)+8*i+7,t) && t==type;
+}
+bool jail20_rule(const Jail20TraceActor& a,unsigned b,unsigned r,std::uint32_t& nodes) {
+    std::uint32_t rules=0;
+    std::uint8_t count=0;
+    return b<a.count && r<64 && jail20_field(a.table,12*b,rules) &&
+           a.table<=0xffffffffu-(12*b+8) &&
+           read_u8(std::uintptr_t(a.table)+12*b+8,count) && r<count &&
+           jail20_field(rules,4*r,nodes) && nodes>=0x10000u;
+}
+bool jail20_owner_shape(const Jail20TraceActor& a) {
+    std::uint32_t n=0;
+    return a.count==3 && jail20_ids(a,2,12,12) &&
+           jail20_rule(a,1,0,n) &&
+           jail20_node(n,2,46,2,3) && jail20_node(n,9,6,2,4) &&
+           jail20_node(n,30,2,5,12) && jail20_node(n,33,86,4,4) &&
+           jail20_node(n,39,99,6,12) && jail20_node(n,41,86,5,4) &&
+           jail20_node(n,43,0,0,8);
+}
+bool jail20_var(const Jail20TraceActor& a,unsigned index,unsigned kind,
+                unsigned expected_offset,unsigned size,std::uint32_t& at) {
+    std::uint32_t mem=0,ref=0,decl=0,infos=0,buffer=0,bytes=0,off=0,t=0;
+    std::uint8_t count=0;
+    if(index>=120 || !jail20_field(a.mind,12,mem) ||
+       !jail20_field(mem,0,ref) || !jail20_field(ref,0,decl) ||
+       !jail20_field(decl,4,infos) || !jail20_field(decl,8,bytes) ||
+       bytes!=4147u || decl>0xffffffffu-12u ||
+       !read_u8(std::uintptr_t(decl)+12,count) || count!=120u ||
+       !jail20_field(mem,8,buffer) || !jail20_field(infos,16*index,off) ||
+       !jail20_field(infos,16*index+4,t) || t!=kind ||
+       off!=expected_offset || off>bytes || size>bytes-off ||
+       buffer<0x10000u || buffer>0xffffffffu-off-size)return false;
+    at=buffer+off;
+    return true;
+}
+bool jail20_producer_shape(const Jail20TraceActor& a,unsigned personal,
+                           unsigned slot,std::uint32_t owner) {
+    std::uint32_t arr=0,element=0,target=0;
+    std::uint8_t count=0;
+    return a.count==9 && jail20_ids(a,13,14,personal) &&
+           jail20_var(a,0,18,0,88,arr) &&
+           jail20_field(arr,0,element) && element==9 &&
+           read_u8(std::uintptr_t(arr)+4,count) && count==20 &&
+           slot<count && jail20_field(arr,8+4*slot,target) && target==owner;
+}
+int jail20_behaviour(const Jail20TraceActor& a) {
+    std::uint32_t intelligence=0,current=0;
+    if(!jail20_field(a.mind,4,intelligence) ||
+       !jail20_field(intelligence,8,current) || current<a.table)return -1;
+    const auto delta=current-a.table;
+    return delta%12==0 && delta/12<a.count ? int(delta/12) : -1;
+}
+struct Jail20TraceValues {
+    int hp=-1,owner_b=-1,p1_b=-1,p1_idx=-1,p1_command=0,p1_match=-1,
+        p2_b=-1,p2_idx=-1,p2_command=0,p2_match=-1;
+    bool p1_valid=false,p2_valid=false;
+};
+bool jail20_producer_values(const Jail20TraceActor& a,std::uint32_t owner,
+                            int& behaviour,int& index,int& command,int& match) {
+    std::uint32_t idx=0,cmd=0,selected=0,bits=0,target=0;
+    std::uint8_t byte=0;
+    if(!jail20_var(a,84,2,4127,1,idx) || !read_u8(idx,byte) ||
+       !jail20_var(a,96,5,2520,4,cmd) || !read_u32(cmd,bits) ||
+       !jail20_var(a,65,9,2444,4,selected) || !read_u32(selected,target))
+        return false;
+    std::int32_t signed_bits=0;
+    std::memcpy(&signed_bits,&bits,sizeof(bits));
+    behaviour=jail20_behaviour(a);
+    index=int(byte); command=int(signed_bits);
+    match=target==owner ? 1 : (target==0 ? 0 : 2);
+    return true;
+}
+// Use the same direct-child world layout as the existing menu actor probe.
+// Require a complete bounded walk and unique candidates across both roots.
+bool jail20_find_actors(std::uintptr_t base,std::uint32_t (&found)[3]) {
+    found[0]=found[1]=found[2]=0;
+    for(const auto rva : {0x100FD0u,0x100FC4u}) {
+        std::uint32_t root=0,child=0,prev=0;
+        if(!read_u32(base+rva,root) || !jail20_field(root,8,child))return false;
+        unsigned n=0;
+        for(;child && n<4096u;++n) {
+            std::uint32_t type=0,next=0,parent=0,back=0;
+            if(!jail20_field(child,0,type) || !jail20_field(child,20,next) ||
+               !jail20_field(child,24,back) || back!=prev ||
+               !jail20_field(child,28,parent) || parent!=root || next==child)
+                return false;
+            if(type==2u) {
+                Jail20TraceActor a{};
+                if(jail20_actor(child,a)) {
+                    int slot=-1;
+                    if(jail20_owner_shape(a))slot=0;
+                    else if(a.count==9 && jail20_ids(a,13,14,14))slot=1;
+                    else if(a.count==9 && jail20_ids(a,13,14,17))slot=2;
+                    if(slot>=0) {
+                        if(found[slot] && found[slot]!=child)return false;
+                        found[slot]=child;
+                    }
+                }
+            }
+            prev=child; child=next;
+        }
+        if(child)return false;
+    }
+    return found[0] && found[1] && found[2];
+}
+void poll_jail20_command_trace(bool in_intro,std::uintptr_t base,DWORD elapsed,bool edge) {
+    static std::uint32_t found[3]{};
+    static DWORD last_scan=0,last_emit=0;
+    static unsigned lines=0;
+    static char previous[240]{};
+    if(!in_intro || !g_log) {
+        found[0]=found[1]=found[2]=0;
+        last_scan=last_emit=0; lines=0; previous[0]=0;
+        return;
+    }
+    if(intro_native_engine_mode(base)!=int(kIntroEnginePlaying)) {
+        found[0]=found[1]=found[2]=0;
+        last_scan=0;
+        return;
+    }
+    const DWORD now=GetTickCount();
+    if(!found[0] || !found[1] || !found[2]) {
+        if(last_scan && DWORD(now-last_scan)<500u)return;
+        last_scan=now;
+        if(!jail20_find_actors(base,found)) {
+            found[0]=found[1]=found[2]=0;
+            if(lines<160 && (!last_emit || DWORD(now-last_emit)>=5000u)) {
+                log_line("RUNTIME-JAIL20-COMMAND: actors unavailable (read-only; fingerprint or world walk incomplete)");
+                last_emit=now; ++lines;
+            }
+            return;
+        }
+    }
+    Jail20TraceActor owner{},p1{},p2{};
+    Jail20TraceValues v{};
+    std::uint8_t hp=0;
+    if(!jail20_actor(found[0],owner) || !jail20_ids(owner,2,12,12) ||
+       owner.count!=3 || !read_u8(std::uintptr_t(owner.standard)+0x22,hp) ||
+       !jail20_actor(found[1],p1) || !jail20_producer_shape(p1,14,3,found[0]) ||
+       !jail20_actor(found[2],p2) || !jail20_producer_shape(p2,17,2,found[0]) ||
+       p1.model!=p2.model) {
+        found[0]=found[1]=found[2]=0;
+        return;
+    }
+    v.hp=int(hp); v.owner_b=jail20_behaviour(owner);
+    v.p1_valid=jail20_producer_values(p1,found[0],v.p1_b,v.p1_idx,v.p1_command,v.p1_match);
+    v.p2_valid=jail20_producer_values(p2,found[0],v.p2_b,v.p2_idx,v.p2_command,v.p2_match);
+    char state[240]{};
+    std::snprintf(state,sizeof(state),
+        "hp=%d owner_b=%d p1_ok=%u b=%d V84=%d V96=%d target=%d p2_ok=%u b=%d V84=%d V96=%d target=%d",
+        v.hp,v.owner_b,unsigned(v.p1_valid),v.p1_b,v.p1_idx,v.p1_command,v.p1_match,
+        unsigned(v.p2_valid),v.p2_b,v.p2_idx,v.p2_command,v.p2_match);
+    if(lines>=160)return;
+    if(edge || std::strcmp(state,previous)!=0 || !last_emit || DWORD(now-last_emit)>=5000u) {
+        char line[340]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-JAIL20-COMMAND: elapsed_ms=%lu edge=%u %s (read-only; target 0=null 1=owner 2=other -1=unknown)",
+            static_cast<unsigned long>(elapsed),unsigned(edge),state);
+        log_line(line);
+        std::memcpy(previous,state,sizeof(previous));
+        last_emit=now; ++lines;
+    }
+}
+
 void poll_second_intro_skip() {
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
     const bool pad_skip_down=(sdl_fresh_actions(r2fix::PadContext::cinematic) &
@@ -5333,6 +5531,8 @@ void poll_second_intro_skip() {
         (g_intro_guard.pending ||
          (g_intro_guard.released && down && !g_intro_guard.requested));
     const auto game_base=intro_game_base();
+    poll_jail20_command_trace(in_intro,game_base,DWORD(GetTickCount()-entered_at),
+                              in_intro && down && !last_down);
     const int mode=need_mode ? intro_native_engine_mode(game_base) : -1;
     // A queued press must survive Alt-Tab; dispatch only in foreground.
     const bool ready=foreground && mode==int(kIntroEnginePlaying);
