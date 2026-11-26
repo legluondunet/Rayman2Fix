@@ -52,17 +52,17 @@ constexpr std::string_view pad_back_label(PadLabelFamily family) noexcept {
         default: return "East";
     }
 }
-// Presentation strings authored for the five original PC languages.
+// Presentation strings authored for the original PC languages, including the Polish GOG edition.
 // UTF-8 for interchange; a Windows renderer must convert to wide text
 // rather than use the process ANSI code page. No native asset copying.
-enum class PadInfoLocale : unsigned { en, fr, es, it, de };
+enum class PadInfoLocale : unsigned { en, fr, es, it, de, pl };
 struct PadInfoStrings {
     std::string_view no_pad, generic_pad, back, pending;
     std::array<std::string_view,11> actions;
     std::array<std::string_view,11> generic_controls;
     std::string_view left_stick, right_stick, up, down, generic_back;
 };
-inline constexpr std::array<PadInfoStrings,5> kPadInfoStrings{{
+inline constexpr std::array<PadInfoStrings,6> kPadInfoStrings{{
     {"No controller connected","Generic controller","Back","To be tested",
      {"Move","Jump / surface","Shoot","Camera left","Camera right","Camera rotation",
       "Target / dive","Statistics","World knowledge","Call Murfy","Pause"},
@@ -97,7 +97,14 @@ inline constexpr std::array<PadInfoStrings,5> kPadInfoStrings{{
      {"Linker Stick","Untere Taste","Rechte Taste","Linke Taste / linke Schultertaste",
       "Obere Taste / rechte Schultertaste","Rechter Stick","Linker Trigger","Rechter Trigger",
       "Steuerkreuz oben","Steuerkreuz unten","Start"},
-     "Linker Stick","Rechter Stick","Steuerkreuz oben","Steuerkreuz unten","Rechte Taste"}
+     "Linker Stick","Rechter Stick","Steuerkreuz oben","Steuerkreuz unten","Rechte Taste"},
+    {u8"Nie pod\u0142\u0105czono kontrolera","Kontroler uniwersalny",u8"Wr\u00f3\u0107","Do sprawdzenia",
+     {"Ruch","Skok / wynurzanie","Strzelanie","Kamera w lewo","Kamera w prawo",u8"Obr\u00f3t kamery",
+      "Celowanie / nurkowanie","Statystyki",u8"Wiedza o \u015bwiecie",u8"Wezwij Murfy\u2019ego","Pauza"},
+     {u8"Lewy dr\u0105\u017cek","Dolny przycisk","Prawy przycisk","Lewy przycisk / lewy bumper",
+      u8"G\u00f3rny przycisk / prawy bumper",u8"Prawy dr\u0105\u017cek","Lewy spust","Prawy spust",
+      u8"Krzy\u017cak w g\u00f3r\u0119",u8"Krzy\u017cak w d\u00f3\u0142","Start"},
+     u8"Lewy dr\u0105\u017cek",u8"Prawy dr\u0105\u017cek",u8"Krzy\u017cak w g\u00f3r\u0119",u8"Krzy\u017cak w d\u00f3\u0142","Prawy przycisk"}
 }};
 constexpr const PadInfoStrings& pad_info_strings(PadInfoLocale locale) noexcept {
     const auto i=static_cast<unsigned>(locale);
@@ -121,7 +128,8 @@ constexpr PadInfoView make_pad_info_view(PadInfoLocale locale,bool connected,
         family==PadLabelFamily::xbox?"Xbox":
         family==PadLabelFamily::playstation?"PlayStation":s.generic_pad,
         s.back,family==PadLabelFamily::generic?s.generic_back:
-            family==PadLabelFamily::playstation&&locale==PadInfoLocale::fr?"Rond":pad_back_label(family),
+            family==PadLabelFamily::playstation&&locale==PadInfoLocale::fr?"Rond":
+            family==PadLabelFamily::playstation&&locale==PadInfoLocale::pl?u8"Kółko":pad_back_label(family),
         s.pending,{},true};
     for(unsigned i=0;i<out.rows.size();++i) {
         auto control=family==PadLabelFamily::generic?s.generic_controls[i]:
@@ -131,6 +139,12 @@ constexpr PadInfoView make_pad_info_view(PadInfoLocale locale,bool connected,
             if(i==2)control="Rond";
             if(i==3)control=u8"Carr\u00e9 / L1";
             if(i==4)control="Triangle / R1";
+        }
+        if(family==PadLabelFamily::playstation && locale==PadInfoLocale::pl){
+            if(i==1)control=u8"Krzy\u017cyk";
+            if(i==2)control=u8"K\u00f3\u0142ko";
+            if(i==3)control="Kwadrat / L1";
+            if(i==4)control=u8"Tr\u00f3jk\u0105t / R1";
         }
         if(i==0)control=s.left_stick;
         if(i==5)control=s.right_stick;
