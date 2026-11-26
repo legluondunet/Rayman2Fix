@@ -15,7 +15,7 @@ int main(){
     if(!bitmap || !bits){if(bitmap)DeleteObject(bitmap);DeleteDC(dc);return 2;}
     auto old=SelectObject(dc,bitmap);
     bool ok=old && old!=HGDI_ERROR;
-    for(unsigned i=0;i<5 && ok;++i){
+    for(unsigned i=0;i<kPadInfoStrings.size() && ok;++i){
         for(auto family:{PadLabelFamily::generic,PadLabelFamily::xbox,PadLabelFamily::playstation}){
             const auto view=make_pad_info_view(static_cast<PadInfoLocale>(i),true,family);
             if(!draw_controller_info_preview(dc,view)){
@@ -51,7 +51,7 @@ int main(){
     }
     if(old && old!=HGDI_ERROR)SelectObject(dc,old);
     DeleteObject(bitmap);DeleteDC(dc);
-    if(ok)std::cout<<"20 localized controller diagram variants rendered without clipping\n";
+    if(ok)std::cout<<"24 localized controller diagram variants rendered without clipping\n";
     return ok?0:3;
 }
 #endif
