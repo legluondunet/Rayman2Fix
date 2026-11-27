@@ -5494,19 +5494,47 @@ void log_replay_intro_audit(const char* phase,std::uintptr_t base,
         static_cast<unsigned long>(region_ok?region.Protect:0));
     log_line(msg);
 }
+// The retail engine's verified Fix actor memory is already RWX under
+// Wine (live first/replay audits both report protection 0x40). Accept
+// that existing writable protection, without calling VirtualProtect or
+// widening any permissions. Keep copy-on-write and guard pages refused.
+constexpr bool replay_intro_writable_page(DWORD protection) noexcept {
+    const auto access=protection&0xffu;
+    return !(protection&(PAGE_GUARD|PAGE_NOACCESS)) &&
+           (access==PAGE_READWRITE || access==PAGE_EXECUTE_READWRITE);
+}
+static_assert(replay_intro_writable_page(PAGE_READWRITE));
+static_assert(replay_intro_writable_page(PAGE_EXECUTE_READWRITE));
+static_assert(!replay_intro_writable_page(PAGE_EXECUTE_READWRITE|PAGE_GUARD));
+static_assert(!replay_intro_writable_page(PAGE_READWRITE|PAGE_GUARD));
+static_assert(!replay_intro_writable_page(PAGE_NOACCESS));
+static_assert(!replay_intro_writable_page(PAGE_READONLY));
+static_assert(!replay_intro_writable_page(PAGE_EXECUTE_READ));
+static_assert(!replay_intro_writable_page(PAGE_EXECUTE));
+static_assert(!replay_intro_writable_page(PAGE_WRITECOPY));
+static_assert(!replay_intro_writable_page(PAGE_EXECUTE_WRITECOPY));
+
 bool replay_intro_compare_exchange(std::uintptr_t address,std::uint32_t old_word,
-                                   std::uint32_t new_word) {
-    if(!address || (address&3u))return false;
+                                   std::uint32_t new_word,
+                                   const char** reason=nullptr) {
+    const auto refuse=[&](const char* why) {
+        if(reason)*reason=why;
+        return false;
+    };
+    if(!address || (address&3u))return refuse("word-alignment");
     MEMORY_BASIC_INFORMATION region{};
-    if(!VirtualQuery(reinterpret_cast<const void*>(address),&region,sizeof(region)) ||
-       region.State!=MEM_COMMIT || (region.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
-       (region.Protect&0xffu)!=PAGE_READWRITE)return false;
+    if(!VirtualQuery(reinterpret_cast<const void*>(address),&region,sizeof(region)))
+        return refuse("word-region-query");
+    if(region.State!=MEM_COMMIT)return refuse("word-region-state");
+    if(!replay_intro_writable_page(region.Protect))return refuse("word-region-protection");
     const auto start=reinterpret_cast<std::uintptr_t>(region.BaseAddress);
     if(address<start || region.RegionSize<sizeof(LONG) ||
-       address-start>region.RegionSize-sizeof(LONG))return false;
-    return static_cast<std::uint32_t>(InterlockedCompareExchange(
+       address-start>region.RegionSize-sizeof(LONG))return refuse("word-region-bounds");
+    if(static_cast<std::uint32_t>(InterlockedCompareExchange(
         reinterpret_cast<volatile LONG*>(address),static_cast<LONG>(new_word),
-        static_cast<LONG>(old_word)))==old_word;
+        static_cast<LONG>(old_word)))!=old_word)
+        return refuse("word-changed-before-exchange");
+    return true;
 }
 r2fix::ReplayHandoverWord try_replay_intro_reset(std::uintptr_t base,
                                                 std::uintptr_t legacy_words) {
@@ -5544,8 +5572,9 @@ r2fix::ReplayHandoverWord try_replay_intro_reset(std::uintptr_t base,
         return refuse("legacy-address-mismatch");
     if(!(word.value&r2fix::replay_handover_mask))return refuse("handover-already-clear");
     const auto reset=r2fix::replay_handover_reset_word(word.value);
-    if(!replay_intro_compare_exchange(word.address,word.value,reset))
-        return refuse("compare-exchange-or-protection");
+    const char* write_refusal="word-exchange";
+    if(!replay_intro_compare_exchange(word.address,word.value,reset,&write_refusal))
+        return refuse(write_refusal);
     g_replay_intro_route.consume();
     log_line("RUNTIME-REPLAY-INTRO: reset=applied bit=1091 route=handover-menu-or-pause-jail10-jail20 initial_and_default_clear=1 other_bits_preserved=1 current_memory_only=1");
     return word;
