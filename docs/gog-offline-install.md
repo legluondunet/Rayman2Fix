@@ -24,7 +24,7 @@ References:
 - https://constexpr.org/innoextract/innoextract.1
 - https://constexpr.org/innoextract/
 
-Status: extraction and shared-runtime candidate launch path implemented on the draft branch. Real GOG extraction and gameplay are not yet validated; launch requires the approved GOG EXE hash and complete static preflight in addition to the GOG receipt.
+Status (27 November 2026): original GOG offline extraction, receipt verification and gameplay under Wine have passed the owner tests. Launch still requires the approved GOG EXE hash and complete static preflight in addition to the GOG receipt. The sections below retain historical research checkpoints. See the final validation section for current evidence.
 
 
 ## Owner-supplied GOG v2 evidence — 25 November 2026
@@ -63,3 +63,12 @@ Local Python access to owner-supplied GOG_reference.zip recovered. SHA-256 of th
 The actual GOG PE imports USER32, GDI32, WINMM, MSVCRT, KERNEL32, SHELL32 and DINPUT (DirectInputCreateA). It does not statically import the bundled GOG wrapper DLLs by other names. DDRAW.dll is present as a string, so absence of static import does not prove the wrapper is unnecessary; the existing Glide path and native system DirectInput are the candidate configuration. Native audio library version/signature checks remain enabled. The extracted GOG Snd_Cpa.ini is kept, including CD_ON_OFF=OFF. Game behavior, sound, controller and menu data remain to be verified in an actual session.
 
 The draft now permits a normal GOG launch only after a verified GOG receipt, approved executable SHA256, PE structural match and all 28 static code/table checks. It uses the unchanged shared fix.dll and normal guarded hook initialization, without an executable replacement. The CD path is unchanged. Temporary extractor/payload is cleaned before launch. The existing --launch-no-verify behavior remains unchanged, and must not be used as the GOG validation route. No actual game execution has occurred in the analysis environment. Linux innoextract and Wine are absent; attempt to obtain the official Linux extractor locally failed. Full extraction of the original GOG setup remains the first real-world check. Prior CI 45660051106 passed Linux and Windows x86; latest candidate CI must pass before requesting gameplay.
+
+
+## Owner validation — 26–27 November 2026
+
+Installer log `Rayman2Fix_installer(20261126-185249).log`: product 1207658940 recognized; manifest lists 2103 files (513213425 bytes); list and extract-and-test both exit 0. Manifest and approved original game executable verified, all 25 code signatures and three dispatch-table checks matched, local SHA-256 receipt published. Verified launch under Wine 11.19; runtime loaded, borderless window applied; child exit 0 after 488163 ms. First-session Log=0 transition confirmed. Subsequent existing-install log `Rayman2Fix_installer(20261126-232341).log` confirms receipt verification, shared-runtime preflight and child exit 0 after 529960 ms.
+
+Owner validated the cleaned standard runtime (build 248332c4, head 851b0d27, workflow 2102) with four consecutive intro transitions of 388 ms. Three guarded replay resets succeeded; first Learn_10 F248 handover verification passed with 71 overrides, original callback slot restored and bit1188 untouched. See [Jail_20 research](research-jail20-native-transition.md) for limitations and the full history. No game files are distributed.
+
+The GOG installer and executable compatibility policy remains unchanged. This establishes the tested GOG package/profile and Wine path, not every localized GOG package or native Windows gameplay. Final CD regression and current-package checks remain separate.
