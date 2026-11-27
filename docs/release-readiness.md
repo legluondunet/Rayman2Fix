@@ -31,10 +31,12 @@ public release.
    swimming scene, and world-knowledge versus Murfy in eligible contexts.
    Keep the pending markers until the actual native effect is confirmed.
    Validate these behaviors under Wine with the available controllers.
-3. Final cross-edition regression: fresh CD installation and verified launch,
-   GOG installation/verification and updated embedded guide. Retain the approved
-   CD executable requirement and original approved GOG executable. Check source
-   availability and all dependency notices. No commercial assets are distributed.
+3. Cross-edition fresh-install regression passed (PR #62 merged as 51ec1665).
+   CD log 20261127-010554: 2095 files verified, approved EXE and backup,
+   successful game exit; GOG installation and repeat verification passed earlier.
+   A separate CD process relaunch is not captured in the first-session logs.
+   Check release source availability and dependency notices before publication.
+   No commercial assets are distributed.
 
 ## Platform validation policy
 
@@ -44,3 +46,7 @@ is not a release prerequisite. Continue Windows x86 automated CI tests;
 report native Windows gameplay coverage as incomplete, not validated.
 
 No public release is authorized by these engineering milestones alone.
+
+## Targeted controller validation candidate
+
+The existing mapping remains unchanged. South (A/Cross) supplies native IPT10/15/21, left trigger supplies IPT13/14, and D-pad Up/Down share the PC DIK_F1 route. A new bounded `RUNTIME-SDL3-TARGET` trace with Log=1 distinguishes physical edges, accepted actions and the first verified native route per accepted activation. The four actions have independent budgets; focus/device/scene boundaries clear route evidence. A native predicate result or keyboard-buffer merge is not proof of swimming movement, opening a screen, or hearing music. Validate those effects visually/audibly. No new setting or game memory write is introduced.
