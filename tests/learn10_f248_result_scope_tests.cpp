@@ -115,5 +115,17 @@ int main() {
     CHECK(!learn10_replay_handover(false,true,true,true,true,true,10000));
     CHECK(learn10_replay_handover(true,true,true,true,true,true,2000));
     CHECK(learn10_replay_handover(true,true,true,true,true,false,3000));
+    CHECK(learn10_extra_cinematic_identity(20,29,50,1092,21,30,49));
+    CHECK(learn10_extra_cinematic_identity(20,29,56,1133,25,34,55));
+    CHECK(learn10_extra_cinematic_identity(20,29,67,1133,25,34,55));
+    CHECK(learn10_extra_cinematic_identity(20,29,66,1130,25,34,55));
+    CHECK(learn10_extra_cinematic_identity(20,29,68,1130,25,34,55));
+    CHECK(!learn10_extra_cinematic_identity(20,29,48,1091,2,16,16));
+    CHECK(!learn10_extra_cinematic_identity(20,29,50,1092,25,34,55));
+    CHECK(!learn10_extra_cinematic_identity(20,29,50,1188,21,30,49));
+    CHECK(!learn10_extra_cinematic_identity(20,29,56,1130,25,34,55));
+    CHECK(!learn10_extra_cinematic_identity(20,29,66,1133,25,34,55));
+    CHECK(!learn10_extra_cinematic_identity(20,29,68,1130,25,34,54));
+    CHECK(!learn10_extra_cinematic_identity(20,28,50,1092,21,30,49));
     return 0;
 }
