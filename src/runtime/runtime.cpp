@@ -4997,14 +4997,13 @@ void log_native_gate_history(DWORD elapsed) {
     }
 }
 
-// Director identification must not depend on Debug.Log. The normal
-// diagnostic snapshot returns early when logging is disabled, so use
-// the same bounded, read-only scene recognizer to obtain the strictly
-// checked F248 director pointers without logging any frame data.
+// Director identification must not depend on Debug.Log or research traces.
+// Standard builds use the bounded read-only scene recognizer to obtain
+// the strictly checked F248 director pointers without dumping frame data.
 // No actor/script memory changes occur here.
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
 void observe_learn10_f248_director_without_log(DWORD elapsed) {
-    if (g_log || !g_f248_enabled.load(std::memory_order_acquire) ||
+    if ((kResearchProbes && g_log) || !g_f248_enabled.load(std::memory_order_acquire) ||
         !g_learn_intro_seen || g_f248_attempted || g_learn_script_probe_done ||
         elapsed>3000u || !g_current_level ||
         !r2fix::is_first_playable_level(g_current_level) ||
@@ -5075,7 +5074,7 @@ void trace_learn10_skip_input() {
 
 void poll_learn_intro_skip() {
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
-    trace_learn10_skip_input();
+    if(kResearchProbes)trace_learn10_skip_input();
     learn10_f248_poll();
 #endif
     if (!g_current_level) {
@@ -5156,7 +5155,7 @@ void poll_learn_intro_skip() {
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
             : "RUNTIME-INTRO: learn_10 skip disabled by configuration; natural scene unchanged");
-        if (g_learn_intro_seen)
+        if (kResearchProbes && g_learn_intro_seen)
             g_learn_first_valid_seen=log_natural_intro_snapshot("opening",0);
     }
     // Sample state changes whenever the callback actually runs; no timer
@@ -5166,7 +5165,7 @@ void poll_learn_intro_skip() {
     if (!handed_over)
         observe_learn10_f248_director_without_log(elapsed);
 #endif
-    if (g_learn_intro_seen && !g_learn_handover && g_log) {
+    if (kResearchProbes && g_learn_intro_seen && !g_learn_handover && g_log) {
         trace_natural_intro_changes(elapsed);
         // The native exit can remove the director between frames. Stop
         // reading its cached bytes at the FIRST observed exit state.
@@ -5176,7 +5175,7 @@ void poll_learn_intro_skip() {
 
     // Consume overdue checkpoints in ONE pass. An earlier build replayed
     // every missed deadline at 32s, creating nine near-duplicate snapshots.
-    if (!handed_over && g_learn_intro_seen && g_log &&
+    if (kResearchProbes && !handed_over && g_learn_intro_seen && g_log &&
         g_learn_trace_index<sizeof(kNaturalTraceTimes)/sizeof(kNaturalTraceTimes[0])) {
         const unsigned before=g_learn_trace_index;
         while (g_learn_trace_index <
@@ -5225,13 +5224,16 @@ void poll_learn_intro_skip() {
             "RUNTIME-INTRO: nomovies-flag at-handover known=%u enabled=%u bit=1188 (read-only; never modified)",
             unsigned(known),unsigned(nomovies));
         log_line(flag);
-        log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
+        if(kResearchProbes)
+            log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
     }
     if (handed_over && g_learn_handover_start &&
         DWORD(GetTickCount() - g_learn_handover_start) >= kNaturalHandoverFollowupMillis) {
         g_learn_handover_start = 0;
-        log_natural_intro_snapshot("handover-plus-1s",DWORD(GetTickCount()-g_learn_intro_start));
-        log_native_gate_history(DWORD(GetTickCount()-g_learn_intro_start));
+        if(kResearchProbes) {
+            log_natural_intro_snapshot("handover-plus-1s",DWORD(GetTickCount()-g_learn_intro_start));
+            log_native_gate_history(DWORD(GetTickCount()-g_learn_intro_start));
+        }
     }
 }
 
@@ -5402,6 +5404,7 @@ bool jail20_find_actors(std::uintptr_t base,std::uint32_t (&found)[3]) {
     return found[0] && found[1] && found[2];
 }
 void poll_jail20_command_trace(bool in_intro,std::uintptr_t base,DWORD elapsed,bool edge) {
+    if(!kResearchProbes)return;
     static std::uint32_t found[3]{};
     static DWORD last_scan=0,last_emit=0;
     static unsigned lines=0;
@@ -5461,7 +5464,7 @@ void poll_jail20_command_trace(bool in_intro,std::uintptr_t base,DWORD elapsed,b
     }
 }
 
-// Candidate replay repair: only one bit in the current, verified new-game
+// Validated replay repair: only one bit in the current, verified new-game
 // progress buffer, never the default/initial arrays or a save file.
 // Read back both initial copies and the same location used by the legacy
 // read-only guard. No F248 override or cinematic actor writes.
@@ -5473,7 +5476,7 @@ r2fix::ReplayHandoverWord replay_intro_word(std::uintptr_t base,
 }
 void log_replay_intro_audit(const char* phase,std::uintptr_t base,
                            std::uintptr_t legacy_words) {
-    if(!g_log)return;
+    if(!kResearchProbes || !g_log)return;
     r2fix::ReplayHandoverAudit d{};
     const auto word=replay_intro_word(base,&d);
     MEMORY_BASIC_INFORMATION region{};
@@ -5618,7 +5621,7 @@ void poll_second_intro_skip() {
     }
     const auto prior_stage=g_replay_intro_route.stage;
     g_replay_intro_route.observe(g_current_level,pause_restart,loading_jail10,loading_jail20);
-    if(prior_stage!=g_replay_intro_route.stage) {
+    if(kResearchProbes && prior_stage!=g_replay_intro_route.stage) {
         char msg[210]{};
         std::snprintf(msg,sizeof(msg),
             "RUNTIME-REPLAY-INTRO: route-stage=%u previous=%u pause_restart=%u queued_jail10=%u queued_jail20=%u",
@@ -6564,7 +6567,7 @@ void poll_sdl3_native() noexcept {
     }
     button_mask=raw_buttons;
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
-    trace_learn10_native_button();
+    if(kResearchProbes)trace_learn10_native_button();
     // Independent per-cinematic physical edge trace. The global button
     // budget must not hide a late South press, and a gated-out press
     // must not be mistaken for an input that never reached SDL.
