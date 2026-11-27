@@ -528,6 +528,17 @@ int main() {
     const auto murphy=pad_action_bit(PadAction::murphy);
     check(pad_gameplay_ipt_binding(10,jump) && pad_gameplay_ipt_binding(15,jump) &&
           pad_gameplay_ipt_binding(21,jump), "South jumps, resurfaces and advances dialogue");
+    for(unsigned index=0;index<138;++index) {
+        const auto* map_binding=pad_world_map_ipt_binding(index,jump);
+        check(bool(map_binding)==(index==10 || index==21),
+              "map South permits only jump and next dialogue");
+        check(!pad_world_map_ipt_binding(index,0) &&
+              !pad_world_map_ipt_binding(index,target) &&
+              !pad_world_map_ipt_binding(index,pad_action_bit(PadAction::confirm)),
+              "map action requires fresh South jump semantic");
+    }
+    check(pad_world_map_ipt_binding(21,jump)->name_fragment=="textesuivant",
+          "map dialogue uses named native action");
     check(pad_gameplay_ipt_binding(13,target) && pad_gameplay_ipt_binding(14,target),
           "left trigger targets or dives");
     check(!pad_gameplay_ipt_binding(22,knowledge) && !pad_gameplay_ipt_binding(22,murphy),
