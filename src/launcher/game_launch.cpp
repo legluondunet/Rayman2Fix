@@ -387,7 +387,7 @@ int launch_verified_game(Startup& startup, bool verify) {
     ratio << std::fixed << std::setprecision(4) << aspect;
     if (verify && gog::has_receipt(root)) {
         startup.log("LAUNCH-READY: edition=GOG game_sha256=" + std::string(gog::executable_sha256) +
-                    " shared_runtime_static_preflight=passed gameframe=verified gameplay_validation=pending");
+                    " shared_runtime_static_preflight=passed gameframe=verified runtime_session=not_started");
     } else if (verify) {
         startup.log(std::string("LAUNCH-READY: original_sha256=") + kOriginalHash +
                     " patched_sha256=" + kUnprotectedHash +
