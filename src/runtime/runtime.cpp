@@ -8746,7 +8746,7 @@ void __cdecl standalone_video_flip() {
     if(prewarm && !scope && g_controller_activity_tick && game_window_is_foreground() &&
        (!last_prewarm || DWORD(now-last_prewarm)>=1000u)) {
         last_prewarm=now;
-        r2fix::warm_controller_info_overlay(controller_info_locale(),g_controller_connected,g_controller_family);
+        r2fix::warm_controller_info_overlay(controller_info_locale(),g_controller_connected,g_controller_family,g_hud_scale);
     }
 #endif
 }

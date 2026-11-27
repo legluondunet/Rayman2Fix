@@ -281,6 +281,32 @@ int main() {
     check(pad_composite565(0xffffu,transparent,{16,0})!=0xffffu &&
           pad_composite565(0,transparent,{16,0})!=0,"translucent tint on distinct scenes");
     check(!composite_controller_info(nullptr,0,nullptr,0),"invalid overlay refuses");
+    // Compare every pixel against the original algorithm for both aspect
+    // ratios, with mixed alpha and a changing synthetic native scene.
+    {
+        std::vector<PadOverlayPixel> art(kPadInfoPixels);
+        for(std::size_t i=0;i<art.size();++i) {
+            const unsigned a=unsigned((i*37u)%256u);
+            art[i]={std::uint8_t(a/2),std::uint8_t(a/3),std::uint8_t(a/4),
+                    std::uint8_t(a),std::uint8_t(a),std::uint8_t(a)};
+        }
+        std::vector<PadPreparedPixel> prepared;
+        for(unsigned width:{unsigned(kPadInfoWidth),unsigned(kPadInfoWidth*3/4)}) {
+            check(prepare_controller_composite(art.data(),art.size(),width,prepared),"prepare static controller samples");
+            for(unsigned frame=0;frame<2;++frame){
+                std::vector<std::uint16_t> reference(std::size_t(width)*kPadInfoHeight);
+                for(std::size_t i=0;i<reference.size();++i)reference[i]=std::uint16_t(i*1237u+frame*197u);
+                auto actual=reference;
+                check(composite_controller_info(reference.data(),reference.size(),art.data(),art.size(),width) &&
+                      composite_prepared_controller(actual.data(),actual.size(),prepared.data(),prepared.size(),width) &&
+                      actual==reference,"cached composite is pixel-exact across live scenes");
+            }
+        }
+        const auto old_size=prepared.size();
+        check(!prepare_controller_composite(nullptr,0,0,prepared) && prepared.size()==old_size,
+              "invalid preparation preserves last cache");
+        check(!composite_prepared_controller(nullptr,0,nullptr,0,1),"invalid cached render refuses");
+    }
     PadSample visual{};visual.connected=true;visual.device_id=1;visual.foreground=true;
     visual.context=PadContext::controller_info;visual.south=true;visual.right_y_display=-20000;
     visual.back_display=true;visual.left_trigger=20000;

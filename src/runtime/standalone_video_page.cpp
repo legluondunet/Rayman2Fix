@@ -630,6 +630,8 @@ unsigned pad_perf_us(PadPerfClock::time_point begin,PadPerfClock::time_point end
 }
 struct ControllerOverlayCache {
     std::vector<PadOverlayPixel> overlay;
+    std::vector<PadPreparedPixel> prepared;
+    unsigned prepared_width=0;
     std::vector<std::uint16_t> scene;
     bool valid=false;
     PadInfoLocale locale=PadInfoLocale::en;
@@ -642,7 +644,7 @@ struct ControllerOverlayCache {
         if(matches(l,c,f))return true;
         const auto begin=PadPerfClock::now();
         if(!prepare_controller_info_overlay(make_pad_info_view(l,c,f),overlay))return false;
-        valid=true;locale=l;connected=c;family=f;
+        valid=true;locale=l;connected=c;family=f;prepared_width=0;
         if(g_log) {
             char line[180]{};
             std::snprintf(line,sizeof(line),
@@ -650,6 +652,12 @@ struct ControllerOverlayCache {
                 source,unsigned(l),unsigned(f),unsigned(c),pad_perf_us(begin,PadPerfClock::now()));
             g_log(line);
         }
+        return true;
+    }
+    bool prepare_width(unsigned width) noexcept {
+        if(width && prepared_width==width)return true;
+        if(!prepare_controller_composite(overlay.data(),overlay.size(),width,prepared))return false;
+        prepared_width=width;
         return true;
     }
 };
@@ -660,9 +668,11 @@ ControllerOverlayCache& controller_overlay_cache() {
     return cache;
 }
 }
-bool warm_controller_info_overlay(PadInfoLocale locale,bool connected,PadLabelFamily family) noexcept {
+bool warm_controller_info_overlay(PadInfoLocale locale,bool connected,PadLabelFamily family,float hud_scale) noexcept {
     if(!g_configured.load(std::memory_order_acquire))return false;
-    return controller_overlay_cache().prepare(locale,connected,family,"prewarm");
+    auto& cache=controller_overlay_cache();
+    const auto placement=pad_info_placement(hud_scale);
+    return placement.width && cache.prepare(locale,connected,family,"prewarm") && cache.prepare_width(placement.width);
 }
 bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFamily family,float hud_scale,PadInfoActivity activity) noexcept {
     if(!g_configured.load(std::memory_order_acquire) || !find_glide())return false;
@@ -671,16 +681,15 @@ bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFami
     try {
         auto& cache=controller_overlay_cache();
         const auto begin=PadPerfClock::now();
-        const bool cache_hit=cache.matches(locale,connected,family);
-        if(!cache.prepare(locale,connected,family,"draw"))return false;
+        const bool cache_hit=cache.matches(locale,connected,family) && cache.prepared_width==placement.width;
+        if(!cache.prepare(locale,connected,family,"draw") || !cache.prepare_width(placement.width))return false;
         auto& scene=cache.scene;
-        const auto& overlay=cache.overlay;
         scene.resize(std::size_t(placement.width)*kPadInfoHeight);
         const auto ready=PadPerfClock::now();
         if(!g_read(kBackBuffer,placement.x,kPadInfoY,placement.width,kPadInfoHeight,
                    placement.width*2u,scene.data()))return false;
         const auto read_done=PadPerfClock::now();
-        if(!composite_controller_info(scene.data(),scene.size(),overlay.data(),overlay.size(),placement.width))
+        if(!composite_prepared_controller(scene.data(),scene.size(),cache.prepared.data(),cache.prepared.size(),placement.width))
             return false;
         if(!apply_pad_info_lights(scene.data(),scene.size(),placement.width,family,connected?activity:PadInfoActivity{}))return false;
         const auto composite_done=PadPerfClock::now();

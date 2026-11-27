@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 namespace r2fix {
 // BGRA DIB samples from two identical drawings over black and white.
 // Recover independent per-channel coverage so antialiasing never retains
@@ -94,6 +95,47 @@ inline bool composite_controller_info(std::uint16_t* dst,std::size_t count,
         for(auto& n:sum)n=(n+kPadInfoWidth/2u)/kPadInfoWidth;
         dst[i]=pad_composite565(dst[i],{std::uint8_t(sum[0]),std::uint8_t(sum[1]),std::uint8_t(sum[2]),
             std::uint8_t(sum[3]),std::uint8_t(sum[4]),std::uint8_t(sum[5])},{sum[6],std::min(sum[7],16u-sum[6])});
+    }
+    return true;
+}
+// Cache the exact box-average of the static overlay and panel coverage.
+ // The live scene and physical button lights must still be composed each frame.
+struct PadPreparedPixel {
+    PadOverlayPixel fg;
+    std::uint8_t fill,border;
+};
+inline bool prepare_controller_composite(const PadOverlayPixel* overlay,std::size_t overlay_count,
+                                         unsigned width,std::vector<PadPreparedPixel>& output) noexcept {
+    if(!overlay||!width||width>kPadInfoWidth||overlay_count!=kPadInfoPixels)return false;
+    try {
+        std::vector<PadPreparedPixel> staged(std::size_t(width)*kPadInfoHeight);
+        for(int y=0;y<kPadInfoHeight;++y)for(unsigned x=0;x<width;++x){
+            const unsigned begin=x*kPadInfoWidth,end=(x+1u)*kPadInfoWidth;
+            unsigned sum[8]{};
+            for(unsigned sx=begin/width;sx<=(end-1u)/width;++sx){
+                const unsigned weight=std::min(end,(sx+1u)*width)-std::max(begin,sx*width);
+                const auto fg=overlay[std::size_t(y)*kPadInfoWidth+sx];
+                const auto c=pad_panel_coverage(int(sx),y);
+                const unsigned channels[]{fg.r,fg.g,fg.b,fg.ar,fg.ag,fg.ab,c.fill,c.border};
+                for(unsigned j=0;j<8;++j)sum[j]+=channels[j]*weight;
+            }
+            for(auto& n:sum)n=(n+kPadInfoWidth/2u)/kPadInfoWidth;
+            staged[std::size_t(y)*width+x]={{std::uint8_t(sum[0]),std::uint8_t(sum[1]),std::uint8_t(sum[2]),
+                std::uint8_t(sum[3]),std::uint8_t(sum[4]),std::uint8_t(sum[5])},
+                std::uint8_t(sum[6]),std::uint8_t(std::min(sum[7],16u-sum[6]))};
+        }
+        output.swap(staged);
+        return true;
+    }catch(...){return false;}
+}
+inline bool composite_prepared_controller(std::uint16_t* dst,std::size_t count,
+                                          const PadPreparedPixel* prepared,std::size_t prepared_count,
+                                          unsigned width) noexcept {
+    if(!dst||!prepared||!width||width>kPadInfoWidth||
+       count!=std::size_t(width)*kPadInfoHeight||prepared_count!=count)return false;
+    for(std::size_t i=0;i<count;++i){
+        const auto& p=prepared[i];
+        dst[i]=pad_composite565(dst[i],p.fg,{p.fill,p.border});
     }
     return true;
 }
