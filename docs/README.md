@@ -1,6 +1,6 @@
 # Rayman2Fix — Guide de l'installation
 
-Rayman2Fix modernise l'édition PC CD-ROM prise en charge de **Rayman 2: The Great Escape**.
+Rayman2Fix modernise les éditions PC CD-ROM et GOG prises en charge de **Rayman 2: The Great Escape**.
 Cet exécutable ne contient ni les fichiers commerciaux du jeu, ni son exécutable déchiffré.
 
 ## Installation neuve uniquement
@@ -8,20 +8,22 @@ Cet exécutable ne contient ni les fichiers commerciaux du jeu, ni son exécutab
 1. Créer un **nouveau dossier vide** pour Rayman2Fix. Ne pas placer le nouveau
    lanceur dans une installation utilisant l'ancienne arborescence `rayman2/`
    ou `Rayman2Fix/` : aucune migration automatique n'est prise en charge.
-2. Copier `Rayman2Fix.exe` et **une seule** image CD d'origine `.iso` ou
-   `.cue` (avec ses fichiers `.bin` requis) dans ce dossier.
-3. Placer l'exécutable déchiffré `Rayman2.exe` approuvé à côté du lanceur,
-   si aucun correctif binaire approuvé n'est déjà intégré au lanceur.
-   L'installateur vérifie sa taille et son empreinte SHA-256.
-4. Exécuter simplement **`Rayman2Fix.exe`** : le lanceur installe les
-   fichiers du CD, vérifie leur intégrité, applique le remplacement approuvé
-   de l'exécutable si disponible, puis démarre le jeu automatiquement.
+2. Copier `Rayman2Fix.exe` et **une seule source** dans ce dossier :
+   - CD : une image `.iso` ou `.cue` avec ses pistes référencées, ainsi que
+     l'exécutable déchiffré `Rayman2.exe` approuvé si aucun delta approuvé
+     n'est intégré au lanceur.
+   - GOG : l'installateur hors ligne `.exe` et tous ses fichiers `.bin`
+     associés. Aucun exécutable de jeu supplémentaire ni GOG Galaxy requis.
+     Le lanceur utilise innoextract intégré sans exécuter le setup d'origine.
+3. Exécuter simplement **`Rayman2Fix.exe`** : le lanceur installe,
+   vérifie et démarre le jeu automatiquement.
    L'option `--install-only` est facultative : elle sert uniquement à
    installer ou vérifier **sans lancer le jeu**.
 
 Le lanceur refuse les versions inconnues de l'exécutable ou un support CD
-non reconnu. Il conserve l'original protégé dans `game/rayman2.exe.bak`
-lorsqu'un remplacement approuvé a lieu. Aucune copie d'un ancien jeu ou de
+non reconnu ou un installateur GOG incompatible. Il conserve l'original protégé dans `game/rayman2.exe.bak`
+lorsqu'un remplacement CD approuvé a lieu. L'exécutable GOG original
+est conservé, sans remplacement. Aucune copie d'un ancien jeu ou de
 ses sauvegardes n'est effectuée automatiquement.
 
 ## Arborescence
@@ -50,11 +52,13 @@ docs/
     LICENSE                   (licence GNU GPLv3 du projet)
     GameFrame-LICENSE-APACHE.txt
     SDL3-LICENSE.txt
+    innoextract-notices.txt
     build-info.txt
     README.md
 state/
     .rayman2fix-cd-files.tsv
-    .rayman2fix-exe-patch.tsv  (si correctif approuvé appliqué)
+    .rayman2fix-exe-patch.tsv  (si correctif CD approuvé appliqué)
+    .rayman2fix-gog-files.tsv  (GOG, à la place des reçus CD)
 ```
 
 - `game/` : fichiers nécessaires à Rayman 2 et DLL native du correctif.
@@ -98,7 +102,7 @@ state/
 
 ## Utilisation et options
 
-- `Rayman2Fix.exe --verify` : vérifier les données locales du CD.
+- `Rayman2Fix.exe --verify` : vérifier les données locales CD ou GOG.
 - `Rayman2Fix.exe --inspect image.iso` : inspecter le support et produire
   `Rayman2Fix_inspect.log`.
 - `Rayman2Fix.exe --help` : consulter les commandes disponibles.
@@ -169,4 +173,7 @@ prise en charge, il faut encore fournir localement un exécutable
 déchiffré approuvé ou un delta de patch approuvé déjà intégré au lanceur.
 Rayman2Fix est placé sous licence GNU GPL version 3 uniquement
 (`GPL-3.0-only`) ; le texte intégral est installé dans `docs/LICENSE`.
-La licence Apache 2.0 de GameFrame est fournie séparément.
+La licence Apache 2.0 de GameFrame est fournie séparément. Les notices
+innoextract et de ses dépendances sont installées dans
+`docs/innoextract-notices.txt`. L'édition GOG conserve son exécutable
+original approuvé ; les archives d'origine restent intactes.

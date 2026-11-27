@@ -54,6 +54,8 @@ NativeMenuScriptNode* g_site_script_copy=nullptr;
 // already executing AI interpreter may still hold the old pointer.
 SiteLogger g_logger=nullptr;
 char g_site_label[96]{};
+// Process-lifetime storage for short original captions; never grow the native buffer.
+char g_short_site_caption[]="/C:Rayman2Fix";
 bool read_site32(std::uintptr_t address,std::uint32_t& out) noexcept {
     SIZE_T done=0;
     return address>=0x10000u &&
@@ -346,7 +348,18 @@ bool prepare_main_menu_site_caption(std::uintptr_t table,SiteLogger logger) noex
     if(!read_exact(slot,&source,4u) || source<0x10000u ||
        !read_exact(source,label,sizeof(label)-1u))return false;
     if(approved_replaced_main_menu_site_text(label))return true;
-    if(!replace_verified_source_caption(source,label))return false;
+    if(!replace_verified_source_caption(source,label)) {
+        // Polish Internet is shorter than Rayman2Fix. Replace only the
+        // exact verified text slot, not the original character buffer.
+        if(!approved_main_menu_site_text(label) || !writable(slot))return false;
+        if(InterlockedCompareExchangePointer(
+                reinterpret_cast<PVOID volatile*>(slot),
+                static_cast<void*>(g_short_site_caption),
+                reinterpret_cast<void*>(std::uintptr_t(source)))!=
+                reinterpret_cast<void*>(std::uintptr_t(source)))return false;
+        if(logger)logger("RUNTIME-MENU-SITE: short-caption-pointer=Rayman2Fix handle=362 native-buffer-unchanged=1");
+        return true;
+    }
     if(logger)logger("RUNTIME-MENU-SITE: early-caption=Rayman2Fix source=verified-handle362 before-controller-scan=1");
     return true;
 }

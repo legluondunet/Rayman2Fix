@@ -1,5 +1,7 @@
 #include "rayman2fix/game_launch.hpp"
 #include "rayman2fix/install_layout.hpp"
+#include "rayman2fix/gog_offline.hpp"
+#include "rayman2fix/gog_hook_diagnostics.hpp"
 
 #include "rayman2fix/gameframe.hpp"
 #include "rayman2fix/game_config.hpp"
@@ -129,19 +131,27 @@ struct Handle {
 
 GameLaunchPreflight check_game_launch(const fs::path& root) {
     try {
-        // Existing installer verification checks the entire CD receipt first;
-        // this second gate authenticates the specific executable edition.
-        if (!is_exe_replaced(root))
-            return {false, "original protected game EXE has not been patched"};
-        const auto exe = root / "rayman2.exe";
-        const auto backup = root / "rayman2.exe.bak";
-        if (!matches(exe, kUnprotectedBytes, kUnprotectedHash))
-            return {false, "patched rayman2.exe SHA256/size is not approved"};
-        if (!matches(backup, kOriginalBytes, kOriginalHash))
-            return {false, "original rayman2.exe.bak SHA256/size is not approved"};
-        std::string problem;
-        if (!verify_exe_replacement(root, kOriginalHash, kOriginalBytes, problem))
-            return {false, "EXE patch marker verification failed: " + problem};
+        if (gog::has_receipt(root)) {
+            std::string problem;
+            if (!gog::verify_receipt(root, problem))
+                return {false, "GOG receipt verification failed: " + problem};
+            if (!gog::shared_runtime_preflight(gog::read_pe_diagnostic(root / "rayman2.exe")))
+                return {false, "GOG shared runtime static preflight refused"};
+        } else {
+            // Existing installer verification checks the entire CD receipt first;
+            // this second gate authenticates the specific executable edition.
+            if (!is_exe_replaced(root))
+                return {false, "original protected game EXE has not been patched"};
+            const auto exe = root / "rayman2.exe";
+            const auto backup = root / "rayman2.exe.bak";
+            if (!matches(exe, kUnprotectedBytes, kUnprotectedHash))
+                return {false, "patched rayman2.exe SHA256/size is not approved"};
+            if (!matches(backup, kOriginalBytes, kOriginalHash))
+                return {false, "original rayman2.exe.bak SHA256/size is not approved"};
+            std::string problem;
+            if (!verify_exe_replacement(root, kOriginalHash, kOriginalBytes, problem))
+                return {false, "EXE patch marker verification failed: " + problem};
+        }
         if (!gameframe_glide_ready(root))
             return {false, "required game/glide2x.dll is missing or unverified"};
         if (!fs::is_regular_file(root / "ubi.ini") ||
@@ -375,7 +385,10 @@ int launch_verified_game(Startup& startup, bool verify) {
                         static_cast<double>(content.second);
     std::ostringstream ratio;
     ratio << std::fixed << std::setprecision(4) << aspect;
-    if (verify) {
+    if (verify && gog::has_receipt(root)) {
+        startup.log("LAUNCH-READY: edition=GOG game_sha256=" + std::string(gog::executable_sha256) +
+                    " shared_runtime_static_preflight=passed gameframe=verified runtime_session=not_started");
+    } else if (verify) {
         startup.log(std::string("LAUNCH-READY: original_sha256=") + kOriginalHash +
                     " patched_sha256=" + kUnprotectedHash +
                     " gameframe=verified input=keyboard SDL3=deferred");

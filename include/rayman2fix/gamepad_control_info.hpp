@@ -52,17 +52,17 @@ constexpr std::string_view pad_back_label(PadLabelFamily family) noexcept {
         default: return "East";
     }
 }
-// Presentation strings authored for the five original PC languages.
+// Presentation strings authored for the original PC languages, including the Polish GOG edition.
 // UTF-8 for interchange; a Windows renderer must convert to wide text
 // rather than use the process ANSI code page. No native asset copying.
-enum class PadInfoLocale : unsigned { en, fr, es, it, de };
+enum class PadInfoLocale : unsigned { en, fr, es, it, de, pl };
 struct PadInfoStrings {
     std::string_view no_pad, generic_pad, back, pending;
     std::array<std::string_view,11> actions;
     std::array<std::string_view,11> generic_controls;
     std::string_view left_stick, right_stick, up, down, generic_back;
 };
-inline constexpr std::array<PadInfoStrings,5> kPadInfoStrings{{
+inline constexpr std::array<PadInfoStrings,6> kPadInfoStrings{{
     {"No controller connected","Generic controller","Back","To be tested",
      {"Move","Jump / surface","Shoot","Camera left","Camera right","Camera rotation",
       "Target / dive","Statistics","World knowledge","Call Murfy","Pause"},
@@ -97,8 +97,50 @@ inline constexpr std::array<PadInfoStrings,5> kPadInfoStrings{{
      {"Linker Stick","Untere Taste","Rechte Taste","Linke Taste / linke Schultertaste",
       "Obere Taste / rechte Schultertaste","Rechter Stick","Linker Trigger","Rechter Trigger",
       "Steuerkreuz oben","Steuerkreuz unten","Start"},
-     "Linker Stick","Rechter Stick","Steuerkreuz oben","Steuerkreuz unten","Rechte Taste"}
+     "Linker Stick","Rechter Stick","Steuerkreuz oben","Steuerkreuz unten","Rechte Taste"},
+    {u8"Nie pod\u0142\u0105czono kontrolera","Kontroler uniwersalny",u8"Wr\u00f3\u0107","Do sprawdzenia",
+     {"Ruch","Skok / wynurzanie","Strzelanie","Kamera w lewo","Kamera w prawo",u8"Obr\u00f3t kamery",
+      "Celowanie / nurkowanie","Statystyki",u8"Wiedza o \u015bwiecie",u8"Wezwij Murfy\u2019ego","Pauza"},
+     {u8"Lewy dr\u0105\u017cek","Dolny przycisk","Prawy przycisk","Lewy przycisk / lewy bumper",
+      u8"G\u00f3rny przycisk / prawy bumper",u8"Prawy dr\u0105\u017cek","Lewy spust","Prawy spust",
+      u8"Krzy\u017cak w g\u00f3r\u0119",u8"Krzy\u017cak w d\u00f3\u0142","Start"},
+     u8"Lewy dr\u0105\u017cek",u8"Prawy dr\u0105\u017cek",u8"Krzy\u017cak w g\u00f3r\u0119",u8"Krzy\u017cak w d\u00f3\u0142","Prawy przycisk"}
 }};
+// Original game label, with explicit ASCII, CP1250 and UTF-8 Polish
+// representations. Unknown native glyph encodings remain unrecognized.
+constexpr PadInfoLocale pad_info_locale_from_label(std::string_view text) noexcept {
+    if(text=="/C:LANGUE")return PadInfoLocale::fr;
+    if(text=="/C:IDIOMA")return PadInfoLocale::es;
+    if(text=="/C:LINGUA")return PadInfoLocale::it;
+    if(text=="/C:SPRACHE")return PadInfoLocale::de;
+    // Actual Polish GOG native label, owner log 2026-11-26:
+    // 2F433A4AE45A594B. 0xE4 is the game's own glyph encoding.
+    if(text=="/C:J\xe4ZYK" || text=="/C:JEZYK" || text=="/C:J\xcaZYK" ||
+       text==u8"/C:J\u0118ZYK")return PadInfoLocale::pl;
+    return PadInfoLocale::en;
+}
+// The Polish GOG release may use a proprietary glyph for the accented
+// LANGUAGE label. Identify its unaccented native captions instead,
+// within the active localization table only. Two distinct captions are
+// required, so a single incidental string cannot switch the UI language.
+constexpr unsigned pad_polish_caption_marker(std::string_view text) noexcept {
+    if(text.size()>=3 && text.substr(0,3)=="/C:")text.remove_prefix(3);
+    const auto equals_ascii=[&](std::string_view expected) {
+        if(text.size()!=expected.size())return false;
+        for(std::size_t i=0;i<text.size();++i) {
+            char c=text[i];
+            if(c>='a'&&c<='z')c=char(c-'a'+'A');
+            if(c!=expected[i])return false;
+        }
+        return true;
+    };
+    return equals_ascii("STEROWANIE")?1u:
+           equals_ascii("NOWA GRA")?2u:
+           equals_ascii("OPCJE")?4u:0u;
+}
+constexpr bool pad_polish_caption_set(unsigned markers) noexcept {
+    return (markers&1u)!=0 && (markers&6u)!=0;
+}
 constexpr const PadInfoStrings& pad_info_strings(PadInfoLocale locale) noexcept {
     const auto i=static_cast<unsigned>(locale);
     return kPadInfoStrings[i<kPadInfoStrings.size()?i:0];
@@ -121,7 +163,8 @@ constexpr PadInfoView make_pad_info_view(PadInfoLocale locale,bool connected,
         family==PadLabelFamily::xbox?"Xbox":
         family==PadLabelFamily::playstation?"PlayStation":s.generic_pad,
         s.back,family==PadLabelFamily::generic?s.generic_back:
-            family==PadLabelFamily::playstation&&locale==PadInfoLocale::fr?"Rond":pad_back_label(family),
+            family==PadLabelFamily::playstation&&locale==PadInfoLocale::fr?"Rond":
+            family==PadLabelFamily::playstation&&locale==PadInfoLocale::pl?u8"K\u00f3\u0142ko":pad_back_label(family),
         s.pending,{},true};
     for(unsigned i=0;i<out.rows.size();++i) {
         auto control=family==PadLabelFamily::generic?s.generic_controls[i]:
@@ -131,6 +174,12 @@ constexpr PadInfoView make_pad_info_view(PadInfoLocale locale,bool connected,
             if(i==2)control="Rond";
             if(i==3)control=u8"Carr\u00e9 / L1";
             if(i==4)control="Triangle / R1";
+        }
+        if(family==PadLabelFamily::playstation && locale==PadInfoLocale::pl){
+            if(i==1)control=u8"Krzy\u017cyk";
+            if(i==2)control=u8"K\u00f3\u0142ko";
+            if(i==3)control="Kwadrat / L1";
+            if(i==4)control=u8"Tr\u00f3jk\u0105t / R1";
         }
         if(i==0)control=s.left_stick;
         if(i==5)control=s.right_stick;

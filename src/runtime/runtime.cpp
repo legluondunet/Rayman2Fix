@@ -214,6 +214,7 @@ using RequestLevel = void (__cdecl*)(const char*, unsigned char);
 std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
 r2fix::IntroSkipGuard g_intro_guard;
+r2fix::ReplayIntroRoute g_replay_intro_route;
 bool g_intro_level_logged = false;
 // Diagnostic-only timestamp of render sources. These do not authorize
 // audio compensation, skip inputs, or changes in foreground policy.
@@ -4732,7 +4733,7 @@ void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output
     // All ordinary F248 calls have ALREADY forwarded to the native
     // handler. Only inspect the exact function child of the approved
     // director's b3/rule1 K1 root. No general keyword interception.
-    std::uint32_t root_keyword=0,func_id=0,active_b=0,live_root=0;
+    std::uint32_t root_keyword=0,func_id=0,active_b=0,live_rules=0,live_root=0;
     std::uint32_t result_value=0,result_type=0;
     std::uint8_t root_depth=0,root_type=0,func_type=0;
     bool nomovies=false,handed_over=false;
@@ -4743,6 +4744,7 @@ void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output
         read_u32(root+8u,func_id) && func_id==248u &&
         read_u8(root+15u,func_type) && func_type==3u &&
         read_u32(intel+8u,active_b) && std::uintptr_t(active_b)==b3 &&
+        read_u32(b3,live_rules) && std::uintptr_t(live_rules)==rules &&
         read_u32(rules+4u,live_root) && std::uintptr_t(live_root)==root &&
         game_story_bit(words,kNoMoviesCheatBit,nomovies) && !nomovies &&
         game_story_bit(words,kLearnHandoverBit,handed_over) && !handed_over &&
@@ -4768,7 +4770,8 @@ void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output
     sample.approved_cd=true; // code/table checked exactly before installing
     sample.skip_cinematics_enabled=g_f248_enabled.load(std::memory_order_acquire);
     sample.exact_script=true; // fingerprinted on this exact b3/rule1 during arm
-    sample.live_learn10=g_f248_armed.load(std::memory_order_acquire);
+    sample.live_learn10=g_f248_armed.load(std::memory_order_acquire) &&
+        g_current_level && r2fix::is_first_playable_level(g_current_level);
     sample.first_visit=true; // story1091 was read as false above
     sample.nomovies_bit_known_off=true; // story1188 read as false above
     sample.handover_incomplete=true;
@@ -4831,13 +4834,14 @@ void learn10_f248_disarm(const char* reason) {
         g_f248_slot_installed.store(false,std::memory_order_release);
     char line[256]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-LEARN10-F248: phase=disarmed reason=%s slot_restored=%u calls=%u matches=%u overrides=%u foreign_thread=%u enter_edges=%u story_bit1188_never_written=1",
+        "RUNTIME-LEARN10-F248: phase=disarmed reason=%s slot_restored=%u calls=%u matches=%u overrides=%u foreign_thread=%u enter_edges=%u active_ms=%lu story_bit1188_never_written=1",
         reason,unsigned(restored),
         g_f248_calls.load(std::memory_order_relaxed),
         g_f248_matches.load(std::memory_order_relaxed),
         g_f248_overrides.load(std::memory_order_relaxed),
         g_f248_foreign_thread.load(std::memory_order_relaxed),
-        g_f248_enter_edges);
+        g_f248_enter_edges,
+        static_cast<unsigned long>(DWORD(GetTickCount()-g_f248_armed_at.load(std::memory_order_acquire))));
     log_line(line);
     if(!restored)
         log_line("RUNTIME-LEARN10-F248: WARNING callback slot restoration failed; overrides disabled");
@@ -4899,7 +4903,7 @@ void learn10_f248_try_arm(bool handed_over,DWORD elapsed) {
     g_f248_ever_armed.store(true,std::memory_order_release);
     char line[220]{};
     std::snprintf(line,sizeof(line),
-        "RUNTIME-LEARN10-F248: phase=armed t=%ums director=3 native=F248 temporary_output_0_to_1=1 story_bit1188_readonly=1 max_active_ms=5000",
+        "RUNTIME-LEARN10-F248: phase=armed t=%ums director=3 native=F248 temporary_output_0_to_1=1 story_bit1188_readonly=1 lifetime=verified-director-context",
         unsigned(DWORD(GetTickCount()-g_learn_intro_start)));
     log_line(line);
 }
@@ -4910,18 +4914,46 @@ void learn10_f248_poll() {
         learn10_f248_disarm("not-armed");
         return;
     }
+
+    // Maintain the exact original native input branch throughout the
+    // verified cinematic, including an input after five seconds. The
+    // callback also checks its exact actor/rule/story on every call.
+    r2fix::Learn10F248Lifetime lifetime{};
+    lifetime.enabled=g_f248_enabled.load(std::memory_order_acquire);
+    lifetime.live_learn10=g_current_level &&
+        r2fix::is_first_playable_level(g_current_level);
+    if (lifetime.enabled && lifetime.live_learn10) {
+        const auto words=g_f248_words.load(std::memory_order_acquire);
+        lifetime.story_readable=words &&
+            game_story_bit(words,kNoMoviesCheatBit,lifetime.nomovies) &&
+            game_story_bit(words,kLearnHandoverBit,lifetime.handed_over);
+        const auto intel=g_f248_intel.load(std::memory_order_acquire);
+        const auto b3=g_f248_b3.load(std::memory_order_acquire);
+        const auto rules=g_f248_rules.load(std::memory_order_acquire);
+        const auto root=g_f248_root.load(std::memory_order_acquire);
+        std::uint32_t behaviour=0,live_rules=0,live_root=0,keyword=0,fn=0;
+        std::uint8_t depth=0,type=0,fn_type=0;
+        lifetime.director_readable=intel && b3 &&
+            read_u32(intel+8u,behaviour);
+        lifetime.same_behaviour=lifetime.director_readable &&
+            std::uintptr_t(behaviour)==b3;
+        lifetime.same_rule_root=lifetime.same_behaviour && rules && root &&
+            read_u32(b3,live_rules) && std::uintptr_t(live_rules)==rules &&
+            read_u32(rules+4u,live_root) && std::uintptr_t(live_root)==root &&
+            read_u32(root,keyword) && keyword==1u &&
+            read_u8(root+6u,depth) && depth==1u &&
+            read_u8(root+7u,type) && type==0u &&
+            read_u32(root+8u,fn) && fn==248u &&
+            read_u8(root+15u,fn_type) && fn_type==3u;
+    }
+    const char* reason=r2fix::learn10_f248_disarm_reason(lifetime);
+    if(reason) {
+        learn10_f248_disarm(reason);
+        return;
+    }
     const bool down=(GetAsyncKeyState(VK_RETURN)&0x8000)!=0;
     if(down && !g_f248_enter_was_down) ++g_f248_enter_edges;
     g_f248_enter_was_down=down;
-    const auto intel=g_f248_intel.load(std::memory_order_acquire);
-    std::uint32_t behaviour=0;
-    bool left=false;
-    if(intel && read_u32(intel+8u,behaviour) &&
-       std::uintptr_t(behaviour)!=g_f248_b3.load(std::memory_order_acquire))
-        left=true;
-    const DWORD age=DWORD(GetTickCount()-g_f248_armed_at.load(std::memory_order_acquire));
-    if(left || age>=5000u)
-        learn10_f248_disarm(left?"director-left-b3":"max-active-5000ms");
 }
 
 void learn10_f248_handover() {
@@ -4965,14 +4997,13 @@ void log_native_gate_history(DWORD elapsed) {
     }
 }
 
-// Director identification must not depend on Debug.Log. The normal
-// diagnostic snapshot returns early when logging is disabled, so use
-// the same bounded, read-only scene recognizer to obtain the strictly
-// checked F248 director pointers without logging any frame data.
+// Director identification must not depend on Debug.Log or research traces.
+// Standard builds use the bounded read-only scene recognizer to obtain
+// the strictly checked F248 director pointers without dumping frame data.
 // No actor/script memory changes occur here.
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
 void observe_learn10_f248_director_without_log(DWORD elapsed) {
-    if (g_log || !g_f248_enabled.load(std::memory_order_acquire) ||
+    if ((kResearchProbes && g_log) || !g_f248_enabled.load(std::memory_order_acquire) ||
         !g_learn_intro_seen || g_f248_attempted || g_learn_script_probe_done ||
         elapsed>3000u || !g_current_level ||
         !r2fix::is_first_playable_level(g_current_level) ||
@@ -4995,8 +5026,55 @@ void observe_learn10_f248_director_without_log(DWORD elapsed) {
 }
 #endif
 
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept;
+#endif
+// Read-only input trace, independent of whether the F248 slot is armed.
+// A refused or completed intro must not look like a lost button press.
+void trace_learn10_skip_input() {
+    static unsigned previous=0,reports=0;
+    if(!g_current_level || !r2fix::is_first_playable_level(g_current_level)) {
+        previous=reports=0;
+        return;
+    }
+    if(!g_log || !g_f248_enabled.load(std::memory_order_acquire) ||
+       !game_window_is_foreground()) {
+        previous=0;
+        return;
+    }
+    unsigned mask=0;
+    if(GetAsyncKeyState(VK_RETURN)&0x8000)mask|=1u;
+    if(GetAsyncKeyState(VK_SPACE)&0x8000)mask|=2u;
+    if(GetAsyncKeyState(VK_ESCAPE)&0x8000)mask|=4u;
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+    if(sdl_fresh_actions(r2fix::PadContext::learn_cinematic)&
+       r2fix::pad_action_bit(r2fix::PadAction::skip))mask|=8u;
+#endif
+    const auto edges=mask&~previous;
+    previous=mask;
+    // Once the first handover is complete, gameplay Space is not an
+    // intro request. Still report the initial already-playable refusal
+    // in the existing entry diagnostic.
+    if(!edges || !g_learn_intro_seen || g_learn_handover || reports>=32u)return;
+    ++reports;
+    bool handover=false;
+    const bool known=game_story_bit(g_progress_words,kLearnHandoverBit,handover);
+    char line[280]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-LEARN10-INPUT: elapsed_ms=%lu edges=0x%x (1=Enter,2=Space,4=Esc,8=pad) armed=%u slot=%u story1091_known=%u story1091=%u director=%d overrides=%u",
+        static_cast<unsigned long>(DWORD(GetTickCount()-g_learn_intro_start)),
+        edges,unsigned(g_f248_armed.load(std::memory_order_acquire)),
+        unsigned(g_f248_slot_installed.load(std::memory_order_acquire)),
+        unsigned(known),unsigned(handover),g_observed_director_index,
+        g_f248_overrides.load(std::memory_order_relaxed));
+    log_line(line);
+}
+#endif
+
 void poll_learn_intro_skip() {
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
+    if(kResearchProbes)trace_learn10_skip_input();
     learn10_f248_poll();
 #endif
     if (!g_current_level) {
@@ -5077,7 +5155,7 @@ void poll_learn_intro_skip() {
         log_line(handed_over
             ? "RUNTIME-INTRO: learn_10 already playable; skip disabled"
             : "RUNTIME-INTRO: learn_10 skip disabled by configuration; natural scene unchanged");
-        if (g_learn_intro_seen)
+        if (kResearchProbes && g_learn_intro_seen)
             g_learn_first_valid_seen=log_natural_intro_snapshot("opening",0);
     }
     // Sample state changes whenever the callback actually runs; no timer
@@ -5087,7 +5165,7 @@ void poll_learn_intro_skip() {
     if (!handed_over)
         observe_learn10_f248_director_without_log(elapsed);
 #endif
-    if (g_learn_intro_seen && !g_learn_handover && g_log) {
+    if (kResearchProbes && g_learn_intro_seen && !g_learn_handover && g_log) {
         trace_natural_intro_changes(elapsed);
         // The native exit can remove the director between frames. Stop
         // reading its cached bytes at the FIRST observed exit state.
@@ -5097,7 +5175,7 @@ void poll_learn_intro_skip() {
 
     // Consume overdue checkpoints in ONE pass. An earlier build replayed
     // every missed deadline at 32s, creating nine near-duplicate snapshots.
-    if (!handed_over && g_learn_intro_seen && g_log &&
+    if (kResearchProbes && !handed_over && g_learn_intro_seen && g_log &&
         g_learn_trace_index<sizeof(kNaturalTraceTimes)/sizeof(kNaturalTraceTimes[0])) {
         const unsigned before=g_learn_trace_index;
         while (g_learn_trace_index <
@@ -5127,6 +5205,7 @@ void poll_learn_intro_skip() {
 #endif
     if (handed_over && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
+        g_replay_intro_route.note_handover();
         g_learn_handover_start = GetTickCount();
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
         if(g_f248_ever_armed.load(std::memory_order_acquire))
@@ -5145,13 +5224,16 @@ void poll_learn_intro_skip() {
             "RUNTIME-INTRO: nomovies-flag at-handover known=%u enabled=%u bit=1188 (read-only; never modified)",
             unsigned(known),unsigned(nomovies));
         log_line(flag);
-        log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
+        if(kResearchProbes)
+            log_natural_intro_snapshot("handover",DWORD(GetTickCount()-g_learn_intro_start));
     }
     if (handed_over && g_learn_handover_start &&
         DWORD(GetTickCount() - g_learn_handover_start) >= kNaturalHandoverFollowupMillis) {
         g_learn_handover_start = 0;
-        log_natural_intro_snapshot("handover-plus-1s",DWORD(GetTickCount()-g_learn_intro_start));
-        log_native_gate_history(DWORD(GetTickCount()-g_learn_intro_start));
+        if(kResearchProbes) {
+            log_natural_intro_snapshot("handover-plus-1s",DWORD(GetTickCount()-g_learn_intro_start));
+            log_native_gate_history(DWORD(GetTickCount()-g_learn_intro_start));
+        }
     }
 }
 
@@ -5182,6 +5264,325 @@ int intro_next_level_status(std::uintptr_t base) {
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
 std::uint32_t sdl_fresh_actions(r2fix::PadContext expected) noexcept;
 #endif
+// Read-only Jail_20 command-chain diagnostic. GOG data fingerprints,
+// never an input override, scene function call, or write to game memory.
+// Pointers are only cached while the same level is in native Playing.
+struct Jail20TraceActor {
+    std::uint32_t so=0, standard=0, mind=0, model=0, table=0, count=0;
+};
+bool jail20_field(std::uint32_t base,unsigned offset,std::uint32_t& v) {
+    return base>=0x10000u && base<=0xffffffffu-offset &&
+           read_u32(std::uintptr_t(base)+offset,v);
+}
+bool jail20_actor(std::uint32_t so,Jail20TraceActor& a) {
+    std::uint32_t type=0,actor=0,back=0,brain=0,desc=0;
+    a={};
+    a.so=so;
+    return jail20_field(so,0,type) && type==2 &&
+           jail20_field(so,4,actor) && jail20_field(actor,4,a.standard) &&
+           jail20_field(a.standard,12,back) && back==so &&
+           jail20_field(actor,12,brain) && jail20_field(brain,0,a.mind) &&
+           jail20_field(a.mind,0,a.model) && jail20_field(a.model,0,desc) &&
+           jail20_field(desc,0,a.table) && a.table>=0x10000u &&
+           jail20_field(desc,4,a.count) && a.count>0 && a.count<=100;
+}
+bool jail20_ids(const Jail20TraceActor& a,unsigned family,unsigned model,unsigned personal) {
+    std::uint32_t f=0,m=0,p=0;
+    return jail20_field(a.standard,0,f) && jail20_field(a.standard,4,m) &&
+           jail20_field(a.standard,8,p) && f==family && m==model && p==personal;
+}
+bool jail20_node(std::uint32_t nodes,unsigned i,unsigned param,
+                 unsigned depth,unsigned type) {
+    std::uint32_t p=0;
+    std::uint8_t d=0,t=0;
+    return i<8192 && jail20_field(nodes,8*i,p) && p==param &&
+           nodes<=0xffffffffu-(8*i+7) &&
+           read_u8(std::uintptr_t(nodes)+8*i+6,d) && d==depth &&
+           read_u8(std::uintptr_t(nodes)+8*i+7,t) && t==type;
+}
+bool jail20_rule(const Jail20TraceActor& a,unsigned b,unsigned r,std::uint32_t& nodes) {
+    std::uint32_t rules=0;
+    std::uint8_t count=0;
+    return b<a.count && r<64 && jail20_field(a.table,12*b,rules) &&
+           a.table<=0xffffffffu-(12*b+8) &&
+           read_u8(std::uintptr_t(a.table)+12*b+8,count) && r<count &&
+           jail20_field(rules,4*r,nodes) && nodes>=0x10000u;
+}
+bool jail20_owner_shape(const Jail20TraceActor& a) {
+    std::uint32_t n=0;
+    return a.count==3 && jail20_ids(a,2,12,12) &&
+           jail20_rule(a,1,0,n) &&
+           jail20_node(n,2,46,2,3) && jail20_node(n,9,6,2,4) &&
+           jail20_node(n,31,2,5,12) && jail20_node(n,33,86,4,4) &&
+           jail20_node(n,39,99,6,12) && jail20_node(n,41,86,5,4) &&
+           jail20_node(n,43,0,0,8);
+}
+bool jail20_var(const Jail20TraceActor& a,unsigned index,unsigned kind,
+                unsigned expected_offset,unsigned size,std::uint32_t& at) {
+    std::uint32_t mem=0,ref=0,decl=0,infos=0,buffer=0,bytes=0,off=0,t=0;
+    std::uint8_t count=0;
+    if(index>=120 || !jail20_field(a.mind,12,mem) ||
+       !jail20_field(mem,0,ref) || !jail20_field(ref,0,decl) ||
+       !jail20_field(decl,4,infos) || !jail20_field(decl,8,bytes) ||
+       bytes!=4147u || decl>0xffffffffu-12u ||
+       !read_u8(std::uintptr_t(decl)+12,count) || count!=120u ||
+       !jail20_field(mem,8,buffer) || !jail20_field(infos,16*index,off) ||
+       !jail20_field(infos,16*index+4,t) || t!=kind ||
+       off!=expected_offset || off>bytes || size>bytes-off ||
+       buffer<0x10000u || buffer>0xffffffffu-off-size)return false;
+    at=buffer+off;
+    return true;
+}
+bool jail20_producer_shape(const Jail20TraceActor& a,unsigned personal,
+                           unsigned slot,std::uint32_t owner) {
+    std::uint32_t arr=0,element=0,target=0;
+    std::uint8_t count=0;
+    return a.count==9 && jail20_ids(a,13,14,personal) &&
+           jail20_var(a,0,18,0,88,arr) &&
+           jail20_field(arr,0,element) && element==9 &&
+           read_u8(std::uintptr_t(arr)+4,count) && count==20 &&
+           slot<count && jail20_field(arr,8+4*slot,target) && target==owner;
+}
+int jail20_behaviour(const Jail20TraceActor& a) {
+    std::uint32_t intelligence=0,current=0;
+    if(!jail20_field(a.mind,4,intelligence) ||
+       !jail20_field(intelligence,8,current) || current<a.table)return -1;
+    const auto delta=current-a.table;
+    return delta%12==0 && delta/12<a.count ? int(delta/12) : -1;
+}
+struct Jail20TraceValues {
+    int hp=-1,owner_b=-1,p1_b=-1,p1_idx=-1,p1_command=0,p1_match=-1,
+        p2_b=-1,p2_idx=-1,p2_command=0,p2_match=-1;
+    bool p1_valid=false,p2_valid=false;
+};
+bool jail20_producer_values(const Jail20TraceActor& a,std::uint32_t owner,
+                            int& behaviour,int& index,int& command,int& match) {
+    std::uint32_t idx=0,cmd=0,selected=0,bits=0,target=0;
+    std::uint8_t byte=0;
+    if(!jail20_var(a,84,2,4127,1,idx) || !read_u8(idx,byte) ||
+       !jail20_var(a,96,5,2520,4,cmd) || !read_u32(cmd,bits) ||
+       !jail20_var(a,65,9,2444,4,selected) || !read_u32(selected,target))
+        return false;
+    std::int32_t signed_bits=0;
+    std::memcpy(&signed_bits,&bits,sizeof(bits));
+    behaviour=jail20_behaviour(a);
+    index=int(byte); command=int(signed_bits);
+    match=target==owner ? 1 : (target==0 ? 0 : 2);
+    return true;
+}
+// Use the same direct-child world layout as the existing menu actor probe.
+// Require a complete bounded walk and unique candidates across both roots.
+bool jail20_find_actors(std::uintptr_t base,std::uint32_t (&found)[3]) {
+    found[0]=found[1]=found[2]=0;
+    for(const auto rva : {0x100FD0u,0x100FC4u}) {
+        std::uint32_t root=0,child=0,prev=0;
+        if(!read_u32(base+rva,root) || !jail20_field(root,8,child))return false;
+        unsigned n=0;
+        for(;child && n<4096u;++n) {
+            std::uint32_t type=0,next=0,parent=0,back=0;
+            if(!jail20_field(child,0,type) || !jail20_field(child,20,next) ||
+               !jail20_field(child,24,back) || back!=prev ||
+               !jail20_field(child,28,parent) || parent!=root || next==child)
+                return false;
+            if(type==2u) {
+                Jail20TraceActor a{};
+                if(jail20_actor(child,a)) {
+                    int slot=-1;
+                    if(jail20_owner_shape(a))slot=0;
+                    else if(a.count==9 && jail20_ids(a,13,14,14))slot=1;
+                    else if(a.count==9 && jail20_ids(a,13,14,17))slot=2;
+                    if(slot>=0) {
+                        if(found[slot] && found[slot]!=child)return false;
+                        found[slot]=child;
+                    }
+                }
+            }
+            prev=child; child=next;
+        }
+        if(child)return false;
+    }
+    return found[0] && found[1] && found[2];
+}
+void poll_jail20_command_trace(bool in_intro,std::uintptr_t base,DWORD elapsed,bool edge) {
+    if(!kResearchProbes)return;
+    static std::uint32_t found[3]{};
+    static DWORD last_scan=0,last_emit=0;
+    static unsigned lines=0;
+    static char previous[240]{};
+    if(!in_intro || !g_log) {
+        found[0]=found[1]=found[2]=0;
+        last_scan=last_emit=0; lines=0; previous[0]=0;
+        return;
+    }
+    if(lines>=160)return;
+    if(intro_native_engine_mode(base)!=int(kIntroEnginePlaying)) {
+        found[0]=found[1]=found[2]=0;
+        last_scan=0;
+        return;
+    }
+    const DWORD now=GetTickCount();
+    if(!found[0] || !found[1] || !found[2]) {
+        if(last_scan && DWORD(now-last_scan)<500u)return;
+        last_scan=now;
+        if(!jail20_find_actors(base,found)) {
+            found[0]=found[1]=found[2]=0;
+            if(lines<160 && (!last_emit || DWORD(now-last_emit)>=5000u)) {
+                log_line("RUNTIME-JAIL20-COMMAND: actors unavailable (read-only; fingerprint or world walk incomplete)");
+                last_emit=now; ++lines;
+            }
+            return;
+        }
+    }
+    Jail20TraceActor owner{},p1{},p2{};
+    Jail20TraceValues v{};
+    std::uint8_t hp=0;
+    if(!jail20_actor(found[0],owner) || !jail20_ids(owner,2,12,12) ||
+       owner.count!=3 || !read_u8(std::uintptr_t(owner.standard)+0x22,hp) ||
+       !jail20_actor(found[1],p1) || !jail20_producer_shape(p1,14,3,found[0]) ||
+       !jail20_actor(found[2],p2) || !jail20_producer_shape(p2,17,2,found[0]) ||
+       p1.model!=p2.model) {
+        found[0]=found[1]=found[2]=0;
+        return;
+    }
+    v.hp=int(hp); v.owner_b=jail20_behaviour(owner);
+    v.p1_valid=jail20_producer_values(p1,found[0],v.p1_b,v.p1_idx,v.p1_command,v.p1_match);
+    v.p2_valid=jail20_producer_values(p2,found[0],v.p2_b,v.p2_idx,v.p2_command,v.p2_match);
+    char state[240]{};
+    std::snprintf(state,sizeof(state),
+        "hp=%d owner_b=%d p1_ok=%u b=%d V84=%d V96=%d target=%d p2_ok=%u b=%d V84=%d V96=%d target=%d",
+        v.hp,v.owner_b,unsigned(v.p1_valid),v.p1_b,v.p1_idx,v.p1_command,v.p1_match,
+        unsigned(v.p2_valid),v.p2_b,v.p2_idx,v.p2_command,v.p2_match);
+    if(lines>=160)return;
+    if(edge || std::strcmp(state,previous)!=0 || !last_emit || DWORD(now-last_emit)>=5000u) {
+        char line[340]{};
+        std::snprintf(line,sizeof(line),
+            "RUNTIME-JAIL20-COMMAND: elapsed_ms=%lu edge=%u %s (read-only; target 0=null 1=owner 2=other -1=unknown)",
+            static_cast<unsigned long>(elapsed),unsigned(edge),state);
+        log_line(line);
+        std::memcpy(previous,state,sizeof(previous));
+        last_emit=now; ++lines;
+    }
+}
+
+// Validated replay repair: only one bit in the current, verified new-game
+// progress buffer, never the default/initial arrays or a save file.
+// Read back both initial copies and the same location used by the legacy
+// read-only guard. No F248 override or cinematic actor writes.
+r2fix::ReplayHandoverWord replay_intro_word(std::uintptr_t base,
+                                       r2fix::ReplayHandoverAudit* audit=nullptr) {
+    return r2fix::locate_replay_handover_word(base+kFixActorListRva,
+        [](std::uintptr_t p,std::uint32_t& v){return read_u32(p,v);},
+        [](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);},audit);
+}
+void log_replay_intro_audit(const char* phase,std::uintptr_t base,
+                           std::uintptr_t legacy_words) {
+    if(!kResearchProbes || !g_log)return;
+    r2fix::ReplayHandoverAudit d{};
+    const auto word=replay_intro_word(base,&d);
+    MEMORY_BASIC_INFORMATION region{};
+    const bool region_ok=word.address &&
+        VirtualQuery(reinterpret_cast<const void*>(word.address),&region,sizeof(region));
+    char msg[570]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-REPLAY-INTRO: audit=%s reason=%s actors=%u candidates=%u vars=%u bytes=%u offset=%u kind=%u "
+        "current=%u/%u/%d initial=%u/%u/%d default=%u/%u/%d initial_present=%u default_present=%u separate=%u "
+        "legacy_match=%u aligned=%u region=%u protection=0x%lx (types/counts/bits only; read-only)",
+        phase,d.reason,d.actors,d.candidates,d.variables,d.bytes,d.offset,d.kind,
+        d.current_kind,d.current_count,d.current_bit,
+        d.initial_kind,d.initial_count,d.initial_bit,
+        d.default_kind,d.default_count,d.default_bit,
+        unsigned(d.initial_present),unsigned(d.default_present),unsigned(d.separate_buffers),
+        unsigned(word.address && legacy_words && word.address==legacy_words+34u*4u),
+        unsigned(word.address && !(word.address&3u)),unsigned(region_ok),
+        static_cast<unsigned long>(region_ok?region.Protect:0));
+    log_line(msg);
+}
+// The retail engine's verified Fix actor memory is already RWX under
+// Wine (live first/replay audits both report protection 0x40). Accept
+// that existing writable protection, without calling VirtualProtect or
+// widening any permissions. Keep copy-on-write and guard pages refused.
+constexpr bool replay_intro_writable_page(DWORD protection) noexcept {
+    const auto access=protection&0xffu;
+    return !(protection&(PAGE_GUARD|PAGE_NOACCESS)) &&
+           (access==PAGE_READWRITE || access==PAGE_EXECUTE_READWRITE);
+}
+static_assert(replay_intro_writable_page(PAGE_READWRITE));
+static_assert(replay_intro_writable_page(PAGE_EXECUTE_READWRITE));
+static_assert(!replay_intro_writable_page(PAGE_EXECUTE_READWRITE|PAGE_GUARD));
+static_assert(!replay_intro_writable_page(PAGE_READWRITE|PAGE_GUARD));
+static_assert(!replay_intro_writable_page(PAGE_NOACCESS));
+static_assert(!replay_intro_writable_page(PAGE_READONLY));
+static_assert(!replay_intro_writable_page(PAGE_EXECUTE_READ));
+static_assert(!replay_intro_writable_page(PAGE_EXECUTE));
+static_assert(!replay_intro_writable_page(PAGE_WRITECOPY));
+static_assert(!replay_intro_writable_page(PAGE_EXECUTE_WRITECOPY));
+
+bool replay_intro_compare_exchange(std::uintptr_t address,std::uint32_t old_word,
+                                   std::uint32_t new_word,
+                                   const char** reason=nullptr) {
+    const auto refuse=[&](const char* why) {
+        if(reason)*reason=why;
+        return false;
+    };
+    if(!address || (address&3u))return refuse("word-alignment");
+    MEMORY_BASIC_INFORMATION region{};
+    if(!VirtualQuery(reinterpret_cast<const void*>(address),&region,sizeof(region)))
+        return refuse("word-region-query");
+    if(region.State!=MEM_COMMIT)return refuse("word-region-state");
+    if(!replay_intro_writable_page(region.Protect))return refuse("word-region-protection");
+    const auto start=reinterpret_cast<std::uintptr_t>(region.BaseAddress);
+    if(address<start || region.RegionSize<sizeof(LONG) ||
+       address-start>region.RegionSize-sizeof(LONG))return refuse("word-region-bounds");
+    if(static_cast<std::uint32_t>(InterlockedCompareExchange(
+        reinterpret_cast<volatile LONG*>(address),static_cast<LONG>(new_word),
+        static_cast<LONG>(old_word)))!=old_word)
+        return refuse("word-changed-before-exchange");
+    return true;
+}
+r2fix::ReplayHandoverWord try_replay_intro_reset(std::uintptr_t base,
+                                                std::uintptr_t legacy_words) {
+    const auto refuse=[](const char* reason) {
+        char msg[180]{};
+        std::snprintf(msg,sizeof(msg),"RUNTIME-REPLAY-INTRO: reset=refused reason=%s",reason);
+        log_line(msg);
+        return r2fix::ReplayHandoverWord{};
+    };
+    if(!g_replay_intro_route.ready())return refuse("route");
+    if(!g_current_level || !r2fix::is_second_intro(g_current_level))
+        return refuse("level");
+    if(!game_window_is_foreground())return refuse("foreground");
+    if(intro_native_engine_mode(base)!=int(kIntroEnginePlaying))return refuse("engine-mode");
+    if(g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())
+        return refuse("camera-thread");
+    std::uint32_t actors[3]{};
+    Jail20TraceActor owner{},p1{},p2{};
+    std::uint8_t hp=0;
+    if(!jail20_find_actors(base,actors))return refuse("actor-search");
+    if(!jail20_actor(actors[0],owner) || !jail20_owner_shape(owner))
+        return refuse("owner-shape");
+    if(jail20_behaviour(owner)!=1)return refuse("owner-behaviour");
+    if(!read_u8(std::uintptr_t(owner.standard)+0x22,hp) || hp!=0)
+        return refuse("owner-hp");
+    if(!jail20_actor(actors[1],p1) || !jail20_producer_shape(p1,14,3,actors[0]))
+        return refuse("producer-1");
+    if(!jail20_actor(actors[2],p2) || !jail20_producer_shape(p2,17,2,actors[0]))
+        return refuse("producer-2");
+    if(p1.model!=p2.model)return refuse("producer-model");
+    r2fix::ReplayHandoverAudit d{};
+    const auto word=replay_intro_word(base,&d);
+    if(!word.address)return refuse(d.reason);
+    if(!legacy_words || word.address!=legacy_words+34u*4u)
+        return refuse("legacy-address-mismatch");
+    if(!(word.value&r2fix::replay_handover_mask))return refuse("handover-already-clear");
+    const auto reset=r2fix::replay_handover_reset_word(word.value);
+    const char* write_refusal="word-exchange";
+    if(!replay_intro_compare_exchange(word.address,word.value,reset,&write_refusal))
+        return refuse(write_refusal);
+    g_replay_intro_route.consume();
+    log_line("RUNTIME-REPLAY-INTRO: reset=applied bit=1091 route=handover-menu-or-pause-jail10-jail20 initial_and_default_clear=1 other_bits_preserved=1 current_memory_only=1");
+    return word;
+}
+
 void poll_second_intro_skip() {
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
     const bool pad_skip_down=(sdl_fresh_actions(r2fix::PadContext::cinematic) &
@@ -5191,7 +5592,44 @@ void poll_second_intro_skip() {
 #endif
     if(!g_skip_cinematics)return;
     const auto native_change = g_request_intro_level.load(std::memory_order_acquire);
-    if (!native_change || !g_current_level) return;
+    if (!native_change) return;
+    // The original Pause menu can restart directly in Jail_10 without
+    // loading MENU. Authenticate its B13/R0 state with the existing live
+    // controller observer. The shared Fix B13 rule requests Jail_10
+    // (or Mapmonde according to story bit 1133); an unrelated destination
+    // cannot earn the replay route.
+    bool pause_restart=false,loading_jail10=false,loading_jail20=false;
+    if(g_replay_intro_route.completed) {
+#ifdef RAYMAN2FIX_BUNDLED_SDL3
+        int normal=-1,reflex=-1;
+        if(r2fix::is_first_playable_level(g_current_level))
+            pause_restart=r2fix::pause_menu_live_state(normal,reflex) &&
+                          normal==13 && reflex==0;
+#endif
+        const auto replay_base=intro_game_base();
+        if(replay_base && intro_native_engine_mode(replay_base)!=int(kIntroEnginePlaying)) {
+            char next[30]{};
+            SIZE_T got=0;
+            if(ReadProcessMemory(GetCurrentProcess(),
+                reinterpret_cast<const void*>(replay_base+kIntroNextLevelRva),
+                next,sizeof(next),&got) && got==sizeof(next) &&
+                std::memchr(next,0,sizeof(next))) {
+                loading_jail10=r2fix::ReplayIntroRoute::equal(next,"jail_10");
+                loading_jail20=r2fix::ReplayIntroRoute::equal(next,"jail_20");
+            }
+        }
+    }
+    const auto prior_stage=g_replay_intro_route.stage;
+    g_replay_intro_route.observe(g_current_level,pause_restart,loading_jail10,loading_jail20);
+    if(kResearchProbes && prior_stage!=g_replay_intro_route.stage) {
+        char msg[210]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-REPLAY-INTRO: route-stage=%u previous=%u pause_restart=%u queued_jail10=%u queued_jail20=%u",
+            unsigned(g_replay_intro_route.stage),unsigned(prior_stage),
+            unsigned(pause_restart),unsigned(loading_jail10),unsigned(loading_jail20));
+        log_line(msg);
+    }
+    if(!g_current_level)return;
     // These counters measure the sampling cadence of the EXISTING camera
     // callback; they do not add a key hook, change the input guard or skip.
     static DWORD entered_at=0,requested_at=0,last_input_diag=0;
@@ -5255,6 +5693,8 @@ void poll_second_intro_skip() {
         (g_intro_guard.pending ||
          (g_intro_guard.released && down && !g_intro_guard.requested));
     const auto game_base=intro_game_base();
+    poll_jail20_command_trace(in_intro,game_base,DWORD(GetTickCount()-entered_at),
+                              in_intro && down && !last_down);
     const int mode=need_mode ? intro_native_engine_mode(game_base) : -1;
     // A queued press must survive Alt-Tab; dispatch only in foreground.
     const bool ready=foreground && mode==int(kIntroEnginePlaying);
@@ -5321,6 +5761,29 @@ void poll_second_intro_skip() {
     }
     if (!requested || !foreground) return;
 
+    // Keep the original refusal for a stale handover unless the exact
+    // new-game route and the verified original clear state both match.
+    const auto intro_words=find_story_words();
+    bool previous_handover=false;
+    const bool story_known=game_story_bit(intro_words,kLearnHandoverBit,previous_handover);
+    const bool replay_route=g_replay_intro_route.ready();
+    log_replay_intro_audit(replay_route?"replay-request":"first-request",game_base,intro_words);
+    r2fix::ReplayHandoverWord replay_reset{};
+    if(story_known && previous_handover && replay_route)
+        replay_reset=try_replay_intro_reset(game_base,intro_words);
+    const bool allowed=replay_reset.address ||
+        ((!replay_route || story_known) &&
+         r2fix::intro_direct_transition_allowed(story_known,previous_handover));
+    {
+        char msg[240]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-INTRO: jail_20 pre-transition story1091_known=%u story1091=%u replay_route=%u action=%s",
+            unsigned(story_known),unsigned(previous_handover),unsigned(replay_route),
+            replay_reset.address?"verified-replay-reset":allowed?"guarded-level-request":"native-transition-only");
+        log_line(msg);
+    }
+    if(!allowed)return;
+
     // The game itself queues the level change for its next engine tick.
     // Do not force a renderer switch, destroy a video window or write
     // save data. This is the same native API used by script transitions.
@@ -5334,6 +5797,26 @@ void poll_second_intro_skip() {
         input_polls,down_polls);
     log_line(line);
     native_change(kAfterIntroLevel, 0);
+    // If the original call did not queue a change and the same live
+    // word is still present in Playing, undo only our own exact write.
+    // Never use an old address across a level load or overwrite a word
+    // modified by the game. Accepted transitions keep native ownership.
+    if(replay_reset.address) {
+        const auto mode_after=intro_native_engine_mode(game_base);
+        const auto next_after=intro_next_level_status(game_base);
+        if(mode_after==int(kIntroEnginePlaying) && next_after!=1 &&
+           r2fix::is_second_intro(g_current_level)) {
+            const auto still=replay_intro_word(game_base);
+            const auto reset=r2fix::replay_handover_reset_word(replay_reset.value);
+            const bool undone=still.address==replay_reset.address &&
+                still.value==reset &&
+                replay_intro_compare_exchange(still.address,reset,replay_reset.value);
+            log_line(undone?"RUNTIME-REPLAY-INTRO: transition-not-queued rollback=restored":
+                            "RUNTIME-REPLAY-INTRO: transition-not-queued rollback=refused-changed-state");
+        } else {
+            log_line("RUNTIME-REPLAY-INTRO: native-transition-dispatched; await Learn_10 handover");
+        }
+    }
     if(g_log) {
         const int mode_after=intro_native_engine_mode(game_base);
         const int next_after=intro_next_level_status(game_base);
@@ -5404,11 +5887,47 @@ r2fix::PadInfoLocale controller_info_locale() noexcept {
        read(directory+(index&255u)*8u,&table,4) && table>=0x10000u && table<=0xfffff000u &&
        read(table+370u*4u,&label,4) && read(label,text,sizeof(text)) &&
        std::memchr(text,0,sizeof(text))) {
-        using L=r2fix::PadInfoLocale;
-        if(!std::strcmp(text,"/C:LANGUE"))return L::fr;
-        if(!std::strcmp(text,"/C:IDIOMA"))return L::es;
-        if(!std::strcmp(text,"/C:LINGUA"))return L::it;
-        if(!std::strcmp(text,"/C:SPRACHE"))return L::de;
+        auto locale=r2fix::pad_info_locale_from_label(text);
+        // Polish GOG can encode accented LANGUAGE differently. Check
+        // only the active menu's bounded native text-handle range.
+        // Cache the result briefly to avoid scanning every frame.
+        static std::uint32_t cached_table=0,cached_index=0;
+        static DWORD checked_at=0;
+        static unsigned markers=0;
+        if(locale==r2fix::PadInfoLocale::en) {
+            const DWORD now=GetTickCount();
+            if(cached_table!=table || cached_index!=index ||
+               !checked_at || DWORD(now-checked_at)>=500u) {
+                cached_table=table;cached_index=index;checked_at=now;markers=0;
+                for(unsigned handle=350;handle<=385;++handle) {
+                    std::uint32_t pointer=0;
+                    char caption[48]{};
+                    if(read(table+handle*4u,&pointer,4) &&
+                       read(pointer,caption,sizeof(caption)) &&
+                       std::memchr(caption,0,sizeof(caption)))
+                        markers|=r2fix::pad_polish_caption_marker(caption);
+                }
+            }
+            if(r2fix::pad_polish_caption_set(markers))
+                locale=r2fix::PadInfoLocale::pl;
+        }
+        // Report only the bounded native language label (not arbitrary
+        // game memory), once per change, to identify unusual glyph encodings.
+        static char previous[32]{};
+        static unsigned previous_locale=999u;
+        if(g_log && (std::strcmp(previous,text)!=0 || previous_locale!=unsigned(locale))) {
+            previous_locale=unsigned(locale);
+            std::memcpy(previous,text,sizeof(previous));
+            char hex[65]{};
+            const auto length=std::strlen(text);
+            for(std::size_t n=0;n<length;++n)
+                std::snprintf(hex+n*2,3,"%02X",unsigned(static_cast<unsigned char>(text[n])));
+            char line[150]{};
+            std::snprintf(line,sizeof(line),"RUNTIME-CONTROLLER-MENU: locale=%u native-label-hex=%s polish-markers=0x%x",
+                unsigned(locale),hex,markers);
+            log_line(line);
+        }
+        return locale;
     }
     return r2fix::PadInfoLocale::en;
 }
@@ -5673,6 +6192,41 @@ bool ipt_live_entry(void* entry,r2fix::IptActionReadback& row,
                     !ipt_name_plausible(name)))return false;
     return true;
 }
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+// Read-only correlation: the two authenticated C45 button nodes in
+// the director rule may reference an IPT entry other than the two
+// currently forwarded cinematic actions. Never dereference an opaque
+// operand unless ipt_live_entry proves it belongs to the live table.
+void trace_learn10_native_button() noexcept {
+    static DWORD observed_arm=0;
+    if(!g_log || !g_f248_armed.load(std::memory_order_acquire)) {
+        observed_arm=0;
+        return;
+    }
+    const auto arm=g_f248_armed_at.load(std::memory_order_acquire);
+    if(observed_arm==arm)return;
+    const auto root=g_f248_root.load(std::memory_order_acquire);
+    std::uint32_t a=0,b=0,c1=0,c2=0;
+    std::uint8_t t1=0,t2=0,d1=0,d2=0;
+    if(!root || !read_u32(root+8u*8u,c1) || c1!=45u ||
+       !read_u32(root+106u*8u,c2) || c2!=45u ||
+       !read_u32(root+9u*8u,a) || !read_u32(root+107u*8u,b) ||
+       a!=b || !read_u8(root+9u*8u+7u,t1) || t1!=14u ||
+       !read_u8(root+107u*8u+7u,t2) || t2!=14u ||
+       !read_u8(root+9u*8u+6u,d1) || d1!=4u ||
+       !read_u8(root+107u*8u+6u,d2) || d2!=6u)return;
+    observed_arm=arm;
+    r2fix::IptActionReadback row{};
+    std::array<char,64> name{};
+    unsigned index=0;
+    const bool match=ipt_live_entry(reinterpret_cast<void*>(std::uintptr_t(a)),row,index,name);
+    char msg[180]{};
+    std::snprintf(msg,sizeof(msg),
+        "RUNTIME-LEARN10-INPUT: script-C45-operand live-IPT-match=%u index=%d existing-route=%u read-only=1",
+        unsigned(match),match?int(index):-1,unsigned(match&&(index==20u||index==21u)));
+    log_line(msg);
+}
+#endif
 bool ipt_current_gameplay() noexcept {
     return g_sdl_input_owner.load(std::memory_order_acquire)==GetCurrentThreadId() &&
         game_window_is_foreground() &&
@@ -5739,6 +6293,17 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
         (binding && (entry_name.empty() ||
          r2fix::ipt_name_contains(entry_name,binding->name_fragment)));
     if(requested) {
+        if(g_log && context==PadContext::learn_cinematic) {
+            static DWORD last_report=0;
+            const DWORD now=GetTickCount();
+            if(!last_report || DWORD(now-last_report)>=250u) {
+                last_report=now;
+                char msg[160]{};
+                std::snprintf(msg,sizeof(msg),
+                    "RUNTIME-LEARN10-INPUT: native-IPT-index=%u pad-skip-forwarded=1",index);
+                log_line(msg);
+            }
+        }
         static bool map_jump_reported=false;
         if(map_jump && !map_jump_reported) {
             map_jump_reported=true;
@@ -6001,6 +6566,42 @@ void poll_sdl3_native() noexcept {
         log_line(msg);++button_reports;
     }
     button_mask=raw_buttons;
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+    if(kResearchProbes)trace_learn10_native_button();
+    // Independent per-cinematic physical edge trace. The global button
+    // budget must not hide a late South press, and a gated-out press
+    // must not be mistaken for an input that never reached SDL.
+    static bool learn_trace_active=false,learn_south=false;
+    static unsigned learn_edges=0,learn_polls=0,learn_gap=0;
+    static DWORD learn_last=0;
+    const bool learn_trace=context==r2fix::PadContext::learn_cinematic;
+    if(learn_trace) {
+        if(!learn_trace_active) {
+            learn_south=false;learn_edges=learn_polls=learn_gap=0;learn_last=0;
+        }
+        ++learn_polls;
+        if(learn_last)learn_gap=std::max(learn_gap,unsigned(DWORD(poll_now-learn_last)));
+        learn_last=poll_now;
+        if(g_log && sample.south!=learn_south && learn_edges<64u) {
+            ++learn_edges;
+            char msg[220]{};
+            std::snprintf(msg,sizeof(msg),
+                "RUNTIME-LEARN10-INPUT: SDL-physical south=%u held-skip=%u pressed-skip=%u device=%u fg=%u",
+                unsigned(sample.south),unsigned(!!(transitions.held&r2fix::pad_action_bit(r2fix::PadAction::skip))),
+                unsigned(!!(transitions.pressed&r2fix::pad_action_bit(r2fix::PadAction::skip))),
+                unsigned(sample.device_id),unsigned(foreground));
+            log_line(msg);
+        }
+        learn_south=sample.south;
+    } else if(learn_trace_active && g_log) {
+        char msg[180]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-LEARN10-INPUT: SDL-context-exit polls=%u physical-edges=%u max-poll-gap-ms=%u",
+            learn_polls,learn_edges,learn_gap);
+        log_line(msg);
+    }
+    learn_trace_active=learn_trace;
+#endif
     observe_native_ipt_readonly(context);
     g_sdl_native_joystick_owned=sample.connected && sample.device_id!=0 && foreground;
     g_sdl_input_context = context;

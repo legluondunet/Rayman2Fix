@@ -184,25 +184,25 @@ std::size_t discard_legacy_runtime_backups(const fs::path& directory) {
     return removed;
 }
 
-#ifdef RAYMAN2FIX_BUNDLED_SDL3
+#if defined(RAYMAN2FIX_BUNDLED_SDL3) || defined(RAYMAN2FIX_BUNDLED_INNOEXTRACT)
 // SDL3 lives beside fix.dll and glide2x.dll in game/.
 // Resources were hash-pinned at configure time; compare installed bytes
 // before replacing. Never follow reparse points or overwrite directories.
-const char* deploy_sdl3_resource(unsigned id, const fs::path& dest) {
+const char* deploy_dependency_resource(unsigned id, const fs::path& dest) {
     const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(id),
                                         MAKEINTRESOURCEW(10));
-    if (!resource) throw std::runtime_error("missing embedded SDL3 resource");
+    if (!resource) throw std::runtime_error("missing embedded dependency resource");
     const DWORD length = SizeofResource(nullptr, resource);
     const HGLOBAL loaded = LoadResource(nullptr, resource);
     const auto* bytes = loaded ?
         static_cast<const unsigned char*>(LockResource(loaded)) : nullptr;
     if (!bytes || !length)
-        throw std::runtime_error("empty embedded SDL3 resource");
+        throw std::runtime_error("empty embedded dependency resource");
     const DWORD attrs = GetFileAttributesW(dest.c_str());
     const bool existing = attrs != INVALID_FILE_ATTRIBUTES;
     if ((!existing && fs::is_symlink(dest)) ||
         (existing && (attrs & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))))
-        throw std::runtime_error("unsafe SDL3 deployment destination");
+        throw std::runtime_error("unsafe dependency deployment destination");
     if (existing && fs::file_size(dest) == length) {
         std::ifstream in(dest, std::ios::binary);
         std::array<char, 4096> block{};
@@ -223,20 +223,20 @@ const char* deploy_sdl3_resource(unsigned id, const fs::path& dest) {
     HANDLE out = CreateFileW(stage.c_str(), GENERIC_WRITE, 0, nullptr,
                              CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (out == INVALID_HANDLE_VALUE)
-        throw std::runtime_error("cannot exclusively stage SDL3 resource");
+        throw std::runtime_error("cannot exclusively stage dependency resource");
     DWORD written = 0;
     const bool ok = WriteFile(out, bytes, length, &written, nullptr) &&
                     written == length && FlushFileBuffers(out);
     CloseHandle(out);
     if (!ok) {
         DeleteFileW(stage.c_str());
-        throw std::runtime_error("cannot write staged SDL3 resource");
+        throw std::runtime_error("cannot write staged dependency resource");
     }
     // Do not change permissions on an unknown local file. Failure preserves it.
     if (!MoveFileExW(stage.c_str(), dest.c_str(),
                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         DeleteFileW(stage.c_str());
-        throw std::runtime_error("cannot publish SDL3 resource");
+        throw std::runtime_error("cannot publish dependency resource");
     }
     return existing ? "replaced" : "installed";
 }
@@ -363,10 +363,13 @@ void Startup::initialize(bool provision_files) {
         prune_obsolete_nested_gameframe(root_);
         ensure_embedded_readme(root_);
         ensure_embedded_license(root_);
+#ifdef RAYMAN2FIX_BUNDLED_INNOEXTRACT
+        deploy_dependency_resource(1112, docs / "innoextract-notices.txt");
+#endif
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
         // Notice first; an incomplete notice must never accompany a new DLL.
-        deploy_sdl3_resource(1108, docs / "SDL3-LICENSE.txt");
-        sdl3_deployment_status = deploy_sdl3_resource(1107, game_dir_ / "SDL3.dll");
+        deploy_dependency_resource(1108, docs / "SDL3-LICENSE.txt");
+        sdl3_deployment_status = deploy_dependency_resource(1107, game_dir_ / "SDL3.dll");
 #endif
 #endif
     }

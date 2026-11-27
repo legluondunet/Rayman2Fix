@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 // Explicitly check in both Debug and Release (assert is disabled by NDEBUG).
@@ -16,6 +17,11 @@
 
 
 int main() {
+    CHECK(r2fix::intro_direct_transition_allowed(true,false));
+    CHECK(!r2fix::intro_direct_transition_allowed(true,true));
+    CHECK(r2fix::intro_direct_transition_allowed(false,false));
+    CHECK(r2fix::intro_direct_transition_allowed(false,true));
+
     CHECK(r2fix::is_second_intro("jail_20"));
     CHECK(r2fix::is_second_intro("Jail_20"));
     CHECK(!r2fix::is_second_intro("jail_10"));
@@ -244,6 +250,121 @@ int main() {
     CHECK(!detect().valid()); // Controller isn't armed
     m.a[standard+0x24]=1u<<27;
     CHECK(detect().valid());
+    }
+
+
+    // The replay route is earned by a real handover, not by an already
+    // playable loaded save or a stale story bit on entry.
+    r2fix::ReplayIntroRoute route;
+    route.observe("menu"); route.observe("jail_10"); route.observe("jail_20");
+    CHECK(!route.ready());
+    route.note_handover();
+    route.observe("menu"); route.observe("jail_20");
+    CHECK(!route.ready());
+    route.observe("MENU"); route.observe("JAIL_10");
+    route.observe("other_10"); route.observe("jail_20");
+    CHECK(!route.ready());
+    route.observe("menu"); route.observe("jail_10");
+    route.observe("jail_10"); route.observe("jail_20"); route.observe("jail_20");
+    CHECK(route.ready());
+    route.consume();
+    CHECK(!route.ready());
+    route.observe("menu"); route.observe("jail_10"); route.observe("jail_20");
+    CHECK(!route.ready());
+    route.note_handover(); route.observe("menu");
+    route.observe("jail_10"); route.observe("jail_20");
+    CHECK(route.ready());
+    route.observe(nullptr);
+    CHECK(!route.ready());
+    // Pause B13/R0 can request Jail_10 directly, without MENU.
+    r2fix::ReplayIntroRoute pause_route;
+    pause_route.observe("Learn_10",true);
+    pause_route.observe("jail_10"); pause_route.observe("jail_20");
+    CHECK(!pause_route.ready());
+    pause_route.note_handover();
+    pause_route.observe("Learn_10",true);
+    pause_route.observe("Learn_10",false,true);
+    pause_route.observe(nullptr,false,true);
+    pause_route.observe("jail_10");
+    pause_route.observe("",false,false,true);
+    pause_route.observe("jail_20");
+    CHECK(pause_route.ready());
+    pause_route.consume();
+    pause_route.note_handover();
+    pause_route.observe("Learn_10",true);
+    pause_route.observe("Learn_10",false); // cancelled/resumed gameplay
+    pause_route.observe("jail_10"); pause_route.observe("jail_20");
+    CHECK(!pause_route.ready());
+    pause_route.observe("Learn_10",true);
+    pause_route.observe("mapmonde"); // alternative native branch
+    pause_route.observe("jail_10"); pause_route.observe("jail_20");
+    CHECK(!pause_route.ready());
+    pause_route.observe("Learn_10",true);
+    pause_route.observe(nullptr,false,false,true); // wrong queued target
+    pause_route.observe("jail_10"); pause_route.observe("jail_20");
+    CHECK(!pause_route.ready());
+    pause_route.observe("Learn_10",true);
+    pause_route.observe("jail_10"); pause_route.observe("jail_20");
+    CHECK(pause_route.ready());
+    for(unsigned bit=0;bit<32;++bit) {
+        const auto word=std::uint32_t(1u)<<bit;
+        CHECK(r2fix::replay_handover_reset_word(word)==(bit==2?0u:word));
+    }
+    CHECK(r2fix::replay_handover_reset_word(0xffffffffu)==0xfffffffbu);
+
+    // Reuse the synthetic Fix-actor memory with the exact GOG layout.
+    {
+        FakeMemory exact;
+        constexpr std::uintptr_t stdg=0x190000,so2=0x1a0000;
+        constexpr std::uintptr_t initial=0x1b0000,defaults=0x1c0000;
+        exact.u32[list]=1; exact.u32[list+4]=actor;
+        exact.u32[actor+4]=stdg; exact.u32[actor+12]=brain;
+        exact.u32[stdg]=2; exact.u32[stdg+4]=2; exact.u32[stdg+8]=2;
+        exact.u32[stdg+12]=so2; exact.u32[so2]=2; exact.u32[so2+4]=actor;
+        exact.u32[brain]=mind; exact.u32[mind+12]=dsg;
+        exact.u32[dsg]=decl_ref; exact.u32[decl_ref]=decl;
+        exact.u32[dsg+4]=initial; exact.u32[dsg+8]=buffer;
+        exact.u32[decl]=defaults; exact.u32[decl+4]=infos;
+        exact.u32[decl+8]=770; exact.u8[decl+12]=68;
+        exact.u32[infos+42*16]=144; exact.u32[infos+42*16+4]=21;
+        constexpr auto offset=144+8+34*4;
+        for(auto ptr : {buffer,initial,defaults}) {
+            exact.u32[ptr+144]=5; exact.u8[ptr+144+4]=45;
+            exact.u32[ptr+offset]=0;
+        }
+        exact.u32[buffer+offset]=0x80000007u;
+        r2fix::ReplayHandoverAudit audit{};
+        auto get=[&] {
+            return r2fix::locate_replay_handover_word(list,
+                [&](std::uintptr_t p,std::uint32_t& v){return exact.rd32(p,v);},
+                [&](std::uintptr_t p,std::uint8_t& v){return exact.rd8(p,v);},&audit);
+        };
+        CHECK(get().address==buffer+offset);
+        CHECK(get().value==0x80000007u);
+        CHECK(std::strcmp(audit.reason,"verified")==0);
+        CHECK(audit.current_bit==1 && audit.initial_bit==0 && audit.default_bit==0);
+        CHECK(audit.separate_buffers && audit.current_count==45);
+        CHECK(r2fix::replay_handover_reset_word(get().value)==0x80000003u);
+        exact.u32[initial+offset]=4; CHECK(!get().address);
+        CHECK(std::strcmp(audit.reason,"story-reference-bit-set")==0);
+        CHECK(audit.current_bit==1 && audit.initial_bit==1 && audit.default_bit==0);
+        exact.u32[initial+offset]=0;
+        exact.u32[defaults+offset]=4; CHECK(!get().address);
+        exact.u32[defaults+offset]=0;
+        exact.u32[dsg+4]=buffer; CHECK(!get().address);
+        CHECK(std::strcmp(audit.reason,"story-buffer-identity")==0);
+        exact.u32[dsg+4]=initial;
+        exact.u8[buffer+148]=44; CHECK(!get().address);
+        CHECK(std::strcmp(audit.reason,"story-current-array")==0);
+        CHECK(audit.current_count==44 && audit.initial_bit==0 && audit.default_bit==0);
+        exact.u8[buffer+148]=45;
+        exact.u32[stdg+8]=3; CHECK(!get().address);
+        exact.u32[stdg+8]=2;
+        exact.u32[so2+4]=0; CHECK(!get().address);
+        exact.u32[so2+4]=actor;
+        exact.u32[list]=2; exact.u32[list+8]=actor; CHECK(!get().address);
+        exact.u32[list]=1;
+        CHECK(get().address==buffer+offset);
     }
 
     return 0;

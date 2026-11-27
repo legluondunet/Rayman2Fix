@@ -8,13 +8,16 @@ void check(bool b){if(!b)std::abort();}
 int main(){
     for(const char* name:{
         "/C:Site Rayman2","/C:Web de Rayman2",
-        "/C:Sito di Rayman2","/C:Rayman2 - Webseite"}) {
+        "/C:Sito di Rayman2","/C:Rayman2 - Webseite",
+        "/C:Internet","/C:INTERNET","/C:internet"}) {
         check(approved_main_menu_site_text(name));
     }
     check(approved_replaced_main_menu_site_text("/C:Rayman2Fix"));
     check(!approved_replaced_main_menu_site_text("/C:Site Rayman2"));
     check(!approved_replaced_main_menu_site_text(nullptr));
     check(std::strcmp(kSiteCaptionReplacement,"/C:Rayman2Fix")==0);
+    check(std::strlen("/C:Internet")<std::strlen(kSiteCaptionReplacement));
+    check(!approved_main_menu_site_text("/C:Internet settings"));
     check(!approved_main_menu_site_text("/C:VIDEO"));
     check(!approved_main_menu_site_text("/C:Site Rayman3"));
     check(!approved_main_menu_site_text(nullptr));

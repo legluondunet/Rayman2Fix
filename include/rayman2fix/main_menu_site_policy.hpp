@@ -7,12 +7,13 @@
 namespace r2fix {
 inline bool approved_main_menu_site_text(const char* s) noexcept {
     if(!s)return false;
-    constexpr const char* original[5]{
+    constexpr const char* original[8]{
         "/C:Site Rayman2",
         "/C:Web de Rayman2",
         "/C:Sito di Rayman2",
         "/C:Rayman2 - Webseite",
-        "/C:Site Rayman2"};
+        "/C:Site Rayman2",
+        "/C:Internet", "/C:INTERNET", "/C:internet"};
     for(const char* expected:original)
         if(std::strcmp(s,expected)==0)return true;
     return false;

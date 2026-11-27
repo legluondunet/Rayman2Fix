@@ -1,9 +1,9 @@
 # Rayman2Fix
 
-**An independent, free and open-source compatibility project for Rayman 2: The Great Escape (PC CD).**
+**An independent, free and open-source compatibility project for Rayman 2: The Great Escape (PC CD and GOG).**
 
 Rayman2Fix is developed from scratch, not a fork of Ray2Fix. It combines
-a verified CD installer, launcher and runtime compatibility fixes in one
+a verified CD/GOG offline installer, launcher and runtime compatibility fixes in one
 Windows x86 executable.
 
 > **Development status:** tested in gameplay under Wine. Automated Linux
@@ -13,8 +13,8 @@ Windows x86 executable.
 
 ## Features
 
-- Automatic installation from original ISO or supported CUE/BIN media,
-  verification and launch.
+- Automatic installation from original ISO/CUE media or a supported GOG
+  offline installer, verification and launch.
 - Pinned GameFrame Glide 2 renderer, DPI-aware borderless fullscreen at
   desktop resolution, widescreen Hor+ world rendering and centered 4:3 HUD.
 - Optional centered 4:3 output and configurable FPS limit (60 by default).
@@ -33,35 +33,43 @@ Windows x86 executable.
 1. Obtain the standard `Rayman2Fix-Windows-x86-bootstrap` artifact from a
    successful [GitHub Actions build](https://github.com/legluondunet/Rayman2Fix/actions).
    Extract `Rayman2Fix.exe` to a new empty directory.
-2. Place exactly one original CD image (`.iso` or `.cue` with its referenced
-   data track) next to the launcher.
-3. Supply the approved local unprotected `Rayman2.exe`, unless a local build
-   already contains an approved binary delta. The public CI artifact contains
-   neither a game executable nor that private delta.
-4. Run `Rayman2Fix.exe` without arguments (under your normal Wine runner on
+2. Choose **one** original source, next to the launcher:
+   - CD: one `.iso` or `.cue` with its referenced data track. Supply the
+     approved local unprotected `Rayman2.exe` unless a local build contains
+     an approved binary delta.
+   - GOG: one offline setup EXE and all its matching BIN files. No separate
+     game executable, Galaxy, or system extractor is required. The launcher
+     uses bundled innoextract; it never runs the original setup.
+3. Run `Rayman2Fix.exe` without arguments (under your normal Wine runner on
    Linux). The launcher installs, verifies and launches automatically.
+   Keep CD and GOG sources in separate installation directories.
 
 Use a clean directory: no automatic migration of older installation layouts.
-The first installation preserves the verified protected executable as
-`game/rayman2.exe.bak`. Subsequent normal launches check the installed
-assets and approved executable before running the game.
+For CD, the approved replacement preserves the protected executable as
+`game/rayman2.exe.bak`. For GOG, the original approved game executable is
+retained. Subsequent normal launches use the existing installation and
+verify its edition-specific receipt and executable.
 
 ## Compatibility
 
-Normal game launch is restricted to the exact approved PC CD executable
-pair. ISO extraction support is not proof of compatibility with every
-regional edition or re-release. GOG and other modified executables are
-not claimed as supported.
+Normal game launch is restricted to the approved executable profiles below.
+GOG offline extraction and gameplay have been tested under Wine, including
+repeated intro skips. GOG installer names, language, and package hashes are
+not an allowlist: product identification, extraction integrity, required
+resources and the approved executable profile are checked independently.
+Not every regional CD or GOG package has been tested. Other executable
+builds are not claimed as supported.
 
 | Executable | Bytes | SHA-256 |
 |---|---:|---|
 | Protected CD original | 676352 | `7927a106ac4f2244e304e57c196170f6cfb311af87ddf59eb6e6c48b9bb0d5e3` |
-| Approved unprotected target | 1468928 | `9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713` |
+| Approved unprotected CD target | 1468928 | `9bae484bd84a4afad8d4e7b1bb30a85ce1ce2367f8451463696eabab28a72713` |
+| GOG original game executable | 1469440 | `82e56041bde6b135a29af70ec213d716ef9d3253d46fa2c893bd25a6cff7f891` |
 
-The CD receipt verifies consistency with the source media, not its retail
+The CD and GOG receipts verify local installation integrity, not retail
 provenance. Unknown executable hashes fail closed in the normal verified
 launch path. See [disc evidence](docs/disc-evidence.md) and
-[release readiness](docs/release-readiness.md).
+[release readiness](docs/release-readiness.md) and [GOG installation notes](docs/gog-offline-install.md).
 
 ## Controller support (SDL3)
 
@@ -142,7 +150,7 @@ Rayman2Fix_installer.log
 Rayman2Fix.log
 game/
     rayman2.exe
-    rayman2.exe.bak
+    rayman2.exe.bak (CD replacement only)
     rayman2.exe.manifest
     fix.dll
     glide2x.dll
@@ -158,10 +166,12 @@ docs/
     LICENSE
     GameFrame-LICENSE-APACHE.txt
     SDL3-LICENSE.txt
+    innoextract-notices.txt
     build-info.txt
 state/
     .rayman2fix-cd-files.tsv
-    .rayman2fix-exe-patch.tsv
+    .rayman2fix-exe-patch.tsv (CD replacement only)
+    .rayman2fix-gog-files.tsv (GOG instead of CD receipts)
 ```
 
 Logs are created when enabled; the patch receipt and original backup are
@@ -178,7 +188,7 @@ documents the format, source and browser-download fallback.
 |---|---|
 | No arguments | Install / verify / launch |
 | --install-only | Install / verify / update without launching |
-| --verify | Verify installed CD assets against local receipts |
+| --verify | Verify installed CD or GOG assets against local receipts |
 | --inspect image.iso | Read-only disc inspection, produces Rayman2Fix_inspect.log |
 | --inspect image.cue [track.bin or track.img] | Read-only CUE inspection |
 | --launch-no-verify | Troubleshooting only; bypass checks and provisioning |
@@ -206,7 +216,9 @@ It is historical documentation, not the current support policy.
 
 Rayman2Fix is licensed under **GNU GPL version 3 only**
 ([GPL-3.0-only](LICENSE)). GameFrame retains its separate Apache 2.0
-license and SDL3 its zlib license; the launcher installs all three notices.
+license and SDL3 its zlib license. The bundled innoextract 1.9 and its
+upstream dependency notices are documented in `docs/innoextract-notices.txt`.
+The launcher deploys the separate notices alongside the project license.
 No copyrighted game assets, commercial executables or private patch
 payloads are distributed in the public build.
 

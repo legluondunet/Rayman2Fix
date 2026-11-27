@@ -1,5 +1,7 @@
 #include "rayman2fix/learn10_f248_result_scope.hpp"
 #include <cstdlib>
+#include <cstring>
+#include <initializer_list>
 #include <iostream>
 #define CHECK(x) do { if(!(x)) {std::cerr << "FAILED: " #x << '\n'; std::abort();} }while(false)
 
@@ -35,7 +37,37 @@ int main() {
     c=s; c.function_id=249; CHECK(!learn10_f248_scope_matches(c));
     c=s; c.output_type=7; CHECK(!learn10_f248_scope_matches(c));
     c=s; c.output_value=1; CHECK(!learn10_f248_scope_matches(c));
-    c=s; c.elapsed_ms=5001; CHECK(!learn10_f248_scope_matches(c));
+    // Regression: the third owner test attempted a skip after the old
+    // five-second deadline. Age alone must not disable the native branch.
+    for (auto elapsed : {5000u,5001u,10000u,20000u,25044u,60000u,0xffffffffu}) {
+        c=s; c.elapsed_ms=elapsed; CHECK(learn10_f248_scope_matches(c));
+        c.handover_incomplete=false; CHECK(!learn10_f248_scope_matches(c));
+        c=s; c.elapsed_ms=elapsed; c.live_learn10=false;
+        CHECK(!learn10_f248_scope_matches(c));
+        c=s; c.elapsed_ms=elapsed; c.behaviour=0x6018;
+        CHECK(!learn10_f248_scope_matches(c));
+    }
+    Learn10F248Lifetime life{};
+    life.enabled=life.live_learn10=life.director_readable=true;
+    life.same_behaviour=life.same_rule_root=life.story_readable=true;
+    CHECK(learn10_f248_disarm_reason(life)==nullptr);
+    auto stopped=life;
+    stopped.enabled=false;
+    CHECK(std::strcmp(learn10_f248_disarm_reason(stopped),"feature-disabled")==0);
+    stopped=life; stopped.live_learn10=false;
+    CHECK(std::strcmp(learn10_f248_disarm_reason(stopped),"level-left")==0);
+    stopped=life; stopped.story_readable=false;
+    CHECK(std::strcmp(learn10_f248_disarm_reason(stopped),"story-unreadable")==0);
+    stopped=life; stopped.handed_over=true;
+    CHECK(std::strcmp(learn10_f248_disarm_reason(stopped),"story1091-handover")==0);
+    stopped=life; stopped.nomovies=true;
+    CHECK(std::strcmp(learn10_f248_disarm_reason(stopped),"story1188-changed")==0);
+    stopped=life; stopped.director_readable=false;
+    CHECK(std::strcmp(learn10_f248_disarm_reason(stopped),"director-unreadable")==0);
+    stopped=life; stopped.same_behaviour=false;
+    CHECK(std::strcmp(learn10_f248_disarm_reason(stopped),"director-left-b3")==0);
+    stopped=life; stopped.same_rule_root=false;
+    CHECK(std::strcmp(learn10_f248_disarm_reason(stopped),"script-context-changed")==0);
     c=s; c.exact_script=false; CHECK(!learn10_f248_scope_matches(c));
     c=s; c.approved_cd=false; CHECK(!learn10_f248_scope_matches(c));
     c=s; c.first_visit=false; CHECK(!learn10_f248_scope_matches(c));

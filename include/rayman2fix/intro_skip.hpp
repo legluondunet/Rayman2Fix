@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 namespace r2fix {
 
@@ -22,6 +23,14 @@ inline bool is_second_intro(const char* level) {
 // A deliberate key-down edge AFTER entering jail_20 is needed. Holding
 // Enter from the New Game menu must not auto-skip the cinematic.
 // The latch resets when the level changes, supporting later new games.
+// Do not force the jail_20 -> learn_10 transition when the native
+// story already reports handover. Let the game's original scene
+// transition resolve that state without changing the saved flags.
+constexpr bool intro_direct_transition_allowed(bool story_known,
+                                                bool already_handed_over) noexcept {
+    return !story_known || !already_handed_over;
+}
+
 struct IntroSkipGuard {
     bool inside = false;
     bool released = false;
@@ -111,4 +120,61 @@ struct LearnIntroGuard {
         return false;
     }
 };
+
+// A replay repair is eligible only after a real Learn_10 handover in this
+// process, followed by menu OR an authenticated Pause restart, then
+// jail_10 -> jail_20. A native queued target bridges the loading gap.
+// Any unrelated level cancels the pending route; loading a save in
+// Learn_10 does not earn a handover. Never infer a new game from bit 1091.
+struct ReplayIntroRoute {
+    enum class Stage { none, menu, pause_restart, first_intro, second_intro };
+    Stage stage = Stage::none;
+    bool completed = false;
+
+    static bool equal(const char* a,const char* b) noexcept {
+        if(!a || !b) return false;
+        while(*a && *b) {
+            unsigned char x=static_cast<unsigned char>(*a++);
+            unsigned char y=static_cast<unsigned char>(*b++);
+            if(x>='A' && x<='Z') x=static_cast<unsigned char>(x+32);
+            if(y>='A' && y<='Z') y=static_cast<unsigned char>(y+32);
+            if(x!=y)return false;
+        }
+        return *a==*b;
+    }
+    void note_handover() noexcept { completed=true; }
+    void observe(const char* level, bool verified_pause_restart=false,
+                 bool loading_jail10=false, bool loading_jail20=false) noexcept {
+        if(!completed) { stage=Stage::none; return; }
+        if(equal(level,"menu")) stage=Stage::menu;
+        else if(equal(level,"jail_10")) {
+            if(stage==Stage::menu || stage==Stage::pause_restart ||
+               stage==Stage::first_intro)
+                stage=Stage::first_intro;
+            else stage=Stage::none;
+        } else if(equal(level,"jail_20")) {
+            if(stage==Stage::first_intro || stage==Stage::second_intro)
+                stage=Stage::second_intro;
+            else stage=Stage::none;
+        } else if(equal(level,"learn_10") && verified_pause_restart) {
+            stage=Stage::pause_restart;
+        } else if((!level || !*level || equal(level,"learn_10")) &&
+                  loading_jail10 &&
+                  (stage==Stage::pause_restart || stage==Stage::menu)) {
+            // A verified departure may unload the live Pause controller.
+        } else if((!level || !*level) && loading_jail20 &&
+                  stage==Stage::first_intro) {
+            // Only the expected native destination bridges an empty name.
+        } else stage=Stage::none;
+    }
+    bool ready() const noexcept {
+        return completed && stage==Stage::second_intro;
+    }
+    void consume() noexcept { completed=false; stage=Stage::none; }
+};
+constexpr std::uint32_t replay_handover_mask = 4u;
+constexpr std::uint32_t replay_handover_reset_word(std::uint32_t word) noexcept {
+    return word & ~replay_handover_mask;
+}
+
 } // namespace r2fix
