@@ -663,14 +663,16 @@ struct ControllerOverlayCache {
 };
 // Both callers run on the authenticated camera/render thread. No worker,
 // Glide access or game memory writes are needed to prepare the static art.
-ControllerOverlayCache& controller_overlay_cache() {
-    static ControllerOverlayCache cache;
-    return cache;
+ControllerOverlayCache& controller_overlay_cache(PadLabelFamily family) {
+    // At most three entries: one per physical layout. Rebuild only a
+    // changed locale/connection state/width, never on a family round-trip.
+    static std::array<ControllerOverlayCache,3> caches;
+    return caches[family==PadLabelFamily::xbox?1u:family==PadLabelFamily::playstation?2u:0u];
 }
 }
 bool warm_controller_info_overlay(PadInfoLocale locale,bool connected,PadLabelFamily family,float hud_scale) noexcept {
     if(!g_configured.load(std::memory_order_acquire))return false;
-    auto& cache=controller_overlay_cache();
+    auto& cache=controller_overlay_cache(family);
     const auto placement=pad_info_placement(hud_scale);
     return placement.width && cache.prepare(locale,connected,family,"prewarm") && cache.prepare_width(placement.width);
 }
@@ -679,7 +681,7 @@ bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFami
     const auto placement=pad_info_placement(hud_scale);
     if(!placement.width)return false;
     try {
-        auto& cache=controller_overlay_cache();
+        auto& cache=controller_overlay_cache(family);
         const auto begin=PadPerfClock::now();
         const bool cache_hit=cache.matches(locale,connected,family) && cache.prepared_width==placement.width;
         if(!cache.prepare(locale,connected,family,"draw") || !cache.prepare_width(placement.width))return false;
@@ -689,6 +691,9 @@ bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFami
         if(!g_read(kBackBuffer,placement.x,kPadInfoY,placement.width,kPadInfoHeight,
                    placement.width*2u,scene.data()))return false;
         const auto read_done=PadPerfClock::now();
+        // GameFrame readback is RGB565 even with the game's ABGR
+        // write format. Otherwise the transparent scene swaps R/B.
+        for(auto& pixel:scene)pixel=pad_scene_read_to_write565(pixel);
         if(!composite_prepared_controller(scene.data(),scene.size(),cache.prepared.data(),cache.prepared.size(),placement.width))
             return false;
         if(!apply_pad_info_lights(scene.data(),scene.size(),placement.width,family,connected?activity:PadInfoActivity{}))return false;

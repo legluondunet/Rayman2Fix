@@ -5,9 +5,9 @@
 #include "controller_info_atlas.hpp"
 namespace r2fix {
 namespace {
-constexpr COLORREF bg=RGB(15,29,52), blue=RGB(75,149,237),
-                   ink=RGB(255,239,211), muted=RGB(152,226,248),
-                   body=RGB(57,75,100), dark=RGB(19,29,43);
+constexpr COLORREF bg=RGB(22,18,26), gold=RGB(246,211,112),
+                   ink=RGB(255,239,211), muted=RGB(222,181,250),
+                   body=RGB(225,161,28), dark=RGB(65,21,105);
 struct GdiObject {
     HGDIOBJ handle;
     ~GdiObject(){if(handle)DeleteObject(handle);}
@@ -61,11 +61,44 @@ void solid_circle(HDC dc,int x,int y,int radius,COLORREF color){
     Selection b(dc,brush.handle),p(dc,GetStockObject(NULL_PEN));
     circle(dc,x,y,radius);
 }
+// Static ornaments are rendered in both alpha recovery passes, never per frame.
+void panel_ornaments(HDC dc) {
+    auto bezier=[&](const POINT* p,int n,COLORREF color,int width){
+        GdiObject pen{CreatePen(PS_SOLID,width,color)};
+        if(pen.handle){Selection selected(dc,pen.handle);PolyBezier(dc,p,n);}
+    };
+    for(int sy:{1,-1})for(int sx:{1,-1}){
+        const int ox=sx==1?13:kPadInfoWidth-14;
+        const int oy=sy==1?13:kPadInfoHeight-14;
+        const POINT curl[]{{0,26},{0,8},{8,-1},{21,2},{39,6},{31,22},{21,17},{14,13},{19,7},{24,10}};
+        const POINT tail[]{{4,35},{4,20},{7,11},{12,8}};
+        const POINT accent[]{{28,2},{38,-1},{44,1},{52,6}};
+        POINT p[10],q[4],z[4];
+        for(unsigned i=0;i<10;++i)p[i]={ox+sx*curl[i].x,oy+sy*curl[i].y};
+        for(unsigned i=0;i<4;++i){
+            q[i]={ox+sx*tail[i].x,oy+sy*tail[i].y};
+            z[i]={ox+sx*accent[i].x,oy+sy*accent[i].y};
+        }
+        bezier(p,10,RGB(129,166,55),2);
+        bezier(q,4,RGB(128,74,164),1);
+        bezier(z,4,RGB(128,74,164),1);
+    }
+    const int mid=kPadInfoWidth/2;
+    const POINT under[]{{mid-62,46},{mid-35,40},{mid-22,53},{mid,49},
+        {mid+22,53},{mid+35,40},{mid+62,46}};
+    bezier(under,7,RGB(160,94,195),2);
+    const POINT left[]{{mid-82,405},{mid-48,386},{mid-33,410},{mid-13,401}};
+    const POINT right[]{{mid+82,405},{mid+48,386},{mid+33,410},{mid+13,401}};
+    bezier(left,4,RGB(143,82,181),2);bezier(right,4,RGB(143,82,181),2);
+    const POINT emblem[]{{mid-12,401},{mid-20,389},{mid+9,383},{mid+13,396},
+        {mid+17,407},{mid-5,410},{mid-5,400},{mid-5,393},{mid+5,393},{mid+4,399}};
+    bezier(emblem,10,RGB(246,211,112),2);
+}
 bool label(HDC dc,const PadInfoView& v,unsigned row,PadInfoRect r,UINT align){
     const auto& item=v.rows[row];
     const auto action=item.action;
     // Subtle offset shadow behind action labels, then the original fitted text.
-    text_fit(dc,action,{r.left,r.top+1,r.right,r.top+26},19,12,RGB(8,24,43),true,align);
+    text_fit(dc,action,{r.left,r.top+1,r.right,r.top+26},19,12,RGB(24,16,24),true,align);
     return text_fit(dc,action,{r.left,r.top,r.right,r.top+25},19,12,ink,true,align) &&
         text_fit(dc,item.control,{r.left,r.top+25,r.right,r.bottom},15,10,muted,false,align);
 }
@@ -80,7 +113,7 @@ bool face(HDC dc,PadLabelFamily family){
         const auto symbol=family==PadLabelFamily::xbox?xbox[i]:
                           family==PadLabelFamily::playstation?ps[i]:generic[i];
         if(family==PadLabelFamily::playstation){
-            GdiObject mark{CreatePen(PS_SOLID,2,ink)};
+            GdiObject mark{CreatePen(PS_SOLID,2,RGB(255,249,224))};
             if(!mark.handle)return false;
             Selection selected(dc,mark.handle), hollow(dc,GetStockObject(HOLLOW_BRUSH));
             if(i==0){line(dc,p.x-5,p.y-5,p.x+6,p.y+6);line(dc,p.x+5,p.y-5,p.x-6,p.y+6);}
@@ -100,13 +133,14 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
     struct Restore{HDC dc;int state;~Restore(){RestoreDC(dc,state);}}restore{dc,state};
     try {
         GdiObject background{CreateSolidBrush(canvas)}, shell{CreateSolidBrush(body)},
-                  button{CreateSolidBrush(dark)}, pen{CreatePen(PS_SOLID,1,blue)};
+                  button{CreateSolidBrush(dark)}, pen{CreatePen(PS_SOLID,1,gold)};
         if(!background.handle || !shell.handle || !button.handle || !pen.handle)return false;
         RECT all{0,0,kPadInfoWidth,kPadInfoHeight};
         if(!FillRect(dc,&all,static_cast<HBRUSH>(background.handle)))return false;
         Selection outline(dc,pen.handle), fill(dc,GetStockObject(HOLLOW_BRUSH));
         if(frame && !RoundRect(dc,0,0,kPadInfoWidth,kPadInfoHeight,24,24))return false;
         SetBkMode(dc,TRANSPARENT);
+        panel_ornaments(dc);
         const auto hw=pad_hardware_layout(view.family);
         if(!controller_atlas::paint(dc,view.family))return false;
         if(!face(dc,view.family))return false;
@@ -119,11 +153,11 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
             const auto endpoint=pad_callout_end(a);
             const int end=endpoint.x,y=endpoint.y;
             // Small terminal dot and restrained leader, no crossing arrowheads.
-            GdiObject leader{CreatePen(PS_SOLID,1,RGB(155,227,249))};
+            GdiObject leader{CreatePen(PS_SOLID,1,RGB(246,221,153))};
             if(!leader.handle)return false;
             Selection lp(dc,leader.handle);
             line(dc,a.anchor.x,a.anchor.y,end,y);
-            solid_circle(dc,a.anchor.x,a.anchor.y,2,RGB(200,231,249));
+            solid_circle(dc,a.anchor.x,a.anchor.y,2,RGB(255,237,183));
             ok=label(dc,view,a.row,a.box,a.left?DT_RIGHT:DT_LEFT)&&ok;
         }
         std::string back(view.back);back+=": ";back+=view.back_control;

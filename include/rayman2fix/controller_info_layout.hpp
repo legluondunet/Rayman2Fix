@@ -43,7 +43,7 @@ inline bool align_pad_info_companion(bool page,bool viewport,unsigned route,floa
     return true;
 }
 constexpr PadInfoRect kPadInfoStatus{12,8,908,42};
-constexpr PadInfoRect kPadInfoBack{675,380,908,412};
+constexpr PadInfoRect kPadInfoBack{675,380,852,412};
 constexpr PadInfoRect kPadInfoPending{12,380,245,412};
 constexpr PadInfoRect kPadInfoBody{277,80,643,350};
 struct PadInfoCallout { unsigned row; PadInfoRect box; PadInfoPoint anchor; bool left; };

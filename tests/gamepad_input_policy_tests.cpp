@@ -278,20 +278,54 @@ int main() {
     check(pad_composite565(0xffffu,red,pad_panel_coverage(0,0))==0xffffu,
           "outside panel untouched");
     check(pad_composite565(0,red,{16,0})==0x001fu,"Glide LFB red channel swap");
+    check(pad_scene_read_to_write565(0xf800u)==0x001fu &&
+          pad_scene_read_to_write565(0x001fu)==0xf800u &&
+          pad_scene_read_to_write565(0x07e0u)==0x07e0u,"GameFrame RGB read to ABGR write");
+    for(unsigned i=0;i<65536u;++i){
+        const auto native=std::uint16_t(i);
+        const auto write=pad_scene_read_to_write565(native);
+        const auto preserved=pad_composite565(write,transparent,{0,0});
+        check(pad_scene_read_to_write565(preserved)==native,"transparent corner round-trips the native color");
+    }
+    const auto blue_water=pad_scene_read_to_write565(
+        pad_composite565(pad_scene_read_to_write565(0x001fu),transparent,{16,0}));
+    check((blue_water&31u)>((blue_water>>11)&31u),"blue water stays blue after overlay write");
     check(pad_composite565(0xffffu,transparent,{16,0})!=0xffffu &&
           pad_composite565(0,transparent,{16,0})!=0,"translucent tint on distinct scenes");
     check(!composite_controller_info(nullptr,0,nullptr,0),"invalid overlay refuses");
+    // Restrained violet tint, 55% opacity, monotone subtle gradient.
+    check(pad_tint_shade(0)==0 && pad_tint_shade(kPadInfoHeight-1)==kPadTintShades-1,
+          "panel gradient spans all shades");
+    for(unsigned shade=0;shade<kPadTintShades;++shade){
+        const auto dst=pad_composite565(0xffffu,transparent,{16,0},shade);
+        // A white scene retains 45% of its original contribution, plus
+        // the violet fill. Verify exact RGB565 rounding at every shade.
+        const unsigned dim=shade/2u;
+        const auto channel=[](unsigned fill,unsigned max){
+            return (((255u*115u+fill*140u+127u)/255u)*max+127u)/255u;
+        };
+        const auto expected=std::uint16_t((channel(26u-dim,31u)<<11) |
+            (channel(18u-dim,63u)<<5) | channel(22u-dim,31u));
+        check(dst==expected,"55 percent translucent panel preserves bright scene");
+        check((dst&31u)>=14 && ((dst>>11)&31u)>=14 && ((dst>>5)&63u)>=29,
+              "panel keeps more of the native animated backdrop");
+        if(shade) {
+            const auto prev=pad_composite565(0xffffu,transparent,{16,0},shade-1);
+            check((dst&31u)<=(prev&31u) && ((dst>>5)&63u)<=((prev>>5)&63u) &&
+                  ((dst>>11)&31u)<=((prev>>11)&31u),"gradient darkens monotonically");
+        }
+    }
     // Exhaustively check each fast path against every possible RGB565 scene color.
     {
-        const auto& lut=pad_background_tint_table();
         const PadOverlayPixel colors[]{{},{12,77,151,255,255,255},{9,22,17,40,90,35}};
         const PadPanelCoverage coverage[]{{0,0},{16,0},{0,16},{6,5},{0,3}};
-        for(auto fg:colors)for(auto cov:coverage) {
-            const auto prepared=pad_prepare_pixel(fg,cov);
+        for(unsigned shade=0;shade<kPadTintShades;++shade)for(auto fg:colors)for(auto cov:coverage) {
+            const auto& lut=pad_background_tint_table(shade);
+            const auto prepared=pad_prepare_pixel(fg,cov,shade);
             bool exact=true;
             for(unsigned i=0;i<65536u;++i)
-                if(pad_composite_prepared_pixel(std::uint16_t(i),prepared,lut)!=
-                   pad_composite565(std::uint16_t(i),fg,cov)){exact=false;break;}
+                if(pad_composite_prepared_pixel(std::uint16_t(i),prepared,lut,shade)!=
+                   pad_composite565(std::uint16_t(i),fg,cov,shade)){exact=false;break;}
             check(exact,"prepared pixel path exactly matches all 65536 destination colors");
         }
     }

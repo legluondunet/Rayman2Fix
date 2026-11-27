@@ -24,10 +24,13 @@ int main(){
             }
             GdiFlush();
             if(GetPixel(dc,20,45)==GetPixel(dc,460,145)){ok=false;break;}
-            // Opaque blue shell, including the lower right grip; no violet
-            // plaque, decorative corner or inner outline on the overlay.
+            // Golden shell and violet face buttons for all controller families.
             const auto grip=GetPixel(dc,607,321);
-            if(GetBValue(grip)<=GetRValue(grip) || GetGValue(grip)<=GetRValue(grip)){ok=false;break;}
+            const auto center=GetPixel(dc,460,185);
+            const auto face=pad_hardware_layout(family).face[0];
+            const auto violet=GetPixel(dc,face.x+9,face.y);
+            if(GetRValue(grip)<=GetBValue(grip) || GetRValue(center)<=GetBValue(center) ||
+               GetGValue(center)<=GetBValue(center) || GetBValue(violet)<=GetGValue(violet)){ok=false;break;}
         }
         if(ok)ok=draw_controller_info_preview(dc,make_pad_info_view(static_cast<PadInfoLocale>(i),false,PadLabelFamily::xbox));
     }
@@ -39,11 +42,14 @@ int main(){
             const auto body=overlay[145u*kPadInfoWidth+460u];
             const auto upper=overlay[150u*kPadInfoWidth+450u],lower=overlay[285u*kPadInfoWidth+460u];
             if(upper.r==lower.r&&upper.g==lower.g&&upper.b==lower.b)ok=false;
-            ok=ok && overlay.size()==kPadInfoPixels && body.ar==255u && body.ag==255u && body.ab==255u &&
+            unsigned ornament_pixels=0;
+            for(unsigned y=8;y<42;++y)for(unsigned x=10;x<70;++x)
+                ornament_pixels+=overlay[y*kPadInfoWidth+x].ar>0;
+            ok=ok && ornament_pixels>20 && overlay.size()==kPadInfoPixels && body.ar==255u && body.ag==255u && body.ab==255u &&
                 !overlay[45u*kPadInfoWidth+20u].ar &&
-                !overlay[15u*kPadInfoWidth+30u].ar &&
+                !overlay[15u*kPadInfoWidth+100u].ar &&
                 !overlay[25u*kPadInfoWidth+355u].ar &&
-                !overlay[398u*kPadInfoWidth+460u].ar &&
+                !overlay[398u*kPadInfoWidth+350u].ar &&
                 overlay[321u*kPadInfoWidth+607u].ar==255u &&
                 composite_controller_info(scene.data(),scene.size(),overlay.data(),overlay.size()) &&
                 scene[0]==0xffffu && scene[45u*kPadInfoWidth+20u]!=0xffffu;

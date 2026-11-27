@@ -57,19 +57,35 @@ constexpr PadPanelCoverage pad_panel_coverage(int x,int y) noexcept {
     }
     return c;
 }
-// GameFrame's Glide LFB uses swapped R/B compared to conventional RGB565.
-// Keep this explicit at the boundary; no channel swap in the GDI renderer.
+// Pinned GameFrame readback always returns conventional RGB565
+// (render/frame.rs::read), but LFB writes in the game's ABGR mode
+// decode the red/blue fields reversed (api/lfb.rs::rgba).
+// Normalize the scene to write order before blending, including corners
+// where the compositor preserves the original word.
+constexpr std::uint16_t pad_scene_read_to_write565(std::uint16_t pixel) noexcept {
+    return std::uint16_t(((pixel&0xf800u)>>11)|(pixel&0x07e0u)|((pixel&0x001fu)<<11));
+}
+// The compositor operates in the write order; the GDI art remains RGB.
+// Eight very close shades across the panel; static row lookup avoids
+// recalculating gradients or increasing the framebuffer read/write area.
+constexpr unsigned kPadTintShades=8;
+constexpr unsigned pad_tint_shade(int y) noexcept {
+    return unsigned(y)*kPadTintShades/kPadInfoHeight;
+}
 constexpr std::uint16_t pad_composite565(std::uint16_t dst,PadOverlayPixel fg,
-                                          PadPanelCoverage c) noexcept {
+                                          PadPanelCoverage c,unsigned shade=0) noexcept {
     if(!c.fill&&!c.border)return dst;
+    shade=std::min(shade,kPadTintShades-1u);
     unsigned b=((dst>>11)&31u)*255u/31u,g=((dst>>5)&63u)*255u/63u,
              r=(dst&31u)*255u/31u;
-    const unsigned f=c.fill*102u,e=c.border*255u,a=f+e;
+    // Dark near-neutral violet at 55% opacity, with restrained vertical shading.
+    const unsigned f=c.fill*140u,e=c.border*255u,a=f+e;
     if(a){
         const auto tint=[&](unsigned base,unsigned fill,unsigned border){
             return pad_tint(base,(f*fill+e*border+a/2u)/a,(a+8u)/16u);
         };
-        r=tint(r,18,145);g=tint(g,38,218);b=tint(b,74,255);
+        const unsigned dim=shade/2u;
+        r=tint(r,22u-dim,246);g=tint(g,18u-dim,211);b=tint(b,26u-dim,112);
     }
     r=pad_over(r,fg.r,fg.ar);g=pad_over(g,fg.g,fg.ag);b=pad_over(b,fg.b,fg.ab);
     return std::uint16_t(((b*31u+127u)/255u)<<11 | ((g*63u+127u)/255u)<<5 |
@@ -95,7 +111,7 @@ inline bool composite_controller_info(std::uint16_t* dst,std::size_t count,
         }
         for(auto& n:sum)n=(n+kPadInfoWidth/2u)/kPadInfoWidth;
         dst[i]=pad_composite565(dst[i],{std::uint8_t(sum[0]),std::uint8_t(sum[1]),std::uint8_t(sum[2]),
-            std::uint8_t(sum[3]),std::uint8_t(sum[4]),std::uint8_t(sum[5])},{sum[6],std::min(sum[7],16u-sum[6])});
+            std::uint8_t(sum[3]),std::uint8_t(sum[4]),std::uint8_t(sum[5])},{sum[6],std::min(sum[7],16u-sum[6])},pad_tint_shade(y));
     }
     return true;
 }
@@ -108,34 +124,38 @@ struct PadPreparedPixel {
     PadCompositeKind kind=PadCompositeKind::partial;
     std::uint16_t constant=0;
 };
-constexpr PadPreparedPixel pad_prepare_pixel(PadOverlayPixel fg,PadPanelCoverage c) noexcept {
+constexpr PadPreparedPixel pad_prepare_pixel(PadOverlayPixel fg,PadPanelCoverage c,unsigned shade=0) noexcept {
     PadPreparedPixel p{fg,std::uint8_t(c.fill),std::uint8_t(c.border)};
     if(!c.fill&&!c.border)p.kind=PadCompositeKind::preserve;
     else if((fg.ar==255u && fg.ag==255u && fg.ab==255u) || c.border==16u) {
         p.kind=PadCompositeKind::constant;
-        p.constant=pad_composite565(0,fg,c);
+        p.constant=pad_composite565(0,fg,c,shade);
     } else if(c.fill==16u && !fg.ar && !fg.ag && !fg.ab && !fg.r && !fg.g && !fg.b)
         p.kind=PadCompositeKind::tint;
     return p;
 }
 // An exact lookup for the ordinary translucent background, derived from
 // the reference integer compositor, not an approximation or color change.
-inline const std::array<std::uint16_t,65536>& pad_background_tint_table() noexcept {
-    static const auto table=[] {
-        std::array<std::uint16_t,65536> out{};
-        for(unsigned i=0;i<out.size();++i)
-            out[i]=pad_composite565(std::uint16_t(i),{},{16,0});
-        return out;
-    }();
-    return table;
+using PadTintTable=std::array<std::uint16_t,65536>;
+struct PadTintTables {
+    std::array<PadTintTable,kPadTintShades> rows{};
+    PadTintTables() noexcept {
+        for(unsigned s=0;s<rows.size();++s)
+            for(unsigned i=0;i<rows[s].size();++i)
+                rows[s][i]=pad_composite565(std::uint16_t(i),{},{16,0},s);
+    }
+};
+inline const PadTintTable& pad_background_tint_table(unsigned shade=0) noexcept {
+    static const PadTintTables tables;
+    return tables.rows[std::min(shade,kPadTintShades-1u)];
 }
 inline std::uint16_t pad_composite_prepared_pixel(std::uint16_t dst,const PadPreparedPixel& p,
-    const std::array<std::uint16_t,65536>& tint) noexcept {
+    const PadTintTable& tint,unsigned shade=0) noexcept {
     switch(p.kind) {
     case PadCompositeKind::preserve:return dst;
     case PadCompositeKind::constant:return p.constant;
     case PadCompositeKind::tint:return tint[dst];
-    default:return pad_composite565(dst,p.fg,{p.fill,p.border});
+    default:return pad_composite565(dst,p.fg,{p.fill,p.border},shade);
     }
 }
 inline bool prepare_controller_composite(const PadOverlayPixel* overlay,std::size_t overlay_count,
@@ -159,7 +179,7 @@ inline bool prepare_controller_composite(const PadOverlayPixel* overlay,std::siz
             staged[std::size_t(y)*width+x]=pad_prepare_pixel(
                 {std::uint8_t(sum[0]),std::uint8_t(sum[1]),std::uint8_t(sum[2]),
                  std::uint8_t(sum[3]),std::uint8_t(sum[4]),std::uint8_t(sum[5])},
-                {sum[6],std::min(sum[7],16u-sum[6])});
+                {sum[6],std::min(sum[7],16u-sum[6])},pad_tint_shade(y));
         }
         output.swap(staged);
         return true;
@@ -170,9 +190,15 @@ inline bool composite_prepared_controller(std::uint16_t* dst,std::size_t count,
                                           unsigned width) noexcept {
     if(!dst||!prepared||!width||width>kPadInfoWidth||
        count!=std::size_t(width)*kPadInfoHeight||prepared_count!=count)return false;
-    const auto& tint=pad_background_tint_table();
-    for(std::size_t i=0;i<count;++i)
-        dst[i]=pad_composite_prepared_pixel(dst[i],prepared[i],tint);
+    for(int y=0;y<kPadInfoHeight;++y){
+        const auto shade=pad_tint_shade(y);
+        const auto& tint=pad_background_tint_table(shade);
+        const auto offset=std::size_t(y)*width;
+        for(unsigned x=0;x<width;++x){
+            const auto i=offset+x;
+            dst[i]=pad_composite_prepared_pixel(dst[i],prepared[i],tint,shade);
+        }
+    }
     return true;
 }
 } // namespace r2fix
