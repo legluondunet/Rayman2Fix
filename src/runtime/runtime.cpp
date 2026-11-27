@@ -6447,20 +6447,15 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
     // The approved CD has stripped names. Match the entire observed
     // 28-entry structural fingerprint and exact table membership first.
     // Reference action indices remain subject to hardware confirmation.
-    const auto matches=[&](unsigned id,const char* suffix,PadAction action) {
-        if(index!=id || !(g_sdl_input_actions&r2fix::pad_action_bit(action)))return false;
-        std::string_view n(name.data());
-        return n.empty() || r2fix::ipt_name_contains(n,suffix);
-    };
+
     // Native action 20 = CouperCinematique, 21 = TexteSuivant in the
     // reference enumeration. Leave Jail_20 to its existing guarded
     // level request, avoiding a simultaneous native skip and level change.
-    const auto* binding=gameplay ?
-        r2fix::pad_gameplay_ipt_binding(index,g_sdl_input_actions) : nullptr;
+    const auto* binding=map_jump ?
+        r2fix::pad_world_map_ipt_binding(index,g_sdl_input_actions) :
+        gameplay ? r2fix::pad_gameplay_ipt_binding(index,g_sdl_input_actions) : nullptr;
     const std::string_view entry_name(name.data());
-    const bool requested=map_jump ?
-        matches(10,"sauter",PadAction::jump) :
-        native_cinematic ? (index==20u || index==21u) :
+    const bool requested=native_cinematic ? (index==20u || index==21u) :
         (binding && (entry_name.empty() ||
          r2fix::ipt_name_contains(entry_name,binding->name_fragment)));
     if(requested) {
@@ -6485,10 +6480,14 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
                 log_line(msg);
             }
         }
-        static bool map_jump_reported=false;
-        if(map_jump && !map_jump_reported) {
+        static bool map_jump_reported=false,map_dialogue_reported=false;
+        if(map_jump && index==10u && !map_jump_reported) {
             map_jump_reported=true;
             log_line("RUNTIME-SDL3: native-route=MAP-jump IPT-index=10 source=retail-fingerprint");
+        }
+        if(map_jump && index==21u && !map_dialogue_reported) {
+            map_dialogue_reported=true;
+            log_line("RUNTIME-SDL3: native-route=MAP-next-dialogue IPT-index=21 source=retail-fingerprint");
         }
         static std::uint32_t seen=0;
         if(index<32u && !(seen&(1u<<index))) {
