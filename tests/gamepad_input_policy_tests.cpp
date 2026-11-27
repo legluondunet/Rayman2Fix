@@ -293,13 +293,22 @@ int main() {
     check(pad_composite565(0xffffu,transparent,{16,0})!=0xffffu &&
           pad_composite565(0,transparent,{16,0})!=0,"translucent tint on distinct scenes");
     check(!composite_controller_info(nullptr,0,nullptr,0),"invalid overlay refuses");
-    // Restrained violet tint, 75% opacity, monotone darker gradient.
+    // Restrained violet tint, 55% opacity, monotone subtle gradient.
     check(pad_tint_shade(0)==0 && pad_tint_shade(kPadInfoHeight-1)==kPadTintShades-1,
           "panel gradient spans all shades");
     for(unsigned shade=0;shade<kPadTintShades;++shade){
         const auto dst=pad_composite565(0xffffu,transparent,{16,0},shade);
-        check((dst&31u)<12 && ((dst>>11)&31u)<12 && ((dst>>5)&63u)<24,
-              "dark translucent panel attenuates bright water");
+        // A white scene retains 45% of its original contribution, plus
+        // the violet fill. Verify exact RGB565 rounding at every shade.
+        const unsigned dim=shade/2u;
+        const auto channel=[](unsigned fill,unsigned max){
+            return (((255u*115u+fill*140u+127u)/255u)*max+127u)/255u;
+        };
+        const auto expected=std::uint16_t((channel(26u-dim,31u)<<11) |
+            (channel(18u-dim,63u)<<5) | channel(22u-dim,31u));
+        check(dst==expected,"55 percent translucent panel preserves bright scene");
+        check((dst&31u)>=14 && ((dst>>11)&31u)>=14 && ((dst>>5)&63u)>=29,
+              "panel keeps more of the native animated backdrop");
         if(shade) {
             const auto prev=pad_composite565(0xffffu,transparent,{16,0},shade-1);
             check((dst&31u)<=(prev&31u) && ((dst>>5)&63u)<=((prev>>5)&63u) &&

@@ -78,13 +78,14 @@ constexpr std::uint16_t pad_composite565(std::uint16_t dst,PadOverlayPixel fg,
     shade=std::min(shade,kPadTintShades-1u);
     unsigned b=((dst>>11)&31u)*255u/31u,g=((dst>>5)&63u)*255u/63u,
              r=(dst&31u)*255u/31u;
-    // Dark near-neutral violet at 75% opacity, slightly darker at the foot.
-    const unsigned f=c.fill*191u,e=c.border*255u,a=f+e;
+    // Dark near-neutral violet at 55% opacity, with restrained vertical shading.
+    const unsigned f=c.fill*140u,e=c.border*255u,a=f+e;
     if(a){
         const auto tint=[&](unsigned base,unsigned fill,unsigned border){
             return pad_tint(base,(f*fill+e*border+a/2u)/a,(a+8u)/16u);
         };
-        r=tint(r,22u-shade,246);g=tint(g,18u-shade,211);b=tint(b,26u-shade,112);
+        const unsigned dim=shade/2u;
+        r=tint(r,22u-dim,246);g=tint(g,18u-dim,211);b=tint(b,26u-dim,112);
     }
     r=pad_over(r,fg.r,fg.ar);g=pad_over(g,fg.g,fg.ag);b=pad_over(b,fg.b,fg.ab);
     return std::uint16_t(((b*31u+127u)/255u)<<11 | ((g*63u+127u)/255u)<<5 |
