@@ -24,17 +24,21 @@ public release.
 
 ## Remaining priorities
 
-1. #45 — retain the validated queued-before-Playing guard and scoped replay
-   repair. Investigate only reproducible residual failures; do not add
-   speculative delays.
+1. #45 — owner validated both replay cinematic fixes in build d88a8501
+   (workflow 2116): six successful Jail_20 exits, five replay resets,
+   six F248 handover passes with restored slot and bit1188=0, plus
+   explicit visual/gameplay approval. Retain the validated runtime.
+   Reopen only on concrete regression evidence.
 2. Targeted controller tests: jump/surface and target/dive in an actual
    swimming scene, and world-knowledge versus Murfy in eligible contexts.
    Keep the pending markers until the actual native effect is confirmed.
    Validate these behaviors under Wine with the available controllers.
-3. Final cross-edition regression: fresh CD installation and verified launch,
-   GOG installation/verification and updated embedded guide. Retain the approved
-   CD executable requirement and original approved GOG executable. Check source
-   availability and all dependency notices. No commercial assets are distributed.
+3. Cross-edition fresh-install regression passed (PR #62 merged as 51ec1665).
+   CD log 20261127-010554: 2095 files verified, approved EXE and backup,
+   successful game exit; GOG installation and repeat verification passed earlier.
+   A separate CD process relaunch is not captured in the first-session logs.
+   Check release source availability and dependency notices before publication.
+   No commercial assets are distributed.
 
 ## Platform validation policy
 
@@ -44,3 +48,11 @@ is not a release prerequisite. Continue Windows x86 automated CI tests;
 report native Windows gameplay coverage as incomplete, not validated.
 
 No public release is authorized by these engineering milestones alone.
+
+## Targeted controller validation candidate
+
+The existing mapping remains unchanged. South (A/Cross) supplies native IPT10/15/21, left trigger supplies IPT13/14, and D-pad Up/Down share the PC DIK_F1 route. A new bounded `RUNTIME-SDL3-TARGET` trace with Log=1 distinguishes physical edges, accepted actions and the first verified native route per accepted activation. The four actions have independent budgets; focus/device/scene boundaries clear route evidence. A native predicate result or keyboard-buffer merge is not proof of swimming movement, opening a screen, or hearing music. Validate those effects visually/audibly. No new setting or game memory write is introduced.
+
+## Owner validation checkpoint 20261127-082021
+
+The owner confirmed visual/gameplay integrity after six cinematic tests. The same runtime log records three D-pad Up and one D-pad Down activations reaching the verified DIK_F1 merge in Learn_10 (lines 1064–1091); original IPT22/23 positive states are observed on the first three activations. No generic menu opening or paired audio continuation attributable to those four presses is recorded. This establishes delivery, not the native screen effect. Jump reaches IPT10/15/21, but no swimming-specific movement is established and no target/dive press appears. Test F1 in an eligible gameplay situation (including sustained hold) and compare physical keyboard F1 to the two pad directions. Test LT/L2 and South in actual water. The validated d88a8501 artifact already contains the required input and audio traces; reuse it rather than rebuilding solely for documentation changes. Leave pending labels unchanged until the owner confirms the actual effects.

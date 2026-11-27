@@ -42,6 +42,14 @@ constexpr const PadIptBinding* pad_gameplay_ipt_binding(unsigned index,
     return nullptr;
 }
 
+// The Hall of Doors is not a normal gameplay map. Only permit its
+// established jump plus the original next-text action on South.
+constexpr const PadIptBinding* pad_world_map_ipt_binding(unsigned index,
+                                                       std::uint32_t actions) noexcept {
+    return index==10u || index==21u ?
+        pad_gameplay_ipt_binding(index,actions) : nullptr;
+}
+
 // Exact PC scene catalog, cross-checked against the PC depot and map
 // classification documented in docs/sdl3-gamepad-policy.md. Names alone
 // do not authorize input: the live Playing/pause/IPT guards still apply.

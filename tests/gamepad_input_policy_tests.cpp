@@ -1,4 +1,5 @@
 #include "rayman2fix/gamepad_input_policy.hpp"
+#include "rayman2fix/targeted_pad_trace.hpp"
 #include "rayman2fix/gamepad_control_info.hpp"
 #include "rayman2fix/controller_info_layout.hpp"
 #include "rayman2fix/controller_info_composite.hpp"
@@ -20,6 +21,48 @@ PadSample active(PadContext context = PadContext::gameplay) {
     return s;
 }
 int main() {
+    {
+        TargetedPadTrace trace;
+        PadTransitionGate input;
+        auto sample=active(); sample.scene_id=2;
+        unsigned changes[4]{};
+        PadTraceState latest[4]{};
+        const auto report=[&](PadAction action,const PadTraceState& state,bool) {
+            for(unsigned i=0;i<kTargetedPadActions.size();++i)
+                if(kTargetedPadActions[i]==action){++changes[i];latest[i]=state;}
+        };
+        auto poll=[&]{trace.observe(sample,input.update(sample),report);};
+        sample.south=true; poll();
+        check(changes[0]==1 && latest[0].physical && !latest[0].accepted,
+              "held on attach reported but cannot claim delivery");
+        check(!trace.note_route(PadAction::jump,PadTraceRoute::surface),"gated route refused");
+        sample.south=false;poll();sample.south=true;poll();
+        check(latest[0].accepted && trace.note_route(PadAction::jump,PadTraceRoute::surface),
+              "fresh jump native surface evidence");
+        check(!trace.note_route(PadAction::jump,PadTraceRoute::surface) &&
+              trace.note_route(PadAction::jump,PadTraceRoute::jump),"distinct native route once per activation");
+        poll();check(!trace.note_route(PadAction::jump,PadTraceRoute::jump),"holding does not repeat evidence");
+        sample.scene_id=3;poll();
+        check(!latest[0].accepted && !trace.note_route(PadAction::jump,PadTraceRoute::surface),
+              "held jump cannot cross scene boundary");
+        sample.south=false;poll();
+        for(unsigned i=0;i<80;++i){sample.south=true;poll();sample.south=false;poll();}
+        check(changes[0]==TargetedPadTrace::max_changes,"jump audit capped");
+        sample.dpad_up=true;sample.left_trigger=32767;poll();
+        check(latest[1].accepted && latest[2].accepted &&
+              trace.note_route(PadAction::target,PadTraceRoute::dive) &&
+              trace.note_route(PadAction::world_knowledge,PadTraceRoute::f1),
+              "independent dive and knowledge budgets");
+        check(!trace.note_route(PadAction::murphy,PadTraceRoute::f1),"no false down delivery");
+        sample.dpad_up=false;sample.dpad_down=true;poll();
+        check(!trace.note_route(PadAction::world_knowledge,PadTraceRoute::f1) &&
+              trace.note_route(PadAction::murphy,PadTraceRoute::f1),"distinct F1 source");
+        sample.foreground=false;poll();
+        check(!latest[1].accepted && !latest[3].accepted &&
+              !trace.note_route(PadAction::murphy,PadTraceRoute::f1),"focus loss invalidates evidence");
+        sample.foreground=true;poll();
+        check(!trace.note_route(PadAction::murphy,PadTraceRoute::f1),"held input after focus remains gated");
+    }
     std::uint32_t native_pad[9]{0xabcdef03u,0x1234u,0xdeadbeefu,1,2,3,4,5,6};
     check(!neutralize_native_joystick(false,true,true,true,native_pad,9)&&native_pad[1]==0x1234u,"native fallback without SDL owner");
     check(!neutralize_native_joystick(true,false,true,true,native_pad,9)&&!neutralize_native_joystick(true,true,false,true,native_pad,9)&&!neutralize_native_joystick(true,true,true,false,native_pad,9)&&!neutralize_native_joystick(true,true,true,true,native_pad,8),"neutralizer requires fresh supported successful poll and exact layout");
@@ -238,6 +281,49 @@ int main() {
     check(pad_composite565(0xffffu,transparent,{16,0})!=0xffffu &&
           pad_composite565(0,transparent,{16,0})!=0,"translucent tint on distinct scenes");
     check(!composite_controller_info(nullptr,0,nullptr,0),"invalid overlay refuses");
+    // Exhaustively check each fast path against every possible RGB565 scene color.
+    {
+        const auto& lut=pad_background_tint_table();
+        const PadOverlayPixel colors[]{{},{12,77,151,255,255,255},{9,22,17,40,90,35}};
+        const PadPanelCoverage coverage[]{{0,0},{16,0},{0,16},{6,5},{0,3}};
+        for(auto fg:colors)for(auto cov:coverage) {
+            const auto prepared=pad_prepare_pixel(fg,cov);
+            bool exact=true;
+            for(unsigned i=0;i<65536u;++i)
+                if(pad_composite_prepared_pixel(std::uint16_t(i),prepared,lut)!=
+                   pad_composite565(std::uint16_t(i),fg,cov)){exact=false;break;}
+            check(exact,"prepared pixel path exactly matches all 65536 destination colors");
+        }
+    }
+    // Compare every pixel against the original algorithm for both aspect
+    // ratios, with mixed alpha and a changing synthetic native scene.
+    {
+        std::vector<PadOverlayPixel> art(kPadInfoPixels);
+        for(std::size_t i=0;i<art.size();++i) {
+            const unsigned a=unsigned((i*37u)%256u);
+            const unsigned g=unsigned((i*17u)%256u),b=unsigned((i*73u)%256u);
+            if(i%11u<4u)art[i]={};
+            else if(i%11u<7u)art[i]={std::uint8_t(a),std::uint8_t(g),std::uint8_t(b),255,255,255};
+            else art[i]={std::uint8_t(a/2),std::uint8_t(g/3),std::uint8_t(b/4),
+                    std::uint8_t(a),std::uint8_t(g),std::uint8_t(b)};
+        }
+        std::vector<PadPreparedPixel> prepared;
+        for(unsigned width:{unsigned(kPadInfoWidth),unsigned(kPadInfoWidth*3/4)}) {
+            check(prepare_controller_composite(art.data(),art.size(),width,prepared),"prepare static controller samples");
+            for(unsigned frame=0;frame<2;++frame){
+                std::vector<std::uint16_t> reference(std::size_t(width)*kPadInfoHeight);
+                for(std::size_t i=0;i<reference.size();++i)reference[i]=std::uint16_t(i*1237u+frame*197u);
+                auto actual=reference;
+                check(composite_controller_info(reference.data(),reference.size(),art.data(),art.size(),width) &&
+                      composite_prepared_controller(actual.data(),actual.size(),prepared.data(),prepared.size(),width) &&
+                      actual==reference,"cached composite is pixel-exact across live scenes");
+            }
+        }
+        const auto old_size=prepared.size();
+        check(!prepare_controller_composite(nullptr,0,0,prepared) && prepared.size()==old_size,
+              "invalid preparation preserves last cache");
+        check(!composite_prepared_controller(nullptr,0,nullptr,0,1),"invalid cached render refuses");
+    }
     PadSample visual{};visual.connected=true;visual.device_id=1;visual.foreground=true;
     visual.context=PadContext::controller_info;visual.south=true;visual.right_y_display=-20000;
     visual.back_display=true;visual.left_trigger=20000;
@@ -485,6 +571,17 @@ int main() {
     const auto murphy=pad_action_bit(PadAction::murphy);
     check(pad_gameplay_ipt_binding(10,jump) && pad_gameplay_ipt_binding(15,jump) &&
           pad_gameplay_ipt_binding(21,jump), "South jumps, resurfaces and advances dialogue");
+    for(unsigned index=0;index<138;++index) {
+        const auto* map_binding=pad_world_map_ipt_binding(index,jump);
+        check(bool(map_binding)==(index==10 || index==21),
+              "map South permits only jump and next dialogue");
+        check(!pad_world_map_ipt_binding(index,0) &&
+              !pad_world_map_ipt_binding(index,target) &&
+              !pad_world_map_ipt_binding(index,pad_action_bit(PadAction::confirm)),
+              "map action requires fresh South jump semantic");
+    }
+    check(pad_world_map_ipt_binding(21,jump)->name_fragment=="textesuivant",
+          "map dialogue uses named native action");
     check(pad_gameplay_ipt_binding(13,target) && pad_gameplay_ipt_binding(14,target),
           "left trigger targets or dives");
     check(!pad_gameplay_ipt_binding(22,knowledge) && !pad_gameplay_ipt_binding(22,murphy),

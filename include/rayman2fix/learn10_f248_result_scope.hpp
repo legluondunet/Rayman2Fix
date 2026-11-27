@@ -21,6 +21,7 @@ struct Learn10F248Sample {
     bool approved_cd=false, skip_cinematics_enabled=false;
     bool exact_script=false, live_learn10=false, first_visit=false;
     bool nomovies_bit_known_off=false, handover_incomplete=false;
+    bool verified_replay_director=false; // earned by guarded Jail_20 reset + live B3/suspension
     bool root_is_ifnot=false, function_node_is_type3=false;
     bool function_result_known=false;
 };
@@ -29,6 +30,50 @@ constexpr std::uint32_t kLearn10F248GetBooleanInArray=248;
 constexpr std::uint32_t kLearn10F248FunctionType=3;
 constexpr std::uint32_t kLearn10F248IntegerResultType=6;
 
+
+// Scope of a replay token: only an accepted native Jail_20 transition
+// following the verified reset can create it. Null/empty level names are
+// permitted only while pending, not after arrival. A second departure
+// or unrelated map always cancels the authorization.
+struct Learn10ReplayVisit {
+    enum class Stage { none, pending, active };
+    Stage stage=Stage::none;
+    std::uint32_t queued_at=0;
+    void queue(std::uint32_t now) noexcept { stage=Stage::pending;queued_at=now; }
+    void observe(bool jail20,bool learn10,bool unknown,std::uint32_t now) noexcept {
+        if(stage==Stage::pending) {
+            if(std::uint32_t(now-queued_at)>10000u)stage=Stage::none;
+            else if(learn10)stage=Stage::active;
+            else if(!jail20 && !unknown)stage=Stage::none;
+        } else if(stage==Stage::active && !learn10)stage=Stage::none;
+    }
+    bool active() const noexcept { return stage==Stage::active; }
+    void clear() noexcept { stage=Stage::none; }
+};
+// Bit 1091 can become set during replay startup. For a verified replay,
+// require readable live Rayman suspension flags and actual release from
+// suspension. If no suspended sample was seen, allow a naturally playable
+// entry only after the existing bounded director-discovery window.
+constexpr bool learn10_replay_handover(bool story_known,bool story_set,
+    bool playing,bool ray_known,bool ray_clear,bool saw_suspended,
+    std::uint32_t elapsed) noexcept {
+    return story_known && story_set && playing && ray_known && ray_clear &&
+        (saw_suspended || elapsed>=3000u);
+}
+
+// Static Learn_10 asset audit: Gen_Cinematique instances and their
+// V0[0] recipient. V49 selects the native story bit. The initial intro
+// (personal 48, bit 1091) deliberately cannot qualify here.
+constexpr bool learn10_extra_cinematic_identity(unsigned family,unsigned model,
+    unsigned personal,unsigned story_bit,unsigned target_family,
+    unsigned target_model,unsigned target_personal) noexcept {
+    if(family!=20 || model!=29)return false;
+    if(personal==50)return story_bit==1092 &&
+        target_family==21 && target_model==30 && target_personal==49;
+    const bool teensie=(personal==56 || personal==67) ? story_bit==1133 :
+                       (personal==66 || personal==68) ? story_bit==1130 : false;
+    return teensie && target_family==25 && target_model==34 && target_personal==55;
+}
 
 // Read-only classification of an individual evaluator call. A positive
 // match alone never installs a native function-slot hook: SkipCinematics
@@ -43,12 +88,13 @@ struct Learn10F248Lifetime {
     bool enabled=false, live_learn10=false, director_readable=false;
     bool same_behaviour=false, same_rule_root=false;
     bool story_readable=false, nomovies=false, handed_over=false;
+    bool verified_replay_director=false;
 };
 constexpr const char* learn10_f248_disarm_reason(const Learn10F248Lifetime& s) {
     if (!s.enabled) return "feature-disabled";
     if (!s.live_learn10) return "level-left";
     if (!s.story_readable) return "story-unreadable";
-    if (s.handed_over) return "story1091-handover";
+    if (s.handed_over && !s.verified_replay_director) return "story1091-handover";
     if (s.nomovies) return "story1188-changed";
     if (!s.director_readable) return "director-unreadable";
     if (!s.same_behaviour) return "director-left-b3";
@@ -58,7 +104,8 @@ constexpr const char* learn10_f248_disarm_reason(const Learn10F248Lifetime& s) {
 
 inline bool learn10_f248_scope_matches(const Learn10F248Sample& s) {
     if (!s.approved_cd || !s.skip_cinematics_enabled ||
-        !s.exact_script || !s.live_learn10 || !s.first_visit ||
+        !s.exact_script || !s.live_learn10 ||
+        (!s.first_visit && !s.verified_replay_director) ||
         !s.nomovies_bit_known_off || !s.handover_incomplete ||
         !s.root_is_ifnot || !s.function_node_is_type3 ||
         !s.function_result_known)

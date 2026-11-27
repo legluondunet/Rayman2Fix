@@ -27,6 +27,7 @@
 #include "rayman2fix/render_poll_gate.hpp"
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
 #include "rayman2fix/sdl_gamepads.hpp"
+#include "rayman2fix/targeted_pad_trace.hpp"
 #include "rayman2fix/controller_info_renderer.hpp"
 #include "rayman2fix/native_ipt_probe.hpp"
 #include "rayman2fix/gamepad_menu_bridge.hpp"
@@ -214,6 +215,7 @@ using RequestLevel = void (__cdecl*)(const char*, unsigned char);
 std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
 r2fix::IntroSkipGuard g_intro_guard;
+r2fix::ReplayOwnerWait g_replay_owner_wait;
 r2fix::ReplayIntroRoute g_replay_intro_route;
 bool g_intro_level_logged = false;
 // Diagnostic-only timestamp of render sources. These do not authorize
@@ -287,6 +289,12 @@ std::atomic<bool> g_f248_slot_installed{false};
 std::atomic<bool> g_f248_enabled{false};
 std::atomic<bool> g_f248_armed{false};
 std::atomic<bool> g_f248_ever_armed{false};
+r2fix::Learn10ReplayVisit g_learn_replay_visit;
+bool g_learn_replay_saw_suspended=false;
+bool g_learn_replay_sample_logged=false;
+int g_learn_replay_last_ray=-2;
+int g_learn_replay_last_story=-2;
+
 std::atomic<std::uintptr_t> g_f248_so{0};
 std::atomic<std::uintptr_t> g_f248_intel{0};
 std::atomic<std::uintptr_t> g_f248_b3{0};
@@ -4697,6 +4705,36 @@ constexpr BYTE kF248OriginalPrefix[16]={
 };
 thread_local bool g_f248_reentrant=false;
 
+// The replay exception is never inferred from bit 1091. Require the
+// accepted Jail20 replay token and the same exact live suspended director.
+bool learn10_replay_ray_flags(std::uint32_t& ray_so,std::uint32_t& custom) {
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    std::uint32_t type=0,actor=0,standard=0,back=0;
+    return base && read_u32(base+kRaymanSuperObjectRva,ray_so) && ray_so &&
+        read_u32(ray_so,type) && type==2u &&
+        read_u32(std::uintptr_t(ray_so)+4u,actor) && actor &&
+        read_u32(std::uintptr_t(actor)+4u,standard) && standard &&
+        read_u32(std::uintptr_t(standard)+12u,back) && back==ray_so &&
+        read_u32(std::uintptr_t(standard)+0x24u,custom);
+}
+constexpr std::uint32_t kLearnRaySuspension=(1u<<13)|(1u<<16);
+bool learn10_live_replay_director(std::uintptr_t actor,std::uintptr_t intel,
+                                  std::uintptr_t b3) {
+    if(!g_learn_replay_visit.active() || g_learn_handover ||
+       !g_current_level || !r2fix::is_first_playable_level(g_current_level) ||
+       g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())
+        return false;
+    std::uint32_t ray=0,custom=0;
+    if(!learn10_replay_ray_flags(ray,custom) ||
+       (custom&kLearnRaySuspension)!=kLearnRaySuspension)return false;
+    r2fix::IntroDirectorScanStats stats{};
+    const auto live=r2fix::recognize_intro_director(actor,ray,
+        [](std::uintptr_t p,std::uint32_t& v){return read_u32(p,v);},
+        [](std::uintptr_t p,std::uint8_t& v){return read_u8(p,v);},&stats);
+    return live.valid() && live.superobject==actor && live.intelligence==intel &&
+        live.ending_behaviour+24u==b3 && stats.current_behaviour_index==3;
+}
+
 // As in the approved native Fn table, this has three cdecl parameters,
 // returning the pointer to the next script node. All nonmatching calls
 // invoke the unchanged original function and pass the result verbatim.
@@ -4747,7 +4785,8 @@ void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output
         read_u32(b3,live_rules) && std::uintptr_t(live_rules)==rules &&
         read_u32(rules+4u,live_root) && std::uintptr_t(live_root)==root &&
         game_story_bit(words,kNoMoviesCheatBit,nomovies) && !nomovies &&
-        game_story_bit(words,kLearnHandoverBit,handed_over) && !handed_over &&
+        game_story_bit(words,kLearnHandoverBit,handed_over) &&
+        (!handed_over || learn10_live_replay_director(actor,intel,b3)) &&
         read_u32(reinterpret_cast<std::uintptr_t>(output),result_value) &&
         read_u32(reinterpret_cast<std::uintptr_t>(output)+12u,result_type);
     if (!valid) {
@@ -4772,7 +4811,8 @@ void* __cdecl learn10_f248_hook(void* superobject,void* first_child,void* output
     sample.exact_script=true; // fingerprinted on this exact b3/rule1 during arm
     sample.live_learn10=g_f248_armed.load(std::memory_order_acquire) &&
         g_current_level && r2fix::is_first_playable_level(g_current_level);
-    sample.first_visit=true; // story1091 was read as false above
+    sample.first_visit=!handed_over;
+    sample.verified_replay_director=handed_over; // exact replay director checked above
     sample.nomovies_bit_known_off=true; // story1188 read as false above
     sample.handover_incomplete=true;
     sample.root_is_ifnot=true; // K1 root just checked above
@@ -4849,7 +4889,8 @@ void learn10_f248_disarm(const char* reason) {
 
 void learn10_f248_try_arm(bool handed_over,DWORD elapsed) {
     if (!g_f248_enabled.load(std::memory_order_acquire) ||
-        g_f248_attempted || !g_learn_intro_seen || handed_over ||
+        g_f248_attempted || !g_learn_intro_seen ||
+        (handed_over && !g_learn_replay_visit.active()) ||
         elapsed>3000u || !g_learn_script_probe_done ||
         !g_progress_words || !g_observed_director_superobject ||
         !g_observed_director_behaviours || !g_observed_director_intelligence ||
@@ -4865,7 +4906,9 @@ void learn10_f248_try_arm(bool handed_over,DWORD elapsed) {
         game_story_bit(g_progress_words,kNoMoviesCheatBit,original_nomovies) &&
         !original_nomovies &&
         game_story_bit(g_progress_words,kLearnHandoverBit,first_visit_handover) &&
-        !first_visit_handover &&
+        (!first_visit_handover ||
+         learn10_live_replay_director(g_observed_director_superobject,
+                                      g_observed_director_intelligence,b3)) &&
         read_u32(g_observed_director_intelligence+8u,active_b) &&
         std::uintptr_t(active_b)==b3 &&
         learn10_f248_original_scripts_match(g_observed_director_behaviours) &&
@@ -4906,6 +4949,8 @@ void learn10_f248_try_arm(bool handed_over,DWORD elapsed) {
         "RUNTIME-LEARN10-F248: phase=armed t=%ums director=3 native=F248 temporary_output_0_to_1=1 story_bit1188_readonly=1 lifetime=verified-director-context",
         unsigned(DWORD(GetTickCount()-g_learn_intro_start)));
     log_line(line);
+    if(g_learn_replay_visit.active())
+        log_line("RUNTIME-LEARN10-F248: scope=verified-replay; exact suspended director, story bit1091 not a completion proof");
 }
 
 void learn10_f248_poll() {
@@ -4937,6 +4982,8 @@ void learn10_f248_poll() {
             read_u32(intel+8u,behaviour);
         lifetime.same_behaviour=lifetime.director_readable &&
             std::uintptr_t(behaviour)==b3;
+        lifetime.verified_replay_director=lifetime.handed_over &&
+            learn10_live_replay_director(g_f248_so.load(std::memory_order_acquire),intel,b3);
         lifetime.same_rule_root=lifetime.same_behaviour && rules && root &&
             read_u32(b3,live_rules) && std::uintptr_t(live_rules)==rules &&
             read_u32(rules+4u,live_root) && std::uintptr_t(live_root)==root &&
@@ -5074,6 +5121,17 @@ void trace_learn10_skip_input() {
 
 void poll_learn_intro_skip() {
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
+    const bool was_replay=g_learn_replay_visit.active();
+    g_learn_replay_visit.observe(
+        r2fix::is_second_intro(g_current_level),
+        r2fix::is_first_playable_level(g_current_level),
+        !g_current_level || !*g_current_level,GetTickCount());
+    if(!was_replay && g_learn_replay_visit.active()) {
+        g_learn_replay_saw_suspended=false;
+        g_learn_replay_sample_logged=false;
+        g_learn_replay_last_ray=g_learn_replay_last_story=-2;
+        log_line("RUNTIME-LEARN10-REPLAY: accepted native Jail20 replay arrival");
+    }
     if(kResearchProbes)trace_learn10_skip_input();
     learn10_f248_poll();
 #endif
@@ -5146,9 +5204,12 @@ void poll_learn_intro_skip() {
         log_line(flag);
         g_learn_logged = true;
         g_learn_intro_seen = !handed_over;
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+        if(g_learn_replay_visit.active())g_learn_intro_seen=true;
+#endif
         g_learn_intro_start = GetTickCount();
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
-        if (!handed_over && g_f248_enabled.load(std::memory_order_acquire))
+        if (g_learn_intro_seen && g_f248_enabled.load(std::memory_order_acquire))
             log_line("RUNTIME-INTRO: learn_10 F248 native skip enabled; progress bit1188 read-only");
         else
 #endif
@@ -5162,8 +5223,39 @@ void poll_learn_intro_skip() {
     // or secondary thread is created. A handover may take 25-40+ seconds.
     const DWORD elapsed=DWORD(GetTickCount()-g_learn_intro_start);
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
-    if (!handed_over)
+    bool completed=handed_over;
+    if(g_learn_replay_visit.active() && !g_learn_handover) {
+        const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+        std::uint8_t mode=0xff;
+        const bool playing=base && read_u8(base+kIntroEngineModeRva,mode) &&
+                           mode==kIntroEnginePlaying;
+        std::uint32_t ray=0,custom=0;
+        const bool ray_known=learn10_replay_ray_flags(ray,custom);
+        const auto suspension=custom&kLearnRaySuspension;
+        if(playing && ray_known && suspension==kLearnRaySuspension)
+            g_learn_replay_saw_suspended=true;
+        const int ray_state=ray_known ? (suspension==0?0:
+            suspension==kLearnRaySuspension?2:1):-1;
+        completed=r2fix::learn10_replay_handover(true,handed_over,playing,
+            ray_known,suspension==0,g_learn_replay_saw_suspended,elapsed);
+        if(g_log && (!g_learn_replay_sample_logged ||
+           ray_state!=g_learn_replay_last_ray || int(handed_over)!=g_learn_replay_last_story ||
+           completed)) {
+            char line[240]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-LEARN10-REPLAY: t=%ums story1091=%u playing=%u ray-suspension=%d saw-suspended=%u complete=%u (read-only)",
+                unsigned(elapsed),unsigned(handed_over),unsigned(playing),ray_state,
+                unsigned(g_learn_replay_saw_suspended),unsigned(completed));
+            log_line(line);
+            g_learn_replay_sample_logged=true;
+            g_learn_replay_last_ray=ray_state;
+            g_learn_replay_last_story=int(handed_over);
+        }
+    }
+    if (!completed)
         observe_learn10_f248_director_without_log(elapsed);
+#else
+    const bool completed=handed_over;
 #endif
     if (kResearchProbes && g_learn_intro_seen && !g_learn_handover && g_log) {
         trace_natural_intro_changes(elapsed);
@@ -5198,13 +5290,19 @@ void poll_learn_intro_skip() {
         }
     }
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
-    if (handed_over)
-        learn10_f248_disarm("story1091-handover");
+    if (completed)
+        learn10_f248_disarm("verified-handover");
     else
         learn10_f248_try_arm(handed_over,elapsed);
 #endif
-    if (handed_over && g_learn_intro_seen && !g_learn_handover) {
+    if (completed && g_learn_intro_seen && !g_learn_handover) {
         g_learn_handover = true;
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+        if(g_learn_replay_visit.active()) {
+            g_learn_replay_visit.clear();
+            log_line("RUNTIME-LEARN10-REPLAY: handover confirmed by native progress and Rayman release");
+        }
+#endif
         g_replay_intro_route.note_handover();
         g_learn_handover_start = GetTickCount();
 #if RAYMAN2FIX_LEARN10_F248_FEATURE
@@ -5403,6 +5501,150 @@ bool jail20_find_actors(std::uintptr_t base,std::uint32_t (&found)[3]) {
     }
     return found[0] && found[1] && found[2];
 }
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+// Separate scope: never reuse the initial intro's authorization or counters.
+// Both paths share the native slot, and only its original owner can be replaced.
+struct Learn10ExtraDirector {
+    std::uint32_t so=0,root=0,bit=0,personal=0;
+};
+thread_local Learn10ExtraDirector g_extra_director{};
+thread_local bool g_extra_slot=false;
+thread_local unsigned g_extra_overrides=0;
+bool learn10_extra_scene_ready() {
+    bool handover=false,nomovies=false;
+    std::uint32_t ray=0,custom=0;
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    std::uint8_t pause=1;
+    return g_skip_cinematics && g_f248_enabled.load(std::memory_order_acquire) &&
+        g_current_level && r2fix::is_first_playable_level(g_current_level) &&
+        !g_learn_replay_visit.active() && !g_f248_slot_installed.load(std::memory_order_acquire) &&
+        g_game_camera_thread_id.load(std::memory_order_acquire)==GetCurrentThreadId() &&
+        base && intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
+        read_u8(base+0xB9BC8u,pause) && !pause &&
+        g_progress_words && game_story_bit(g_progress_words,kLearnHandoverBit,handover) && handover &&
+        game_story_bit(g_progress_words,kNoMoviesCheatBit,nomovies) && !nomovies &&
+        learn10_replay_ray_flags(ray,custom) &&
+        (custom&kLearnRaySuspension)==kLearnRaySuspension;
+}
+bool learn10_extra_identity(std::uint32_t so,Learn10ExtraDirector& out) {
+    Jail20TraceActor a{},recipient{};
+    std::uint32_t family=0,model=0,personal=0,bit_at=0,bit=0,arr=0,kind=0,target=0;
+    std::uint32_t tf=0,tm=0,tp=0,root=0;
+    std::uint8_t count=0;
+    if(!jail20_actor(so,a) || a.count!=9 ||
+       !jail20_field(a.standard,0,family) || family!=20 ||
+       !jail20_field(a.standard,4,model) || model!=29 ||
+       !jail20_field(a.standard,8,personal) ||
+       (personal!=50 && personal!=56 && personal!=66 && personal!=67 && personal!=68) ||
+       jail20_behaviour(a)!=3 ||
+       !jail20_var(a,49,5,2384,4,bit_at) || !read_u32(bit_at,bit) ||
+       !jail20_var(a,0,18,0,88,arr) || !jail20_field(arr,0,kind) || kind!=9 ||
+       !read_u8(std::uintptr_t(arr)+4,count) || count!=20 ||
+       !jail20_field(arr,8,target) || !jail20_actor(target,recipient) ||
+       !jail20_field(recipient.standard,0,tf) || !jail20_field(recipient.standard,4,tm) ||
+       !jail20_field(recipient.standard,8,tp) ||
+       !r2fix::learn10_extra_cinematic_identity(family,model,personal,bit,tf,tm,tp) ||
+       !jail20_rule(a,3,1,root) ||
+       !jail20_node(root,0,1,1,0) || !jail20_node(root,1,248,2,3) ||
+       !jail20_node(root,2,12,3,2) || !jail20_node(root,4,42,4,11) ||
+       !jail20_node(root,5,1188,3,12))return false;
+    out={so,root,bit,personal};
+    return true;
+}
+bool learn10_extra_find(std::uintptr_t base,Learn10ExtraDirector& out) {
+    out={};
+    for(const auto rva:{0x100FD0u,0x100FC4u}) {
+        std::uint32_t root=0,child=0,prev=0;
+        if(!read_u32(base+rva,root) || !jail20_field(root,8,child))return false;
+        unsigned n=0;
+        for(;child && n<4096u;++n) {
+            std::uint32_t type=0,next=0,parent=0,back=0;
+            if(!jail20_field(child,0,type) || !jail20_field(child,20,next) ||
+               !jail20_field(child,24,back) || back!=prev ||
+               !jail20_field(child,28,parent) || parent!=root || next==child)return false;
+            Learn10ExtraDirector candidate{};
+            if(type==2 && learn10_extra_identity(child,candidate)) {
+                if(out.so && out.so!=child)return false;
+                out=candidate;
+            }
+            prev=child;child=next;
+        }
+        if(child)return false;
+    }
+    if(!out.so)return false;
+    Jail20TraceActor actor{};
+    return jail20_actor(out.so,actor) && learn10_f248_original_scripts_match(actor.table);
+}
+void* __cdecl learn10_extra_f248_hook(void* so,void* child,void* output) {
+    const auto original=g_f248_original.load(std::memory_order_acquire);
+    if(!original)return nullptr;
+    if(g_f248_reentrant)return original(so,child,output);
+    g_f248_reentrant=true;
+    void* next=original(so,child,output);
+    if(g_extra_slot && g_extra_director.so &&
+       reinterpret_cast<std::uintptr_t>(so)==g_extra_director.so &&
+       reinterpret_cast<std::uintptr_t>(child)==std::uintptr_t(g_extra_director.root)+16u &&
+       output && learn10_extra_scene_ready()) {
+        Learn10ExtraDirector live{};
+        std::uint32_t value=0,type=0;
+        if(learn10_extra_identity(g_extra_director.so,live) &&
+           live.root==g_extra_director.root && live.bit==g_extra_director.bit &&
+           live.personal==g_extra_director.personal &&
+           read_u32(reinterpret_cast<std::uintptr_t>(output),value) && value==0 &&
+           read_u32(reinterpret_cast<std::uintptr_t>(output)+12u,type) &&
+           type==r2fix::kLearn10F248IntegerResultType &&
+           InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(output),1,0)==0)
+            ++g_extra_overrides;
+    }
+    g_f248_reentrant=false;
+    return next;
+}
+void learn10_extra_disarm() {
+    if(!g_extra_slot)return;
+    const auto base=g_approved_exe_base.load(std::memory_order_acquire);
+    auto* slot=reinterpret_cast<PVOID volatile*>(base+kF248TableSlotRva);
+    const bool restored=base && learn10_f248_writable_slot(reinterpret_cast<std::uintptr_t>(slot)) &&
+        InterlockedCompareExchangePointer(slot,reinterpret_cast<PVOID>(base+kF248OriginalRva),
+            reinterpret_cast<PVOID>(&learn10_extra_f248_hook))==
+            reinterpret_cast<PVOID>(&learn10_extra_f248_hook);
+    char line[180]{};
+    std::snprintf(line,sizeof(line),"RUNTIME-LEARN10-EXTRA: disarmed actor=%u story=%u overrides=%u slot_restored=%u",
+        g_extra_director.personal,g_extra_director.bit,g_extra_overrides,unsigned(restored));
+    log_line(line);
+    g_extra_director={}; // fail closed even if slot restoration fails
+    g_extra_slot=!restored;
+}
+void poll_learn10_extra_cinematics() {
+    static DWORD last_scan=0;
+    if(g_extra_slot) {
+        Learn10ExtraDirector live{};
+        if(!learn10_extra_scene_ready() || !g_extra_director.so ||
+           !learn10_extra_identity(g_extra_director.so,live) ||
+           live.root!=g_extra_director.root || live.bit!=g_extra_director.bit ||
+           live.personal!=g_extra_director.personal)learn10_extra_disarm();
+        return;
+    }
+    if(!learn10_extra_scene_ready())return;
+    const DWORD now=GetTickCount();
+    if(last_scan && DWORD(now-last_scan)<100u)return;
+    last_scan=now;
+    const auto base=g_approved_exe_base.load(std::memory_order_acquire);
+    Learn10ExtraDirector found{};
+    if(!base || !learn10_extra_find(base,found))return;
+    auto* slot=reinterpret_cast<PVOID volatile*>(base+kF248TableSlotRva);
+    auto* native=reinterpret_cast<PVOID>(base+kF248OriginalRva);
+    if(!learn10_f248_writable_slot(reinterpret_cast<std::uintptr_t>(slot)) ||
+       std::memcmp(native,kF248OriginalPrefix,sizeof(kF248OriginalPrefix))!=0)return;
+    g_f248_original.store(reinterpret_cast<F248Function>(native),std::memory_order_release);
+    if(InterlockedCompareExchangePointer(slot,reinterpret_cast<PVOID>(&learn10_extra_f248_hook),native)!=native)return;
+    g_extra_director=found;g_extra_slot=true;g_extra_overrides=0;
+    char line[180]{};
+    std::snprintf(line,sizeof(line),"RUNTIME-LEARN10-EXTRA: armed actor=%u story=%u native-F248 temporary-result-only",
+        found.personal,found.bit);
+    log_line(line);
+}
+#endif
+
 void poll_jail20_command_trace(bool in_intro,std::uintptr_t base,DWORD elapsed,bool edge) {
     if(!kResearchProbes)return;
     static std::uint32_t found[3]{};
@@ -5540,7 +5782,8 @@ bool replay_intro_compare_exchange(std::uintptr_t address,std::uint32_t old_word
     return true;
 }
 r2fix::ReplayHandoverWord try_replay_intro_reset(std::uintptr_t base,
-                                                std::uintptr_t legacy_words) {
+                                                std::uintptr_t legacy_words,int& owner_behavior) {
+    owner_behavior=-1;
     const auto refuse=[](const char* reason) {
         char msg[180]{};
         std::snprintf(msg,sizeof(msg),"RUNTIME-REPLAY-INTRO: reset=refused reason=%s",reason);
@@ -5560,7 +5803,14 @@ r2fix::ReplayHandoverWord try_replay_intro_reset(std::uintptr_t base,
     if(!jail20_find_actors(base,actors))return refuse("actor-search");
     if(!jail20_actor(actors[0],owner) || !jail20_owner_shape(owner))
         return refuse("owner-shape");
-    if(jail20_behaviour(owner)!=1)return refuse("owner-behaviour");
+    owner_behavior=jail20_behaviour(owner);
+    if(owner_behavior!=1) {
+        char msg[150]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-REPLAY-INTRO: owner-behaviour=%d required=1",owner_behavior);
+        log_line(msg);
+        return refuse("owner-behaviour");
+    }
     if(!read_u8(std::uintptr_t(owner.standard)+0x22,hp) || hp!=0)
         return refuse("owner-hp");
     if(!jail20_actor(actors[1],p1) || !jail20_producer_shape(p1,14,3,actors[0]))
@@ -5629,7 +5879,13 @@ void poll_second_intro_skip() {
             unsigned(pause_restart),unsigned(loading_jail10),unsigned(loading_jail20));
         log_line(msg);
     }
-    if(!g_current_level)return;
+    if(!g_current_level) {
+        if(g_replay_owner_wait.active) {
+            g_replay_owner_wait.clear();
+            g_intro_guard.refuse_pre_dispatch();
+        }
+        return;
+    }
     // These counters measure the sampling cadence of the EXISTING camera
     // callback; they do not add a key hook, change the input guard or skip.
     static DWORD entered_at=0,requested_at=0,last_input_diag=0;
@@ -5638,6 +5894,7 @@ void poll_second_intro_skip() {
     static int last_engine_mode=-2,last_next_level=-2;
     static DWORD last_engine_probe_at=0;
     const bool in_intro = r2fix::is_second_intro(g_current_level);
+    if(!in_intro)g_replay_owner_wait.clear();
     if (in_intro && !g_intro_level_logged) {
         entered_at=GetTickCount();
         requested_at=last_input_diag=0;
@@ -5688,7 +5945,8 @@ void poll_second_intro_skip() {
     }
     // Queue an early fresh press without calling the native level-change
     // routine until the ORIGINAL GAM engine reports E_EM_ModePlaying=9.
-    // No timer threshold and no retry loop: one request per level.
+    // No guessed readiness delay: one native dispatch per level, with
+    // a bounded recheck of the authenticated replay owner's initialization.
     const bool need_mode=in_intro &&
         (g_intro_guard.pending ||
          (g_intro_guard.released && down && !g_intro_guard.requested));
@@ -5697,7 +5955,15 @@ void poll_second_intro_skip() {
                               in_intro && down && !last_down);
     const int mode=need_mode ? intro_native_engine_mode(game_base) : -1;
     // A queued press must survive Alt-Tab; dispatch only in foreground.
-    const bool ready=foreground && mode==int(kIntroEnginePlaying);
+    const DWORD retry_now=GetTickCount();
+    if(in_intro && g_replay_owner_wait.expired(retry_now)) {
+        g_replay_owner_wait.clear();
+        g_intro_guard.refuse_pre_dispatch();
+        log_line("RUNTIME-REPLAY-INTRO: owner-wait=expired; fresh press required");
+        return;
+    }
+    const bool ready=foreground && mode==int(kIntroEnginePlaying) &&
+        g_replay_owner_wait.due(retry_now);
     const bool was_pending=g_intro_guard.pending;
     const bool was_requested=g_intro_guard.requested;
     const bool requested=g_intro_guard.update(g_current_level,down,ready);
@@ -5767,10 +6033,18 @@ void poll_second_intro_skip() {
     bool previous_handover=false;
     const bool story_known=game_story_bit(intro_words,kLearnHandoverBit,previous_handover);
     const bool replay_route=g_replay_intro_route.ready();
+    if(g_replay_owner_wait.active &&
+       (!replay_route || !story_known || !previous_handover)) {
+        g_replay_owner_wait.clear();
+        g_intro_guard.refuse_pre_dispatch();
+        log_line("RUNTIME-REPLAY-INTRO: owner-wait=cancelled; replay authorization changed");
+        return;
+    }
     log_replay_intro_audit(replay_route?"replay-request":"first-request",game_base,intro_words);
     r2fix::ReplayHandoverWord replay_reset{};
+    int owner_behavior=-1;
     if(story_known && previous_handover && replay_route)
-        replay_reset=try_replay_intro_reset(game_base,intro_words);
+        replay_reset=try_replay_intro_reset(game_base,intro_words,owner_behavior);
     const bool allowed=replay_reset.address ||
         ((!replay_route || story_known) &&
          r2fix::intro_direct_transition_allowed(story_known,previous_handover));
@@ -5782,7 +6056,22 @@ void poll_second_intro_skip() {
             replay_reset.address?"verified-replay-reset":allowed?"guarded-level-request":"native-transition-only");
         log_line(msg);
     }
-    if(!allowed)return;
+    if(!allowed) {
+        // No write or native call occurred on this path. B2 is the
+        // authenticated controller's observed initialization behavior.
+        // Re-run the entire original preflight, not just its behavior test.
+        if(story_known && previous_handover && replay_route &&
+           g_replay_owner_wait.defer(owner_behavior,GetTickCount())) {
+            g_intro_guard.defer_pre_dispatch();
+            log_line("RUNTIME-REPLAY-INTRO: owner-wait=pending B2->B1; request retained");
+        } else {
+            g_replay_owner_wait.clear();
+            g_intro_guard.refuse_pre_dispatch();
+            log_line("RUNTIME-REPLAY-INTRO: pre-dispatch refused; fresh press required");
+        }
+        return;
+    }
+    g_replay_owner_wait.clear();
 
     // The game itself queues the level change for its next engine tick.
     // Do not force a renderer switch, destroy a video window or write
@@ -5815,6 +6104,12 @@ void poll_second_intro_skip() {
                             "RUNTIME-REPLAY-INTRO: transition-not-queued rollback=refused-changed-state");
         } else {
             log_line("RUNTIME-REPLAY-INTRO: native-transition-dispatched; await Learn_10 handover");
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+            if(mode_after>=0 && mode_after!=int(kIntroEnginePlaying) && next_after==1) {
+                g_learn_replay_visit.queue(GetTickCount());
+                log_line("RUNTIME-LEARN10-REPLAY: queued authorization from verified replay reset and native target");
+            }
+#endif
         }
     }
     if(g_log) {
@@ -5842,6 +6137,26 @@ std::uint32_t g_sdl_input_actions = 0;
 r2fix::PadMovement g_sdl_input_movement{};
 DWORD g_sdl_input_tick = 0;
 thread_local bool g_sdl_native_joystick_owned=false;
+thread_local r2fix::TargetedPadTrace g_targeted_pad_trace;
+const char* targeted_pad_name(r2fix::PadAction action) noexcept {
+    using r2fix::PadAction;
+    switch(action) {
+        case PadAction::jump:return "jump-surface";
+        case PadAction::target:return "target-dive";
+        case PadAction::world_knowledge:return "world-knowledge";
+        case PadAction::murphy:return "murfy";
+        default:return "other";
+    }
+}
+void targeted_pad_route(r2fix::PadAction action,r2fix::PadTraceRoute route,
+                        const char* native) noexcept {
+    if(!g_log || !g_targeted_pad_trace.note_route(action,route))return;
+    char line[180]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-SDL3-TARGET: action=%s route=%s scene=%u delivery=observed (not gameplay-effect proof)",
+        targeted_pad_name(action),native,unsigned(g_sdl_input_scene));
+    log_line(line);
+}
 thread_local DWORD g_sdl_pause_delivery_tick=0;
 thread_local bool g_sdl_pause_delivery_pending=false;
 thread_local DWORD g_sdl_f1_delivery_tick=0;
@@ -5852,10 +6167,14 @@ thread_local bool g_controller_connected=false;
 thread_local r2fix::PadInfoActivity g_controller_activity{};
 thread_local DWORD g_controller_activity_tick=0;
 thread_local r2fix::PadLabelFamily g_controller_family=r2fix::PadLabelFamily::generic;
-int controller_info_scope() noexcept {
+int controller_info_scope(bool* prewarm=nullptr) noexcept {
+    if(prewarm)*prewarm=false;
     if(g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())return 0;
     int n=-1,f=-1;
-    if(r2fix::pause_menu_live_state(n,f))return n==17 && f==2 ? 2:0;
+    if(r2fix::pause_menu_live_state(n,f)) {
+        if(prewarm)*prewarm=n==6 && f==2;
+        return n==17 && f==2 ? 2:0;
+    }
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
     const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     char level[30]{};
@@ -5864,7 +6183,11 @@ int controller_info_scope() noexcept {
        level,sizeof(level),&copied) || copied!=sizeof(level) || !std::memchr(level,0,sizeof(level)) ||
        _stricmp(level,"menu")!=0)return 0;
     r2fix::MenuAiModel model{};r2fix::MenuAiState state{};
-    if(r2fix::get_verified_menu_controller(model,state) && state.normal==21 && state.reflex==0)return 1;
+    if(r2fix::get_verified_menu_controller(model,state)) {
+        if(prewarm)*prewarm=(state.normal==11 && state.reflex==0) ||
+                            (state.normal==8 && state.reflex==2);
+        if(state.normal==21 && state.reflex==0)return 1;
+    }
 #endif
     return 0;
 }
@@ -5959,7 +6282,9 @@ r2fix::PadContext sdl_native_context(std::uint32_t* scene_out=nullptr) noexcept 
        intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
        g_progress_words &&
        game_story_bit(g_progress_words,kLearnHandoverBit,intro_handed_over) &&
-       !intro_handed_over)
+       (!intro_handed_over || (g_learn_replay_visit.active() && !g_learn_handover)))
+        return PadContext::learn_cinematic;
+    if(g_extra_slot && g_extra_director.so && learn10_extra_scene_ready())
         return PadContext::learn_cinematic;
 #endif
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
@@ -6276,23 +6601,28 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
     // The approved CD has stripped names. Match the entire observed
     // 28-entry structural fingerprint and exact table membership first.
     // Reference action indices remain subject to hardware confirmation.
-    const auto matches=[&](unsigned id,const char* suffix,PadAction action) {
-        if(index!=id || !(g_sdl_input_actions&r2fix::pad_action_bit(action)))return false;
-        std::string_view n(name.data());
-        return n.empty() || r2fix::ipt_name_contains(n,suffix);
-    };
+
     // Native action 20 = CouperCinematique, 21 = TexteSuivant in the
     // reference enumeration. Leave Jail_20 to its existing guarded
     // level request, avoiding a simultaneous native skip and level change.
-    const auto* binding=gameplay ?
-        r2fix::pad_gameplay_ipt_binding(index,g_sdl_input_actions) : nullptr;
+    const auto* binding=map_jump ?
+        r2fix::pad_world_map_ipt_binding(index,g_sdl_input_actions) :
+        gameplay ? r2fix::pad_gameplay_ipt_binding(index,g_sdl_input_actions) : nullptr;
     const std::string_view entry_name(name.data());
-    const bool requested=map_jump ?
-        matches(10,"sauter",PadAction::jump) :
-        native_cinematic ? (index==20u || index==21u) :
+    const bool requested=native_cinematic ? (index==20u || index==21u) :
         (binding && (entry_name.empty() ||
          r2fix::ipt_name_contains(entry_name,binding->name_fragment)));
     if(requested) {
+        if(g_log && gameplay) {
+            using r2fix::PadTraceRoute;
+            switch(index) {
+                case 10:targeted_pad_route(PadAction::jump,PadTraceRoute::jump,"IPT10");break;
+                case 13:targeted_pad_route(PadAction::target,PadTraceRoute::strafe,"IPT13");break;
+                case 14:targeted_pad_route(PadAction::target,PadTraceRoute::dive,"IPT14");break;
+                case 15:targeted_pad_route(PadAction::jump,PadTraceRoute::surface,"IPT15");break;
+                case 21:targeted_pad_route(PadAction::jump,PadTraceRoute::dialogue,"IPT21");break;
+            }
+        }
         if(g_log && context==PadContext::learn_cinematic) {
             static DWORD last_report=0;
             const DWORD now=GetTickCount();
@@ -6304,10 +6634,14 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
                 log_line(msg);
             }
         }
-        static bool map_jump_reported=false;
-        if(map_jump && !map_jump_reported) {
+        static bool map_jump_reported=false,map_dialogue_reported=false;
+        if(map_jump && index==10u && !map_jump_reported) {
             map_jump_reported=true;
             log_line("RUNTIME-SDL3: native-route=MAP-jump IPT-index=10 source=retail-fingerprint");
+        }
+        if(map_jump && index==21u && !map_dialogue_reported) {
+            map_dialogue_reported=true;
+            log_line("RUNTIME-SDL3: native-route=MAP-next-dialogue IPT-index=21 source=retail-fingerprint");
         }
         static std::uint32_t seen=0;
         if(index<32u && !(seen&(1u<<index))) {
@@ -6532,6 +6866,16 @@ void poll_sdl3_native() noexcept {
         log_line(msg);
     }
     const auto transitions = gate.update(sample);
+    if(g_log)g_targeted_pad_trace.observe(sample,transitions,
+        [&](r2fix::PadAction action,const r2fix::PadTraceState& state,bool exhausted) {
+            char line[220]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-SDL3-TARGET: action=%s device=%u scene=%u physical=%u accepted=%u context=%u foreground=%u budget_end=%u",
+                targeted_pad_name(action),unsigned(state.device),unsigned(state.scene),
+                unsigned(state.physical),unsigned(state.accepted),unsigned(context),
+                unsigned(foreground),unsigned(exhausted));
+            log_line(line);
+        });
     if(g_log && (!boundary_seen || boundary_device!=sample.device_id ||
        boundary_scene!=scene || boundary_focus!=foreground || boundary_context!=context)) {
         if(boundary_reports<256u) {
@@ -6701,6 +7045,9 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     // the validated research build. Either opt-out prevents F248 armament.
     // Diagnostics remain gated by Debug.Log, not feature activation.
     poll_learn_intro_skip();
+#endif
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+    poll_learn10_extra_cinematics();
 #endif
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
     poll_sdl3_native();
@@ -7236,8 +7583,18 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     if((g_remove_dialogue_backgrounds || g_remove_cinematic_bars) &&
        producer==Native2DProducer::Frame) {
         const auto kind=r2fix::black_frame_kind(xmin,ymin,xmax,ymax);
-        if(kind==r2fix::BlackFrameKind::DialogueBackdrop &&
+        const bool map_single=r2fix::map_single_line_dialogue(
+            g_current_level && _stricmp(g_current_level,"mapmonde")==0,
+            true,xmin,ymin,xmax,ymax);
+        if((kind==r2fix::BlackFrameKind::DialogueBackdrop || map_single) &&
            g_remove_dialogue_backgrounds) {
+            if(map_single) {
+                static bool reported=false;
+                if(!reported) {
+                    reported=true;
+                    log_line("RUNTIME-FRAMES: suppressing Mapmonde single-line dialogue backdrop x=14..94 y=64.3..70.7");
+                }
+            }
             if(g_hidden_dialogue_frames.fetch_add(1,std::memory_order_relaxed)==0)
                 log_line("RUNTIME-FRAMES: suppressing verified GLI dialogue backdrop quads (opt-in; source-frame geometry)");
             return;
@@ -8347,7 +8704,9 @@ void __cdecl standalone_video_flip() {
     r2fix::native_graphics_info_stabilize_video_cursor_at_flip();
     r2fix::standalone_video_page_draw_before_flip();
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
-    const int scope=controller_info_scope();
+    bool prewarm=false;
+    const int scope=controller_info_scope(&prewarm);
+    const DWORD panel_started=GetTickCount();
     const int previous=g_controller_drawn_scope;
     g_controller_drawn_scope=0;
     const auto activity=(game_window_is_foreground() && DWORD(GetTickCount()-g_controller_activity_tick)<=100u)?
@@ -8361,7 +8720,16 @@ void __cdecl standalone_video_flip() {
             previous_mask=activity.mask;
         }
         g_controller_drawn_scope=scope;
-        if(previous!=scope)log_line(scope==1?"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=MENU normal=21 reflex=0":"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=PAUSE normal=17 reflex=2");
+        if(previous!=scope) {
+            log_line(scope==1?"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=MENU normal=21 reflex=0":"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=PAUSE normal=17 reflex=2");
+            if(g_log) {
+                char msg[160]{};
+                std::snprintf(msg,sizeof(msg),"RUNTIME-CONTROLLER-PERF: stage=first-draw scope=%s t_ms=%lu elapsed_ms=%lu",
+                    scope==1?"MENU":"PAUSE",static_cast<unsigned long>(GetTickCount()),
+                    static_cast<unsigned long>(DWORD(GetTickCount()-panel_started)));
+                log_line(msg);
+            }
+        }
     }
 #endif
     const auto original=reinterpret_cast<void (__cdecl*)()>(
@@ -8371,6 +8739,15 @@ void __cdecl standalone_video_flip() {
     // Also refresh on the verified VIDEO flip route used in MENU.
     // The acquisition function still requires the original camera thread.
     poll_sdl3_native();
+    // Prepare the exact active language/device art in the authenticated
+    // parent menu, after presenting its frame. Never prewarm in gameplay.
+    static DWORD last_prewarm=0;
+    const DWORD now=GetTickCount();
+    if(prewarm && !scope && g_controller_activity_tick && game_window_is_foreground() &&
+       (!last_prewarm || DWORD(now-last_prewarm)>=1000u)) {
+        last_prewarm=now;
+        r2fix::warm_controller_info_overlay(controller_info_locale(),g_controller_connected,g_controller_family,g_hud_scale);
+    }
 #endif
 }
 #endif
@@ -9220,7 +9597,11 @@ std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept {
     return sdl_fresh_actions(r2fix::PadContext::menu);
 }
 void r2fix_sdl_note_f1_delivery() noexcept {
-    if(r2fix_sdl_f1_actions()) {
+    const auto actions=r2fix_sdl_f1_actions();
+    if(actions) {
+        for(auto action:{r2fix::PadAction::world_knowledge,r2fix::PadAction::murphy})
+            if(actions&r2fix::pad_action_bit(action))
+                targeted_pad_route(action,r2fix::PadTraceRoute::f1,"DIK_F1");
         g_sdl_f1_delivery_tick=GetTickCount();
         g_sdl_f1_delivery_pending=true;
     }

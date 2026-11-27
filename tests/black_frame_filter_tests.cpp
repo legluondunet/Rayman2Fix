@@ -22,6 +22,17 @@ int main() {
     CHECK(!r2fix::remove_black_frame(true,false,false,14,61.6f,94,73.4f));
     CHECK(r2fix::remove_black_frame(true,false,true,14,61.6f,94,73.4f));
 
+    // Single-line Mapmonde tutorial: exact trace, not a general geometry rule.
+    CHECK(cls(14.f,64.3f,94.f,70.7f)==K::Preserve);
+    CHECK(r2fix::map_single_line_dialogue(true,true,14.f,64.3f,94.f,70.7f));
+    CHECK(r2fix::map_single_line_dialogue(true,true,14.05f,64.35f,93.95f,70.65f));
+    CHECK(!r2fix::map_single_line_dialogue(false,true,14.f,64.3f,94.f,70.7f));
+    CHECK(!r2fix::map_single_line_dialogue(true,false,14.f,64.3f,94.f,70.7f));
+    CHECK(!r2fix::map_single_line_dialogue(true,true,14.f,64.f,94.f,70.7f));
+    CHECK(!r2fix::map_single_line_dialogue(true,true,0.f,0.f,100.f,100.f));
+    CHECK(!r2fix::map_single_line_dialogue(true,true,54.f,76.f,60.f,84.f));
+    CHECK(!r2fix::map_single_line_dialogue(true,true,14.f,std::numeric_limits<float>::quiet_NaN(),94.f,70.7f));
+
     // Plausible engine-drawn cinematic top and bottom letterbox strips.
     // Confirmation of those strips in a live cinematic is still needed.
     CHECK(cls(0.0f,0.0f,100.0f,15.0f) == K::CinematicLetterbox);
