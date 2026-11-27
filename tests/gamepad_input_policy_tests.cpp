@@ -281,24 +281,30 @@ int main() {
     check(pad_composite565(0xffffu,transparent,{16,0})!=0xffffu &&
           pad_composite565(0,transparent,{16,0})!=0,"translucent tint on distinct scenes");
     check(!composite_controller_info(nullptr,0,nullptr,0),"invalid overlay refuses");
-    // A neutral background must remain neutral to within RGB565 quantization.
-    for(unsigned gray=0;gray<32;++gray){
-        const unsigned green=(gray*63u+15u)/31u;
-        const auto src=std::uint16_t((gray<<11)|(green<<5)|gray);
-        const auto dst=pad_composite565(src,transparent,{16,0});
-        check(((dst>>11)&31u)==(dst&31u),"charcoal tint never adds red/blue color cast");
+    // Restrained violet tint, 75% opacity, monotone darker gradient.
+    check(pad_tint_shade(0)==0 && pad_tint_shade(kPadInfoHeight-1)==kPadTintShades-1,
+          "panel gradient spans all shades");
+    for(unsigned shade=0;shade<kPadTintShades;++shade){
+        const auto dst=pad_composite565(0xffffu,transparent,{16,0},shade);
+        check((dst&31u)<12 && ((dst>>11)&31u)<12 && ((dst>>5)&63u)<24,
+              "dark translucent panel attenuates bright water");
+        if(shade) {
+            const auto prev=pad_composite565(0xffffu,transparent,{16,0},shade-1);
+            check((dst&31u)<=(prev&31u) && ((dst>>5)&63u)<=((prev>>5)&63u) &&
+                  ((dst>>11)&31u)<=((prev>>11)&31u),"gradient darkens monotonically");
+        }
     }
     // Exhaustively check each fast path against every possible RGB565 scene color.
     {
-        const auto& lut=pad_background_tint_table();
         const PadOverlayPixel colors[]{{},{12,77,151,255,255,255},{9,22,17,40,90,35}};
         const PadPanelCoverage coverage[]{{0,0},{16,0},{0,16},{6,5},{0,3}};
-        for(auto fg:colors)for(auto cov:coverage) {
-            const auto prepared=pad_prepare_pixel(fg,cov);
+        for(unsigned shade=0;shade<kPadTintShades;++shade)for(auto fg:colors)for(auto cov:coverage) {
+            const auto& lut=pad_background_tint_table(shade);
+            const auto prepared=pad_prepare_pixel(fg,cov,shade);
             bool exact=true;
             for(unsigned i=0;i<65536u;++i)
-                if(pad_composite_prepared_pixel(std::uint16_t(i),prepared,lut)!=
-                   pad_composite565(std::uint16_t(i),fg,cov)){exact=false;break;}
+                if(pad_composite_prepared_pixel(std::uint16_t(i),prepared,lut,shade)!=
+                   pad_composite565(std::uint16_t(i),fg,cov,shade)){exact=false;break;}
             check(exact,"prepared pixel path exactly matches all 65536 destination colors");
         }
     }

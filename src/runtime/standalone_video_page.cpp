@@ -663,14 +663,16 @@ struct ControllerOverlayCache {
 };
 // Both callers run on the authenticated camera/render thread. No worker,
 // Glide access or game memory writes are needed to prepare the static art.
-ControllerOverlayCache& controller_overlay_cache() {
-    static ControllerOverlayCache cache;
-    return cache;
+ControllerOverlayCache& controller_overlay_cache(PadLabelFamily family) {
+    // At most three entries: one per physical layout. Rebuild only a
+    // changed locale/connection state/width, never on a family round-trip.
+    static std::array<ControllerOverlayCache,3> caches;
+    return caches[family==PadLabelFamily::xbox?1u:family==PadLabelFamily::playstation?2u:0u];
 }
 }
 bool warm_controller_info_overlay(PadInfoLocale locale,bool connected,PadLabelFamily family,float hud_scale) noexcept {
     if(!g_configured.load(std::memory_order_acquire))return false;
-    auto& cache=controller_overlay_cache();
+    auto& cache=controller_overlay_cache(family);
     const auto placement=pad_info_placement(hud_scale);
     return placement.width && cache.prepare(locale,connected,family,"prewarm") && cache.prepare_width(placement.width);
 }
@@ -679,7 +681,7 @@ bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFami
     const auto placement=pad_info_placement(hud_scale);
     if(!placement.width)return false;
     try {
-        auto& cache=controller_overlay_cache();
+        auto& cache=controller_overlay_cache(family);
         const auto begin=PadPerfClock::now();
         const bool cache_hit=cache.matches(locale,connected,family) && cache.prepared_width==placement.width;
         if(!cache.prepare(locale,connected,family,"draw") || !cache.prepare_width(placement.width))return false;

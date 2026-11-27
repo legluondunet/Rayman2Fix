@@ -32,14 +32,14 @@ inline void pill(Graphics& g,float x,float y,float w,float h,float radius,Color 
     GraphicsPath p;round_path(p,x,y,w,h,radius);
     LinearGradientBrush b(PointF(x,y),PointF(x,y+h),top,bottom);
     g.FillPath(&b,&p);Pen rim(rgb(54,19,83),1.5f);g.DrawPath(&rim,&p);
-    curve(g,rgb(242,199,255,150),1.2f,{x+radius,y+2},{x+w*.35f,y+.8f},
+    curve(g,rgb(242,199,255,190),1.6f,{x+radius,y+2},{x+w*.35f,y+.8f},
           {x+w*.65f,y+.8f},{x+w-radius,y+2});
 }
 inline void spiral(Graphics& g,float x,float y,float radius,Color color,float width,bool mirror=false) {
     PointF pts[65]{};
     constexpr float pi=3.14159265359f;
     for(unsigned i=0;i<65;++i) {
-        const float t=float(i)/64.f, angle=t*2.15f*pi;
+        const float t=float(i)/64.f, angle=t*4.1f*pi;
         const float rad=radius*(1.f-t);
         pts[i]={x+(mirror?-1.f:1.f)*rad*std::cos(angle),y+rad*std::sin(angle)};
     }
@@ -51,7 +51,7 @@ inline void gem(Graphics& g,float x,float y,float r,Color top,Color bottom) {
     LinearGradientBrush b(PointF(x,y-r),PointF(x,y+r),top,bottom);
     g.FillEllipse(&b,x-r,y-r,r*2,r*2);
     GraphicsPath dome;dome.AddEllipse(x-r,y-r,r*2,r*2);
-    PathGradientBrush gloss(&dome);Color dark=rgb(28,8,47,175);INT count=1;
+    PathGradientBrush gloss(&dome);Color dark=rgb(28,8,47,130);INT count=1;
     gloss.SetSurroundColors(&dark,&count);gloss.SetCenterPoint(PointF(x-r*.32f,y-r*.42f));
     gloss.SetCenterColor(rgb(255,255,239,100));g.FillPath(&gloss,&dome);
     ring(g,x,y,r,rgb(211,156,244),.9f);
@@ -81,15 +81,15 @@ inline void shell(Graphics& g,PadLabelFamily family) {
     Pen shadow(rgb(62,30,8,175),7);shadow.SetLineJoin(LineJoinRound);g.DrawPath(&shadow,&p);
     // The brush spans the entire bounding box on a vertical axis. Never
     // use a short diagonal gradient which repeats on the lower right grip.
-    SolidBrush base(rgb(202,133,19));g.FillPath(&base,&p);
-    LinearGradientBrush surface(RectF(270,95,380,270),rgb(255,215,70),rgb(193,108,10),LinearGradientModeVertical);
-    Color colors[]={rgb(226,153,23),rgb(255,218,72),rgb(255,237,124),rgb(208,124,13)};
+    SolidBrush base(rgb(235,159,12));g.FillPath(&base,&p);
+    LinearGradientBrush surface(RectF(270,95,380,270),rgb(255,215,40),rgb(229,143,12),LinearGradientModeVertical);
+    Color colors[]={rgb(244,173,17),rgb(255,211,37),rgb(255,232,96),rgb(242,162,17)};
     REAL stops[]={0,.23f,.64f,1};surface.SetInterpolationColors(colors,stops,4);
     g.FillPath(&surface,&p);
     auto saved=g.Save();g.SetClip(&p,CombineModeIntersect);
     // Soft light across the sculpted plastic, with warm amber perimeter.
-    PathGradientBrush volume(&p); Color edge=rgb(141,65,8,180); INT n=1;
-    volume.SetSurroundColors(&edge,&n);volume.SetCenterColor(rgb(255,226,93,195));
+    PathGradientBrush volume(&p); Color edge=rgb(166,89,6,115); INT n=1;
+    volume.SetSurroundColors(&edge,&n);volume.SetCenterColor(rgb(255,223,56,155));
     volume.SetCenterPoint(PointF(467,221));volume.SetFocusScales(.38f,.25f);
     g.FillPath(&volume,&p);
     const auto hw=pad_hardware_layout(family);
@@ -104,8 +104,8 @@ inline void shell(Graphics& g,PadLabelFamily family) {
     // Sculpted outer grip shading, soft central glow, and painted curls.
     for(int w=34;w>=4;w-=5) {
         const unsigned alpha=unsigned(7+(34-w)/6);
-        curve(g,rgb(151,76,7,alpha),float(w),{301,164},{278,223},{299,303},{313,340});
-        curve(g,rgb(151,76,7,alpha),float(w),{619,164},{642,223},{621,303},{607,340});
+        curve(g,rgb(166,85,5,alpha),float(w),{301,164},{278,223},{299,303},{313,340});
+        curve(g,rgb(166,85,5,alpha),float(w),{619,164},{642,223},{621,303},{607,340});
     }
     for(int w=38;w>=8;w-=6)
         curve(g,rgb(255,248,172,12),float(w),{388,257},{437,215},{472,200},{514,177});
@@ -114,8 +114,8 @@ inline void shell(Graphics& g,PadLabelFamily family) {
     curve(g,rgb(255,252,217,155),2,{313,165},{325,139},{356,122},{391,128});
     curve(g,rgb(255,247,194,135),2,{529,128},{565,116},{596,133},{608,164});
     // Sweeping spiral decals on both grips; keep the central shell clean.
-    spiral(g,324,295,27,rgb(92,148,34,220),8.5f);
-    spiral(g,596,295,27,rgb(92,148,34,220),8.5f,true);
+    spiral(g,324,295,26,rgb(91,143,27,245),4.8f);
+    spiral(g,596,295,26,rgb(91,143,27,245),4.8f,true);
     curve(g,rgb(255,226,133,120),2,{390,298},{431,290},{489,290},{530,298});
     g.Restore(saved);
     Pen rim(rgb(255,218,95),1.1f);rim.SetLineJoin(LineJoinRound);g.DrawPath(&rim,&p);
@@ -125,12 +125,12 @@ inline void draw(Graphics& g,PadLabelFamily family) {
     for(auto r:{PadInfoRect{315,81,361,108},PadInfoRect{559,81,605,108},
                 PadInfoRect{307,112,354,139},PadInfoRect{566,112,613,139}})
         pill(g,float(r.left),float(r.top),float(r.right-r.left),float(r.bottom-r.top),
-             9,rgb(167,93,211),rgb(70,25,112));
+             9,rgb(180,99,224),rgb(62,19,104));
     shell(g,family);
     // Front bumpers remain visible over the shell, triggers behind.
     for(auto r:{PadInfoRect{307,112,354,139},PadInfoRect{566,112,613,139}})
         pill(g,float(r.left),float(r.top),float(r.right-r.left),float(r.bottom-r.top),
-             9,rgb(184,109,228),rgb(78,31,128));
+             9,rgb(189,109,234),rgb(71,22,120));
     const auto hw=pad_hardware_layout(family);
     for(auto stick:{hw.left_stick,hw.right_stick}) {
         const float x=float(stick.x),y=float(stick.y);
@@ -164,7 +164,7 @@ inline void draw(Graphics& g,PadLabelFamily family) {
     for(unsigned i=0;i<4;++i) {
         const auto a=hw.face[i];
         gem(g,float(a.x),float(a.y),13,
-            rgb(170,97,218),rgb(68,22,111));
+            rgb(178,98,227),rgb(65,19,108));
     }
 }
 inline bool paint(HDC target,PadLabelFamily family) noexcept {

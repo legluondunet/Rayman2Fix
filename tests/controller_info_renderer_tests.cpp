@@ -42,11 +42,14 @@ int main(){
             const auto body=overlay[145u*kPadInfoWidth+460u];
             const auto upper=overlay[150u*kPadInfoWidth+450u],lower=overlay[285u*kPadInfoWidth+460u];
             if(upper.r==lower.r&&upper.g==lower.g&&upper.b==lower.b)ok=false;
-            ok=ok && overlay.size()==kPadInfoPixels && body.ar==255u && body.ag==255u && body.ab==255u &&
+            unsigned ornament_pixels=0;
+            for(unsigned y=8;y<42;++y)for(unsigned x=10;x<70;++x)
+                ornament_pixels+=overlay[y*kPadInfoWidth+x].ar>0;
+            ok=ok && ornament_pixels>20 && overlay.size()==kPadInfoPixels && body.ar==255u && body.ag==255u && body.ab==255u &&
                 !overlay[45u*kPadInfoWidth+20u].ar &&
-                !overlay[15u*kPadInfoWidth+30u].ar &&
+                !overlay[15u*kPadInfoWidth+100u].ar &&
                 !overlay[25u*kPadInfoWidth+355u].ar &&
-                !overlay[398u*kPadInfoWidth+460u].ar &&
+                !overlay[398u*kPadInfoWidth+350u].ar &&
                 overlay[321u*kPadInfoWidth+607u].ar==255u &&
                 composite_controller_info(scene.data(),scene.size(),overlay.data(),overlay.size()) &&
                 scene[0]==0xffffu && scene[45u*kPadInfoWidth+20u]!=0xffffu;
