@@ -281,6 +281,13 @@ int main() {
     check(pad_composite565(0xffffu,transparent,{16,0})!=0xffffu &&
           pad_composite565(0,transparent,{16,0})!=0,"translucent tint on distinct scenes");
     check(!composite_controller_info(nullptr,0,nullptr,0),"invalid overlay refuses");
+    // A neutral background must remain neutral to within RGB565 quantization.
+    for(unsigned gray=0;gray<32;++gray){
+        const unsigned green=(gray*63u+15u)/31u;
+        const auto src=std::uint16_t((gray<<11)|(green<<5)|gray);
+        const auto dst=pad_composite565(src,transparent,{16,0});
+        check(((dst>>11)&31u)==(dst&31u),"charcoal tint never adds red/blue color cast");
+    }
     // Exhaustively check each fast path against every possible RGB565 scene color.
     {
         const auto& lut=pad_background_tint_table();

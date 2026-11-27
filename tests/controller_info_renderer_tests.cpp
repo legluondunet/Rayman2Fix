@@ -24,10 +24,13 @@ int main(){
             }
             GdiFlush();
             if(GetPixel(dc,20,45)==GetPixel(dc,460,145)){ok=false;break;}
-            // Opaque blue shell, including the lower right grip; no violet
-            // plaque, decorative corner or inner outline on the overlay.
+            // Golden shell and violet face buttons for all controller families.
             const auto grip=GetPixel(dc,607,321);
-            if(GetBValue(grip)<=GetRValue(grip) || GetGValue(grip)<=GetRValue(grip)){ok=false;break;}
+            const auto center=GetPixel(dc,460,145);
+            const auto face=pad_hardware_layout(family).face[0];
+            const auto violet=GetPixel(dc,face.x+9,face.y);
+            if(GetRValue(grip)<=GetBValue(grip) || GetRValue(center)<=GetBValue(center) ||
+               GetGValue(center)<=GetBValue(center) || GetBValue(violet)<=GetGValue(violet)){ok=false;break;}
         }
         if(ok)ok=draw_controller_info_preview(dc,make_pad_info_view(static_cast<PadInfoLocale>(i),false,PadLabelFamily::xbox));
     }

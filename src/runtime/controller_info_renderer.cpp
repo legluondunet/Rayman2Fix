@@ -5,9 +5,9 @@
 #include "controller_info_atlas.hpp"
 namespace r2fix {
 namespace {
-constexpr COLORREF bg=RGB(15,29,52), blue=RGB(75,149,237),
-                   ink=RGB(255,239,211), muted=RGB(152,226,248),
-                   body=RGB(57,75,100), dark=RGB(19,29,43);
+constexpr COLORREF bg=RGB(24,24,24), gold=RGB(246,211,112),
+                   ink=RGB(255,239,211), muted=RGB(222,181,250),
+                   body=RGB(225,161,28), dark=RGB(65,21,105);
 struct GdiObject {
     HGDIOBJ handle;
     ~GdiObject(){if(handle)DeleteObject(handle);}
@@ -65,7 +65,7 @@ bool label(HDC dc,const PadInfoView& v,unsigned row,PadInfoRect r,UINT align){
     const auto& item=v.rows[row];
     const auto action=item.action;
     // Subtle offset shadow behind action labels, then the original fitted text.
-    text_fit(dc,action,{r.left,r.top+1,r.right,r.top+26},19,12,RGB(8,24,43),true,align);
+    text_fit(dc,action,{r.left,r.top+1,r.right,r.top+26},19,12,RGB(24,16,24),true,align);
     return text_fit(dc,action,{r.left,r.top,r.right,r.top+25},19,12,ink,true,align) &&
         text_fit(dc,item.control,{r.left,r.top+25,r.right,r.bottom},15,10,muted,false,align);
 }
@@ -100,7 +100,7 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
     struct Restore{HDC dc;int state;~Restore(){RestoreDC(dc,state);}}restore{dc,state};
     try {
         GdiObject background{CreateSolidBrush(canvas)}, shell{CreateSolidBrush(body)},
-                  button{CreateSolidBrush(dark)}, pen{CreatePen(PS_SOLID,1,blue)};
+                  button{CreateSolidBrush(dark)}, pen{CreatePen(PS_SOLID,1,gold)};
         if(!background.handle || !shell.handle || !button.handle || !pen.handle)return false;
         RECT all{0,0,kPadInfoWidth,kPadInfoHeight};
         if(!FillRect(dc,&all,static_cast<HBRUSH>(background.handle)))return false;
@@ -119,11 +119,11 @@ static bool draw_controller_info(HDC dc,const PadInfoView& view,COLORREF canvas,
             const auto endpoint=pad_callout_end(a);
             const int end=endpoint.x,y=endpoint.y;
             // Small terminal dot and restrained leader, no crossing arrowheads.
-            GdiObject leader{CreatePen(PS_SOLID,1,RGB(155,227,249))};
+            GdiObject leader{CreatePen(PS_SOLID,1,RGB(246,221,153))};
             if(!leader.handle)return false;
             Selection lp(dc,leader.handle);
             line(dc,a.anchor.x,a.anchor.y,end,y);
-            solid_circle(dc,a.anchor.x,a.anchor.y,2,RGB(200,231,249));
+            solid_circle(dc,a.anchor.x,a.anchor.y,2,RGB(255,237,183));
             ok=label(dc,view,a.row,a.box,a.left?DT_RIGHT:DT_LEFT)&&ok;
         }
         std::string back(view.back);back+=": ";back+=view.back_control;
