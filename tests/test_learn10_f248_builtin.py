@@ -67,7 +67,17 @@ class BuiltinF248Guards(unittest.TestCase):
     def test_log_off_still_collects_director_identity(self):
         self.assertIn("observe_learn10_f248_director_without_log",self.runtime)
         self.assertIn("sample_natural_director(ray_so)",self.runtime)
-        self.assertRegex(self.runtime,r"if\s*\(!handed_over\)\s*observe_learn10_f248_director_without_log\(elapsed\)")
+        self.assertRegex(self.runtime,r"if\s*\(!completed\)\s*observe_learn10_f248_director_without_log\(elapsed\)")
+        self.assertIn("bool completed=handed_over;",self.runtime)
+        self.assertIn("completed=r2fix::learn10_replay_handover(",self.runtime)
+        self.assertIn("g_learn_replay_visit.active() && !g_learn_handover",self.runtime)
+
+    def test_replay_exception_requires_native_route_and_live_director(self):
+        self.assertEqual(self.runtime.count("g_learn_replay_visit.queue("),1)
+        self.assertIn("if(mode_after>=0 && mode_after!=int(kIntroEnginePlaying) && next_after==1)",self.runtime)
+        self.assertIn("(!handed_over || learn10_live_replay_director(actor,intel,b3))",self.runtime)
+        self.assertIn("live.ending_behaviour+24u==b3 && stats.current_behaviour_index==3",self.runtime)
+        self.assertIn("(!s.first_visit && !s.verified_replay_director)",self.policy)
         self.assertIn("g_learn_script_probe_done=true;",self.runtime)
 
     def test_no_obsolete_story_bit_or_script_patch(self):
