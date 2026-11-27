@@ -5501,6 +5501,150 @@ bool jail20_find_actors(std::uintptr_t base,std::uint32_t (&found)[3]) {
     }
     return found[0] && found[1] && found[2];
 }
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+// Separate scope: never reuse the initial intro's authorization or counters.
+// Both paths share the native slot, and only its original owner can be replaced.
+struct Learn10ExtraDirector {
+    std::uint32_t so=0,root=0,bit=0,personal=0;
+};
+thread_local Learn10ExtraDirector g_extra_director{};
+thread_local bool g_extra_slot=false;
+thread_local unsigned g_extra_overrides=0;
+bool learn10_extra_scene_ready() {
+    bool handover=false,nomovies=false;
+    std::uint32_t ray=0,custom=0;
+    const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    std::uint8_t pause=1;
+    return g_skip_cinematics && g_f248_enabled.load(std::memory_order_acquire) &&
+        g_current_level && r2fix::is_first_playable_level(g_current_level) &&
+        !g_learn_replay_visit.active() && !g_f248_slot_installed.load(std::memory_order_acquire) &&
+        g_game_camera_thread_id.load(std::memory_order_acquire)==GetCurrentThreadId() &&
+        base && intro_native_engine_mode(base)==int(kIntroEnginePlaying) &&
+        read_u8(base+0xB9BC8u,pause) && !pause &&
+        g_progress_words && game_story_bit(g_progress_words,kLearnHandoverBit,handover) && handover &&
+        game_story_bit(g_progress_words,kNoMoviesCheatBit,nomovies) && !nomovies &&
+        learn10_replay_ray_flags(ray,custom) &&
+        (custom&kLearnRaySuspension)==kLearnRaySuspension;
+}
+bool learn10_extra_identity(std::uint32_t so,Learn10ExtraDirector& out) {
+    Jail20TraceActor a{},recipient{};
+    std::uint32_t family=0,model=0,personal=0,bit_at=0,bit=0,arr=0,kind=0,target=0;
+    std::uint32_t tf=0,tm=0,tp=0,root=0;
+    std::uint8_t count=0;
+    if(!jail20_actor(so,a) || a.count!=9 ||
+       !jail20_field(a.standard,0,family) || family!=20 ||
+       !jail20_field(a.standard,4,model) || model!=29 ||
+       !jail20_field(a.standard,8,personal) ||
+       (personal!=50 && personal!=56 && personal!=66 && personal!=67 && personal!=68) ||
+       jail20_behaviour(a)!=3 ||
+       !jail20_var(a,49,5,2384,4,bit_at) || !read_u32(bit_at,bit) ||
+       !jail20_var(a,0,18,0,88,arr) || !jail20_field(arr,0,kind) || kind!=9 ||
+       !read_u8(std::uintptr_t(arr)+4,count) || count!=20 ||
+       !jail20_field(arr,8,target) || !jail20_actor(target,recipient) ||
+       !jail20_field(recipient.standard,0,tf) || !jail20_field(recipient.standard,4,tm) ||
+       !jail20_field(recipient.standard,8,tp) ||
+       !r2fix::learn10_extra_cinematic_identity(family,model,personal,bit,tf,tm,tp) ||
+       !jail20_rule(a,3,1,root) ||
+       !jail20_node(root,0,1,1,0) || !jail20_node(root,1,248,2,3) ||
+       !jail20_node(root,2,12,3,2) || !jail20_node(root,4,42,4,11) ||
+       !jail20_node(root,5,1188,3,12))return false;
+    out={so,root,bit,personal};
+    return true;
+}
+bool learn10_extra_find(std::uintptr_t base,Learn10ExtraDirector& out) {
+    out={};
+    for(const auto rva:{0x100FD0u,0x100FC4u}) {
+        std::uint32_t root=0,child=0,prev=0;
+        if(!read_u32(base+rva,root) || !jail20_field(root,8,child))return false;
+        unsigned n=0;
+        for(;child && n<4096u;++n) {
+            std::uint32_t type=0,next=0,parent=0,back=0;
+            if(!jail20_field(child,0,type) || !jail20_field(child,20,next) ||
+               !jail20_field(child,24,back) || back!=prev ||
+               !jail20_field(child,28,parent) || parent!=root || next==child)return false;
+            Learn10ExtraDirector candidate{};
+            if(type==2 && learn10_extra_identity(child,candidate)) {
+                if(out.so && out.so!=child)return false;
+                out=candidate;
+            }
+            prev=child;child=next;
+        }
+        if(child)return false;
+    }
+    if(!out.so)return false;
+    Jail20TraceActor actor{};
+    return jail20_actor(out.so,actor) && learn10_f248_original_scripts_match(actor.table);
+}
+void* __cdecl learn10_extra_f248_hook(void* so,void* child,void* output) {
+    const auto original=g_f248_original.load(std::memory_order_acquire);
+    if(!original)return nullptr;
+    if(g_f248_reentrant)return original(so,child,output);
+    g_f248_reentrant=true;
+    void* next=original(so,child,output);
+    if(g_extra_slot && g_extra_director.so &&
+       reinterpret_cast<std::uintptr_t>(so)==g_extra_director.so &&
+       reinterpret_cast<std::uintptr_t>(child)==std::uintptr_t(g_extra_director.root)+16u &&
+       output && learn10_extra_scene_ready()) {
+        Learn10ExtraDirector live{};
+        std::uint32_t value=0,type=0;
+        if(learn10_extra_identity(g_extra_director.so,live) &&
+           live.root==g_extra_director.root && live.bit==g_extra_director.bit &&
+           live.personal==g_extra_director.personal &&
+           read_u32(reinterpret_cast<std::uintptr_t>(output),value) && value==0 &&
+           read_u32(reinterpret_cast<std::uintptr_t>(output)+12u,type) &&
+           type==r2fix::kLearn10F248IntegerResultType &&
+           InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(output),1,0)==0)
+            ++g_extra_overrides;
+    }
+    g_f248_reentrant=false;
+    return next;
+}
+void learn10_extra_disarm() {
+    if(!g_extra_slot)return;
+    const auto base=g_approved_exe_base.load(std::memory_order_acquire);
+    auto* slot=reinterpret_cast<PVOID volatile*>(base+kF248TableSlotRva);
+    const bool restored=base && learn10_f248_writable_slot(reinterpret_cast<std::uintptr_t>(slot)) &&
+        InterlockedCompareExchangePointer(slot,reinterpret_cast<PVOID>(base+kF248OriginalRva),
+            reinterpret_cast<PVOID>(&learn10_extra_f248_hook))==
+            reinterpret_cast<PVOID>(&learn10_extra_f248_hook);
+    char line[180]{};
+    std::snprintf(line,sizeof(line),"RUNTIME-LEARN10-EXTRA: disarmed actor=%u story=%u overrides=%u slot_restored=%u",
+        g_extra_director.personal,g_extra_director.bit,g_extra_overrides,unsigned(restored));
+    log_line(line);
+    g_extra_director={}; // fail closed even if slot restoration fails
+    g_extra_slot=!restored;
+}
+void poll_learn10_extra_cinematics() {
+    static DWORD last_scan=0;
+    if(g_extra_slot) {
+        Learn10ExtraDirector live{};
+        if(!learn10_extra_scene_ready() || !g_extra_director.so ||
+           !learn10_extra_identity(g_extra_director.so,live) ||
+           live.root!=g_extra_director.root || live.bit!=g_extra_director.bit ||
+           live.personal!=g_extra_director.personal)learn10_extra_disarm();
+        return;
+    }
+    if(!learn10_extra_scene_ready())return;
+    const DWORD now=GetTickCount();
+    if(last_scan && DWORD(now-last_scan)<100u)return;
+    last_scan=now;
+    const auto base=g_approved_exe_base.load(std::memory_order_acquire);
+    Learn10ExtraDirector found{};
+    if(!base || !learn10_extra_find(base,found))return;
+    auto* slot=reinterpret_cast<PVOID volatile*>(base+kF248TableSlotRva);
+    auto* native=reinterpret_cast<PVOID>(base+kF248OriginalRva);
+    if(!learn10_f248_writable_slot(reinterpret_cast<std::uintptr_t>(slot)) ||
+       std::memcmp(native,kF248OriginalPrefix,sizeof(kF248OriginalPrefix))!=0)return;
+    g_f248_original.store(reinterpret_cast<F248Function>(native),std::memory_order_release);
+    if(InterlockedCompareExchangePointer(slot,reinterpret_cast<PVOID>(&learn10_extra_f248_hook),native)!=native)return;
+    g_extra_director=found;g_extra_slot=true;g_extra_overrides=0;
+    char line[180]{};
+    std::snprintf(line,sizeof(line),"RUNTIME-LEARN10-EXTRA: armed actor=%u story=%u native-F248 temporary-result-only",
+        found.personal,found.bit);
+    log_line(line);
+}
+#endif
+
 void poll_jail20_command_trace(bool in_intro,std::uintptr_t base,DWORD elapsed,bool edge) {
     if(!kResearchProbes)return;
     static std::uint32_t found[3]{};
@@ -6131,6 +6275,8 @@ r2fix::PadContext sdl_native_context(std::uint32_t* scene_out=nullptr) noexcept 
        g_progress_words &&
        game_story_bit(g_progress_words,kLearnHandoverBit,intro_handed_over) &&
        (!intro_handed_over || (g_learn_replay_visit.active() && !g_learn_handover)))
+        return PadContext::learn_cinematic;
+    if(g_extra_slot && g_extra_director.so && learn10_extra_scene_ready())
         return PadContext::learn_cinematic;
 #endif
 #if defined(RAYMAN2FIX_STANDALONE_VIDEO_PAGE) && RAYMAN2FIX_STANDALONE_VIDEO_PAGE
@@ -6891,6 +7037,9 @@ void poll_game_render_events(r2fix::RenderPollSource source) {
     // the validated research build. Either opt-out prevents F248 armament.
     // Diagnostics remain gated by Debug.Log, not feature activation.
     poll_learn_intro_skip();
+#endif
+#if RAYMAN2FIX_LEARN10_F248_FEATURE
+    poll_learn10_extra_cinematics();
 #endif
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
     poll_sdl3_native();
