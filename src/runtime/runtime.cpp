@@ -27,6 +27,7 @@
 #include "rayman2fix/render_poll_gate.hpp"
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
 #include "rayman2fix/sdl_gamepads.hpp"
+#include "rayman2fix/targeted_pad_trace.hpp"
 #include "rayman2fix/controller_info_renderer.hpp"
 #include "rayman2fix/native_ipt_probe.hpp"
 #include "rayman2fix/gamepad_menu_bridge.hpp"
@@ -5842,6 +5843,26 @@ std::uint32_t g_sdl_input_actions = 0;
 r2fix::PadMovement g_sdl_input_movement{};
 DWORD g_sdl_input_tick = 0;
 thread_local bool g_sdl_native_joystick_owned=false;
+thread_local r2fix::TargetedPadTrace g_targeted_pad_trace;
+const char* targeted_pad_name(r2fix::PadAction action) noexcept {
+    using r2fix::PadAction;
+    switch(action) {
+        case PadAction::jump:return "jump-surface";
+        case PadAction::target:return "target-dive";
+        case PadAction::world_knowledge:return "world-knowledge";
+        case PadAction::murphy:return "murfy";
+        default:return "other";
+    }
+}
+void targeted_pad_route(r2fix::PadAction action,r2fix::PadTraceRoute route,
+                        const char* native) noexcept {
+    if(!g_log || !g_targeted_pad_trace.note_route(action,route))return;
+    char line[180]{};
+    std::snprintf(line,sizeof(line),
+        "RUNTIME-SDL3-TARGET: action=%s route=%s scene=%u delivery=observed (not gameplay-effect proof)",
+        targeted_pad_name(action),native,unsigned(g_sdl_input_scene));
+    log_line(line);
+}
 thread_local DWORD g_sdl_pause_delivery_tick=0;
 thread_local bool g_sdl_pause_delivery_pending=false;
 thread_local DWORD g_sdl_f1_delivery_tick=0;
@@ -6293,6 +6314,16 @@ unsigned char __cdecl ipt_gameplay_predicate(void* entry) {
         (binding && (entry_name.empty() ||
          r2fix::ipt_name_contains(entry_name,binding->name_fragment)));
     if(requested) {
+        if(g_log && gameplay) {
+            using r2fix::PadTraceRoute;
+            switch(index) {
+                case 10:targeted_pad_route(PadAction::jump,PadTraceRoute::jump,"IPT10");break;
+                case 13:targeted_pad_route(PadAction::target,PadTraceRoute::strafe,"IPT13");break;
+                case 14:targeted_pad_route(PadAction::target,PadTraceRoute::dive,"IPT14");break;
+                case 15:targeted_pad_route(PadAction::jump,PadTraceRoute::surface,"IPT15");break;
+                case 21:targeted_pad_route(PadAction::jump,PadTraceRoute::dialogue,"IPT21");break;
+            }
+        }
         if(g_log && context==PadContext::learn_cinematic) {
             static DWORD last_report=0;
             const DWORD now=GetTickCount();
@@ -6532,6 +6563,16 @@ void poll_sdl3_native() noexcept {
         log_line(msg);
     }
     const auto transitions = gate.update(sample);
+    if(g_log)g_targeted_pad_trace.observe(sample,transitions,
+        [&](r2fix::PadAction action,const r2fix::PadTraceState& state,bool exhausted) {
+            char line[220]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-SDL3-TARGET: action=%s device=%u scene=%u physical=%u accepted=%u context=%u foreground=%u budget_end=%u",
+                targeted_pad_name(action),unsigned(state.device),unsigned(state.scene),
+                unsigned(state.physical),unsigned(state.accepted),unsigned(context),
+                unsigned(foreground),unsigned(exhausted));
+            log_line(line);
+        });
     if(g_log && (!boundary_seen || boundary_device!=sample.device_id ||
        boundary_scene!=scene || boundary_focus!=foreground || boundary_context!=context)) {
         if(boundary_reports<256u) {
@@ -9220,7 +9261,11 @@ std::uint32_t r2fix_sdl_menu_actions(bool video) noexcept {
     return sdl_fresh_actions(r2fix::PadContext::menu);
 }
 void r2fix_sdl_note_f1_delivery() noexcept {
-    if(r2fix_sdl_f1_actions()) {
+    const auto actions=r2fix_sdl_f1_actions();
+    if(actions) {
+        for(auto action:{r2fix::PadAction::world_knowledge,r2fix::PadAction::murphy})
+            if(actions&r2fix::pad_action_bit(action))
+                targeted_pad_route(action,r2fix::PadTraceRoute::f1,"DIK_F1");
         g_sdl_f1_delivery_tick=GetTickCount();
         g_sdl_f1_delivery_pending=true;
     }
