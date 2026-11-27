@@ -278,6 +278,18 @@ int main() {
     check(pad_composite565(0xffffu,red,pad_panel_coverage(0,0))==0xffffu,
           "outside panel untouched");
     check(pad_composite565(0,red,{16,0})==0x001fu,"Glide LFB red channel swap");
+    check(pad_scene_read_to_write565(0xf800u)==0x001fu &&
+          pad_scene_read_to_write565(0x001fu)==0xf800u &&
+          pad_scene_read_to_write565(0x07e0u)==0x07e0u,"GameFrame RGB read to ABGR write");
+    for(unsigned i=0;i<65536u;++i){
+        const auto native=std::uint16_t(i);
+        const auto write=pad_scene_read_to_write565(native);
+        const auto preserved=pad_composite565(write,transparent,{0,0});
+        check(pad_scene_read_to_write565(preserved)==native,"transparent corner round-trips the native color");
+    }
+    const auto blue_water=pad_scene_read_to_write565(
+        pad_composite565(pad_scene_read_to_write565(0x001fu),transparent,{16,0}));
+    check((blue_water&31u)>((blue_water>>11)&31u),"blue water stays blue after overlay write");
     check(pad_composite565(0xffffu,transparent,{16,0})!=0xffffu &&
           pad_composite565(0,transparent,{16,0})!=0,"translucent tint on distinct scenes");
     check(!composite_controller_info(nullptr,0,nullptr,0),"invalid overlay refuses");

@@ -57,8 +57,15 @@ constexpr PadPanelCoverage pad_panel_coverage(int x,int y) noexcept {
     }
     return c;
 }
-// GameFrame's Glide LFB uses swapped R/B compared to conventional RGB565.
-// Keep this explicit at the boundary; no channel swap in the GDI renderer.
+// Pinned GameFrame readback always returns conventional RGB565
+// (render/frame.rs::read), but LFB writes in the game's ABGR mode
+// decode the red/blue fields reversed (api/lfb.rs::rgba).
+// Normalize the scene to write order before blending, including corners
+// where the compositor preserves the original word.
+constexpr std::uint16_t pad_scene_read_to_write565(std::uint16_t pixel) noexcept {
+    return std::uint16_t(((pixel&0xf800u)>>11)|(pixel&0x07e0u)|((pixel&0x001fu)<<11));
+}
+// The compositor operates in the write order; the GDI art remains RGB.
 // Eight very close shades across the panel; static row lookup avoids
 // recalculating gradients or increasing the framebuffer read/write area.
 constexpr unsigned kPadTintShades=8;

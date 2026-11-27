@@ -691,6 +691,9 @@ bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFami
         if(!g_read(kBackBuffer,placement.x,kPadInfoY,placement.width,kPadInfoHeight,
                    placement.width*2u,scene.data()))return false;
         const auto read_done=PadPerfClock::now();
+        // GameFrame readback is RGB565 even with the game's ABGR
+        // write format. Otherwise the transparent scene swaps R/B.
+        for(auto& pixel:scene)pixel=pad_scene_read_to_write565(pixel);
         if(!composite_prepared_controller(scene.data(),scene.size(),cache.prepared.data(),cache.prepared.size(),placement.width))
             return false;
         if(!apply_pad_info_lights(scene.data(),scene.size(),placement.width,family,connected?activity:PadInfoActivity{}))return false;
