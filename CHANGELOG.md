@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Support for GOG offline installers using embedded, pinned innoextract 1.9, with independent executable approval, edition-specific SHA-256 receipts and shared runtime deployment.
 - SDL3 3.4.20 x86, automatic controller handover, native input integration and keyboard coexistence.
 - Integrated Controls pages in startup and pause Options, with localized enchanted controller diagrams and live physical-input highlights.
 - Read-only Video information in both the main and in-game Pause Options menus, included in the standard single-EXE installer.
@@ -18,6 +19,8 @@
 - The legacy passive resolution diagnostic runs only in explicit research builds. Normal Video functionality is independent of logging.
 
 ### Fixed
+- Repeated Jail_20 intro skips after restarting from the Pause menu, with a guarded single-bit reset and native level transition; preserve Learn_10 F248 restoration and the original no-movies flag.
+- Move verbose intro research diagnostics behind the existing research-build switch without making normal director identification depend on logging.
 - Late website caption replacement, obsolete Pause Video widgets and residual brightness gauge in the tested menu paths.
 - Oversized generic Windows GPU descriptions shrinking all panel text.
 
