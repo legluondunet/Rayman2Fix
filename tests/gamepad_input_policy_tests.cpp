@@ -281,14 +281,31 @@ int main() {
     check(pad_composite565(0xffffu,transparent,{16,0})!=0xffffu &&
           pad_composite565(0,transparent,{16,0})!=0,"translucent tint on distinct scenes");
     check(!composite_controller_info(nullptr,0,nullptr,0),"invalid overlay refuses");
+    // Exhaustively check each fast path against every possible RGB565 scene color.
+    {
+        const auto& lut=pad_background_tint_table();
+        const PadOverlayPixel colors[]{{},{12,77,151,255,255,255},{9,22,17,40,90,35}};
+        const PadPanelCoverage coverage[]{{0,0},{16,0},{0,16},{6,5},{0,3}};
+        for(auto fg:colors)for(auto cov:coverage) {
+            const auto prepared=pad_prepare_pixel(fg,cov);
+            bool exact=true;
+            for(unsigned i=0;i<65536u;++i)
+                if(pad_composite_prepared_pixel(std::uint16_t(i),prepared,lut)!=
+                   pad_composite565(std::uint16_t(i),fg,cov)){exact=false;break;}
+            check(exact,"prepared pixel path exactly matches all 65536 destination colors");
+        }
+    }
     // Compare every pixel against the original algorithm for both aspect
     // ratios, with mixed alpha and a changing synthetic native scene.
     {
         std::vector<PadOverlayPixel> art(kPadInfoPixels);
         for(std::size_t i=0;i<art.size();++i) {
             const unsigned a=unsigned((i*37u)%256u);
-            art[i]={std::uint8_t(a/2),std::uint8_t(a/3),std::uint8_t(a/4),
-                    std::uint8_t(a),std::uint8_t(a),std::uint8_t(a)};
+            const unsigned g=unsigned((i*17u)%256u),b=unsigned((i*73u)%256u);
+            if(i%11u<4u)art[i]={};
+            else if(i%11u<7u)art[i]={std::uint8_t(a),std::uint8_t(g),std::uint8_t(b),255,255,255};
+            else art[i]={std::uint8_t(a/2),std::uint8_t(g/3),std::uint8_t(b/4),
+                    std::uint8_t(a),std::uint8_t(g),std::uint8_t(b)};
         }
         std::vector<PadPreparedPixel> prepared;
         for(unsigned width:{unsigned(kPadInfoWidth),unsigned(kPadInfoWidth*3/4)}) {

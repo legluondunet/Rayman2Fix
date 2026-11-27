@@ -696,10 +696,14 @@ bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFami
         const bool ok=g_write(kBackBuffer,placement.x,kPadInfoY,kRgb565,placement.width,kPadInfoHeight,
                        placement.width*2,scene.data())!=0;
         const auto end=PadPerfClock::now();
-        static unsigned reports=0;
+        static unsigned reports=0,slow_reports=0,frame=0;
         const unsigned total=pad_perf_us(begin,end);
-        if(g_log && reports<24u && (reports<4u || !cache_hit || total>=25000u)) {
-            ++reports;
+        ++frame;
+        const bool regular=reports<24u && (reports<4u || frame%120u==0u || !cache_hit);
+        const bool slow=slow_reports<12u && total>=16000u;
+        if(g_log && (regular || slow)) {
+            if(regular)++reports;
+            else ++slow_reports;
             char line[256]{};
             std::snprintf(line,sizeof(line),
                 "RUNTIME-CONTROLLER-PERF: stage=draw cache_hit=%u prepare_us=%u read_us=%u composite_us=%u write_us=%u total_us=%u ok=%u",

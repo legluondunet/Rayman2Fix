@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <array>
 namespace r2fix {
 // BGRA DIB samples from two identical drawings over black and white.
 // Recover independent per-channel coverage so antialiasing never retains
@@ -99,15 +100,50 @@ inline bool composite_controller_info(std::uint16_t* dst,std::size_t count,
     return true;
 }
 // Cache the exact box-average of the static overlay and panel coverage.
- // The live scene and physical button lights must still be composed each frame.
+// The live scene and physical button lights must still be composed each frame.
+enum class PadCompositeKind : std::uint8_t { preserve, constant, tint, partial };
 struct PadPreparedPixel {
     PadOverlayPixel fg;
     std::uint8_t fill,border;
+    PadCompositeKind kind=PadCompositeKind::partial;
+    std::uint16_t constant=0;
 };
+constexpr PadPreparedPixel pad_prepare_pixel(PadOverlayPixel fg,PadPanelCoverage c) noexcept {
+    PadPreparedPixel p{fg,std::uint8_t(c.fill),std::uint8_t(c.border)};
+    if(!c.fill&&!c.border)p.kind=PadCompositeKind::preserve;
+    else if((fg.ar==255u && fg.ag==255u && fg.ab==255u) || c.border==16u) {
+        p.kind=PadCompositeKind::constant;
+        p.constant=pad_composite565(0,fg,c);
+    } else if(c.fill==16u && !fg.ar && !fg.ag && !fg.ab && !fg.r && !fg.g && !fg.b)
+        p.kind=PadCompositeKind::tint;
+    return p;
+}
+// An exact lookup for the ordinary translucent background, derived from
+// the reference integer compositor, not an approximation or color change.
+inline const std::array<std::uint16_t,65536>& pad_background_tint_table() noexcept {
+    static const auto table=[] {
+        std::array<std::uint16_t,65536> out{};
+        for(unsigned i=0;i<out.size();++i)
+            out[i]=pad_composite565(std::uint16_t(i),{},{16,0});
+        return out;
+    }();
+    return table;
+}
+inline std::uint16_t pad_composite_prepared_pixel(std::uint16_t dst,const PadPreparedPixel& p,
+    const std::array<std::uint16_t,65536>& tint) noexcept {
+    switch(p.kind) {
+    case PadCompositeKind::preserve:return dst;
+    case PadCompositeKind::constant:return p.constant;
+    case PadCompositeKind::tint:return tint[dst];
+    default:return pad_composite565(dst,p.fg,{p.fill,p.border});
+    }
+}
 inline bool prepare_controller_composite(const PadOverlayPixel* overlay,std::size_t overlay_count,
                                          unsigned width,std::vector<PadPreparedPixel>& output) noexcept {
     if(!overlay||!width||width>kPadInfoWidth||overlay_count!=kPadInfoPixels)return false;
     try {
+        // Initialize the shared lookup during prewarm, not the first draw.
+        (void)pad_background_tint_table();
         std::vector<PadPreparedPixel> staged(std::size_t(width)*kPadInfoHeight);
         for(int y=0;y<kPadInfoHeight;++y)for(unsigned x=0;x<width;++x){
             const unsigned begin=x*kPadInfoWidth,end=(x+1u)*kPadInfoWidth;
@@ -120,9 +156,10 @@ inline bool prepare_controller_composite(const PadOverlayPixel* overlay,std::siz
                 for(unsigned j=0;j<8;++j)sum[j]+=channels[j]*weight;
             }
             for(auto& n:sum)n=(n+kPadInfoWidth/2u)/kPadInfoWidth;
-            staged[std::size_t(y)*width+x]={{std::uint8_t(sum[0]),std::uint8_t(sum[1]),std::uint8_t(sum[2]),
-                std::uint8_t(sum[3]),std::uint8_t(sum[4]),std::uint8_t(sum[5])},
-                std::uint8_t(sum[6]),std::uint8_t(std::min(sum[7],16u-sum[6]))};
+            staged[std::size_t(y)*width+x]=pad_prepare_pixel(
+                {std::uint8_t(sum[0]),std::uint8_t(sum[1]),std::uint8_t(sum[2]),
+                 std::uint8_t(sum[3]),std::uint8_t(sum[4]),std::uint8_t(sum[5])},
+                {sum[6],std::min(sum[7],16u-sum[6])});
         }
         output.swap(staged);
         return true;
@@ -133,10 +170,9 @@ inline bool composite_prepared_controller(std::uint16_t* dst,std::size_t count,
                                           unsigned width) noexcept {
     if(!dst||!prepared||!width||width>kPadInfoWidth||
        count!=std::size_t(width)*kPadInfoHeight||prepared_count!=count)return false;
-    for(std::size_t i=0;i<count;++i){
-        const auto& p=prepared[i];
-        dst[i]=pad_composite565(dst[i],p.fg,{p.fill,p.border});
-    }
+    const auto& tint=pad_background_tint_table();
+    for(std::size_t i=0;i<count;++i)
+        dst[i]=pad_composite_prepared_pixel(dst[i],prepared[i],tint);
     return true;
 }
 } // namespace r2fix
