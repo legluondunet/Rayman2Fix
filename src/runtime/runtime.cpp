@@ -7426,8 +7426,18 @@ void __cdecl native_2d_percent_sprite(void* viewport,
     if((g_remove_dialogue_backgrounds || g_remove_cinematic_bars) &&
        producer==Native2DProducer::Frame) {
         const auto kind=r2fix::black_frame_kind(xmin,ymin,xmax,ymax);
-        if(kind==r2fix::BlackFrameKind::DialogueBackdrop &&
+        const bool map_single=r2fix::map_single_line_dialogue(
+            g_current_level && _stricmp(g_current_level,"mapmonde")==0,
+            true,xmin,ymin,xmax,ymax);
+        if((kind==r2fix::BlackFrameKind::DialogueBackdrop || map_single) &&
            g_remove_dialogue_backgrounds) {
+            if(map_single) {
+                static bool reported=false;
+                if(!reported) {
+                    reported=true;
+                    log_line("RUNTIME-FRAMES: suppressing Mapmonde single-line dialogue backdrop x=14..94 y=64.3..70.7");
+                }
+            }
             if(g_hidden_dialogue_frames.fetch_add(1,std::memory_order_relaxed)==0)
                 log_line("RUNTIME-FRAMES: suppressing verified GLI dialogue backdrop quads (opt-in; source-frame geometry)");
             return;
