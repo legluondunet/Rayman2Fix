@@ -66,6 +66,48 @@ int main() {
     CHECK(!queued.update("learn_10", true, true));  // reset on exit
     CHECK(!queued.requested && !queued.pending);
 
+    // A replay request can reach Playing while the original controller
+    // remains in B2. Retain the press, throttle preflight, and dispatch
+    // once only after the original B1 authorization succeeds.
+    r2fix::IntroSkipGuard replay;
+    r2fix::ReplayOwnerWait wait;
+    CHECK(!replay.update("jail_20",false,false));
+    CHECK(!replay.update("jail_20",false,false));
+    CHECK(!replay.update("jail_20",true,false));
+    CHECK(replay.update("jail_20",false,true));
+    CHECK(wait.defer(2,553));
+    replay.defer_pre_dispatch();
+    CHECK(replay.pending && replay.requested);
+    CHECK(!wait.due(602));
+    CHECK(!replay.update("jail_20",false,wait.due(602)));
+    CHECK(wait.due(603) && !wait.expired(603));
+    CHECK(replay.update("jail_20",false,true));
+    CHECK(wait.defer(2,603));
+    replay.defer_pre_dispatch();
+    CHECK(replay.update("jail_20",false,wait.due(653)));
+    wait.clear(); // B1 and all other original guards passed, native dispatch
+    CHECK(!replay.update("jail_20",true,true));
+    CHECK(!replay.update("jail_20",false,true));
+    CHECK(!replay.update("jail_20",true,true));
+    CHECK(!wait.defer(-1,700) && !wait.defer(0,700) && !wait.defer(1,700));
+    CHECK(wait.defer(2,1000));
+    CHECK(!wait.expired(2999) && wait.expired(3000));
+    CHECK(!wait.defer(2,3000));
+    wait.clear();
+    CHECK(wait.defer(2,0xfffffff0u));
+    CHECK(!wait.due(0x10u) && wait.due(0x22u));
+    CHECK(wait.expired(0x7c0u));
+    wait.clear();
+    // A refusal before dispatch must never consume the entire scene.
+    // Releasing and pressing again can attempt the full guarded preflight.
+    replay.refuse_pre_dispatch();
+    CHECK(!replay.update("jail_20",true,true));
+    CHECK(!replay.update("jail_20",false,true));
+    CHECK(replay.update("jail_20",true,true));
+    replay.defer_pre_dispatch();
+    CHECK(!replay.update("learn_10",false,true));
+    CHECK(!replay.pending && !replay.requested);
+
     // If the level changes while waiting for readiness, cancel the request.
     r2fix::IntroSkipGuard cancelled;
     CHECK(!cancelled.update("jail_20", false, false));
