@@ -36,8 +36,15 @@ struct IntroSkipGuard {
     bool released = false;
     bool requested = false;
     // A fresh press can be queued while the engine is still loading.
-    // Once Playing is observed, exactly ONE native change is issued.
+    // Playing permits preflight, not necessarily native dispatch. Only a
+    // successfully authorized request may consume the level transition.
     bool pending = false;
+
+    // Only call these before any native level request or memory write.
+    void defer_pre_dispatch() noexcept { pending = inside && requested; }
+    void refuse_pre_dispatch() noexcept {
+        pending = requested = released = false;
+    }
 
     // engine_ready must come from the original engine's Playing state,
     // not a guessed wall-clock delay. Default preserves existing tests.
@@ -63,6 +70,30 @@ struct IntroSkipGuard {
         }
         return false;
     }
+};
+
+// The authenticated Jail_20 controller's B2 initialization was observed
+// to precede B1 (the only allowed writer/transition state). Never treat
+// a missing/invalid behavior or any other refusal as authorization.
+// Wait at most 2 s, poll the complete original preflight no more often
+// than every 50 ms, and do not call the native transition during waiting.
+struct ReplayOwnerWait {
+    static constexpr std::uint32_t interval_ms=50, timeout_ms=2000;
+    bool active=false;
+    std::uint32_t started=0,last=0;
+    bool defer(int behavior,std::uint32_t now) noexcept {
+        if(behavior!=2 || (active && expired(now)))return false;
+        if(!active){active=true;started=now;}
+        last=now;
+        return true;
+    }
+    bool expired(std::uint32_t now) const noexcept {
+        return active && std::uint32_t(now-started)>=timeout_ms;
+    }
+    bool due(std::uint32_t now) const noexcept {
+        return !active || std::uint32_t(now-last)>=interval_ms;
+    }
+    void clear() noexcept { *this={}; }
 };
 
 // The third *sequence* happens inside the first playable level, Learn_10.
