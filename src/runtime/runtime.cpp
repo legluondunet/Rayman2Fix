@@ -6167,10 +6167,14 @@ thread_local bool g_controller_connected=false;
 thread_local r2fix::PadInfoActivity g_controller_activity{};
 thread_local DWORD g_controller_activity_tick=0;
 thread_local r2fix::PadLabelFamily g_controller_family=r2fix::PadLabelFamily::generic;
-int controller_info_scope() noexcept {
+int controller_info_scope(bool* prewarm=nullptr) noexcept {
+    if(prewarm)*prewarm=false;
     if(g_game_camera_thread_id.load(std::memory_order_acquire)!=GetCurrentThreadId())return 0;
     int n=-1,f=-1;
-    if(r2fix::pause_menu_live_state(n,f))return n==17 && f==2 ? 2:0;
+    if(r2fix::pause_menu_live_state(n,f)) {
+        if(prewarm)*prewarm=n==6 && f==2;
+        return n==17 && f==2 ? 2:0;
+    }
 #if defined(RAYMAN2FIX_GRAPHICS_MENU_TRACE) && RAYMAN2FIX_GRAPHICS_MENU_TRACE
     const auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     char level[30]{};
@@ -6179,7 +6183,11 @@ int controller_info_scope() noexcept {
        level,sizeof(level),&copied) || copied!=sizeof(level) || !std::memchr(level,0,sizeof(level)) ||
        _stricmp(level,"menu")!=0)return 0;
     r2fix::MenuAiModel model{};r2fix::MenuAiState state{};
-    if(r2fix::get_verified_menu_controller(model,state) && state.normal==21 && state.reflex==0)return 1;
+    if(r2fix::get_verified_menu_controller(model,state)) {
+        if(prewarm)*prewarm=(state.normal==11 && state.reflex==0) ||
+                            (state.normal==8 && state.reflex==2);
+        if(state.normal==21 && state.reflex==0)return 1;
+    }
 #endif
     return 0;
 }
@@ -8696,7 +8704,9 @@ void __cdecl standalone_video_flip() {
     r2fix::native_graphics_info_stabilize_video_cursor_at_flip();
     r2fix::standalone_video_page_draw_before_flip();
 #ifdef RAYMAN2FIX_BUNDLED_SDL3
-    const int scope=controller_info_scope();
+    bool prewarm=false;
+    const int scope=controller_info_scope(&prewarm);
+    const DWORD panel_started=GetTickCount();
     const int previous=g_controller_drawn_scope;
     g_controller_drawn_scope=0;
     const auto activity=(game_window_is_foreground() && DWORD(GetTickCount()-g_controller_activity_tick)<=100u)?
@@ -8710,7 +8720,16 @@ void __cdecl standalone_video_flip() {
             previous_mask=activity.mask;
         }
         g_controller_drawn_scope=scope;
-        if(previous!=scope)log_line(scope==1?"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=MENU normal=21 reflex=0":"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=PAUSE normal=17 reflex=2");
+        if(previous!=scope) {
+            log_line(scope==1?"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=MENU normal=21 reflex=0":"RUNTIME-CONTROLLER-MENU: panel-drawn=1 scope=PAUSE normal=17 reflex=2");
+            if(g_log) {
+                char msg[160]{};
+                std::snprintf(msg,sizeof(msg),"RUNTIME-CONTROLLER-PERF: stage=first-draw scope=%s t_ms=%lu elapsed_ms=%lu",
+                    scope==1?"MENU":"PAUSE",static_cast<unsigned long>(GetTickCount()),
+                    static_cast<unsigned long>(DWORD(GetTickCount()-panel_started)));
+                log_line(msg);
+            }
+        }
     }
 #endif
     const auto original=reinterpret_cast<void (__cdecl*)()>(
@@ -8720,6 +8739,15 @@ void __cdecl standalone_video_flip() {
     // Also refresh on the verified VIDEO flip route used in MENU.
     // The acquisition function still requires the original camera thread.
     poll_sdl3_native();
+    // Prepare the exact active language/device art in the authenticated
+    // parent menu, after presenting its frame. Never prewarm in gameplay.
+    static DWORD last_prewarm=0;
+    const DWORD now=GetTickCount();
+    if(prewarm && !scope && g_controller_activity_tick && game_window_is_foreground() &&
+       (!last_prewarm || DWORD(now-last_prewarm)>=1000u)) {
+        last_prewarm=now;
+        r2fix::warm_controller_info_overlay(controller_info_locale(),g_controller_connected,g_controller_family);
+    }
 #endif
 }
 #endif

@@ -16,6 +16,7 @@
 #include <cstring>
 #include <numeric>
 #include <vector>
+#include <chrono>
 
 namespace r2fix {
 bool pause_video_live_active() noexcept;
@@ -622,31 +623,82 @@ bool standalone_video_page_filter_native_glyphs(float& xmin,float& ymin,float& x
     // itself, all game/world objects and the return-to-Options screen.
     return standalone_video_hide_native_glyphs(visible,drew,true,title);
 }
+namespace {
+using PadPerfClock=std::chrono::steady_clock;
+unsigned pad_perf_us(PadPerfClock::time_point begin,PadPerfClock::time_point end) noexcept {
+    return static_cast<unsigned>(std::chrono::duration_cast<std::chrono::microseconds>(end-begin).count());
+}
+struct ControllerOverlayCache {
+    std::vector<PadOverlayPixel> overlay;
+    std::vector<std::uint16_t> scene;
+    bool valid=false;
+    PadInfoLocale locale=PadInfoLocale::en;
+    PadLabelFamily family=PadLabelFamily::generic;
+    bool connected=false;
+    bool matches(PadInfoLocale l,bool c,PadLabelFamily f) const noexcept {
+        return valid && locale==l && connected==c && family==f;
+    }
+    bool prepare(PadInfoLocale l,bool c,PadLabelFamily f,const char* source) noexcept {
+        if(matches(l,c,f))return true;
+        const auto begin=PadPerfClock::now();
+        if(!prepare_controller_info_overlay(make_pad_info_view(l,c,f),overlay))return false;
+        valid=true;locale=l;connected=c;family=f;
+        if(g_log) {
+            char line[180]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-CONTROLLER-PERF: stage=prepare source=%s locale=%u family=%u connected=%u elapsed_us=%u",
+                source,unsigned(l),unsigned(f),unsigned(c),pad_perf_us(begin,PadPerfClock::now()));
+            g_log(line);
+        }
+        return true;
+    }
+};
+// Both callers run on the authenticated camera/render thread. No worker,
+// Glide access or game memory writes are needed to prepare the static art.
+ControllerOverlayCache& controller_overlay_cache() {
+    static ControllerOverlayCache cache;
+    return cache;
+}
+}
+bool warm_controller_info_overlay(PadInfoLocale locale,bool connected,PadLabelFamily family) noexcept {
+    if(!g_configured.load(std::memory_order_acquire))return false;
+    return controller_overlay_cache().prepare(locale,connected,family,"prewarm");
+}
 bool draw_controller_info_glide(PadInfoLocale locale,bool connected,PadLabelFamily family,float hud_scale,PadInfoActivity activity) noexcept {
     if(!g_configured.load(std::memory_order_acquire) || !find_glide())return false;
     const auto placement=pad_info_placement(hud_scale);
     if(!placement.width)return false;
     try {
-        static std::vector<PadOverlayPixel> overlay;
-        static std::vector<std::uint16_t> scene;
-        static bool cached=false;
-        static PadInfoLocale old_locale=PadInfoLocale::en;
-        static PadLabelFamily old_family=PadLabelFamily::generic;
-        static bool old_connected=false;
-        if(!cached || locale!=old_locale || connected!=old_connected || family!=old_family) {
-            if(!prepare_controller_info_overlay(make_pad_info_view(locale,connected,family),overlay))
-                return false;
-            scene.resize(std::size_t(placement.width)*kPadInfoHeight);
-            cached=true;old_locale=locale;old_connected=connected;old_family=family;
-        }
+        auto& cache=controller_overlay_cache();
+        const auto begin=PadPerfClock::now();
+        const bool cache_hit=cache.matches(locale,connected,family);
+        if(!cache.prepare(locale,connected,family,"draw"))return false;
+        auto& scene=cache.scene;
+        const auto& overlay=cache.overlay;
         scene.resize(std::size_t(placement.width)*kPadInfoHeight);
+        const auto ready=PadPerfClock::now();
         if(!g_read(kBackBuffer,placement.x,kPadInfoY,placement.width,kPadInfoHeight,
                    placement.width*2u,scene.data()))return false;
+        const auto read_done=PadPerfClock::now();
         if(!composite_controller_info(scene.data(),scene.size(),overlay.data(),overlay.size(),placement.width))
             return false;
         if(!apply_pad_info_lights(scene.data(),scene.size(),placement.width,family,connected?activity:PadInfoActivity{}))return false;
-        return g_write(kBackBuffer,placement.x,kPadInfoY,kRgb565,placement.width,kPadInfoHeight,
+        const auto composite_done=PadPerfClock::now();
+        const bool ok=g_write(kBackBuffer,placement.x,kPadInfoY,kRgb565,placement.width,kPadInfoHeight,
                        placement.width*2,scene.data())!=0;
+        const auto end=PadPerfClock::now();
+        static unsigned reports=0;
+        const unsigned total=pad_perf_us(begin,end);
+        if(g_log && reports<24u && (reports<4u || !cache_hit || total>=25000u)) {
+            ++reports;
+            char line[256]{};
+            std::snprintf(line,sizeof(line),
+                "RUNTIME-CONTROLLER-PERF: stage=draw cache_hit=%u prepare_us=%u read_us=%u composite_us=%u write_us=%u total_us=%u ok=%u",
+                unsigned(cache_hit),pad_perf_us(begin,ready),pad_perf_us(ready,read_done),
+                pad_perf_us(read_done,composite_done),pad_perf_us(composite_done,end),total,unsigned(ok));
+            g_log(line);
+        }
+        return ok;
     }catch(...){return false;}
 }
 bool standalone_video_page_draw_before_flip() noexcept {
