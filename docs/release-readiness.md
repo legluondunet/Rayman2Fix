@@ -1,6 +1,6 @@
 # Rayman2Fix — release readiness
 
-Updated 25 November 2026. CI artifacts are development builds, not a
+Updated 27 November 2026. CI artifacts are development builds, not a
 public release.
 
 ## Completed engineering work
@@ -15,18 +15,26 @@ public release.
   CI #2001 passed Linux and Windows x86; owner approved build 4467b514
   under Wine with automatic controller handovers and physical indicators.
 
+- GOG offline installation and verified launch under Wine: #61 / #62.
+  Real installer manifest/extraction, edition-specific receipt and shared runtime
+  preflight passed. No original setup is executed.
+- Repeated Jail_20 skips and standard-build diagnostic cleanup: owner validated
+  248332c4 (workflow 2102), four native transitions of 388 ms, three scoped
+  replay resets, original F248 slot restored after the first Learn_10 visit.
+
 ## Remaining priorities
 
-1. #45 — investigate very early Jail_20 input under Wine if reproducible,
-   including the queued-before-Playing case. #46 is already merged;
-   normal later skips have passed. Do not add speculative delays.
+1. #45 — retain the validated queued-before-Playing guard and scoped replay
+   repair. Investigate only reproducible residual failures; do not add
+   speculative delays.
 2. Targeted controller tests: jump/surface and target/dive in an actual
    swimming scene, and world-knowledge versus Murfy in eligible contexts.
    Keep the pending markers until the actual native effect is confirmed.
    Validate these behaviors under Wine with the available controllers.
-3. Review supported CD editions, installation/launch, source availability,
-   notices and release readiness. No commercial assets are distributed;
-   the approved local executable requirement remains documented.
+3. Final cross-edition regression: fresh CD installation and verified launch,
+   GOG installation/verification and updated embedded guide. Retain the approved
+   CD executable requirement and original approved GOG executable. Check source
+   availability and all dependency notices. No commercial assets are distributed.
 
 ## Platform validation policy
 
