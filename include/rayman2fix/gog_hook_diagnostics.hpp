@@ -160,7 +160,7 @@ inline std::vector<std::string> hook_diagnostics(const std::filesystem::path& ex
     lines.push_back("GOG-HOOK-PROBE: shared_runtime_preflight="+std::string(shared_runtime_preflight(pe)?"passed":"refused"));
     lines.push_back("GOG-HOOK-PROBE: matched="+std::to_string(matched)+"/"+
                     std::to_string(diagnostic_signatures().size())+
-                    " static evidence only; gameplay validation pending");
+                    " static evidence only; see runtime log for actual session");
     return lines;
 }
 } // namespace r2fix::gog
