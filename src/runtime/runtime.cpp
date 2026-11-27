@@ -5640,8 +5640,10 @@ void poll_second_intro_skip() {
         log_line(msg);
     }
     if(!g_current_level) {
-        g_replay_owner_wait.clear();
-        g_intro_guard.update(nullptr,false,false);
+        if(g_replay_owner_wait.active) {
+            g_replay_owner_wait.clear();
+            g_intro_guard.refuse_pre_dispatch();
+        }
         return;
     }
     // These counters measure the sampling cadence of the EXISTING camera
@@ -5791,6 +5793,13 @@ void poll_second_intro_skip() {
     bool previous_handover=false;
     const bool story_known=game_story_bit(intro_words,kLearnHandoverBit,previous_handover);
     const bool replay_route=g_replay_intro_route.ready();
+    if(g_replay_owner_wait.active &&
+       (!replay_route || !story_known || !previous_handover)) {
+        g_replay_owner_wait.clear();
+        g_intro_guard.refuse_pre_dispatch();
+        log_line("RUNTIME-REPLAY-INTRO: owner-wait=cancelled; replay authorization changed");
+        return;
+    }
     log_replay_intro_audit(replay_route?"replay-request":"first-request",game_base,intro_words);
     r2fix::ReplayHandoverWord replay_reset{};
     int owner_behavior=-1;
