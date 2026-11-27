@@ -70,9 +70,9 @@ inline BlackFrameKind black_frame_kind(float x0, float y0,
 // geometry to mapmonde; do not broaden the general dialogue filter.
 inline bool map_single_line_dialogue(bool map_scene,bool verified_frame,
     float x0,float y0,float x1,float y1) noexcept {
-    const auto near=[](float a,float b){return std::fabs(a-b)<=0.15f;};
-    return map_scene && verified_frame && near(x0,14.f) && near(x1,94.f) &&
-        near(y0,64.3f) && near(y1,70.7f);
+    const auto coord_matches=[](float a,float b){return std::fabs(a-b)<=0.15f;};
+    return map_scene && verified_frame && coord_matches(x0,14.f) && coord_matches(x1,94.f) &&
+        coord_matches(y0,64.3f) && coord_matches(y1,70.7f);
 }
 
 // Broad, read-only source geometry classification for investigating cutscene
