@@ -1,4 +1,5 @@
 #include "rayman2fix/gamepad_input_policy.hpp"
+#include "rayman2fix/targeted_pad_trace.hpp"
 #include "rayman2fix/gamepad_control_info.hpp"
 #include "rayman2fix/controller_info_layout.hpp"
 #include "rayman2fix/controller_info_composite.hpp"
@@ -20,6 +21,48 @@ PadSample active(PadContext context = PadContext::gameplay) {
     return s;
 }
 int main() {
+    {
+        TargetedPadTrace trace;
+        PadTransitionGate input;
+        auto sample=active(); sample.scene_id=2;
+        unsigned changes[4]{};
+        PadTraceState latest[4]{};
+        const auto report=[&](PadAction action,const PadTraceState& state,bool) {
+            for(unsigned i=0;i<kTargetedPadActions.size();++i)
+                if(kTargetedPadActions[i]==action){++changes[i];latest[i]=state;}
+        };
+        auto poll=[&]{trace.observe(sample,input.update(sample),report);};
+        sample.south=true; poll();
+        check(changes[0]==1 && latest[0].physical && !latest[0].accepted,
+              "held on attach reported but cannot claim delivery");
+        check(!trace.note_route(PadAction::jump,PadTraceRoute::surface),"gated route refused");
+        sample.south=false;poll();sample.south=true;poll();
+        check(latest[0].accepted && trace.note_route(PadAction::jump,PadTraceRoute::surface),
+              "fresh jump native surface evidence");
+        check(!trace.note_route(PadAction::jump,PadTraceRoute::surface) &&
+              trace.note_route(PadAction::jump,PadTraceRoute::jump),"distinct native route once per activation");
+        poll();check(!trace.note_route(PadAction::jump,PadTraceRoute::jump),"holding does not repeat evidence");
+        sample.scene_id=3;poll();
+        check(!latest[0].accepted && !trace.note_route(PadAction::jump,PadTraceRoute::surface),
+              "held jump cannot cross scene boundary");
+        sample.south=false;poll();
+        for(unsigned i=0;i<80;++i){sample.south=true;poll();sample.south=false;poll();}
+        check(changes[0]==TargetedPadTrace::max_changes,"jump audit capped");
+        sample.dpad_up=true;sample.left_trigger=32767;poll();
+        check(latest[1].accepted && latest[2].accepted &&
+              trace.note_route(PadAction::target,PadTraceRoute::dive) &&
+              trace.note_route(PadAction::world_knowledge,PadTraceRoute::f1),
+              "independent dive and knowledge budgets");
+        check(!trace.note_route(PadAction::murphy,PadTraceRoute::f1),"no false down delivery");
+        sample.dpad_up=false;sample.dpad_down=true;poll();
+        check(!trace.note_route(PadAction::world_knowledge,PadTraceRoute::f1) &&
+              trace.note_route(PadAction::murphy,PadTraceRoute::f1),"distinct F1 source");
+        sample.foreground=false;poll();
+        check(!latest[1].accepted && !latest[3].accepted &&
+              !trace.note_route(PadAction::murphy,PadTraceRoute::f1),"focus loss invalidates evidence");
+        sample.foreground=true;poll();
+        check(!trace.note_route(PadAction::murphy,PadTraceRoute::f1),"held input after focus remains gated");
+    }
     std::uint32_t native_pad[9]{0xabcdef03u,0x1234u,0xdeadbeefu,1,2,3,4,5,6};
     check(!neutralize_native_joystick(false,true,true,true,native_pad,9)&&native_pad[1]==0x1234u,"native fallback without SDL owner");
     check(!neutralize_native_joystick(true,false,true,true,native_pad,9)&&!neutralize_native_joystick(true,true,false,true,native_pad,9)&&!neutralize_native_joystick(true,true,true,false,native_pad,9)&&!neutralize_native_joystick(true,true,true,true,native_pad,8),"neutralizer requires fresh supported successful poll and exact layout");
