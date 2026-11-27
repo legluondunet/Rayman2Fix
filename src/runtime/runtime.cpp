@@ -215,6 +215,7 @@ using RequestLevel = void (__cdecl*)(const char*, unsigned char);
 std::atomic<RequestLevel> g_request_intro_level{nullptr};
 const char* g_current_level = nullptr;
 r2fix::IntroSkipGuard g_intro_guard;
+r2fix::ReplayOwnerWait g_replay_owner_wait;
 r2fix::ReplayIntroRoute g_replay_intro_route;
 bool g_intro_level_logged = false;
 // Diagnostic-only timestamp of render sources. These do not authorize
@@ -5541,7 +5542,8 @@ bool replay_intro_compare_exchange(std::uintptr_t address,std::uint32_t old_word
     return true;
 }
 r2fix::ReplayHandoverWord try_replay_intro_reset(std::uintptr_t base,
-                                                std::uintptr_t legacy_words) {
+                                                std::uintptr_t legacy_words,int& owner_behavior) {
+    owner_behavior=-1;
     const auto refuse=[](const char* reason) {
         char msg[180]{};
         std::snprintf(msg,sizeof(msg),"RUNTIME-REPLAY-INTRO: reset=refused reason=%s",reason);
@@ -5561,7 +5563,14 @@ r2fix::ReplayHandoverWord try_replay_intro_reset(std::uintptr_t base,
     if(!jail20_find_actors(base,actors))return refuse("actor-search");
     if(!jail20_actor(actors[0],owner) || !jail20_owner_shape(owner))
         return refuse("owner-shape");
-    if(jail20_behaviour(owner)!=1)return refuse("owner-behaviour");
+    owner_behavior=jail20_behaviour(owner);
+    if(owner_behavior!=1) {
+        char msg[150]{};
+        std::snprintf(msg,sizeof(msg),
+            "RUNTIME-REPLAY-INTRO: owner-behaviour=%d required=1",owner_behavior);
+        log_line(msg);
+        return refuse("owner-behaviour");
+    }
     if(!read_u8(std::uintptr_t(owner.standard)+0x22,hp) || hp!=0)
         return refuse("owner-hp");
     if(!jail20_actor(actors[1],p1) || !jail20_producer_shape(p1,14,3,actors[0]))
@@ -5630,7 +5639,11 @@ void poll_second_intro_skip() {
             unsigned(pause_restart),unsigned(loading_jail10),unsigned(loading_jail20));
         log_line(msg);
     }
-    if(!g_current_level)return;
+    if(!g_current_level) {
+        g_replay_owner_wait.clear();
+        g_intro_guard.update(nullptr,false,false);
+        return;
+    }
     // These counters measure the sampling cadence of the EXISTING camera
     // callback; they do not add a key hook, change the input guard or skip.
     static DWORD entered_at=0,requested_at=0,last_input_diag=0;
@@ -5639,6 +5652,7 @@ void poll_second_intro_skip() {
     static int last_engine_mode=-2,last_next_level=-2;
     static DWORD last_engine_probe_at=0;
     const bool in_intro = r2fix::is_second_intro(g_current_level);
+    if(!in_intro)g_replay_owner_wait.clear();
     if (in_intro && !g_intro_level_logged) {
         entered_at=GetTickCount();
         requested_at=last_input_diag=0;
@@ -5689,7 +5703,8 @@ void poll_second_intro_skip() {
     }
     // Queue an early fresh press without calling the native level-change
     // routine until the ORIGINAL GAM engine reports E_EM_ModePlaying=9.
-    // No timer threshold and no retry loop: one request per level.
+    // No guessed readiness delay: one native dispatch per level, with
+    // a bounded recheck of the authenticated replay owner's initialization.
     const bool need_mode=in_intro &&
         (g_intro_guard.pending ||
          (g_intro_guard.released && down && !g_intro_guard.requested));
@@ -5698,7 +5713,15 @@ void poll_second_intro_skip() {
                               in_intro && down && !last_down);
     const int mode=need_mode ? intro_native_engine_mode(game_base) : -1;
     // A queued press must survive Alt-Tab; dispatch only in foreground.
-    const bool ready=foreground && mode==int(kIntroEnginePlaying);
+    const DWORD retry_now=GetTickCount();
+    if(in_intro && g_replay_owner_wait.expired(retry_now)) {
+        g_replay_owner_wait.clear();
+        g_intro_guard.refuse_pre_dispatch();
+        log_line("RUNTIME-REPLAY-INTRO: owner-wait=expired; fresh press required");
+        return;
+    }
+    const bool ready=foreground && mode==int(kIntroEnginePlaying) &&
+        g_replay_owner_wait.due(retry_now);
     const bool was_pending=g_intro_guard.pending;
     const bool was_requested=g_intro_guard.requested;
     const bool requested=g_intro_guard.update(g_current_level,down,ready);
@@ -5770,8 +5793,9 @@ void poll_second_intro_skip() {
     const bool replay_route=g_replay_intro_route.ready();
     log_replay_intro_audit(replay_route?"replay-request":"first-request",game_base,intro_words);
     r2fix::ReplayHandoverWord replay_reset{};
+    int owner_behavior=-1;
     if(story_known && previous_handover && replay_route)
-        replay_reset=try_replay_intro_reset(game_base,intro_words);
+        replay_reset=try_replay_intro_reset(game_base,intro_words,owner_behavior);
     const bool allowed=replay_reset.address ||
         ((!replay_route || story_known) &&
          r2fix::intro_direct_transition_allowed(story_known,previous_handover));
@@ -5783,7 +5807,22 @@ void poll_second_intro_skip() {
             replay_reset.address?"verified-replay-reset":allowed?"guarded-level-request":"native-transition-only");
         log_line(msg);
     }
-    if(!allowed)return;
+    if(!allowed) {
+        // No write or native call occurred on this path. B2 is the
+        // authenticated controller's observed initialization behavior.
+        // Re-run the entire original preflight, not just its behavior test.
+        if(story_known && previous_handover && replay_route &&
+           g_replay_owner_wait.defer(owner_behavior,GetTickCount())) {
+            g_intro_guard.defer_pre_dispatch();
+            log_line("RUNTIME-REPLAY-INTRO: owner-wait=pending B2->B1; request retained");
+        } else {
+            g_replay_owner_wait.clear();
+            g_intro_guard.refuse_pre_dispatch();
+            log_line("RUNTIME-REPLAY-INTRO: pre-dispatch refused; fresh press required");
+        }
+        return;
+    }
+    g_replay_owner_wait.clear();
 
     // The game itself queues the level change for its next engine tick.
     // Do not force a renderer switch, destroy a video window or write
