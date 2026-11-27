@@ -26,7 +26,7 @@ int main(){
             if(GetPixel(dc,20,45)==GetPixel(dc,460,145)){ok=false;break;}
             // Golden shell and violet face buttons for all controller families.
             const auto grip=GetPixel(dc,607,321);
-            const auto center=GetPixel(dc,460,145);
+            const auto center=GetPixel(dc,460,185);
             const auto face=pad_hardware_layout(family).face[0];
             const auto violet=GetPixel(dc,face.x+9,face.y);
             if(GetRValue(grip)<=GetBValue(grip) || GetRValue(center)<=GetBValue(center) ||
