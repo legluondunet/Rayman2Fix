@@ -61,6 +61,20 @@ constexpr bool learn10_replay_handover(bool story_known,bool story_set,
         (saw_suspended || elapsed>=3000u);
 }
 
+// Static Learn_10 asset audit: Gen_Cinematique instances and their
+// V0[0] recipient. V49 selects the native story bit. The initial intro
+// (personal 48, bit 1091) deliberately cannot qualify here.
+constexpr bool learn10_extra_cinematic_identity(unsigned family,unsigned model,
+    unsigned personal,unsigned story_bit,unsigned target_family,
+    unsigned target_model,unsigned target_personal) noexcept {
+    if(family!=20 || model!=29)return false;
+    if(personal==50)return story_bit==1092 &&
+        target_family==21 && target_model==30 && target_personal==49;
+    const bool teensie=(personal==56 || personal==67) ? story_bit==1133 :
+                       (personal==66 || personal==68) ? story_bit==1130 : false;
+    return teensie && target_family==25 && target_model==34 && target_personal==55;
+}
+
 // Read-only classification of an individual evaluator call. A positive
 // match alone never installs a native function-slot hook: SkipCinematics
 // and the effective Learn_10 enable state (hidden debug opt-out) are required.
